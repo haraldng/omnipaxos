@@ -1,8 +1,9 @@
-use std::fmt::Debug;
-use crate::storage::{Entry, StateTraits, SequenceTraits, Storage, StopSign};
-use crate::messages::*;
-use crate::leader_election::*;
-use std::sync::Arc;
+use crate::{
+    leader_election::*,
+    messages::*,
+    storage::{Entry, SequenceTraits, StateTraits, StopSign, Storage},
+};
+use std::{fmt::Debug, sync::Arc};
 
 #[derive(PartialEq, Debug)]
 enum Phase {
@@ -22,14 +23,14 @@ enum Role {
 #[derive(Debug)]
 pub enum ProposeErr {
     Normal(Vec<u8>),
-    Reconfiguration(Vec<u64>)   // TODO use a type for ProcessId
+    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
 }
 
 pub struct Paxos<R, S, P>
-    where
-        R: Round,
-        S: SequenceTraits<R>,
-        P: StateTraits<R>,
+where
+    R: Round,
+    S: SequenceTraits<R>,
+    P: StateTraits<R>,
 {
     storage: Storage<R, S, P>,
     config_id: u32,
@@ -58,10 +59,10 @@ pub struct Paxos<R, S, P>
 }
 
 impl<R, S, P> Paxos<R, S, P>
-    where
-        R: Round,
-        S: SequenceTraits<R>,
-        P: StateTraits<R>,
+where
+    R: Round,
+    S: SequenceTraits<R>,
+    P: StateTraits<R>,
 {
     /*** User functions ***/
     pub fn with(
@@ -70,7 +71,7 @@ impl<R, S, P> Paxos<R, S, P>
         peers: Vec<u64>,
         storage: Storage<R, S, P>,
         // log: KompactLogger,  TODO
-        skipped_prepare: Option<Leader<R>>, // skipped prepare phase with the following leader event
+        skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
         max_inflight: Option<usize>,
     ) -> Paxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
@@ -78,11 +79,13 @@ impl<R, S, P> Paxos<R, S, P>
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = std::cmp::max(max_peer_pid, &pid);
         let num_nodes = *max_pid as usize;
-        let (state, leader, n_leader, lds) = match skipped_prepare {
+        let (state, leader, n_leader, lds) = match skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
+                    // we are leader in new config
                     let mut v = vec![None; num_nodes];
                     for peer in &peers {
+                        // this works as a promise
                         let idx = *peer as usize - 1;
                         v[idx] = Some(0);
                     }
@@ -139,17 +142,17 @@ impl<R, S, P> Paxos<R, S, P>
         let mut outgoing = Vec::with_capacity(self.max_inflight);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
-            {
-                self.batch_accept_meta = vec![None; self.num_nodes];
-            }
+        {
+            self.batch_accept_meta = vec![None; self.num_nodes];
+        }
         #[cfg(feature = "latest_decide")]
-            {
-                self.latest_decide_meta = vec![None; self.num_nodes];
-            }
+        {
+            self.latest_decide_meta = vec![None; self.num_nodes];
+        }
         #[cfg(feature = "latest_accepted")]
-            {
-                self.latest_accepted_meta = None;
-            }
+        {
+            self.latest_accepted_meta = None;
+        }
         outgoing
     }
 
@@ -388,8 +391,11 @@ impl<R, S, P> Paxos<R, S, P>
                         }
                     }
                     _ => {
-                        let acc =
-                            AcceptDecide::with(self.n_leader.clone().clone(), self.lc, vec![entry.clone()]);
+                        let acc = AcceptDecide::with(
+                            self.n_leader.clone().clone(),
+                            self.lc,
+                            vec![entry.clone()],
+                        );
                         let cache_idx = self.outgoing.len();
                         let pid = idx as u64 + 1;
                         self.outgoing.push(Message::with(
@@ -397,16 +403,19 @@ impl<R, S, P> Paxos<R, S, P>
                             pid,
                             PaxosMsg::AcceptDecide(acc),
                         ));
-                        self.batch_accept_meta[idx] = Some((self.n_leader.clone().clone(), cache_idx));
+                        self.batch_accept_meta[idx] =
+                            Some((self.n_leader.clone().clone(), cache_idx));
                         #[cfg(feature = "latest_decide")]
-                            {
-                                self.latest_decide_meta[idx] = Some((self.n_leader.clone().clone(), cache_idx));
-                            }
+                        {
+                            self.latest_decide_meta[idx] =
+                                Some((self.n_leader.clone().clone(), cache_idx));
+                        }
                     }
                 }
             } else {
                 let pid = idx as u64 + 1;
-                let acc = AcceptDecide::with(self.n_leader.clone().clone(), self.lc, vec![entry.clone()]);
+                let acc =
+                    AcceptDecide::with(self.n_leader.clone().clone(), self.lc, vec![entry.clone()]);
                 self.outgoing
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
             }
@@ -428,20 +437,20 @@ impl<R, S, P> Paxos<R, S, P>
                     Some((n, outgoing_idx)) if n == &self.n_leader => {
                         let Message { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
                         match msg {
-                            PaxosMsg::AcceptDecide(a) => {
-                                a.entries.append(entries.clone().as_mut())
-                            }
+                            PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
                             PaxosMsg::AcceptSync(acc) => {
                                 acc.entries.append(entries.clone().as_mut())
                             }
-                            PaxosMsg::FirstAccept(f) => {
-                                f.entries.append(entries.clone().as_mut())
-                            }
+                            PaxosMsg::FirstAccept(f) => f.entries.append(entries.clone().as_mut()),
                             _ => panic!("Not Accept or AcceptSync when batching"),
                         }
                     }
                     _ => {
-                        let acc = AcceptDecide::with(self.n_leader.clone().clone(), self.lc, entries.clone());
+                        let acc = AcceptDecide::with(
+                            self.n_leader.clone().clone(),
+                            self.lc,
+                            entries.clone(),
+                        );
                         let cache_idx = self.outgoing.len();
                         let pid = idx as u64 + 1;
                         self.outgoing.push(Message::with(
@@ -449,16 +458,19 @@ impl<R, S, P> Paxos<R, S, P>
                             pid,
                             PaxosMsg::AcceptDecide(acc),
                         ));
-                        self.batch_accept_meta[idx] = Some((self.n_leader.clone().clone(), cache_idx));
+                        self.batch_accept_meta[idx] =
+                            Some((self.n_leader.clone().clone(), cache_idx));
                         #[cfg(feature = "latest_decide")]
-                            {
-                                self.latest_decide_meta[idx] = Some((self.n_leader.clone().clone(), cache_idx));
-                            }
+                        {
+                            self.latest_decide_meta[idx] =
+                                Some((self.n_leader.clone().clone(), cache_idx));
+                        }
                     }
                 }
             } else {
                 let pid = idx as u64 + 1;
-                let acc = AcceptDecide::with(self.n_leader.clone().clone(), self.lc, entries.clone());
+                let acc =
+                    AcceptDecide::with(self.n_leader.clone().clone(), self.lc, entries.clone());
                 self.outgoing
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
             }
@@ -490,7 +502,8 @@ impl<R, S, P> Paxos<R, S, P>
                 let max_sfx_is_empty = self.max_promise_sfx.is_empty();
                 if max_pid != &self.pid {
                     // sync self with max pid's sequence
-                    let (leader_n, leader_sfx_len) = &(self.promises_meta[self.pid as usize - 1].as_ref().unwrap());
+                    let (leader_n, leader_sfx_len) =
+                        &(self.promises_meta[self.pid as usize - 1].as_ref().unwrap());
                     if (leader_n, leader_sfx_len) != (max_promise_n, max_sfx_len) {
                         self.storage
                             .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx));
@@ -520,9 +533,9 @@ impl<R, S, P> Paxos<R, S, P>
                 for (idx, l) in promised {
                     let pid = idx as u64 + 1;
                     let ld = l.unwrap();
-                    let (promise_n, promise_sfx_len) = &self.promises_meta[idx].as_ref().unwrap_or_else(|| {
-                        panic!("No promise from {}. Max pid: {}", pid, max_pid)
-                    });
+                    let (promise_n, promise_sfx_len) = &self.promises_meta[idx]
+                        .as_ref()
+                        .unwrap_or_else(|| panic!("No promise from {}. Max pid: {}", pid, max_pid));
                     if cfg!(feature = "max_accsync") {
                         if (promise_n, promise_sfx_len) == (max_promise_n, max_sfx_len) {
                             if !max_sfx_is_empty || ld >= self.acc_sync_ld {
@@ -536,8 +549,7 @@ impl<R, S, P> Paxos<R, S, P>
                         } else {
                             let sfx = self.storage.get_suffix(ld);
                             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld, true);
-                            let msg =
-                                Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync));
+                            let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync));
                             self.outgoing.push(msg);
                         }
                     } else {
@@ -547,10 +559,10 @@ impl<R, S, P> Paxos<R, S, P>
                         self.outgoing.push(msg);
                     }
                     #[cfg(feature = "batch_accept")]
-                        {
-                            self.batch_accept_meta[idx] =
-                                Some((self.n_leader.clone(), self.outgoing.len() - 1));
-                        }
+                    {
+                        self.batch_accept_meta[idx] =
+                            Some((self.n_leader.clone(), self.outgoing.len() - 1));
+                    }
                 }
             }
         }
@@ -595,11 +607,11 @@ impl<R, S, P> Paxos<R, S, P>
                 self.outgoing
                     .push(Message::with(self.pid, from, PaxosMsg::Decide(d)));
                 #[cfg(feature = "latest_decide")]
-                    {
-                        let idx = from as usize - 1;
-                        let cached_idx = self.outgoing.len() - 1;
-                        self.latest_decide_meta[idx] = Some((self.n_leader.clone(), cached_idx));
-                    }
+                {
+                    let idx = from as usize - 1;
+                    let cached_idx = self.outgoing.len() - 1;
+                    self.latest_decide_meta[idx] = Some((self.n_leader.clone(), cached_idx));
+                }
             }
         }
     }
@@ -618,19 +630,17 @@ impl<R, S, P> Paxos<R, S, P>
                             self.lds.iter().enumerate().filter(|(_, ld)| ld.is_some());
                         for (idx, _) in promised_idx {
                             match self.latest_decide_meta.get_mut(idx).unwrap() {
-                                Some((n, outgoing_dec_idx))
-                                if n == &self.n_leader =>
-                                    {
-                                        let Message { msg, .. } =
-                                            self.outgoing.get_mut(*outgoing_dec_idx).unwrap();
-                                        match msg {
-                                            PaxosMsg::AcceptDecide(a) => a.ld = self.lc,
-                                            PaxosMsg::Decide(d) => d.ld = self.lc,
-                                            _ => {
-                                                panic!("Cached Message<R> in outgoing was not Decide")
-                                            }
+                                Some((n, outgoing_dec_idx)) if n == &self.n_leader => {
+                                    let Message { msg, .. } =
+                                        self.outgoing.get_mut(*outgoing_dec_idx).unwrap();
+                                    match msg {
+                                        PaxosMsg::AcceptDecide(a) => a.ld = self.lc,
+                                        PaxosMsg::Decide(d) => d.ld = self.lc,
+                                        _ => {
+                                            panic!("Cached Message<R> in outgoing was not Decide")
                                         }
                                     }
+                                }
                                 _ => {
                                     let cache_dec_idx = self.outgoing.len();
                                     self.latest_decide_meta[idx] =
@@ -697,14 +707,14 @@ impl<R, S, P> Paxos<R, S, P>
             self.state = (Role::Follower, Phase::Accept);
             let accepted = Accepted::with(acc_sync.n, la);
             #[cfg(feature = "latest_accepted")]
-                {
-                    let cached_idx = self.outgoing.len();
-                    self.latest_accepted_meta = Some((acc_sync.n, cached_idx));
-                }
+            {
+                let cached_idx = self.outgoing.len();
+                self.latest_accepted_meta = Some((acc_sync.n, cached_idx));
+            }
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
             /*** Forward proposals ***/
-            let proposals =std::mem::take(&mut self.proposals);
+            let proposals = std::mem::take(&mut self.proposals);
             if !proposals.is_empty() {
                 self.forward_proposals(proposals);
             }
@@ -720,7 +730,7 @@ impl<R, S, P> Paxos<R, S, P>
                     self.accept_entries(f.n, &mut entries);
                     self.state.1 = Phase::Accept;
                     /*** Forward proposals ***/
-                    let proposals =std::mem::take(&mut self.proposals);
+                    let proposals = std::mem::take(&mut self.proposals);
                     if !proposals.is_empty() {
                         self.forward_proposals(proposals);
                     }

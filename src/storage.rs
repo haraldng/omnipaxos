@@ -1,32 +1,54 @@
-use crate::leader_election::{Round, Leader};
-use std::sync::Arc;
-use std::marker::PhantomData;
-use std::fmt::Debug;
+use crate::leader_election::{Leader, Round};
+use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-pub trait SequenceTraits<R>: Sequence<R> + Debug + Send + Sync + 'static where R: Round {}
-pub trait StateTraits<R>: PaxosState<R> + Send + 'static where R: Round{}
+pub trait SequenceTraits<R>: Sequence<R> + Debug + Send + Sync + 'static
+where
+    R: Round,
+{
+}
+pub trait StateTraits<R>: PaxosState<R> + Send + 'static
+where
+    R: Round,
+{
+}
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Entry<R> where R: Round {
+pub enum Entry<R>
+where
+    R: Round,
+{
     Normal(Vec<u8>),
     StopSign(StopSign<R>),
 }
 
-impl<R> Entry<R> where R: Round {
-    pub(crate) fn is_stopsign(&self) -> bool {
+impl<R> Entry<R>
+where
+    R: Round,
+{
+    pub fn is_stopsign(&self) -> bool {
         matches!(self, Entry::StopSign(_))
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct StopSign<R> where R: Round {
+pub struct StopSign<R>
+where
+    R: Round,
+{
     pub config_id: u32,
     pub nodes: Vec<u64>,
     pub skip_prepare_use_leader: Option<Leader<R>>, // skip prepare phase in new config with the given leader
 }
 
-impl<R> StopSign<R> where R: Round{
-    pub fn with(config_id: u32, nodes: Vec<u64>, skip_prepare_use_leader: Option<Leader<R>>) -> Self {
+impl<R> StopSign<R>
+where
+    R: Round,
+{
+    pub fn with(
+        config_id: u32,
+        nodes: Vec<u64>,
+        skip_prepare_use_leader: Option<Leader<R>>,
+    ) -> Self {
         StopSign {
             config_id,
             nodes,
@@ -35,13 +57,19 @@ impl<R> StopSign<R> where R: Round{
     }
 }
 
-impl<R> PartialEq for StopSign<R> where R: Round{
+impl<R> PartialEq for StopSign<R>
+where
+    R: Round,
+{
     fn eq(&self, other: &Self) -> bool {
         self.config_id == other.config_id && self.nodes == other.nodes
     }
 }
 
-pub trait Sequence<R> where R: Round {
+pub trait Sequence<R>
+where
+    R: Round,
+{
     fn new() -> Self;
 
     fn new_with_sequence(seq: Vec<Entry<R>>) -> Self;
@@ -67,7 +95,10 @@ pub trait Sequence<R> where R: Round {
     fn stopped(&self) -> bool;
 }
 
-pub trait PaxosState<R> where R: Round {
+pub trait PaxosState<R>
+where
+    R: Round,
+{
     fn new() -> Self;
 
     fn set_promise(&mut self, nprom: R);
@@ -84,39 +115,39 @@ pub trait PaxosState<R> where R: Round {
 }
 
 enum PaxosSequence<R, S>
-    where
-        R: Round,
-        S: Sequence<R>
+where
+    R: Round,
+    S: Sequence<R>,
 {
     Active(S),
     Stopped(Arc<S>),
     None,
-    _Never(PhantomData<R>)    // make cargo happy for unused type R
+    _Never(PhantomData<R>), // make cargo happy for unused type R
 }
 
 pub struct Storage<R, S, P>
-    where
-        R: Round,
-        S: Sequence<R>,
-        P: PaxosState<R>,
+where
+    R: Round,
+    S: Sequence<R>,
+    P: PaxosState<R>,
 {
     sequence: PaxosSequence<R, S>,
     paxos_state: P,
-    _round_type: PhantomData<R>  // make cargo happy for unused type R
+    _round_type: PhantomData<R>, // make cargo happy for unused type R
 }
 
 impl<R, S, P> Storage<R, S, P>
-    where
-        R: Round,
-        S: Sequence<R>,
-        P: PaxosState<R>,
+where
+    R: Round,
+    S: Sequence<R>,
+    P: PaxosState<R>,
 {
     pub fn with(seq: S, paxos_state: P) -> Storage<R, S, P> {
         let sequence = PaxosSequence::Active(seq);
         Storage {
             sequence,
             paxos_state,
-            _round_type: PhantomData
+            _round_type: PhantomData,
         }
     }
 
