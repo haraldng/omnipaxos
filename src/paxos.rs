@@ -773,7 +773,6 @@ where
         };
     }
 
-    #[cfg(test)]
     pub fn get_sequence(&self) -> Vec<Entry<R>> {
         self.storage.get_sequence()
     }
