@@ -304,7 +304,12 @@ where
             self.state = (Role::Leader, Phase::Prepare);
             /* send prepare */
             for pid in &self.peers {
-                let prep = Prepare::with(n.clone(), ld, self.storage.get_accepted_round());
+                let prep = Prepare::with(
+                    n.clone(),
+                    ld,
+                    self.storage.get_accepted_round(),
+                    sfx_len as u64,
+                );
                 self.outgoing
                     .push(Message::with(self.pid, *pid, PaxosMsg::Prepare(prep)));
             }
@@ -321,7 +326,8 @@ where
         if self.state.0 == Role::Leader {
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
-            let prep = Prepare::with(self.n_leader.clone().clone(), ld, n_accepted);
+            let sfx_len = self.storage.get_sequence_len() - ld;
+            let prep = Prepare::with(self.n_leader.clone().clone(), ld, n_accepted, sfx_len);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Prepare(prep)));
         }
@@ -682,7 +688,10 @@ where
             self.storage.set_promise(prep.n.clone());
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
-            let sfx = if na >= prep.n_accepted {
+            let sfx = if na > prep.n_accepted
+                || (na == prep.n_accepted
+                    && self.storage.get_sequence_len() > prep.ld + prep.sfx_len)
+            {
                 self.storage.get_suffix(prep.ld)
             } else {
                 vec![]

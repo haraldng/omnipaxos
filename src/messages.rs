@@ -8,14 +8,20 @@ where
     pub n: R,
     pub ld: u64,
     pub n_accepted: R,
+    pub sfx_len: u64,
 }
 
 impl<R> Prepare<R>
 where
     R: Round,
 {
-    pub fn with(n: R, ld: u64, n_accepted: R) -> Self {
-        Prepare { n, ld, n_accepted }
+    pub fn with(n: R, ld: u64, n_accepted: R, sfx_len: u64) -> Self {
+        Prepare {
+            n,
+            ld,
+            n_accepted,
+            sfx_len,
+        }
     }
 }
 
