@@ -705,12 +705,12 @@ where
                 self.storage.append_sequence(&mut entries)
             };
             self.state = (Role::Follower, Phase::Accept);
-            let accepted = Accepted::with(acc_sync.n, la);
             #[cfg(feature = "latest_accepted")]
             {
                 let cached_idx = self.outgoing.len();
-                self.latest_accepted_meta = Some((acc_sync.n, cached_idx));
+                self.latest_accepted_meta = Some((acc_sync.n.clone(), cached_idx));
             }
+            let accepted = Accepted::with(acc_sync.n, la);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
             /*** Forward proposals ***/
