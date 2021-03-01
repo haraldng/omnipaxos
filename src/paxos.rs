@@ -46,9 +46,9 @@ where
     proposals: Vec<Entry<R>>,
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
-    acc_sync_ld: u64,
-    max_promise_meta: (R, usize, u64), // R, sfx len, pid
-    max_promise_sfx: Vec<Entry<R>>,
+    prepare_ld: u64,
+    max_promise_meta: (R, usize, u64),          // R, sfx len, pid
+    max_promise_sfx: Vec<Entry<R>>,             // TODO put in Storage
     batch_accept_meta: Vec<Option<(R, usize)>>, //  R, index in outgoing
     latest_decide_meta: Vec<Option<(R, usize)>>,
     latest_accepted_meta: Option<(R, usize)>,
@@ -119,7 +119,7 @@ where
             proposals: Vec::with_capacity(max_inflight),
             lc: 0,
             prev_ld: 0,
-            acc_sync_ld: 0,
+            prepare_ld: 0,
             max_promise_meta: (R::default(), 0, 0),
             max_promise_sfx: vec![],
             batch_accept_meta: vec![None; num_nodes],
@@ -296,7 +296,7 @@ where
             self.promises_meta[self.pid as usize - 1] = Some((na, sfx_len));
             self.max_promise_sfx = sfx;
             /* insert my longest decided sequence */
-            self.acc_sync_ld = ld;
+            self.prepare_ld = ld;
             /* initialise longest chosen sequence and update state */
             self.lc = 0;
             self.state = (Role::Leader, Phase::Prepare);
@@ -475,12 +475,8 @@ where
     fn handle_promise_prepare(&mut self, prom: Promise<R>, from: u64) {
         if prom.n == self.n_leader {
             let sfx_len = prom.sfx.len();
-            let promise_meta = &(prom.n_accepted.clone(), sfx_len, from);
-            if promise_meta > &self.max_promise_meta && sfx_len > 0
-                || (sfx_len == 0 && prom.ld >= self.acc_sync_ld)
-            // TODO Remove?
-            {
-                self.max_promise_meta = promise_meta.clone();
+            if &prom.n > &self.max_promise_meta.0 && sfx_len > 0 {
+                self.max_promise_meta = (prom.n_accepted.clone(), sfx_len, from);
                 self.max_promise_sfx = prom.sfx;
             }
             let idx = from as usize - 1;
@@ -510,7 +506,7 @@ where
                 }
                 // create accept_sync with only new proposals for all pids with max_promise
                 let mut new_entries = std::mem::take(&mut self.proposals);
-                let max_ld = self.lds[*max_pid as usize - 1].unwrap_or(self.acc_sync_ld); // unwrap_or: if we are max_pid then unwrap will be none
+                let max_ld = self.lds[*max_pid as usize - 1].unwrap_or(self.prepare_ld); // unwrap_or: if we are max_pid then unwrap will be none
                 let max_promise_acc_sync =
                     AcceptSync::with(self.n_leader.clone(), new_entries.clone(), max_ld, false);
                 // append new proposals in my sequence
@@ -531,15 +527,15 @@ where
                         .as_ref()
                         .unwrap_or_else(|| panic!("No promise from {}. Max pid: {}", pid, max_pid));
                     if cfg!(feature = "max_accsync") {
-                        if (promise_n, promise_sfx_len) == (max_promise_n, max_sfx_len) {
-                            if !max_sfx_is_empty || ld >= self.acc_sync_ld {
-                                let msg = Message::with(
-                                    self.pid,
-                                    pid,
-                                    PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
-                                );
-                                self.outgoing.push(msg);
-                            }
+                        if (promise_n, promise_sfx_len) == (max_promise_n, max_sfx_len)
+                            && (!max_sfx_is_empty || ld >= self.prepare_ld)
+                        {
+                            let msg = Message::with(
+                                self.pid,
+                                pid,
+                                PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
+                            );
+                            self.outgoing.push(msg);
                         } else {
                             let sfx = self.storage.get_suffix(ld);
                             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld, true);
@@ -573,10 +569,8 @@ where
                 && cfg!(feature = "max_accsync")
             {
                 match max_sfx_len == &0 {
-                    false => (false, self.acc_sync_ld + sfx_len as u64),
-                    true if prom.ld >= self.acc_sync_ld => {
-                        (false, self.acc_sync_ld + sfx_len as u64)
-                    }
+                    false => (false, self.prepare_ld + sfx_len as u64),
+                    true if prom.ld >= self.prepare_ld => (false, self.prepare_ld + sfx_len as u64),
                     _ => (true, prom.ld),
                 }
             } else {
