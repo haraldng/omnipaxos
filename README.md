@@ -40,13 +40,15 @@ paxos.handle_leader(l);
 
 ...
 
-// propose a client request p
-paxos.propose(p);
+// propose a client request
+let data: Vec<u8> = ...; // client request as raw bytes
+paxos.propose_normal(data).expect("Failed to propose normal proposal");
 
 ...
 
-// propose a reconfiguration r
-paxos.propose_reconfiguration(r);
+// propose a reconfiguration
+let new_cluster = vec![1, 2, 4];    // oops replica 3 appears to have crashed... let's replace it with a new replica 4
+paxos.propose_reconfiguration(new_cluster).expect("Failed to propose reconfiguration");
 
 ...
 
