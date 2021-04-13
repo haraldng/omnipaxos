@@ -61,11 +61,13 @@ for out_msg in paxos.get_outgoings_msgs() {
 // handle decided client requests
 for entry in paxos.get_decided_entries() {
     match entry {
-        Entry::Normal(data) => {    // data is represented as raw bytes: Vec<u8>
-            // handle normally decided entries
+        Entry::Normal(data) => {    // handle normally decided entries
+            // data is represented as raw bytes: Vec<u8>
         }
-        Entry::StopSign(ss) => {    // ss is of type StopSign that contains info about new configuration id and the new cluster
-            // handle completed reconfiguration
+        Entry::StopSign(ss) => {    // handle completed reconfiguration
+            let next_configuration_id = ss.config_id;
+            let next_cluster = ss.nodes;
+            // handle reconfiguration
         }
     }
 }
