@@ -1,0 +1,73 @@
+LeaderPaxos
+============
+
+LeaderPaxos is an in-development sequence consensus library. It is based on the [Leader-based Sequence Paxos](https://arxiv.org/pdf/2008.13456.pdf) algorithm and implemented in the Rust programming language. 
+
+Similarly to Raft, the Leader-based Sequence Paxos algorithm can be used to build abstractions such as a distributed log or state-machine replication. However, Leader-based Sequence Paxos uses a modular design
+that allows for increased flexibility in leader election and an efficient reconfiguration that allows new server to catch up the sequence in parallel.
+
+A LeaderPaxos replica is implemented as a Rust ```struct``. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact).
+
+## Example
+```
+use leaderpaxos::{leader_election::*, paxos::*, storage::*};
+
+// configuration with id 1 and the following cluster
+let configuration_id = 1;
+let _cluster = vec![1, 2, 3];
+
+// create the replica 2 in this cluster
+let my_pid = 2;
+let my_peers= vec![1, 3];
+
+let sequence = S::new();        // S is a type that implements the storage::Sequence trait
+let paxos_state = P::new();     // P is a type that implements the storage::PaxosState trait
+let storage = Storage::with(sequence, paxos_state);
+
+// create a replica in configuration 1 with process id 2
+let paxos = Paxos::with(
+    config_id: configuration_id,
+    pid: my_pid,
+    peers: my_peers,
+    storage,
+    ...
+);
+
+...
+
+// external leader election indicates we are the leader with the event l
+paxos.handle_leader(l);
+
+...
+
+// propose a client request p
+paxos.propose(p);
+
+...
+
+// propose a reconfiguration r
+paxos.propose_reconfiguration(r);
+
+...
+
+// send outgoing messages
+for out_msg in paxos.get_outgoings_msgs() {
+    let receiver = out_msg.to;
+    // send out_msg to receiver
+}
+
+...
+
+// handle decided client requests
+for entry in paxos.get_decided_entries() {
+    match entry {
+        Entry::Normal(data) => {    // data is represented as raw bytes: Vec<u8>
+            // handle normally decided entries
+        }
+        Entry::StopSign(ss) => {    // ss is of type StopSign that contains info about new configuration id and the new cluster
+            // handle completed reconfiguration
+        }
+    }
+}
+
+```
