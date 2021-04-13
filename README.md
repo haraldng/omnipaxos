@@ -6,7 +6,7 @@ LeaderPaxos is an in-development sequence consensus library. It is based on the 
 Similarly to Raft, the Leader-based Sequence Paxos algorithm can be used to build abstractions such as a distributed log or state-machine replication. However, Leader-based Sequence Paxos uses a modular design
 that allows for increased flexibility in leader election and an efficient reconfiguration that allows new server to catch up the sequence in parallel.
 
-A LeaderPaxos replica is implemented as a Rust ```struct``. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact).
+A LeaderPaxos replica is implemented as a Rust ```struct```. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact).
 
 ## Example
 ```
