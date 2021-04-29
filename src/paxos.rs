@@ -211,24 +211,35 @@ where
                 .iter()
                 .filter(|&pid| pid == &self.pid || self.peers.contains(pid))
                 .collect();
-            let skip_prepare_use_leader = if !continued_nodes.is_empty() {
-                let my_idx = self.pid as usize - 1;
-                let max_idx = self
-                    .las
-                    .iter()
-                    .enumerate()
-                    .filter(|(idx, _)| {
-                        idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
-                    })
-                    .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
-                let max_pid = match max_idx {
-                    Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date peer
-                    None => self.pid,
-                };
-                let l = Leader::with(max_pid, prio_start_round.unwrap_or(R::default()));
-                Some(l)
-            } else {
-                None
+            let skip_prepare_use_leader = match continued_nodes.is_empty() {
+                true => None,
+                false => {
+                    let max_pid = if cfg!(feature = "continued_leader_reconfiguration")
+                        && continued_nodes.contains(&&self.pid)
+                    {
+                        // make ourselves the initial leader in the next configuration
+                        self.pid
+                    } else {
+                        let my_idx = self.pid as usize - 1;
+                        let max_idx = self
+                            .las
+                            .iter()
+                            .enumerate()
+                            .filter(|(idx, _)| {
+                                idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
+                            })
+                            .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
+                        let max_pid = match max_idx {
+                            Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date follower
+                            None => self.pid,
+                        };
+                        max_pid
+                    };
+                    Some(Leader::with(
+                        max_pid,
+                        prio_start_round.unwrap_or(R::default()),
+                    ))
+                }
             };
             let ss = StopSign::with(self.config_id + 1, nodes, skip_prepare_use_leader);
             let entry = Entry::StopSign(ss);
