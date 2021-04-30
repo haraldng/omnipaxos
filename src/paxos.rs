@@ -2,6 +2,7 @@ use crate::{
     leader_election::*,
     messages::*,
     storage::{Entry, SequenceTraits, StateTraits, StopSign, Storage},
+    util::PromiseMetaData
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -40,14 +41,13 @@ where
     state: (Role, Phase),
     leader: u64,
     n_leader: R,
-    promises_meta: Vec<Option<(R, usize)>>,
+    promises_meta: Vec<Option<PromiseMetaData<R>>>,
     las: Vec<u64>,
     lds: Vec<Option<u64>>,
     proposals: Vec<Entry<R>>,
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
-    prepare_ld: u64,
-    max_promise_meta: (R, usize, u64),          // R, sfx len, pid
+    max_promise_meta: PromiseMetaData<R>,
     max_promise_sfx: Vec<Entry<R>>,             // TODO put in Storage
     batch_accept_meta: Vec<Option<(R, usize)>>, //  R, index in outgoing
     latest_decide_meta: Vec<Option<(R, usize)>>,
@@ -119,8 +119,7 @@ where
             proposals: Vec::with_capacity(max_inflight),
             lc: 0,
             prev_ld: 0,
-            prepare_ld: 0,
-            max_promise_meta: (R::default(), 0, 0),
+            max_promise_meta: PromiseMetaData::with(R::default(), 0, 0),
             max_promise_sfx: vec![],
             batch_accept_meta: vec![None; num_nodes],
             latest_decide_meta: vec![None; num_nodes],
@@ -229,16 +228,12 @@ where
                                 idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
                             })
                             .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
-                        let max_pid = match max_idx {
+                        match max_idx {
                             Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date follower
                             None => self.pid,
-                        };
-                        max_pid
+                        }
                     };
-                    Some(Leader::with(
-                        max_pid,
-                        prio_start_round.unwrap_or(R::default()),
-                    ))
+                    Some(Leader::with(max_pid, prio_start_round.unwrap_or_default()))
                 }
             };
             let ss = StopSign::with(self.config_id + 1, nodes, skip_prepare_use_leader);
@@ -284,6 +279,9 @@ where
         self.lds = vec![None; self.num_nodes];
     }
 
+    fn get_idx_from_pid(pid: u64) -> usize {
+        pid as usize - 1
+    }
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
         let n = l.round;
@@ -302,16 +300,15 @@ where
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_len();
             let sfx = self.storage.get_suffix(ld);
-            let sfx_len = sfx.len();
-            self.max_promise_meta = (na.clone(), sfx_len, self.pid);
-            self.promises_meta[self.pid as usize - 1] = Some((na, sfx_len));
+            let la = self.storage.get_sequence_len();
+            let promise_meta = PromiseMetaData::with(na, la, self.pid);
+            self.max_promise_meta = promise_meta.clone();
+            self.promises_meta[self.pid as usize - 1] = Some(promise_meta);
             self.max_promise_sfx = sfx;
-            /* insert my longest decided sequence */
-            self.prepare_ld = ld;
             /* initialise longest chosen sequence and update state */
             self.lc = 0;
             self.state = (Role::Leader, Phase::Prepare);
-            let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), sfx_len as u64);
+            let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
             /* send prepare */
             for pid in &self.peers {
                 self.outgoing.push(Message::with(
@@ -333,8 +330,8 @@ where
         if self.state.0 == Role::Leader {
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
-            let sfx_len = self.storage.get_sequence_len() - ld;
-            let prep = Prepare::with(self.n_leader.clone(), ld, n_accepted, sfx_len);
+            let la = self.storage.get_sequence_len();
+            let prep = Prepare::with(self.n_leader.clone(), ld, n_accepted, la);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Prepare(prep)));
         }
@@ -485,27 +482,34 @@ where
 
     fn handle_promise_prepare(&mut self, prom: Promise<R>, from: u64) {
         if prom.n == self.n_leader {
-            let sfx_len = prom.sfx.len();
-            if &prom.n > &self.max_promise_meta.0 && sfx_len > 0 {
-                self.max_promise_meta = (prom.n_accepted.clone(), sfx_len, from);
+            let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
+            if promise_meta > self.max_promise_meta {
+                self.max_promise_meta = promise_meta.clone();
                 self.max_promise_sfx = prom.sfx;
             }
-            let idx = from as usize - 1;
-            self.promises_meta[idx] = Some((prom.n_accepted, sfx_len));
+            let idx = Self::get_idx_from_pid(from);
+            self.promises_meta[idx] = Some(promise_meta);
             self.lds[idx] = Some(prom.ld);
             let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
             if num_promised >= self.majority {
-                let (max_promise_n, max_sfx_len, max_pid) = &self.max_promise_meta;
+                let PromiseMetaData {
+                    n: max_promise_n,
+                    la: max_la,
+                    pid: max_pid,
+                } = &self.max_promise_meta;
                 let last_is_stop = match self.max_promise_sfx.last() {
                     Some(e) => e.is_stopsign(),
                     None => false,
                 };
-                let max_sfx_is_empty = self.max_promise_sfx.is_empty();
                 if max_pid != &self.pid {
                     // sync self with max pid's sequence
-                    let (leader_n, leader_sfx_len) =
-                        &(self.promises_meta[self.pid as usize - 1].as_ref().unwrap());
-                    if (leader_n, leader_sfx_len) != (max_promise_n, max_sfx_len) {
+                    let my_idx = Self::get_idx_from_pid(self.pid);
+                    let PromiseMetaData {
+                        n: leader_n,
+                        la: leader_la,
+                        ..
+                    } = self.promises_meta[my_idx].as_ref().unwrap();
+                    if (leader_n, leader_la) != (max_promise_n, max_la) {
                         self.storage
                             .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx));
                     }
@@ -517,50 +521,55 @@ where
                 }
                 // create accept_sync with only new proposals for all pids with max_promise
                 let mut new_entries = std::mem::take(&mut self.proposals);
-                let max_ld = self.lds[*max_pid as usize - 1].unwrap_or(self.prepare_ld); // unwrap_or: if we are max_pid then unwrap will be none
                 let max_promise_acc_sync =
-                    AcceptSync::with(self.n_leader.clone(), new_entries.clone(), max_ld, false);
+                    AcceptSync::with(self.n_leader.clone(), new_entries.clone(), *max_la);
                 // append new proposals in my sequence
                 let la = self.storage.append_sequence(&mut new_entries);
-                self.las[self.pid as usize - 1] = la;
+                self.las[Self::get_idx_from_pid(self.pid)] = la;
                 self.state = (Role::Leader, Phase::Accept);
+                let leader_pid = self.pid;
                 // send accept_sync to followers
-                let my_idx = self.pid as usize - 1;
                 let promised_followers = self
-                    .lds
+                    .promises_meta
                     .iter()
-                    .enumerate()
-                    .filter(|(idx, ld)| idx != &my_idx && ld.is_some());
-                for (idx, l) in promised_followers {
-                    let pid = idx as u64 + 1;
-                    let ld = l.unwrap();
-                    let (promise_n, promise_sfx_len) = &self.promises_meta[idx]
-                        .as_ref()
-                        .unwrap_or_else(|| panic!("No promise from {}. Max pid: {}", pid, max_pid));
-                    if cfg!(feature = "max_accsync") {
-                        if (promise_n, promise_sfx_len) == (max_promise_n, max_sfx_len)
-                            && (!max_sfx_is_empty || ld >= self.prepare_ld)
-                        {
-                            let msg = Message::with(
-                                self.pid,
-                                pid,
-                                PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
-                            );
-                            self.outgoing.push(msg);
-                        } else {
-                            let sfx = self.storage.get_suffix(ld);
-                            let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld, true);
-                            let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync));
-                            self.outgoing.push(msg);
-                        }
+                    .filter_map(|p| p.as_ref())
+                    .filter(|p| p.pid != leader_pid);
+                for PromiseMetaData {
+                    n: promise_n,
+                    la: promise_la,
+                    pid,
+                } in promised_followers
+                {
+                    let msg = if cfg!(feature = "max_accsync")
+                        && (promise_n, promise_la) == (max_promise_n, max_la)
+                    {
+                        Message::with(
+                            self.pid,
+                            *pid,
+                            PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
+                        )
+                    } else if cfg!(feature = "max_accsync")
+                        && promise_n == max_promise_n
+                        && promise_la < max_la
+                    {
+                        let sfx = self.storage.get_suffix(*promise_la);
+                        let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
+                        Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
                     } else {
+                        let idx = Self::get_idx_from_pid(*pid);
+                        let ld = self
+                            .lds
+                            .get(idx)
+                            .expect("Received PromiseMetaData but not found in ld")
+                            .unwrap();
                         let sfx = self.storage.get_suffix(ld);
-                        let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld, true);
-                        let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync));
-                        self.outgoing.push(msg);
-                    }
+                        let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld);
+                        Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
+                    };
+                    self.outgoing.push(msg);
                     #[cfg(feature = "batch_accept")]
                     {
+                        let idx = Self::get_idx_from_pid(*pid);
                         self.batch_accept_meta[idx] =
                             Some((self.n_leader.clone(), self.outgoing.len() - 1));
                     }
@@ -573,28 +582,28 @@ where
         if prom.n == self.n_leader {
             let idx = from as usize - 1;
             self.lds[idx] = Some(prom.ld);
-            let sfx_len = prom.sfx.len();
-            let (promise_n, promise_sfx_len) = &(prom.n_accepted, sfx_len);
-            let (max_round, max_sfx_len, _) = &self.max_promise_meta;
-            let (sync, sfx_start) = if (promise_n, promise_sfx_len) == (max_round, max_sfx_len)
-                && cfg!(feature = "max_accsync")
-            {
-                match max_sfx_len == &0 {
-                    false => (false, self.prepare_ld + sfx_len as u64),
-                    true if prom.ld >= self.prepare_ld => (false, self.prepare_ld + sfx_len as u64),
-                    _ => (true, prom.ld),
+            let PromiseMetaData {
+                n: max_round,
+                la: max_la,
+                ..
+            } = &self.max_promise_meta;
+            let sync_idx = if cfg!(feature = "max_accsync") {
+                if (&prom.n_accepted, &prom.la) == (max_round, max_la)
+                    || (prom.n_accepted == self.max_promise_meta.n
+                        && prom.la < self.max_promise_meta.la)
+                {
+                    prom.la
+                } else {
+                    prom.ld
                 }
             } else {
-                (true, prom.ld)
+                prom.ld
             };
-            let sfx = self.storage.get_suffix(sfx_start);
+            let sfx = self.storage.get_suffix(sync_idx);
             // println!("Handle promise from {} in Accept phase: {:?}, sfx len: {}", from, (sync, sfx_start), sfx.len());
-            let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, prom.ld, sync);
-            self.outgoing.push(Message::with(
-                self.pid,
-                from,
-                PaxosMsg::AcceptSync(acc_sync),
-            ));
+            let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, sync_idx);
+            let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
+            self.outgoing.push(msg);
             // inform what got decided already
             let ld = if self.lc > 0 {
                 self.lc
@@ -681,15 +690,13 @@ where
             self.storage.set_promise(prep.n.clone());
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
-            let sfx = if na > prep.n_accepted
-                || (na == prep.n_accepted
-                    && self.storage.get_sequence_len() > prep.ld + prep.sfx_len)
-            {
+            let la = self.storage.get_sequence_len();
+            let sfx = if na > prep.n_accepted || (na == prep.n_accepted && la > prep.ld + prep.la) {
                 self.storage.get_suffix(prep.ld)
             } else {
                 vec![]
             };
-            let p = Promise::with(prep.n, na, sfx, self.storage.get_decided_len());
+            let p = Promise::with(prep.n, na, sfx, self.storage.get_decided_len(), la);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Promise(p)));
         }
@@ -700,11 +707,9 @@ where
         {
             self.storage.set_accepted_round(accsync.n.clone());
             let mut entries = accsync.entries;
-            let la = if accsync.sync {
-                self.storage.append_on_prefix(accsync.ld, &mut entries)
-            } else {
-                self.storage.append_sequence(&mut entries)
-            };
+            let la = self
+                .storage
+                .append_on_prefix(accsync.sync_idx, &mut entries);
             self.state = (Role::Follower, Phase::Accept);
             #[cfg(feature = "latest_accepted")]
             {
@@ -739,16 +744,13 @@ where
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
         if self.storage.get_promise() == acc.n {
-            match self.state {
-                (Role::Follower, Phase::Accept) => {
-                    let mut entries = acc.entries;
-                    self.accept_entries(acc.n, &mut entries);
-                    // handle decide
-                    if acc.ld > self.storage.get_decided_len() {
-                        self.storage.set_decided_len(acc.ld);
-                    }
+            if let (Role::Follower, Phase::Accept) = self.state {
+                let mut entries = acc.entries;
+                self.accept_entries(acc.n, &mut entries);
+                // handle decide
+                if acc.ld > self.storage.get_decided_len() {
+                    self.storage.set_decided_len(acc.ld);
                 }
-                _ => {}
             }
         }
     }

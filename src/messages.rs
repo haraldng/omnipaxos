@@ -8,19 +8,19 @@ where
     pub n: R,
     pub ld: u64,
     pub n_accepted: R,
-    pub sfx_len: u64,
+    pub la: u64,
 }
 
 impl<R> Prepare<R>
 where
     R: Round,
 {
-    pub fn with(n: R, ld: u64, n_accepted: R, sfx_len: u64) -> Self {
+    pub fn with(n: R, ld: u64, n_accepted: R, la: u64) -> Self {
         Prepare {
             n,
             ld,
             n_accepted,
-            sfx_len,
+            la,
         }
     }
 }
@@ -34,18 +34,20 @@ where
     pub n_accepted: R,
     pub sfx: Vec<Entry<R>>,
     pub ld: u64,
+    pub la: u64,
 }
 
 impl<R> Promise<R>
 where
     R: Round,
 {
-    pub fn with(n: R, n_accepted: R, sfx: Vec<Entry<R>>, ld: u64) -> Self {
+    pub fn with(n: R, n_accepted: R, sfx: Vec<Entry<R>>, ld: u64, la: u64) -> Self {
         Promise {
             n,
             n_accepted,
             sfx,
             ld,
+            la,
         }
     }
 }
@@ -57,20 +59,18 @@ where
 {
     pub n: R,
     pub entries: Vec<Entry<R>>,
-    pub ld: u64,
-    pub sync: bool, // true -> append on prefix(ld), false -> append
+    pub sync_idx: u64,
 }
 
 impl<R> AcceptSync<R>
 where
     R: Round,
 {
-    pub fn with(n: R, sfx: Vec<Entry<R>>, ld: u64, sync: bool) -> Self {
+    pub fn with(n: R, sfx: Vec<Entry<R>>, sync_idx: u64) -> Self {
         AcceptSync {
             n,
             entries: sfx,
-            ld,
-            sync,
+            sync_idx,
         }
     }
 }
