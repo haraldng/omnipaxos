@@ -56,6 +56,7 @@ where
     num_nodes: usize,
     // pub log: KompactLogger, // TODO provide kompact independent log when used as a library
     max_inflight: usize,
+    disconnected_peers: Vec<u64>
 }
 
 impl<R, S, P> Paxos<R, S, P>
@@ -128,6 +129,7 @@ where
             num_nodes,
             // log,
             max_inflight,
+            disconnected_peers: vec![]
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -267,10 +269,10 @@ where
     }
 
     pub fn connection_lost(&mut self, pid: u64) {
-        // TODO remove allow dead code when fail-recovery is supported
         if self.state.0 == Role::Follower && self.leader == pid {
             self.state = (Role::Follower, Phase::Recover);
         }
+        self.disconnected_peers.push(pid);
     }
 
     fn clear_peers_state(&mut self) {
@@ -285,6 +287,7 @@ where
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
         let n = l.round;
+        let leader_pid = l.pid;
         if n <= self.n_leader || n <= self.storage.get_promise() {
             return;
         }
@@ -292,9 +295,9 @@ where
         if self.stopped() {
             self.proposals.clear();
         }
-        if self.pid == l.pid {
+        if self.pid == leader_pid {
             self.n_leader = n.clone();
-            self.leader = l.pid;
+            self.leader = leader_pid;
             self.storage.set_promise(n.clone());
             /* insert my promise */
             let na = self.storage.get_accepted_round();
@@ -318,10 +321,11 @@ where
                 ));
             }
         } else {
-            if self.state.1 == Phase::Recover {
+            if self.state.1 == Phase::Recover || self.disconnected_peers.contains(&leader_pid) {
                 self.outgoing
-                    .push(Message::with(self.pid, l.pid, PaxosMsg::PrepareReq));
+                    .push(Message::with(self.pid, leader_pid, PaxosMsg::PrepareReq));
             }
+            self.disconnected_peers.retain(|pid| pid != &leader_pid);
             self.state.0 = Role::Follower;
         }
     }
@@ -503,16 +507,8 @@ where
                 };
                 if max_pid != &self.pid {
                     // sync self with max pid's sequence
-                    let my_idx = Self::get_idx_from_pid(self.pid);
-                    let PromiseMetaData {
-                        n: leader_n,
-                        la: leader_la,
-                        ..
-                    } = self.promises_meta[my_idx].as_ref().unwrap();
-                    if (leader_n, leader_la) != (max_promise_n, max_la) {
-                        self.storage
-                            .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx));
-                    }
+                    self.storage
+                        .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx))
                 }
                 if last_is_stop {
                     self.proposals.clear(); // will never be decided
@@ -691,7 +687,7 @@ where
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_sequence_len();
-            let sfx = if na > prep.n_accepted || (na == prep.n_accepted && la > prep.ld + prep.la) {
+            let sfx = if na > prep.n_accepted || (na == prep.n_accepted && la > prep.la) {
                 self.storage.get_suffix(prep.ld)
             } else {
                 vec![]
