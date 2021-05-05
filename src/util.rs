@@ -43,7 +43,7 @@ impl<R> PartialOrd for PromiseMetaData<R>
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let ordering = if self.n == other.n && self.la == other.la && self.pid == other.pid {
             Ordering::Equal
-        } else if self.n > other.n && self.la > other.la {
+        } else if self.n > other.n || (self.n == other.n && self.la > other.la) {
             Ordering::Greater
         } else {
             Ordering::Less

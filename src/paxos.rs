@@ -521,6 +521,7 @@ where
                     AcceptSync::with(self.n_leader.clone(), new_entries.clone(), *max_la);
                 // append new proposals in my sequence
                 let la = self.storage.append_sequence(&mut new_entries);
+                self.storage.set_accepted_round(self.n_leader.clone());
                 self.las[Self::get_idx_from_pid(self.pid)] = la;
                 self.state = (Role::Leader, Phase::Accept);
                 let leader_pid = self.pid;
