@@ -2,7 +2,7 @@ use crate::{
     leader_election::*,
     messages::*,
     storage::{Entry, SequenceTraits, StateTraits, StopSign, Storage},
-    util::PromiseMetaData
+    util::PromiseMetaData,
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -56,7 +56,7 @@ where
     num_nodes: usize,
     // pub log: KompactLogger, // TODO provide kompact independent log when used as a library
     max_inflight: usize,
-    disconnected_peers: Vec<u64>
+    disconnected_peers: Vec<u64>,
 }
 
 impl<R, S, P> Paxos<R, S, P>
@@ -129,7 +129,7 @@ where
             num_nodes,
             // log,
             max_inflight,
-            disconnected_peers: vec![]
+            disconnected_peers: vec![],
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -322,10 +322,10 @@ where
             }
         } else {
             if self.state.1 == Phase::Recover || self.disconnected_peers.contains(&leader_pid) {
+                self.disconnected_peers.retain(|pid| pid != &leader_pid);
                 self.outgoing
                     .push(Message::with(self.pid, leader_pid, PaxosMsg::PrepareReq));
             }
-            self.disconnected_peers.retain(|pid| pid != &leader_pid);
             self.state.0 = Role::Follower;
         }
     }
@@ -368,7 +368,6 @@ where
     }
 
     fn send_first_accept(&mut self, entry: Entry<R>) {
-        // info!(self.log, "Sending first accept");
         let promised_pids = self
             .lds
             .iter()
@@ -506,9 +505,13 @@ where
                     None => false,
                 };
                 if max_pid != &self.pid {
-                    // sync self with max pid's sequence
-                    self.storage
-                        .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx))
+                    // sync self with max pid's log
+                    if max_promise_n == &self.storage.get_accepted_round() {
+                        self.storage.append_sequence(&mut self.max_promise_sfx);
+                    } else {
+                        self.storage
+                            .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx))
+                    }
                 }
                 if last_is_stop {
                     self.proposals.clear(); // will never be decided
@@ -688,8 +691,10 @@ where
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_sequence_len();
-            let sfx = if na > prep.n_accepted || (na == prep.n_accepted && la > prep.la) {
+            let sfx = if na > prep.n_accepted {
                 self.storage.get_suffix(prep.ld)
+            } else if na == prep.n_accepted && la > prep.la {
+                self.storage.get_suffix(prep.la)
             } else {
                 vec![]
             };
