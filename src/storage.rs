@@ -88,8 +88,6 @@ where
 
     fn get_ser_suffix(&self, from: u64) -> Option<Vec<u8>>;
 
-    fn get_sequence(&self) -> Vec<Entry<R>>;
-
     fn get_sequence_len(&self) -> u64;
 
     fn stopped(&self) -> bool;
@@ -275,14 +273,6 @@ where
                 arc_s
             }
             _ => panic!("Storage should already have been stopped!"),
-        }
-    }
-
-    pub fn get_sequence(&self) -> Vec<Entry<R>> {
-        match &self.sequence {
-            PaxosSequence::Active(s) => s.get_sequence(),
-            PaxosSequence::Stopped(s) => s.get_sequence(),
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in get_sequence"),
         }
     }
 }

@@ -6,6 +6,8 @@ use crate::{
 };
 use std::{fmt::Debug, sync::Arc};
 
+const BUFFER_SIZE: usize = 100000;
+
 #[derive(PartialEq, Debug)]
 enum Phase {
     Prepare,
@@ -27,6 +29,8 @@ pub enum ProposeErr {
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
 }
 
+/// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
+/// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct Paxos<R, S, P>
 where
     R: Round,
@@ -54,8 +58,6 @@ where
     latest_accepted_meta: Option<(R, usize)>,
     outgoing: Vec<Message<R>>,
     num_nodes: usize,
-    // pub log: KompactLogger, // TODO provide kompact independent log when used as a library
-    max_inflight: usize,
     disconnected_peers: Vec<u64>,
 }
 
@@ -66,14 +68,18 @@ where
     P: StateTraits<R>,
 {
     /*** User functions ***/
+    /// Creates an Omni-Paxos replica.
+    /// # Arguments
+    /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
+    /// * `pid` - The identifier of this Omni-Paxos replica.
+    /// * `peers` - The `pid`s of the other replicas in the configuration.
+    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     pub fn with(
         config_id: u32,
         pid: u64,
         peers: Vec<u64>,
         storage: Storage<R, S, P>,
-        // log: KompactLogger,  TODO
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
-        max_inflight: Option<usize>,
     ) -> Paxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
@@ -103,8 +109,6 @@ where
                 (state, 0, R::default(), lds)
             }
         };
-        // info!(log, "Start raw paxos pid: {}, state: {:?}, n_leader: {:?}", pid, state, n_leader);
-        let max_inflight = max_inflight.unwrap_or(100000);
         let mut paxos = Paxos {
             storage,
             pid,
@@ -117,7 +121,7 @@ where
             promises_meta: vec![None; num_nodes],
             las: vec![0; num_nodes],
             lds,
-            proposals: Vec::with_capacity(max_inflight),
+            proposals: Vec::with_capacity(BUFFER_SIZE),
             lc: 0,
             prev_ld: 0,
             max_promise_meta: PromiseMetaData::with(R::default(), 0, 0),
@@ -125,22 +129,23 @@ where
             batch_accept_meta: vec![None; num_nodes],
             latest_decide_meta: vec![None; num_nodes],
             latest_accepted_meta: None,
-            outgoing: Vec::with_capacity(max_inflight),
+            outgoing: Vec::with_capacity(BUFFER_SIZE),
             num_nodes,
             // log,
-            max_inflight,
             disconnected_peers: vec![],
         };
         paxos.storage.set_promise(n_leader);
         paxos
     }
 
+    /// Returns the id of the current leader.
     pub fn get_current_leader(&self) -> u64 {
         self.leader
     }
 
+    /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
     pub fn get_outgoing_msgs(&mut self) -> Vec<Message<R>> {
-        let mut outgoing = Vec::with_capacity(self.max_inflight);
+        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
         {
@@ -157,6 +162,7 @@ where
         outgoing
     }
 
+    /// Returns the decided entries since the last call of this function.
     pub fn get_decided_entries(&mut self) -> &[Entry<R>] {
         let ld = self.storage.get_decided_len();
         if self.prev_ld < ld {
@@ -168,6 +174,7 @@ where
         }
     }
 
+    /// Handle an incoming message.
     pub fn handle(&mut self, m: Message<R>) {
         match m.msg {
             PaxosMsg::PrepareReq => self.handle_preparereq(m.from),
@@ -186,10 +193,12 @@ where
         }
     }
 
+    /// Returns whether this Omni-Paxos instance is stopped, i.e. if it has been reconfigured.
     pub fn stopped(&self) -> bool {
         self.storage.stopped()
     }
 
+    /// Propose a normal entry to be replicated.
     pub fn propose_normal(&mut self, data: Vec<u8>) -> Result<(), ProposeErr> {
         if self.stopped() {
             Err(ProposeErr::Normal(data))
@@ -200,49 +209,80 @@ where
         }
     }
 
+    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
+    /// # Arguments
+    /// * `new_configuration` - A vec with the ids of replicas in the new configuration
+    /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists)
     pub fn propose_reconfiguration(
         &mut self,
-        nodes: Vec<u64>,
+        new_configuration: Vec<u64>,
         prio_start_round: Option<R>,
     ) -> Result<(), ProposeErr> {
-        if self.stopped() {
-            Err(ProposeErr::Reconfiguration(nodes))
+        if self.stopped() || new_configuration.is_empty() {
+            Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
-            let continued_nodes: Vec<&u64> = nodes
+            let continued_nodes: Vec<&u64> = new_configuration
                 .iter()
                 .filter(|&pid| pid == &self.pid || self.peers.contains(pid))
                 .collect();
-            let skip_prepare_use_leader = match continued_nodes.is_empty() {
-                true => None,
-                false => {
-                    let max_pid = if cfg!(feature = "continued_leader_reconfiguration")
-                        && continued_nodes.contains(&&self.pid)
-                    {
-                        // make ourselves the initial leader in the next configuration
-                        self.pid
-                    } else {
-                        let my_idx = self.pid as usize - 1;
-                        let max_idx = self
-                            .las
-                            .iter()
-                            .enumerate()
-                            .filter(|(idx, _)| {
-                                idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
-                            })
-                            .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
-                        match max_idx {
-                            Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date follower
-                            None => self.pid,
-                        }
-                    };
-                    Some(Leader::with(max_pid, prio_start_round.unwrap_or_default()))
-                }
+            let skip_prepare_use_leader = {
+                let max_pid = if cfg!(feature = "continued_leader_reconfiguration")
+                    && continued_nodes.contains(&&self.pid)
+                {
+                    // make ourselves the initial leader in the next configuration
+                    self.pid
+                } else {
+                    let my_idx = self.pid as usize - 1;
+                    let max_idx = self
+                        .las
+                        .iter()
+                        .enumerate()
+                        .filter(|(idx, _)| {
+                            idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
+                        })
+                        .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
+                    match max_idx {
+                        Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date follower
+                        None => self.pid,
+                    }
+                };
+                Some(Leader::with(max_pid, prio_start_round.unwrap_or_default()))
             };
-            let ss = StopSign::with(self.config_id + 1, nodes, skip_prepare_use_leader);
+            let ss = StopSign::with(
+                self.config_id + 1,
+                new_configuration,
+                skip_prepare_use_leader,
+            );
             let entry = Entry::StopSign(ss);
             self.propose_entry(entry);
             Ok(())
         }
+    }
+
+    /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
+    pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<Entry<R>> {
+        let ld = self.storage.get_decided_len();
+        let max_idx = std::cmp::max(ld, self.lc);
+        if to_idx > max_idx {
+            vec![]
+        } else {
+            self.storage.get_entries(from_idx, to_idx).to_vec()
+        }
+    }
+
+    /// Stops this Paxos to write any new entries to the log and returns the final log.
+    /// This should only be called **after a reconfiguration has been decided.**
+    pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
+        self.storage.stop_and_get_sequence()
+    }
+
+    /// Handles a disconnection to another peer.
+    /// This should only be called if the underlying network implementation indicates that a connection has been dropped and some messages might have been lost.
+    pub fn connection_lost(&mut self, pid: u64) {
+        if self.state.0 == Role::Follower && self.leader == pid {
+            self.state = (Role::Follower, Phase::Recover);
+        }
+        self.disconnected_peers.push(pid);
     }
 
     fn propose_entry(&mut self, entry: Entry<R>) {
@@ -254,27 +294,6 @@ where
         }
     }
 
-    pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> (bool, Vec<Entry<R>>) {
-        let ld = self.storage.get_decided_len();
-        let max_idx = std::cmp::max(ld, self.lc);
-        if to_idx > max_idx {
-            (false, vec![])
-        } else {
-            (true, self.storage.get_entries(from_idx, to_idx).to_vec())
-        }
-    }
-
-    pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
-        self.storage.stop_and_get_sequence()
-    }
-
-    pub fn connection_lost(&mut self, pid: u64) {
-        if self.state.0 == Role::Follower && self.leader == pid {
-            self.state = (Role::Follower, Phase::Recover);
-        }
-        self.disconnected_peers.push(pid);
-    }
-
     fn clear_peers_state(&mut self) {
         self.las = vec![0; self.num_nodes];
         self.promises_meta = vec![None; self.num_nodes];
@@ -284,6 +303,8 @@ where
     fn get_idx_from_pid(pid: u64) -> usize {
         pid as usize - 1
     }
+
+    /// Handle becoming the leader. Should be called when the leader election has elected this replica as the leader
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
         let n = l.round;
@@ -345,7 +366,6 @@ where
         if self.leader > 0 && self.leader != self.pid {
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = Message::with(self.pid, self.leader, pf);
-            // println!("Forwarding to node {}", self.leader);
             self.outgoing.push(msg);
         } else {
             self.proposals.append(&mut entries);
@@ -600,7 +620,6 @@ where
                 prom.ld
             };
             let sfx = self.storage.get_suffix(sync_idx);
-            // println!("Handle promise from {} in Accept phase: {:?}, sfx len: {}", from, (sync, sfx_start), sfx.len());
             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, sync_idx);
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
@@ -770,10 +789,6 @@ where
         if let Some(idx) = ss_idx {
             entries.truncate(idx + 1);
         };
-    }
-
-    pub fn get_sequence(&self) -> Vec<Entry<R>> {
-        self.storage.get_sequence()
     }
 
     fn accept_entries(&mut self, n: R, entries: &mut Vec<Entry<R>>) {
