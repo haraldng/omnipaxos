@@ -23,6 +23,8 @@ enum Role {
     Leader,
 }
 
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[allow(missing_docs)]
 #[derive(Debug)]
 pub enum ProposeErr {
     Normal(Vec<u8>),
@@ -211,14 +213,14 @@ where
 
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
     /// # Arguments
-    /// * `new_configuration` - A vec with the ids of replicas in the new configuration
-    /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists)
+    /// * `new_configuration` - A vec with the ids of replicas in the new configuration.
+    /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists).
     pub fn propose_reconfiguration(
         &mut self,
         new_configuration: Vec<u64>,
         prio_start_round: Option<R>,
     ) -> Result<(), ProposeErr> {
-        if self.stopped() || new_configuration.is_empty() {
+        if self.stopped() {
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
             let continued_nodes: Vec<&u64> = new_configuration
