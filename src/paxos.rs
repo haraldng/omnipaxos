@@ -632,7 +632,7 @@ where
                 self.storage.get_decided_len()
             };
             if ld > prom.ld {
-                let d = Decide::with(ld, self.n_leader.clone());
+                let d = Decide::with(self.n_leader.clone(), ld);
                 self.outgoing
                     .push(Message::with(self.pid, from, PaxosMsg::Decide(d)));
                 #[cfg(feature = "latest_decide")]
@@ -653,7 +653,7 @@ where
                     self.las.iter().filter(|la| *la >= &accepted.la).count() >= self.majority;
                 if chosen {
                     self.lc = accepted.la;
-                    let d = Decide::with(self.lc, self.n_leader.clone());
+                    let d = Decide::with(self.n_leader.clone(), self.lc);
                     if cfg!(feature = "latest_decide") {
                         let promised_idx =
                             self.lds.iter().enumerate().filter(|(_, ld)| ld.is_some());
