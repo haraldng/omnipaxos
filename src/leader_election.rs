@@ -56,29 +56,50 @@ pub mod ballot_leader_election {
     /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
     /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
     pub struct BallotLeaderElection {
+        /// Process identifier used to uniquely identify this instance.
         pid: u64,
+        /// Vector that holds all the other replicas.
         peers: Vec<u64>,
+        /// The current round of the heartbeat cycle.
         hb_round: u32,
+        /// Vector which holds all the received ballots.
         ballots: Vec<(Ballot, bool)>,
+        /// Holds the current ballot of this instance.
         current_ballot: Ballot, // (round, pid)
+        /// States if the instance is a candidate to become a leader.
         majority_connected: bool,
+        /// Current elected leader.
         leader: Option<Ballot>,
+        /// Delay until timeout.
         hb_current_delay: u64,
+        /// Fixed delay of timeout. It is measured in ticks.
         hb_delay: u64,
+        /// A fixed delay that is added to the current_delay. It is measured in ticks.
         increment_delay: u64,
-        /// The majority of replicas inside a cluster
+        /// The majority of replicas inside a cluster. It is measured in ticks.
         majority: usize,
+        /// Initiates a quick timeout.
         quick_timeout: bool,
         /// A factor used in the beginning for a shorter hb_delay.
         /// Used to faster elect a leader when starting up.
         /// If used, then hb_delay is set to hb_delay/initial_delay_factor until the first leader is elected.
         initial_delay_factor: u64,
+        /// Internal timer which simulates the passage of time.
         ticks_elapsed: u64,
+        /// Vector which holds all the outgoing messages of the BLE instance.
         outgoing: Vec<BLEMessage>,
     }
 
     impl BallotLeaderElection {
         /// Construct a new BallotLeaderComponent
+        /// # Arguments
+        /// * `peers` - Vector that holds all the other replicas.
+        /// * `pid` -  Process identifier used to uniquely identify this instance.
+        /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
+        /// * `increment_delay` - A fixed delay that is added to the current_delay. It is measured in ticks.
+        /// * `quick_timeout` -  Initiates a quick timeout.
+        /// * `initial_leader` -  Initial leader which will be elected.
+        /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
         pub fn with(
             peers: Vec<u64>,
             pid: u64,
@@ -146,7 +167,7 @@ pub mod ballot_leader_election {
 
         /// Handle an incoming message.
         /// # Arguments
-        /// * `m` - .
+        /// * `m` - the message to be handled.
         pub fn handle(&mut self, m: BLEMessage) {
             match m.msg {
                 HeartbeatMsg::Request(req) => self.handle_request(m.from, req),

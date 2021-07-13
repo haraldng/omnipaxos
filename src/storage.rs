@@ -335,6 +335,7 @@ pub mod memory_storage {
     where
         R: Round,
     {
+        /// Vector which contains all the logged entries in-memory.
         sequence: Vec<Entry<R>>,
     }
 
@@ -402,8 +403,11 @@ pub mod memory_storage {
     where
         R: Round,
     {
+        /// Last promised round.
         n_prom: R,
+        /// Last accepted round.
         acc_round: R,
+        /// Length of the decided sequence.
         ld: u64,
     }
 
