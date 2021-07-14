@@ -9,7 +9,7 @@ that allows for increased flexibility in leader election and an efficient reconf
 An OmniPaxos replica is implemented as a Rust ```struct```. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact).
 
 ## Example
-```
+```rust
 use omnipaxos::{leader_election::*, paxos::*, storage::*};
 
 // configuration with id 1 and the following cluster
