@@ -144,6 +144,11 @@ pub mod ballot_leader_election {
             }
         }
 
+        /// Get outgoing vector
+        pub fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
+            std::mem::take(&mut self.outgoing)
+        }
+
         /// Get the current elected leader
         pub fn get_leader(&self) -> Option<Leader<Ballot>> {
             self.leader
