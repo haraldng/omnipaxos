@@ -9,6 +9,8 @@ edition = "2018"
 [dependencies]
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af" }
+serial_test = "0.5.1"
+rand = "0.8.4"
 
 [features]
 batch_accept = []

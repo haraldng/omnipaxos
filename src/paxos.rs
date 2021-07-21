@@ -165,7 +165,7 @@ where
     }
 
     /// Returns the decided entries since the last call of this function.
-    pub fn get_decided_entries(&mut self) -> &[Entry<R>] {
+    pub fn get_last_decided_entries(&mut self) -> &[Entry<R>] {
         let ld = self.storage.get_decided_len();
         if self.prev_ld < ld {
             let decided = self.storage.get_entries(self.prev_ld, ld);
@@ -174,6 +174,11 @@ where
         } else {
             &[]
         }
+    }
+
+    /// Returns the entire decided entries of this replica.
+    pub fn get_decided_entries(&self) -> &[Entry<R>] {
+        self.storage.get_entries(0, self.storage.get_decided_len())
     }
 
     /// Handle an incoming message.

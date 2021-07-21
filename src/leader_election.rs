@@ -237,7 +237,8 @@ pub mod ballot_leader_election {
             }
         }
 
-        fn new_hb_round(&mut self) {
+        /// Initiates a new heartbeat round.
+        pub fn new_hb_round(&mut self) {
             self.hb_current_delay = if self.quick_timeout {
                 // use short timeout if still no first leader
                 self.hb_delay / self.initial_delay_factor
