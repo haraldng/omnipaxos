@@ -1,7 +1,7 @@
 use crate::{
     leader_election::*,
     messages::*,
-    storage::{Entry, SequenceTraits, StateTraits, StopSign, Storage},
+    storage::{Entry, PaxosState, Sequence, StopSign, Storage},
     util::PromiseMetaData,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -36,8 +36,8 @@ pub enum ProposeErr {
 pub struct Paxos<R, S, P>
 where
     R: Round,
-    S: SequenceTraits<R>,
-    P: StateTraits<R>,
+    S: Sequence<R>,
+    P: PaxosState<R>,
 {
     storage: Storage<R, S, P>,
     config_id: u32,
@@ -66,8 +66,8 @@ where
 impl<R, S, P> Paxos<R, S, P>
 where
     R: Round,
-    S: SequenceTraits<R>,
-    P: StateTraits<R>,
+    S: Sequence<R>,
+    P: PaxosState<R>,
 {
     /*** User functions ***/
     /// Creates an Omni-Paxos replica.

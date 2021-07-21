@@ -1,20 +1,6 @@
 use crate::leader_election::{Leader, Round};
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-/// Wrapper trait for convenience to avoid writing all sequence related traits repeatedly.
-pub trait SequenceTraits<R>: Sequence<R> + Debug + Send + 'static
-where
-    R: Round,
-{
-}
-
-/// Wrapper trait for convenience to avoid writing all Omni-Paxos state related traits repeatedly.
-pub trait StateTraits<R>: PaxosState<R> + Send + 'static
-where
-    R: Round,
-{
-}
-
 /// An entry in the replicated log.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entry<R>
@@ -327,7 +313,7 @@ where
 /// A in-memory storage implementation for Paxos.
 pub mod memory_storage {
     use crate::leader_election::Round;
-    use crate::storage::{Entry, PaxosState, Sequence, SequenceTraits, StateTraits};
+    use crate::storage::{Entry, PaxosState, Sequence};
 
     /// Stores all the accepted entries inside a vector.
     #[derive(Debug)]
@@ -338,8 +324,6 @@ pub mod memory_storage {
         /// Vector which contains all the logged entries in-memory.
         sequence: Vec<Entry<R>>,
     }
-
-    impl<R> SequenceTraits<R> for MemorySequence<R> where R: Round {}
 
     impl<R> Sequence<R> for MemorySequence<R>
     where
@@ -410,8 +394,6 @@ pub mod memory_storage {
         /// Length of the decided sequence.
         ld: u64,
     }
-
-    impl<R> StateTraits<R> for MemoryState<R> where R: Round {}
 
     impl<R> PaxosState<R> for MemoryState<R>
     where
