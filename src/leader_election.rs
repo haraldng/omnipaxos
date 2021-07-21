@@ -148,9 +148,7 @@ pub mod ballot_leader_election {
         /// Returns the currently elected leader.
         pub fn get_leader(&self) -> Option<Leader<Ballot>> {
             self.leader
-                .and_then(|ballot: Ballot| -> Option<Leader<Ballot>> {
-                    Some(Leader::with(ballot.pid, ballot))
-                })
+                .map(|ballot: Ballot| -> Leader<Ballot> { Leader::with(ballot.pid, ballot) })
         }
 
         /// Tick is run by all servers to simulate the passage of time
