@@ -41,7 +41,6 @@ impl TestSystem {
         ble_hb_delay: u64,
         ble_initial_delay_factor: Option<u64>,
         ble_initial_leader: Option<Leader<Ballot>>,
-        quick_timeout: bool,
         increment_delay: u64,
         num_threads: usize,
     ) -> Self {
@@ -80,7 +79,6 @@ impl TestSystem {
                         pid,
                         ble_hb_delay,
                         increment_delay,
-                        quick_timeout,
                         ble_initial_leader,
                         ble_initial_delay_factor,
                     ),

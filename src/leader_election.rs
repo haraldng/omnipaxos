@@ -70,20 +70,18 @@ pub mod ballot_leader_election {
         majority_connected: bool,
         /// Current elected leader.
         leader: Option<Ballot>,
-        /// Delay until timeout.
-        hb_current_delay: u64,
+        /// Internal delay used for timeout.
+        _hb_current_delay: u64,
         /// Fixed delay of timeout. It is measured in ticks.
         hb_delay: u64,
-        /// A fixed delay that is added to the current_delay. It is measured in ticks.
+        /// How long time is waited before timing out on a Heartbeat response and possibly resulting in a leader-change. Measured in number of times [`tick()`] is called.
         increment_delay: u64,
         /// The majority of replicas inside a cluster. It is measured in ticks.
         majority: usize,
-        /// Initiates a quick timeout.
-        quick_timeout: bool,
         /// A factor used in the beginning for a shorter hb_delay.
         /// Used to faster elect a leader when starting up.
         /// If used, then hb_delay is set to hb_delay/initial_delay_factor until the first leader is elected.
-        initial_delay_factor: u64,
+        initial_delay_factor: Option<u64>,
         /// Internal timer which simulates the passage of time.
         ticks_elapsed: u64,
         /// Vector which holds all the outgoing messages of the BLE instance.
@@ -105,7 +103,6 @@ pub mod ballot_leader_election {
             pid: u64,
             hb_delay: u64,
             increment_delay: u64,
-            quick_timeout: bool,
             initial_leader: Option<Leader<Ballot>>,
             initial_delay_factor: Option<u64>,
         ) -> BallotLeaderElection {
@@ -134,35 +131,33 @@ pub mod ballot_leader_election {
                 current_ballot: initial_ballot,
                 majority_connected: true,
                 leader,
-                hb_current_delay: hb_delay,
+                _hb_current_delay: hb_delay,
                 hb_delay,
                 increment_delay,
-                quick_timeout,
-                initial_delay_factor: initial_delay_factor.unwrap_or(1),
+                initial_delay_factor,
                 ticks_elapsed: 0,
                 outgoing: vec![],
             }
         }
 
-        /// Get outgoing vector
+        /// Returns the outgoing vector
         pub fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
             std::mem::take(&mut self.outgoing)
         }
 
-        /// Get the current elected leader
+        /// Returns the currently elected leader.
         pub fn get_leader(&self) -> Option<Leader<Ballot>> {
             self.leader
-                .and_then(|ballot: Ballot| -> Option<Leader<Ballot>> {
-                    Some(Leader::with(ballot.pid, ballot))
-                })
+                .map(|ballot: Ballot| -> Leader<Ballot> { Leader::with(ballot.pid, ballot) })
         }
 
-        /// tick is run by all servers to simulate the passage of time
+        /// Tick is run by all servers to simulate the passage of time
+        /// If one wishes to have hb_delay of 500ms, one can set a periodic timer of 100ms to call tick(). After 5 calls to this function, the timeout will occur.
         /// Returns an Option with the elected leader otherwise None
         pub fn tick(&mut self) -> Option<Leader<Ballot>> {
             self.ticks_elapsed += 1;
 
-            if self.ticks_elapsed >= self.hb_current_delay {
+            if self.ticks_elapsed >= self._hb_current_delay {
                 self.ticks_elapsed = 0;
                 self.hb_timeout()
             } else {
@@ -194,7 +189,6 @@ pub mod ballot_leader_election {
                 self.current_ballot = Ballot::with(0, self.pid);
                 self.majority_connected = false;
             };
-            self.quick_timeout = false;
         }
 
         fn check_leader(&mut self) -> Option<Leader<Ballot>> {
@@ -222,7 +216,6 @@ pub mod ballot_leader_election {
                 None
             } else if self.leader != Some(top_ballot) {
                 // got a new leader with greater ballot
-                self.quick_timeout = false;
                 self.leader = Some(top_ballot);
                 let top_pid = top_ballot.pid;
                 if self.pid == top_pid {
@@ -239,9 +232,9 @@ pub mod ballot_leader_election {
 
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
-            self.hb_current_delay = if self.quick_timeout {
+            self._hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
                 // use short timeout if still no first leader
-                self.hb_delay / self.initial_delay_factor
+                self.hb_delay / initial_delay
             } else {
                 self.hb_delay
             };
@@ -288,7 +281,7 @@ pub mod ballot_leader_election {
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {
-                self.hb_delay += self.increment_delay;
+                self._hb_current_delay += self.increment_delay;
             }
         }
     }
