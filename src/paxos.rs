@@ -562,27 +562,12 @@ where
                     .filter_map(|p| p.as_ref())
                     .filter(|p| p.pid != leader_pid);
                 for PromiseMetaData {
-                    n: promise_n,
-                    la: promise_la,
+                    n: _promise_n,
+                    la: _promise_la,
                     pid,
                 } in promised_followers
                 {
-                    let msg = if cfg!(feature = "max_accsync")
-                        && (promise_n, promise_la) == (max_promise_n, max_la)
-                    {
-                        Message::with(
-                            self.pid,
-                            *pid,
-                            PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
-                        )
-                    } else if cfg!(feature = "max_accsync")
-                        && promise_n == max_promise_n
-                        && promise_la < max_la
-                    {
-                        let sfx = self.storage.get_suffix(*promise_la);
-                        let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
-                        Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
-                    } else {
+                    let msg = {
                         let idx = Self::get_idx_from_pid(*pid);
                         let ld = self
                             .lds
@@ -614,18 +599,7 @@ where
                 la: max_la,
                 ..
             } = &self.max_promise_meta;
-            let sync_idx = if cfg!(feature = "max_accsync") {
-                if (&prom.n_accepted, &prom.la) == (max_round, max_la)
-                    || (prom.n_accepted == self.max_promise_meta.n
-                        && prom.la < self.max_promise_meta.la)
-                {
-                    prom.la
-                } else {
-                    prom.ld
-                }
-            } else {
-                prom.ld
-            };
+            let sync_idx = prom.ld;
             let sfx = self.storage.get_suffix(sync_idx);
             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, sync_idx);
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
