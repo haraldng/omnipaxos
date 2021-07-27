@@ -12,10 +12,9 @@ edition = "2018"
 batch_accept = []
 latest_accepted = []
 latest_decide = []
-max_accsync = []
 continued_leader_reconfiguration = []
 
-default = ["latest_accepted", "latest_decide", "max_accsync", "continued_leader_reconfiguration"]
+default = ["latest_accepted", "latest_decide", "continued_leader_reconfiguration"]
 
 [profile.release]
 lto = true
