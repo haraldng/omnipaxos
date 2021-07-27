@@ -272,6 +272,11 @@ where
         }
     }
 
+    /// Returns the currently promised round.
+    pub fn get_promise(&self) -> R {
+        self.storage.get_promise()
+    }
+
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
     pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
