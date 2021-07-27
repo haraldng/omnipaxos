@@ -524,7 +524,7 @@ where
             if num_promised >= self.majority {
                 let PromiseMetaData {
                     n: max_promise_n,
-                    la: max_la,
+                    la: _max_la,
                     pid: max_pid,
                 } = &self.max_promise_meta;
                 let last_is_stop = match self.max_promise_sfx.last() {
@@ -547,8 +547,6 @@ where
                 }
                 // create accept_sync with only new proposals for all pids with max_promise
                 let mut new_entries = std::mem::take(&mut self.proposals);
-                let max_promise_acc_sync =
-                    AcceptSync::with(self.n_leader.clone(), new_entries.clone(), *max_la);
                 // append new proposals in my sequence
                 let la = self.storage.append_sequence(&mut new_entries);
                 self.storage.set_accepted_round(self.n_leader.clone());
@@ -595,8 +593,8 @@ where
             let idx = from as usize - 1;
             self.lds[idx] = Some(prom.ld);
             let PromiseMetaData {
-                n: max_round,
-                la: max_la,
+                n: _max_round,
+                la: _max_la,
                 ..
             } = &self.max_promise_meta;
             let sync_idx = prom.ld;
