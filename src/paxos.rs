@@ -292,6 +292,16 @@ where
         self.disconnected_peers.push(pid);
     }
 
+    /// Handles re-establishing a connection to a previously disconnected peer.
+    /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
+    pub fn connection_reestablished(&mut self, pid: u64) {
+        self.disconnected_peers.retain(|p| p != &pid);
+        if self.state.1 == Phase::Recover && self.leader == pid {
+            self.outgoing
+                .push(Message::with(self.pid, pid, PaxosMsg::PrepareReq));
+        }
+    }
+
     fn propose_entry(&mut self, entry: Entry<R>) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.proposals.push(entry),
@@ -756,8 +766,7 @@ where
     }
 
     fn handle_firstaccept(&mut self, f: FirstAccept<R>) {
-        if self.storage.get_promise() == f.n {
-            assert_eq!(self.state, (Role::Follower, Phase::FirstAccept));
+        if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             let mut entries = f.entries;
             self.storage.set_accepted_round(f.n.clone());
             self.accept_entries(f.n, &mut entries);
@@ -784,7 +793,7 @@ where
     }
 
     fn handle_decide(&mut self, dec: Decide<R>) {
-        if self.storage.get_promise() == dec.n {
+        if self.storage.get_promise() == dec.n && self.state.1 != Phase::Recover {
             self.storage.set_decided_len(dec.ld);
         }
     }
