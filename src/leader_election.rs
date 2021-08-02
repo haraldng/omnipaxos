@@ -71,7 +71,7 @@ pub mod ballot_leader_election {
         /// Current elected leader.
         leader: Option<Ballot>,
         /// Internal delay used for timeout.
-        _hb_current_delay: u64,
+        hb_current_delay: u64,
         /// Fixed delay of timeout. It is measured in ticks.
         hb_delay: u64,
         /// How long time is waited before timing out on a Heartbeat response and possibly resulting in a leader-change. Measured in number of times [`tick()`] is called.
@@ -131,7 +131,7 @@ pub mod ballot_leader_election {
                 current_ballot: initial_ballot,
                 majority_connected: true,
                 leader,
-                _hb_current_delay: hb_delay,
+                hb_current_delay: hb_delay,
                 hb_delay,
                 increment_delay,
                 initial_delay_factor,
@@ -157,7 +157,7 @@ pub mod ballot_leader_election {
         pub fn tick(&mut self) -> Option<Leader<Ballot>> {
             self.ticks_elapsed += 1;
 
-            if self.ticks_elapsed >= self._hb_current_delay {
+            if self.ticks_elapsed >= self.hb_current_delay {
                 self.ticks_elapsed = 0;
                 self.hb_timeout()
             } else {
@@ -232,7 +232,7 @@ pub mod ballot_leader_election {
 
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
-            self._hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
+            self.hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
                 // use short timeout if still no first leader
                 self.hb_delay / initial_delay
             } else {
@@ -281,7 +281,7 @@ pub mod ballot_leader_election {
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {
-                self._hb_current_delay += self.increment_delay;
+                self.hb_current_delay += self.increment_delay;
             }
         }
     }
