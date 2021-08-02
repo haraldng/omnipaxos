@@ -15,9 +15,11 @@ const NUM_NODES: usize = 6;
 const BLE_HB_DELAY: u64 = 5;
 const INCREMENT_DELAY: u64 = 2;
 
+/// Verifies if the follower nodes forwards the proposal message to a leader
+/// so it can get decided.
 #[test]
 #[serial]
-fn proposal_test() {
+fn forward_proposal_test() {
     let sys = TestSystem::with(
         NUM_NODES,
         BLE_HB_DELAY,
@@ -60,7 +62,7 @@ fn proposal_test() {
         .wait_timeout(WAIT_TIMEOUT)
         .expect("The message was not proposed in the allocated time!");
 
-    println!("Pass proposal");
+    println!("Pass forward_proposal");
 
     match sys.kompact_system.shutdown() {
         Ok(_) => {}

@@ -12,8 +12,10 @@ const NUM_THREADS: usize = 8;
 const NUM_NODES: usize = 20;
 const BLE_HB_DELAY: u64 = 5;
 const INCREMENT_DELAY: u64 = 2;
-const NUM_MSG: u64 = 20;
+const NUM_PROPOSALS: u64 = 20;
 
+/// Verifies the 3 properties that the Paxos algorithm offers
+/// Quorum, Validity, Uniform Agreement
 #[test]
 #[serial]
 fn consensus_test() {
@@ -30,7 +32,7 @@ fn consensus_test() {
 
     let mut num_proposals: Vec<Entry<Ballot>> = vec![];
     let mut futures = vec![];
-    for i in 0..NUM_MSG {
+    for i in 0..NUM_PROPOSALS {
         let (kprom, kfuture) = promise::<Entry<Ballot>>();
         let prop = format!("Decide Paxos {}", i).as_bytes().to_vec();
 
@@ -46,7 +48,7 @@ fn consensus_test() {
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, WAIT_TIMEOUT) {
         Ok(_) => {}
-        Err(e) => panic!("Error on collecting features: {}", e),
+        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
     let mut seq: Vec<(&u64, Vec<Entry<Ballot>>)> = vec![];
@@ -68,6 +70,7 @@ fn consensus_test() {
     };
 }
 
+/// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
     sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>,
     quorum_size: usize,
@@ -84,7 +87,7 @@ fn check_quorum(
             assert!(
                 num_nodes >= quorum_size,
                 "Decided value did NOT have majority quorum! contained: {:?}",
-                quorum_size
+                num_nodes
             );
         }
     }
@@ -92,6 +95,7 @@ fn check_quorum(
     println!("Pass check_quorum");
 }
 
+/// Verifies that only proposed values are decided.
 fn check_validity(
     sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>,
     num_proposals: Vec<Entry<Ballot>>,
@@ -114,6 +118,7 @@ fn check_validity(
     println!("Pass check_validity");
 }
 
+/// Verifies if one correct node receives a message, then everyone will eventually receive it.
 fn check_uniform_agreement(sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>) {
     let (_, longest_seq) = sequence_responses
         .iter()

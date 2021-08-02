@@ -23,6 +23,7 @@ use std::{collections::HashMap, sync::Arc};
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
+const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct TestSystem {
     pub kompact_system: KompactSystem,
@@ -186,9 +187,7 @@ impl TestSystem {
 
 pub mod ble {
     use super::*;
-
     use std::collections::LinkedList;
-    use std::time::Duration;
 
     pub struct BallotLeaderElectionPort;
 
@@ -254,20 +253,19 @@ pub mod ble {
     impl ComponentLifecycle for BallotLeaderComp {
         fn on_start(&mut self) -> Handled {
             self.ble.new_hb_round();
-            self.timer = Some(self.schedule_periodic(
-                Duration::from_millis(100),
-                Duration::from_millis(100),
-                move |c, _| {
-                    if let Some(l) = c.ble.tick() {
-                        c.answer_future(l);
+            self.timer =
+                Some(
+                    self.schedule_periodic(BLE_TIMER_TIMEOUT, BLE_TIMER_TIMEOUT, move |c, _| {
+                        if let Some(l) = c.ble.tick() {
+                            c.answer_future(l);
 
-                        c.ble_port.trigger(l);
-                    }
-                    c.send_outgoing_msgs();
+                            c.ble_port.trigger(l);
+                        }
+                        c.send_outgoing_msgs();
 
-                    Handled::Ok
-                },
-            ));
+                        Handled::Ok
+                    }),
+                );
 
             Handled::Ok
         }
@@ -393,7 +391,7 @@ pub mod omnireplica {
 
         fn answer_future(&mut self) {
             if !self.ask_vector.is_empty() {
-                for ent in self.paxos.get_last_decided_entries().iter() {
+                for ent in self.paxos.get_latest_decided_entries().iter() {
                     match self.ask_vector.pop_front().unwrap().reply(ent.clone()) {
                         Ok(_) => {}
                         Err(e) => println!("Error in promise {}", e),
