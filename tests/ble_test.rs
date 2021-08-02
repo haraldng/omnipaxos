@@ -9,10 +9,10 @@ use util::TestSystem;
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const NUM_THREADS: usize = 8;
-const NUM_NODES: usize = 6;
+const NUM_NODES: usize = 9;
 const BLE_HB_DELAY: u64 = 5;
 const INCREMENT_DELAY: u64 = 2;
-const NUM_MSG: u64 = 2;
+const NUM_MSG: u64 = 3;
 
 #[test]
 #[serial]

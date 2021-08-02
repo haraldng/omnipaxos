@@ -255,8 +255,8 @@ pub mod ble {
         fn on_start(&mut self) -> Handled {
             self.ble.new_hb_round();
             self.timer = Some(self.schedule_periodic(
-                Duration::from_millis(1),
-                Duration::from_millis(1),
+                Duration::from_millis(100),
+                Duration::from_millis(100),
                 move |c, _| {
                     if let Some(l) = c.ble.tick() {
                         c.answer_future(l);
