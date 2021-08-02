@@ -524,7 +524,7 @@ where
             if num_promised >= self.majority {
                 let PromiseMetaData {
                     n: max_promise_n,
-                    la: _max_la,
+                    la: max_la,
                     pid: max_pid,
                 } = &self.max_promise_meta;
                 let last_is_stop = match self.max_promise_sfx.last() {
@@ -547,6 +547,8 @@ where
                 }
                 // create accept_sync with only new proposals for all pids with max_promise
                 let mut new_entries = std::mem::take(&mut self.proposals);
+                let max_promise_acc_sync =
+                    AcceptSync::with(self.n_leader.clone(), new_entries.clone(), *max_la);
                 // append new proposals in my sequence
                 let la = self.storage.append_sequence(&mut new_entries);
                 self.storage.set_accepted_round(self.n_leader.clone());
@@ -560,12 +562,22 @@ where
                     .filter_map(|p| p.as_ref())
                     .filter(|p| p.pid != leader_pid);
                 for PromiseMetaData {
-                    n: _promise_n,
-                    la: _promise_la,
+                    n: promise_n,
+                    la: promise_la,
                     pid,
                 } in promised_followers
                 {
-                    let msg = {
+                    let msg = if (promise_n, promise_la) == (max_promise_n, max_la) {
+                        Message::with(
+                            self.pid,
+                            *pid,
+                            PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
+                        )
+                    } else if (promise_n == max_promise_n) && (promise_la < max_la) {
+                        let sfx = self.storage.get_suffix(*promise_la);
+                        let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
+                        Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
+                    } else {
                         let idx = Self::get_idx_from_pid(*pid);
                         let ld = self
                             .lds
