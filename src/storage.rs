@@ -1,20 +1,6 @@
 use crate::leader_election::{Leader, Round};
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
-/// Wrapper trait for convenience to avoid writing all sequence related traits repeatedly.
-pub trait SequenceTraits<R>: Sequence<R> + Debug + Send + Sync + 'static
-where
-    R: Round,
-{
-}
-
-/// Wrapper trait for convenience to avoid writing all Omni-Paxos state related traits repeatedly.
-pub trait StateTraits<R>: PaxosState<R> + Send + 'static
-where
-    R: Round,
-{
-}
-
 /// An entry in the replicated log.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entry<R>
@@ -320,6 +306,130 @@ where
                 arc_s
             }
             _ => panic!("Storage should already have been stopped!"),
+        }
+    }
+}
+
+/// A in-memory storage implementation for Paxos.
+pub mod memory_storage {
+    use crate::leader_election::Round;
+    use crate::storage::{Entry, PaxosState, Sequence};
+
+    /// Stores all the accepted entries inside a vector.
+    #[derive(Debug)]
+    pub struct MemorySequence<R>
+    where
+        R: Round,
+    {
+        /// Vector which contains all the logged entries in-memory.
+        sequence: Vec<Entry<R>>,
+    }
+
+    impl<R> Sequence<R> for MemorySequence<R>
+    where
+        R: Round,
+    {
+        fn new() -> Self {
+            MemorySequence { sequence: vec![] }
+        }
+
+        fn new_with_sequence(seq: Vec<Entry<R>>) -> Self {
+            MemorySequence { sequence: seq }
+        }
+
+        fn append_entry(&mut self, entry: Entry<R>) {
+            self.sequence.push(entry);
+        }
+
+        fn append_sequence(&mut self, seq: &mut Vec<Entry<R>>) {
+            self.sequence.append(seq);
+        }
+
+        fn append_on_prefix(&mut self, from_idx: u64, seq: &mut Vec<Entry<R>>) {
+            self.sequence.truncate(from_idx as usize);
+            self.sequence.append(seq);
+        }
+
+        fn get_entries(&self, from: u64, to: u64) -> &[Entry<R>] {
+            match self.sequence.get(from as usize..to as usize) {
+                Some(ents) => ents,
+                None => panic!(
+                    "get_entries out of bounds. From: {}, To: {}, len: {}",
+                    from,
+                    to,
+                    self.sequence.len()
+                ),
+            }
+        }
+
+        fn get_suffix(&self, from: u64) -> Vec<Entry<R>> {
+            match self.sequence.get(from as usize..) {
+                Some(s) => s.to_vec(),
+                None => vec![],
+            }
+        }
+
+        fn get_sequence_len(&self) -> u64 {
+            self.sequence.len() as u64
+        }
+
+        fn stopped(&self) -> bool {
+            match self.sequence.last() {
+                Some(entry) => entry.is_stopsign(),
+                None => false,
+            }
+        }
+    }
+
+    /// Stores the state of a paxos replica in-memory.
+    #[derive(Debug)]
+    pub struct MemoryState<R>
+    where
+        R: Round,
+    {
+        /// Last promised round.
+        n_prom: R,
+        /// Last accepted round.
+        acc_round: R,
+        /// Length of the decided sequence.
+        ld: u64,
+    }
+
+    impl<R> PaxosState<R> for MemoryState<R>
+    where
+        R: Round,
+    {
+        fn new() -> Self {
+            let r = R::default();
+            MemoryState {
+                n_prom: r.clone(),
+                acc_round: r,
+                ld: 0,
+            }
+        }
+
+        fn set_promise(&mut self, n_prom: R) {
+            self.n_prom = n_prom;
+        }
+
+        fn set_decided_len(&mut self, ld: u64) {
+            self.ld = ld;
+        }
+
+        fn set_accepted_round(&mut self, na: R) {
+            self.acc_round = na;
+        }
+
+        fn get_accepted_round(&self) -> R {
+            self.acc_round.clone()
+        }
+
+        fn get_decided_len(&self) -> u64 {
+            self.ld
+        }
+
+        fn get_promise(&self) -> R {
+            self.n_prom.clone()
         }
     }
 }

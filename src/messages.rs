@@ -178,8 +178,8 @@ where
     R: Round,
 {
     /// Creates a [`Decide`] message.
-    pub fn with(ld: u64, n: R) -> Self {
-        Decide { ld, n }
+    pub fn with(n: R, ld: u64) -> Self {
+        Decide { n, ld }
     }
 }
 
