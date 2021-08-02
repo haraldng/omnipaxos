@@ -95,7 +95,6 @@ pub mod ballot_leader_election {
         /// * `pid` -  Process identifier used to uniquely identify this instance.
         /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
         /// * `increment_delay` - A fixed delay that is added to the current_delay. It is measured in ticks.
-        /// * `quick_timeout` -  Initiates a quick timeout.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
         pub fn with(
