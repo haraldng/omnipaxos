@@ -567,18 +567,13 @@ where
                     pid,
                 } in promised_followers
                 {
-                    let msg = if cfg!(feature = "max_accsync")
-                        && (promise_n, promise_la) == (max_promise_n, max_la)
-                    {
+                    let msg = if (promise_n, promise_la) == (max_promise_n, max_la) {
                         Message::with(
                             self.pid,
                             *pid,
                             PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
                         )
-                    } else if cfg!(feature = "max_accsync")
-                        && promise_n == max_promise_n
-                        && promise_la < max_la
-                    {
+                    } else if (promise_n == max_promise_n) && (promise_la < max_la) {
                         let sfx = self.storage.get_suffix(*promise_la);
                         let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
                         Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
@@ -614,15 +609,11 @@ where
                 la: max_la,
                 ..
             } = &self.max_promise_meta;
-            let sync_idx = if cfg!(feature = "max_accsync") {
-                if (&prom.n_accepted, &prom.la) == (max_round, max_la)
-                    || (prom.n_accepted == self.max_promise_meta.n
-                        && prom.la < self.max_promise_meta.la)
-                {
-                    prom.la
-                } else {
-                    prom.ld
-                }
+            let sync_idx = if (&prom.n_accepted, &prom.la) == (max_round, max_la)
+                || (prom.n_accepted == self.max_promise_meta.n
+                    && prom.la < self.max_promise_meta.la)
+            {
+                prom.la
             } else {
                 prom.ld
             };
