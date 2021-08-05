@@ -1,42 +1,38 @@
+pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::leader_election::ballot_leader_election::Ballot;
 use omnipaxos::storage::{Entry, Sequence};
 use serial_test::serial;
-use std::time::Duration;
+use test_config::TestConfig;
 use util::TestSystem;
-
-const WAIT_TIMEOUT: Duration = Duration::from_secs(2);
-const NUM_THREADS: usize = 8;
-const NUM_NODES: usize = 20;
-const BLE_HB_DELAY: u64 = 5;
-const INCREMENT_DELAY: u64 = 2;
-const NUM_PROPOSALS: u64 = 20;
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
 #[test]
 #[serial]
 fn consensus_test() {
+    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+
     let sys = TestSystem::with(
-        NUM_NODES,
-        BLE_HB_DELAY,
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
         None,
         None,
-        INCREMENT_DELAY,
-        NUM_THREADS,
+        cfg.increment_delay,
+        cfg.num_threads,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut num_proposals: Vec<Entry<Ballot>> = vec![];
+    let mut vec_proposals: Vec<Entry<Ballot>> = vec![];
     let mut futures = vec![];
-    for i in 0..NUM_PROPOSALS {
+    for i in 0..cfg.num_proposals {
         let (kprom, kfuture) = promise::<Entry<Ballot>>();
         let prop = format!("Decide Paxos {}", i).as_bytes().to_vec();
 
-        num_proposals.push(Entry::Normal(prop.clone()));
+        vec_proposals.push(Entry::Normal(prop.clone()));
         px.on_definition(|x| {
             x.propose(prop);
             x.add_ask(Ask::new(kprom, ()))
@@ -46,7 +42,7 @@ fn consensus_test() {
 
     sys.start_all_nodes();
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, WAIT_TIMEOUT) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -59,9 +55,9 @@ fn consensus_test() {
         }));
     }
 
-    let quorum_size = NUM_NODES as usize / 2 + 1;
-    check_quorum(seq.clone(), quorum_size, num_proposals.clone());
-    check_validity(seq.clone(), num_proposals);
+    let quorum_size = cfg.num_nodes as usize / 2 + 1;
+    check_quorum(seq.clone(), quorum_size, vec_proposals.clone());
+    check_validity(seq.clone(), vec_proposals);
     check_uniform_agreement(seq);
 
     match sys.kompact_system.shutdown() {
