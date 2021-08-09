@@ -11,6 +11,8 @@
 //! * `continued_leader_reconfiguration` - Let the cluster pick the current leader as the initial leader in the new configuration (if possible) to shorten down-time during reconfiguration.
 
 #![deny(missing_docs)]
+/// Holds the translation to string for the configuration parameters used in Omni-paxos.
+pub mod key_values;
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod leader_election;
 /// The different messages Omni-Paxos replicas can communicate to each other with.

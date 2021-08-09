@@ -7,11 +7,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hocon = "0.5.2"
+
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af" }
 serial_test = "0.5.1"
 rand = "0.8.4"
-hocon = "0.5.2"
 
 [features]
 batch_accept = []

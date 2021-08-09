@@ -28,7 +28,9 @@ where
 
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
+    use crate::key_values::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, PID};
     use crate::leader_election::{Leader, Round};
+    use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 
     /// Used to define an epoch
@@ -137,6 +139,27 @@ pub mod ballot_leader_election {
                 ticks_elapsed: 0,
                 outgoing: vec![],
             }
+        }
+
+        /// Construct a new BallotLeaderComponent
+        /// # Arguments
+        /// * `cfg` - Hocon configuration used for ble replica.
+        /// * `peers` - Vector that holds all the other replicas.
+        /// * `initial_leader` -  Initial leader which will be elected.
+        pub fn with_hocon(
+            &self,
+            cfg: &Hocon,
+            peers: Vec<u64>,
+            initial_leader: Option<Leader<Ballot>>,
+        ) -> BallotLeaderElection {
+            BallotLeaderElection::with(
+                peers,
+                cfg[PID].as_i64().unwrap_or_default() as u64,
+                cfg[HB_DELAY].as_i64().unwrap_or_default() as u64,
+                cfg[INCREMENT_DELAY].as_i64().unwrap_or_default() as u64,
+                initial_leader,
+                Option::from(cfg[INITIAL_DELAY_FACTOR].as_i64().unwrap_or_default() as u64),
+            )
         }
 
         /// Returns the outgoing vector
