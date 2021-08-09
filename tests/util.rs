@@ -82,6 +82,7 @@ impl TestSystem {
                         increment_delay,
                         ble_initial_leader,
                         ble_initial_delay_factor,
+                        None,
                     ),
                 )
             });
@@ -97,6 +98,7 @@ impl TestSystem {
                             MemorySequence::<Ballot>::new(),
                             MemoryState::<Ballot>::new(),
                         ),
+                        None,
                         None,
                     ),
                 )

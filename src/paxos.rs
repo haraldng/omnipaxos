@@ -1,9 +1,11 @@
+use crate::util::create_logger;
 use crate::{
     leader_election::*,
     messages::*,
     storage::{Entry, PaxosState, Sequence, StopSign, Storage},
     util::PromiseMetaData,
 };
+use slog::{debug, info, Logger};
 use std::{fmt::Debug, sync::Arc};
 
 const BUFFER_SIZE: usize = 100000;
@@ -61,6 +63,8 @@ where
     outgoing: Vec<Message<R>>,
     num_nodes: usize,
     disconnected_peers: Vec<u64>,
+    /// Logger used to output the status of the component.
+    logger: Logger,
 }
 
 impl<R, S, P> Paxos<R, S, P>
@@ -82,6 +86,7 @@ where
         peers: Vec<u64>,
         storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
+        logger: Option<Logger>,
     ) -> Paxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
@@ -111,6 +116,15 @@ where
                 (state, 0, R::default(), lds)
             }
         };
+
+        let l = if let Some(log) = logger {
+            log
+        } else {
+            create_logger(format!("logs/paxos_{}.log", pid).as_str())
+        };
+
+        info!(l, "Paxos component pid: {} created!", pid);
+
         let mut paxos = Paxos {
             storage,
             pid,
@@ -135,6 +149,7 @@ where
             num_nodes,
             // log,
             disconnected_peers: vec![],
+            logger: l,
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -225,6 +240,10 @@ where
         new_configuration: Vec<u64>,
         prio_start_round: Option<R>,
     ) -> Result<(), ProposeErr> {
+        info!(
+            self.logger,
+            "Propose reconfiguration {:?}", new_configuration
+        );
         if self.stopped() {
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
@@ -286,6 +305,7 @@ where
     /// Handles a disconnection to another peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been dropped and some messages might have been lost.
     pub fn connection_lost(&mut self, pid: u64) {
+        info!(self.logger, "Connection lost pid {}", pid);
         if self.state.0 == Role::Follower && self.leader == pid {
             self.state = (Role::Follower, Phase::Recover);
         }
@@ -302,6 +322,7 @@ where
     }
 
     fn clear_peers_state(&mut self) {
+        debug!(self.logger, "Clear peers state");
         self.las = vec![0; self.num_nodes];
         self.promises_meta = vec![None; self.num_nodes];
         self.lds = vec![None; self.num_nodes];
@@ -314,6 +335,7 @@ where
     /// Handle becoming the leader. Should be called when the leader election has elected this replica as the leader
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
+        info!(self.logger, "Replica selected as leader");
         let n = l.round;
         let leader_pid = l.pid;
         if n <= self.n_leader || n <= self.storage.get_promise() {
@@ -359,6 +381,7 @@ where
     }
 
     fn handle_preparereq(&mut self, from: u64) {
+        debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
@@ -371,6 +394,7 @@ where
 
     fn forward_proposals(&mut self, mut entries: Vec<Entry<R>>) {
         if self.leader > 0 && self.leader != self.pid {
+            info!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = Message::with(self.pid, self.leader, pf);
             self.outgoing.push(msg);
@@ -380,6 +404,7 @@ where
     }
 
     fn handle_forwarded_proposal(&mut self, mut entries: Vec<Entry<R>>) {
+        debug!(self.logger, "Incoming Forwarded Proposal");
         if !self.stopped() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.proposals.append(&mut entries),
@@ -511,6 +536,11 @@ where
     }
 
     fn handle_promise_prepare(&mut self, prom: Promise<R>, from: u64) {
+        let (r, p) = &self.state;
+        debug!(
+            self.logger,
+            "Self role {:?}, phase {:?}. Incoming message Promise Prepare from {}", r, p, from
+        );
         if prom.n == self.n_leader {
             let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
             if promise_meta > self.max_promise_meta {
@@ -606,6 +636,11 @@ where
     }
 
     fn handle_promise_accept(&mut self, prom: Promise<R>, from: u64) {
+        let (r, p) = &self.state;
+        debug!(
+            self.logger,
+            "Self role {:?}, phase {:?}. Incoming message Promise Accept from {}", r, p, from
+        );
         if prom.n == self.n_leader {
             let idx = from as usize - 1;
             self.lds[idx] = Some(prom.ld);
@@ -651,6 +686,7 @@ where
     }
 
     fn handle_accepted(&mut self, accepted: Accepted<R>, from: u64) {
+        debug!(self.logger, "Incoming message Accepted {}", from);
         if accepted.n == self.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.las[from as usize - 1] = accepted.la;
             if accepted.la > self.lc {
@@ -711,6 +747,7 @@ where
 
     /*** Follower ***/
     fn handle_prepare(&mut self, prep: Prepare<R>, from: u64) {
+        debug!(self.logger, "Incoming message Prepare from {}", from);
         if self.storage.get_promise() < prep.n {
             self.leader = from;
             self.storage.set_promise(prep.n.clone());
@@ -731,6 +768,7 @@ where
     }
 
     fn handle_acceptsync(&mut self, accsync: AcceptSync<R>, from: u64) {
+        debug!(self.logger, "Incoming message Accept Sync from {}", from);
         if self.state == (Role::Follower, Phase::Prepare) && self.storage.get_promise() == accsync.n
         {
             self.storage.set_accepted_round(accsync.n.clone());
@@ -756,6 +794,7 @@ where
     }
 
     fn handle_firstaccept(&mut self, f: FirstAccept<R>) {
+        debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n {
             assert_eq!(self.state, (Role::Follower, Phase::FirstAccept));
             let mut entries = f.entries;
@@ -771,6 +810,7 @@ where
     }
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
+        debug!(self.logger, "Incoming message Accept Decide");
         if self.storage.get_promise() == acc.n {
             if let (Role::Follower, Phase::Accept) = self.state {
                 let mut entries = acc.entries;
@@ -784,6 +824,7 @@ where
     }
 
     fn handle_decide(&mut self, dec: Decide<R>) {
+        debug!(self.logger, "Incoming message Decide");
         if self.storage.get_promise() == dec.n {
             self.storage.set_decided_len(dec.ld);
         }
