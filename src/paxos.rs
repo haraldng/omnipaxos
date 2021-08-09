@@ -296,6 +296,11 @@ where
         }
     }
 
+    /// Returns the currently promised round.
+    pub fn get_promise(&self) -> R {
+        self.storage.get_promise()
+    }
+
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
     pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
@@ -310,6 +315,16 @@ where
             self.state = (Role::Follower, Phase::Recover);
         }
         self.disconnected_peers.push(pid);
+    }
+
+    /// Handles re-establishing a connection to a previously disconnected peer.
+    /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
+    pub fn connection_reestablished(&mut self, pid: u64) {
+        self.disconnected_peers.retain(|p| p != &pid);
+        if self.state.1 == Phase::Recover && self.leader == pid {
+            self.outgoing
+                .push(Message::with(self.pid, pid, PaxosMsg::PrepareReq));
+        }
     }
 
     fn propose_entry(&mut self, entry: Entry<R>) {
@@ -597,18 +612,13 @@ where
                     pid,
                 } in promised_followers
                 {
-                    let msg = if cfg!(feature = "max_accsync")
-                        && (promise_n, promise_la) == (max_promise_n, max_la)
-                    {
+                    let msg = if (promise_n, promise_la) == (max_promise_n, max_la) {
                         Message::with(
                             self.pid,
                             *pid,
                             PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
                         )
-                    } else if cfg!(feature = "max_accsync")
-                        && promise_n == max_promise_n
-                        && promise_la < max_la
-                    {
+                    } else if (promise_n == max_promise_n) && (promise_la < max_la) {
                         let sfx = self.storage.get_suffix(*promise_la);
                         let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
                         Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
@@ -649,15 +659,11 @@ where
                 la: max_la,
                 ..
             } = &self.max_promise_meta;
-            let sync_idx = if cfg!(feature = "max_accsync") {
-                if (&prom.n_accepted, &prom.la) == (max_round, max_la)
-                    || (prom.n_accepted == self.max_promise_meta.n
-                        && prom.la < self.max_promise_meta.la)
-                {
-                    prom.la
-                } else {
-                    prom.ld
-                }
+            let sync_idx = if (&prom.n_accepted, &prom.la) == (max_round, max_la)
+                || (prom.n_accepted == self.max_promise_meta.n
+                    && prom.la < self.max_promise_meta.la)
+            {
+                prom.la
             } else {
                 prom.ld
             };
@@ -795,8 +801,7 @@ where
 
     fn handle_firstaccept(&mut self, f: FirstAccept<R>) {
         debug!(self.logger, "Incoming message First Accept");
-        if self.storage.get_promise() == f.n {
-            assert_eq!(self.state, (Role::Follower, Phase::FirstAccept));
+        if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             let mut entries = f.entries;
             self.storage.set_accepted_round(f.n.clone());
             self.accept_entries(f.n, &mut entries);
@@ -825,7 +830,7 @@ where
 
     fn handle_decide(&mut self, dec: Decide<R>) {
         debug!(self.logger, "Incoming message Decide");
-        if self.storage.get_promise() == dec.n {
+        if self.storage.get_promise() == dec.n && self.state.1 != Phase::Recover {
             self.storage.set_decided_len(dec.ld);
         }
     }
