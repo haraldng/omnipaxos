@@ -37,7 +37,7 @@ pub enum ProposeErr {
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct Paxos<R, S, P>
+pub struct OmniPaxos<R, S, P>
 where
     R: Round,
     S: Sequence<R>,
@@ -69,7 +69,7 @@ where
     logger: Logger,
 }
 
-impl<R, S, P> Paxos<R, S, P>
+impl<R, S, P> OmniPaxos<R, S, P>
 where
     R: Round,
     S: Sequence<R>,
@@ -93,7 +93,7 @@ where
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> Paxos<R, S, P> {
+    ) -> OmniPaxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -129,7 +129,7 @@ where
 
         info!(l, "Paxos component pid: {} created!", pid);
 
-        let mut paxos = Paxos {
+        let mut paxos = OmniPaxos {
             storage,
             pid,
             config_id,
@@ -172,8 +172,8 @@ where
         storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>,
         logger: Option<Logger>,
-    ) -> Paxos<R, S, P> {
-        Paxos::<R, S, P>::with(
+    ) -> OmniPaxos<R, S, P> {
+        OmniPaxos::<R, S, P>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
