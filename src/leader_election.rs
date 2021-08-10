@@ -247,12 +247,13 @@ pub mod ballot_leader_election {
 
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
+            self.hb_round += 1;
+
             trace!(
                 self.logger,
                 "Initiate new heartbeat round: {}",
-                self.hb_round + 1
+                self.hb_round
             );
-            debug!(self.logger, "Current heartbeat round: {}", self.hb_round);
 
             self.hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
                 debug!(self.logger, "Using initial heartbeat delay");
@@ -264,7 +265,6 @@ pub mod ballot_leader_election {
                 self.hb_delay
             };
 
-            self.hb_round += 1;
             for peer in &self.peers {
                 let hb_request = HeartbeatRequest::with(self.hb_round);
 
