@@ -6,7 +6,7 @@ use kompact::config_keys::system;
 use kompact::executors::crossbeam_workstealing_pool;
 use kompact::prelude::*;
 use omnipaxos::leader_election::ballot_leader_election::BallotLeaderElection;
-use omnipaxos::paxos::Paxos;
+use omnipaxos::paxos::OmniPaxos;
 use omnipaxos::storage::memory_storage::{MemorySequence, MemoryState};
 use omnipaxos::storage::{PaxosState, Sequence, Storage};
 use omnipaxos::{
@@ -82,6 +82,8 @@ impl TestSystem {
                         increment_delay,
                         ble_initial_leader,
                         ble_initial_delay_factor,
+                        None,
+                        None,
                     ),
                 )
             });
@@ -89,7 +91,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosReplica::with(
                     pid,
-                    Paxos::with(
+                    OmniPaxos::with(
                         1,
                         pid,
                         peer_pids.clone(),
@@ -97,6 +99,8 @@ impl TestSystem {
                             MemorySequence::<Ballot>::new(),
                             MemoryState::<Ballot>::new(),
                         ),
+                        None,
+                        None,
                         None,
                     ),
                 )
@@ -301,7 +305,7 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::paxos::Paxos;
+    use omnipaxos::paxos::OmniPaxos;
     use omnipaxos::storage::memory_storage::{MemorySequence, MemoryState};
     use omnipaxos::storage::Entry;
     use omnipaxos::{
@@ -318,7 +322,7 @@ pub mod omnireplica {
         pid: u64,
         peers: HashMap<u64, ActorRef<Message<Ballot>>>,
         timer: Option<ScheduledTimer>,
-        paxos: Paxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
+        paxos: OmniPaxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
         ask_vector: LinkedList<Ask<(), Entry<Ballot>>>,
     }
 
@@ -350,7 +354,7 @@ pub mod omnireplica {
     impl OmniPaxosReplica {
         pub fn with(
             pid: u64,
-            paxos: Paxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
+            paxos: OmniPaxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),

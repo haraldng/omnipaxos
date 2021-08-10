@@ -29,9 +29,13 @@ where
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
     use crate::leader_election::{Leader, Round};
-    use crate::utils::hocon_kv::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, PID};
+    use crate::utils::hocon_kv::{
+        HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID,
+    };
+    use crate::utils::logger::create_logger;
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
+    use slog::{debug, info, trace, warn, Logger};
 
     /// Used to define an epoch
     #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
@@ -88,6 +92,8 @@ pub mod ballot_leader_election {
         ticks_elapsed: u64,
         /// Vector which holds all the outgoing messages of the BLE instance.
         outgoing: Vec<BLEMessage>,
+        /// Logger used to output the status of the component.
+        logger: Logger,
     }
 
     impl BallotLeaderElection {
@@ -99,6 +105,8 @@ pub mod ballot_leader_election {
         /// * `increment_delay` - A fixed delay that is added to the current_delay. It is measured in ticks.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
+        /// * `logger` - Used for logging events of Ballot Leader Election.
+        /// * `log_file_path` - Path where the default logger logs events.
         pub fn with(
             peers: Vec<u64>,
             pid: u64,
@@ -106,6 +114,8 @@ pub mod ballot_leader_election {
             increment_delay: u64,
             initial_leader: Option<Leader<Ballot>>,
             initial_delay_factor: Option<u64>,
+            logger: Option<Logger>,
+            log_file_path: Option<&str>,
         ) -> BallotLeaderElection {
             let n = &peers.len() + 1;
             let (leader, initial_ballot) = match initial_leader {
@@ -123,6 +133,13 @@ pub mod ballot_leader_election {
                     (None, initial_ballot)
                 }
             };
+
+            let l = logger.unwrap_or_else(|| {
+                create_logger(log_file_path.unwrap_or(format!("logs/ble_{}.log", pid).as_str()))
+            });
+
+            info!(l, "Ballot Leader Election component pid: {} created!", pid);
+
             BallotLeaderElection {
                 pid,
                 majority: n / 2 + 1, // +1 because peers is exclusive ourselves
@@ -138,6 +155,7 @@ pub mod ballot_leader_election {
                 initial_delay_factor,
                 ticks_elapsed: 0,
                 outgoing: vec![],
+                logger: l,
             }
         }
 
@@ -146,11 +164,13 @@ pub mod ballot_leader_election {
         /// * `cfg` - Hocon configuration used for ble replica.
         /// * `peers` - Vector that holds all the other replicas.
         /// * `initial_leader` -  Initial leader which will be elected.
+        /// * `logger` - Used for logging events of Ballot Leader Election.
         pub fn with_hocon(
             &self,
             cfg: &Hocon,
             peers: Vec<u64>,
             initial_leader: Option<Leader<Ballot>>,
+            logger: Option<Logger>,
         ) -> BallotLeaderElection {
             BallotLeaderElection::with(
                 peers,
@@ -166,6 +186,13 @@ pub mod ballot_leader_election {
                     cfg[INITIAL_DELAY_FACTOR]
                         .as_i64()
                         .expect("Failed to load initial delay factor") as u64,
+                ),
+                logger,
+                Option::from(
+                    cfg[LOG_FILE_PATH]
+                        .as_string()
+                        .expect("Failed to load log file path")
+                        .as_str(),
                 ),
             )
         }
@@ -254,6 +281,10 @@ pub mod ballot_leader_election {
                     self.majority_connected = false;
                 }
 
+                debug!(
+                    self.logger,
+                    "New Leader elected, pid: {}, ballot: {:?}", top_pid, top_ballot
+                );
                 Some(Leader::with(top_pid, top_ballot))
             } else {
                 None
@@ -262,14 +293,24 @@ pub mod ballot_leader_election {
 
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
+            self.hb_round += 1;
+
+            trace!(
+                self.logger,
+                "Initiate new heartbeat round: {}",
+                self.hb_round
+            );
+
             self.hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
+                debug!(self.logger, "Using initial heartbeat delay");
                 // use short timeout if still no first leader
-                self.hb_delay / initial_delay
+                let delay = self.hb_delay / initial_delay;
+                self.initial_delay_factor = None;
+                delay
             } else {
                 self.hb_delay
             };
 
-            self.hb_round += 1;
             for peer in &self.peers {
                 let hb_request = HeartbeatRequest::with(self.hb_round);
 
@@ -282,11 +323,21 @@ pub mod ballot_leader_election {
         }
 
         fn hb_timeout(&mut self) -> Option<Leader<Ballot>> {
+            trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
+
             let result: Option<Leader<Ballot>> = if self.ballots.len() + 1 >= self.majority {
+                debug!(
+                    self.logger,
+                    "Received a majority of heartbeats {:?}", self.ballots
+                );
                 self.ballots
                     .push((self.current_ballot, self.majority_connected));
                 self.check_leader()
             } else {
+                warn!(
+                    self.logger,
+                    "Did not receive a majority of heartbeats {:?}", self.ballots
+                );
                 self.ballots.clear();
                 self.majority_connected = false;
                 None
@@ -297,6 +348,8 @@ pub mod ballot_leader_election {
         }
 
         fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
+            trace!(self.logger, "Heartbeat request from {}", from);
+
             let hb_reply =
                 HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
 
@@ -308,9 +361,18 @@ pub mod ballot_leader_election {
         }
 
         fn handle_reply(&mut self, rep: HeartbeatReply) {
+            trace!(self.logger, "Heartbeat reply {:?}", rep.ballot);
+
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {
+                warn!(
+                    self.logger,
+                    "Got late response, round {}, current delay {}, ballot {:?}",
+                    self.hb_round,
+                    self.hb_current_delay,
+                    rep.ballot
+                );
                 self.hb_current_delay += self.increment_delay;
             }
         }

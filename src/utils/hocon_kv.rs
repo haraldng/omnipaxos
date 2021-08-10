@@ -8,3 +8,5 @@ pub const HB_DELAY: &str = "HB_DELAY";
 pub const INCREMENT_DELAY: &str = "increment_delay";
 /// A factor used in the beginning for a shorter hb_delay.
 pub const INITIAL_DELAY_FACTOR: &str = "increment_delay";
+/// Path where the default logger logs events.
+pub const LOG_FILE_PATH: &str = "log_file_path";

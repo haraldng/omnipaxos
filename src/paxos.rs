@@ -1,4 +1,5 @@
-use crate::utils::hocon_kv::{CONFIG_ID, PID};
+use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID};
+use crate::utils::logger::create_logger;
 use crate::{
     leader_election::*,
     messages::*,
@@ -6,6 +7,7 @@ use crate::{
     util::PromiseMetaData,
 };
 use hocon::Hocon;
+use slog::{debug, info, trace, Logger};
 use std::{fmt::Debug, sync::Arc};
 
 const BUFFER_SIZE: usize = 100000;
@@ -35,7 +37,7 @@ pub enum ProposeErr {
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct Paxos<R, S, P>
+pub struct OmniPaxos<R, S, P>
 where
     R: Round,
     S: Sequence<R>,
@@ -63,9 +65,11 @@ where
     outgoing: Vec<Message<R>>,
     num_nodes: usize,
     disconnected_peers: Vec<u64>,
+    /// Logger used to output the status of the component.
+    logger: Logger,
 }
 
-impl<R, S, P> Paxos<R, S, P>
+impl<R, S, P> OmniPaxos<R, S, P>
 where
     R: Round,
     S: Sequence<R>,
@@ -79,13 +83,17 @@ where
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `storage` - Implementation of a storage used to store the messages.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `logger` - Used for logging events of OmniPaxos.
+    /// * `log_file_path` - Path where the default logger logs events.
     pub fn with(
         config_id: u32,
         pid: u64,
         peers: Vec<u64>,
         storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
-    ) -> Paxos<R, S, P> {
+        logger: Option<Logger>,
+        log_file_path: Option<&str>,
+    ) -> OmniPaxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -114,7 +122,14 @@ where
                 (state, 0, R::default(), lds)
             }
         };
-        let mut paxos = Paxos {
+
+        let l = logger.unwrap_or_else(|| {
+            create_logger(log_file_path.unwrap_or(format!("logs/paxos_{}.log", pid).as_str()))
+        });
+
+        info!(l, "Paxos component pid: {} created!", pid);
+
+        let mut paxos = OmniPaxos {
             storage,
             pid,
             config_id,
@@ -136,8 +151,8 @@ where
             latest_accepted_meta: None,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             num_nodes,
-            // log,
             disconnected_peers: vec![],
+            logger: l,
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -149,19 +164,28 @@ where
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `storage` - Implementation of a storage used to store the messages.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `logger` - Used for logging events of OmniPaxos.
     pub fn with_hocon(
         &self,
         cfg: &Hocon,
         peers: Vec<u64>,
         storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>,
-    ) -> Paxos<R, S, P> {
-        Paxos::<R, S, P>::with(
+        logger: Option<Logger>,
+    ) -> OmniPaxos<R, S, P> {
+        OmniPaxos::<R, S, P>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
             storage,
             skip_prepare_use_leader,
+            logger,
+            Option::from(
+                cfg[LOG_FILE_PATH]
+                    .as_string()
+                    .expect("Failed to load log file path")
+                    .as_str(),
+            ),
         )
     }
 
@@ -250,6 +274,10 @@ where
         new_configuration: Vec<u64>,
         prio_start_round: Option<R>,
     ) -> Result<(), ProposeErr> {
+        info!(
+            self.logger,
+            "Propose reconfiguration {:?}", new_configuration
+        );
         if self.stopped() {
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
@@ -316,6 +344,7 @@ where
     /// Handles a disconnection to another peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been dropped and some messages might have been lost.
     pub fn connection_lost(&mut self, pid: u64) {
+        debug!(self.logger, "Connection lost to pid: {}", pid);
         if self.state.0 == Role::Follower && self.leader == pid {
             self.state = (Role::Follower, Phase::Recover);
         }
@@ -354,6 +383,10 @@ where
     /// Handle becoming the leader. Should be called when the leader election has elected this replica as the leader
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
+        debug!(
+            self.logger,
+            "Replica got elected as the leader, round: {:?}", l.round
+        );
         let n = l.round;
         let leader_pid = l.pid;
         if n <= self.n_leader || n <= self.storage.get_promise() {
@@ -399,6 +432,7 @@ where
     }
 
     fn handle_preparereq(&mut self, from: u64) {
+        debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
@@ -411,6 +445,7 @@ where
 
     fn forward_proposals(&mut self, mut entries: Vec<Entry<R>>) {
         if self.leader > 0 && self.leader != self.pid {
+            trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = Message::with(self.pid, self.leader, pf);
             self.outgoing.push(msg);
@@ -420,6 +455,7 @@ where
     }
 
     fn handle_forwarded_proposal(&mut self, mut entries: Vec<Entry<R>>) {
+        trace!(self.logger, "Incoming Forwarded Proposal");
         if !self.stopped() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.proposals.append(&mut entries),
@@ -551,6 +587,11 @@ where
     }
 
     fn handle_promise_prepare(&mut self, prom: Promise<R>, from: u64) {
+        let (r, p) = &self.state;
+        debug!(
+            self.logger,
+            "Self role {:?}, phase {:?}. Incoming message Promise Prepare from {}", r, p, from
+        );
         if prom.n == self.n_leader {
             let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
             if promise_meta > self.max_promise_meta {
@@ -641,6 +682,11 @@ where
     }
 
     fn handle_promise_accept(&mut self, prom: Promise<R>, from: u64) {
+        let (r, p) = &self.state;
+        debug!(
+            self.logger,
+            "Self role {:?}, phase {:?}. Incoming message Promise Accept from {}", r, p, from
+        );
         if prom.n == self.n_leader {
             let idx = from as usize - 1;
             self.lds[idx] = Some(prom.ld);
@@ -682,6 +728,7 @@ where
     }
 
     fn handle_accepted(&mut self, accepted: Accepted<R>, from: u64) {
+        trace!(self.logger, "Incoming message Accepted {}", from);
         if accepted.n == self.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.las[from as usize - 1] = accepted.la;
             if accepted.la > self.lc {
@@ -742,6 +789,7 @@ where
 
     /*** Follower ***/
     fn handle_prepare(&mut self, prep: Prepare<R>, from: u64) {
+        debug!(self.logger, "Incoming message Prepare from {}", from);
         if self.storage.get_promise() < prep.n {
             self.leader = from;
             self.storage.set_promise(prep.n.clone());
@@ -762,6 +810,7 @@ where
     }
 
     fn handle_acceptsync(&mut self, accsync: AcceptSync<R>, from: u64) {
+        debug!(self.logger, "Incoming message Accept Sync from {}", from);
         if self.state == (Role::Follower, Phase::Prepare) && self.storage.get_promise() == accsync.n
         {
             self.storage.set_accepted_round(accsync.n.clone());
@@ -787,6 +836,7 @@ where
     }
 
     fn handle_firstaccept(&mut self, f: FirstAccept<R>) {
+        debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             let mut entries = f.entries;
             self.storage.set_accepted_round(f.n.clone());
@@ -801,6 +851,7 @@ where
     }
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
+        trace!(self.logger, "Incoming message Accept Decide");
         if self.storage.get_promise() == acc.n {
             if let (Role::Follower, Phase::Accept) = self.state {
                 let mut entries = acc.entries;
@@ -814,6 +865,7 @@ where
     }
 
     fn handle_decide(&mut self, dec: Decide<R>) {
+        trace!(self.logger, "Incoming message Decide");
         if self.storage.get_promise() == dec.n && self.state.1 != Phase::Recover {
             self.storage.set_decided_len(dec.ld);
         }
