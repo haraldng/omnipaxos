@@ -1,3 +1,4 @@
+use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID};
 use crate::utils::logger::create_logger;
 use crate::{
     leader_election::*,
@@ -5,6 +6,7 @@ use crate::{
     storage::{Entry, PaxosState, Sequence, StopSign, Storage},
     util::PromiseMetaData,
 };
+use hocon::Hocon;
 use slog::{debug, info, trace, Logger};
 use std::{fmt::Debug, sync::Arc};
 
@@ -79,7 +81,10 @@ where
     /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
     /// * `pid` - The identifier of this Omni-Paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
+    /// * `storage` - Implementation of a storage used to store the messages.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `logger` - Used for logging events of OmniPaxos.
+    /// * `log_file_path` - Path where the default logger logs events.
     pub fn with(
         config_id: u32,
         pid: u64,
@@ -87,6 +92,7 @@ where
         storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
+        log_file_path: Option<&str>,
     ) -> Paxos<R, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
@@ -117,7 +123,9 @@ where
             }
         };
 
-        let l = logger.unwrap_or_else(|| create_logger(format!("logs/paxos_{}.log", pid).as_str()));
+        let l = logger.unwrap_or_else(|| {
+            create_logger(log_file_path.unwrap_or(format!("logs/paxos_{}.log", pid).as_str()))
+        });
 
         info!(l, "Paxos component pid: {} created!", pid);
 
@@ -143,12 +151,42 @@ where
             latest_accepted_meta: None,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             num_nodes,
-            // log,
             disconnected_peers: vec![],
             logger: l,
         };
         paxos.storage.set_promise(n_leader);
         paxos
+    }
+
+    /// Creates an Omni-Paxos replica.
+    /// # Arguments
+    /// * `cfg` - Hocon configuration used for paxos replica.
+    /// * `peers` - The `pid`s of the other replicas in the configuration.
+    /// * `storage` - Implementation of a storage used to store the messages.
+    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `logger` - Used for logging events of OmniPaxos.
+    pub fn with_hocon(
+        &self,
+        cfg: &Hocon,
+        peers: Vec<u64>,
+        storage: Storage<R, S, P>,
+        skip_prepare_use_leader: Option<Leader<R>>,
+        logger: Option<Logger>,
+    ) -> Paxos<R, S, P> {
+        Paxos::<R, S, P>::with(
+            cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
+            cfg[PID].as_i64().expect("Failed to load PID") as u64,
+            peers,
+            storage,
+            skip_prepare_use_leader,
+            logger,
+            Option::from(
+                cfg[LOG_FILE_PATH]
+                    .as_string()
+                    .expect("Failed to load log file path")
+                    .as_str(),
+            ),
+        )
     }
 
     /// Returns the id of the current leader.

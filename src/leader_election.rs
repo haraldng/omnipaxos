@@ -29,7 +29,11 @@ where
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
     use crate::leader_election::{Leader, Round};
+    use crate::utils::hocon_kv::{
+        HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID,
+    };
     use crate::utils::logger::create_logger;
+    use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
     use slog::{debug, info, trace, warn, Logger};
 
@@ -101,6 +105,8 @@ pub mod ballot_leader_election {
         /// * `increment_delay` - A fixed delay that is added to the current_delay. It is measured in ticks.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
+        /// * `logger` - Used for logging events of Ballot Leader Election.
+        /// * `log_file_path` - Path where the default logger logs events.
         pub fn with(
             peers: Vec<u64>,
             pid: u64,
@@ -109,6 +115,7 @@ pub mod ballot_leader_election {
             initial_leader: Option<Leader<Ballot>>,
             initial_delay_factor: Option<u64>,
             logger: Option<Logger>,
+            log_file_path: Option<&str>,
         ) -> BallotLeaderElection {
             let n = &peers.len() + 1;
             let (leader, initial_ballot) = match initial_leader {
@@ -127,8 +134,9 @@ pub mod ballot_leader_election {
                 }
             };
 
-            let l =
-                logger.unwrap_or_else(|| create_logger(format!("logs/ble_{}.log", pid).as_str()));
+            let l = logger.unwrap_or_else(|| {
+                create_logger(log_file_path.unwrap_or(format!("logs/ble_{}.log", pid).as_str()))
+            });
 
             info!(l, "Ballot Leader Election component pid: {} created!", pid);
 
@@ -149,6 +157,44 @@ pub mod ballot_leader_election {
                 outgoing: vec![],
                 logger: l,
             }
+        }
+
+        /// Construct a new BallotLeaderComponent
+        /// # Arguments
+        /// * `cfg` - Hocon configuration used for ble replica.
+        /// * `peers` - Vector that holds all the other replicas.
+        /// * `initial_leader` -  Initial leader which will be elected.
+        /// * `logger` - Used for logging events of Ballot Leader Election.
+        pub fn with_hocon(
+            &self,
+            cfg: &Hocon,
+            peers: Vec<u64>,
+            initial_leader: Option<Leader<Ballot>>,
+            logger: Option<Logger>,
+        ) -> BallotLeaderElection {
+            BallotLeaderElection::with(
+                peers,
+                cfg[PID].as_i64().expect("Failed to load PID") as u64,
+                cfg[HB_DELAY]
+                    .as_i64()
+                    .expect("Failed to load heartbeat delay") as u64,
+                cfg[INCREMENT_DELAY]
+                    .as_i64()
+                    .expect("Failed to load increment delay") as u64,
+                initial_leader,
+                Option::from(
+                    cfg[INITIAL_DELAY_FACTOR]
+                        .as_i64()
+                        .expect("Failed to load initial delay factor") as u64,
+                ),
+                logger,
+                Option::from(
+                    cfg[LOG_FILE_PATH]
+                        .as_string()
+                        .expect("Failed to load log file path")
+                        .as_str(),
+                ),
+            )
         }
 
         /// Returns the outgoing vector

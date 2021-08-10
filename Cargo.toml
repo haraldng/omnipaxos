@@ -10,6 +10,7 @@ edition = "2018"
 slog = "2.7.0"
 slog-term = "2.8.0"
 slog-async = "2.7.0"
+hocon = "0.5.2"
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af" }

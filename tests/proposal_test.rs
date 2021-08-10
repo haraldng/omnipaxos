@@ -1,3 +1,4 @@
+pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
@@ -6,27 +7,23 @@ use omnipaxos::leader_election::Leader;
 use omnipaxos::storage::Entry;
 use rand::Rng;
 use serial_test::serial;
-use std::time::Duration;
+use test_config::TestConfig;
 use util::TestSystem;
-
-const WAIT_TIMEOUT: Duration = Duration::from_secs(2);
-const NUM_THREADS: usize = 8;
-const NUM_NODES: usize = 6;
-const BLE_HB_DELAY: u64 = 5;
-const INCREMENT_DELAY: u64 = 2;
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
 #[test]
 #[serial]
 fn forward_proposal_test() {
+    let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
+
     let sys = TestSystem::with(
-        NUM_NODES,
-        BLE_HB_DELAY,
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
         None,
         None,
-        INCREMENT_DELAY,
-        NUM_THREADS,
+        cfg.increment_delay,
+        cfg.num_threads,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -37,13 +34,13 @@ fn forward_proposal_test() {
     sys.start_all_nodes();
 
     let elected_leader = kfuture_ble
-        .wait_timeout(WAIT_TIMEOUT)
+        .wait_timeout(cfg.wait_timeout)
         .expect("No leader has been elected in the allocated time!");
     println!("elected: {} {}", elected_leader.pid, elected_leader.round.n);
 
     let mut proposal_node: u64;
     loop {
-        proposal_node = rand::thread_rng().gen_range(1..=NUM_NODES as u64);
+        proposal_node = rand::thread_rng().gen_range(1..=cfg.num_nodes as u64);
 
         if proposal_node != elected_leader.pid {
             break;
@@ -59,7 +56,7 @@ fn forward_proposal_test() {
     });
 
     kfuture_px
-        .wait_timeout(WAIT_TIMEOUT)
+        .wait_timeout(cfg.wait_timeout)
         .expect("The message was not proposed in the allocated time!");
 
     println!("Pass forward_proposal");
