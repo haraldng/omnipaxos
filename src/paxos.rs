@@ -1,11 +1,11 @@
-use crate::util::create_logger;
+use crate::utils::logger::create_logger;
 use crate::{
     leader_election::*,
     messages::*,
     storage::{Entry, PaxosState, Sequence, StopSign, Storage},
     util::PromiseMetaData,
 };
-use slog::{debug, info, Logger};
+use slog::{debug, info, trace, Logger};
 use std::{fmt::Debug, sync::Arc};
 
 const BUFFER_SIZE: usize = 100000;
@@ -117,11 +117,7 @@ where
             }
         };
 
-        let l = if let Some(log) = logger {
-            log
-        } else {
-            create_logger(format!("logs/paxos_{}.log", pid).as_str())
-        };
+        let l = logger.unwrap_or_else(|| create_logger(format!("logs/paxos_{}.log", pid).as_str()));
 
         info!(l, "Paxos component pid: {} created!", pid);
 
@@ -310,7 +306,7 @@ where
     /// Handles a disconnection to another peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been dropped and some messages might have been lost.
     pub fn connection_lost(&mut self, pid: u64) {
-        info!(self.logger, "Connection lost pid {}", pid);
+        debug!(self.logger, "Connection lost to pid: {}", pid);
         if self.state.0 == Role::Follower && self.leader == pid {
             self.state = (Role::Follower, Phase::Recover);
         }
@@ -337,7 +333,6 @@ where
     }
 
     fn clear_peers_state(&mut self) {
-        debug!(self.logger, "Clear peers state");
         self.las = vec![0; self.num_nodes];
         self.promises_meta = vec![None; self.num_nodes];
         self.lds = vec![None; self.num_nodes];
@@ -350,7 +345,10 @@ where
     /// Handle becoming the leader. Should be called when the leader election has elected this replica as the leader
     /*** Leader ***/
     pub fn handle_leader(&mut self, l: Leader<R>) {
-        info!(self.logger, "Replica selected as leader");
+        debug!(
+            self.logger,
+            "Replica got elected as the leader, round: {:?}", l.round
+        );
         let n = l.round;
         let leader_pid = l.pid;
         if n <= self.n_leader || n <= self.storage.get_promise() {
@@ -409,7 +407,7 @@ where
 
     fn forward_proposals(&mut self, mut entries: Vec<Entry<R>>) {
         if self.leader > 0 && self.leader != self.pid {
-            info!(self.logger, "Forwarding proposal to Leader {}", self.leader);
+            trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = Message::with(self.pid, self.leader, pf);
             self.outgoing.push(msg);
@@ -419,7 +417,7 @@ where
     }
 
     fn handle_forwarded_proposal(&mut self, mut entries: Vec<Entry<R>>) {
-        debug!(self.logger, "Incoming Forwarded Proposal");
+        trace!(self.logger, "Incoming Forwarded Proposal");
         if !self.stopped() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.proposals.append(&mut entries),
@@ -692,7 +690,7 @@ where
     }
 
     fn handle_accepted(&mut self, accepted: Accepted<R>, from: u64) {
-        debug!(self.logger, "Incoming message Accepted {}", from);
+        trace!(self.logger, "Incoming message Accepted {}", from);
         if accepted.n == self.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.las[from as usize - 1] = accepted.la;
             if accepted.la > self.lc {
@@ -815,7 +813,7 @@ where
     }
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
-        debug!(self.logger, "Incoming message Accept Decide");
+        trace!(self.logger, "Incoming message Accept Decide");
         if self.storage.get_promise() == acc.n {
             if let (Role::Follower, Phase::Accept) = self.state {
                 let mut entries = acc.entries;
@@ -829,7 +827,7 @@ where
     }
 
     fn handle_decide(&mut self, dec: Decide<R>) {
-        debug!(self.logger, "Incoming message Decide");
+        trace!(self.logger, "Incoming message Decide");
         if self.storage.get_promise() == dec.n && self.state.1 != Phase::Recover {
             self.storage.set_decided_len(dec.ld);
         }

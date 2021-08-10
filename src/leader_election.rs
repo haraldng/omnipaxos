@@ -29,9 +29,9 @@ where
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
     use crate::leader_election::{Leader, Round};
-    use crate::util::create_logger;
+    use crate::utils::logger::create_logger;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
-    use slog::{debug, info, Logger};
+    use slog::{debug, info, trace, warn, Logger};
 
     /// Used to define an epoch
     #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
@@ -127,11 +127,8 @@ pub mod ballot_leader_election {
                 }
             };
 
-            let l = if let Some(log) = logger {
-                log
-            } else {
-                create_logger(format!("logs/ble_{}.log", pid).as_str())
-            };
+            let l =
+                logger.unwrap_or_else(|| create_logger(format!("logs/ble_{}.log", pid).as_str()));
 
             info!(l, "Ballot Leader Election component pid: {} created!", pid);
 
@@ -185,7 +182,7 @@ pub mod ballot_leader_election {
         pub fn handle(&mut self, m: BLEMessage) {
             match m.msg {
                 HeartbeatMsg::Request(req) => self.handle_request(m.from, req),
-                HeartbeatMsg::Reply(rep) => self.handle_reply(m.from, rep),
+                HeartbeatMsg::Reply(rep) => self.handle_reply(rep),
             }
         }
 
@@ -238,7 +235,10 @@ pub mod ballot_leader_election {
                     self.majority_connected = false;
                 }
 
-                info!(self.logger, "New Leader elected, pid: {}", top_pid);
+                debug!(
+                    self.logger,
+                    "New Leader elected, pid: {}, ballot: {:?}", top_pid, top_ballot
+                );
                 Some(Leader::with(top_pid, top_ballot))
             } else {
                 None
@@ -247,11 +247,15 @@ pub mod ballot_leader_election {
 
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
-            info!(self.logger, "Initiate new heartbeat round");
+            trace!(
+                self.logger,
+                "Initiate new heartbeat round: {}",
+                self.hb_round + 1
+            );
             debug!(self.logger, "Current heartbeat round: {}", self.hb_round);
 
             self.hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
-                debug!(self.logger, "Initial heartbeat delay");
+                debug!(self.logger, "Using initial heartbeat delay");
                 // use short timeout if still no first leader
                 let delay = self.hb_delay / initial_delay;
                 self.initial_delay_factor = None;
@@ -273,18 +277,21 @@ pub mod ballot_leader_election {
         }
 
         fn hb_timeout(&mut self) -> Option<Leader<Ballot>> {
-            info!(self.logger, "Heartbeat timeout");
+            trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
 
             let result: Option<Leader<Ballot>> = if self.ballots.len() + 1 >= self.majority {
                 debug!(
                     self.logger,
-                    "Majority confirmed, size: {}",
-                    self.ballots.len()
+                    "Received a majority of heartbeats {:?}", self.ballots
                 );
                 self.ballots
                     .push((self.current_ballot, self.majority_connected));
                 self.check_leader()
             } else {
+                warn!(
+                    self.logger,
+                    "Did not receive a majority of heartbeats {:?}", self.ballots
+                );
                 self.ballots.clear();
                 self.majority_connected = false;
                 None
@@ -295,7 +302,7 @@ pub mod ballot_leader_election {
         }
 
         fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
-            debug!(self.logger, "Heartbeat request from {}", from);
+            trace!(self.logger, "Heartbeat request from {}", from);
 
             let hb_reply =
                 HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
@@ -307,12 +314,19 @@ pub mod ballot_leader_election {
             ));
         }
 
-        fn handle_reply(&mut self, from: u64, rep: HeartbeatReply) {
-            debug!(self.logger, "Heartbeat reply from {}", from);
+        fn handle_reply(&mut self, rep: HeartbeatReply) {
+            trace!(self.logger, "Heartbeat reply {:?}", rep.ballot);
 
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {
+                warn!(
+                    self.logger,
+                    "Got late response, round {}, current delay {}, ballot {:?}",
+                    self.hb_round,
+                    self.hb_current_delay,
+                    rep.ballot
+                );
                 self.hb_current_delay += self.increment_delay;
             }
         }
