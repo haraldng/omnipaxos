@@ -14,7 +14,7 @@ pub struct TestConfig {
 impl TestConfig {
     pub fn load(name: &str) -> Result<TestConfig, Error> {
         let raw_cfg = HoconLoader::new()
-            .load_file("tests/data/basic.conf")?
+            .load_file("tests/config/test.conf")?
             .hocon()?;
 
         let cfg: &Hocon = &raw_cfg[name];

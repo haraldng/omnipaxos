@@ -28,8 +28,8 @@ where
 
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
-    use crate::key_values::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, PID};
     use crate::leader_election::{Leader, Round};
+    use crate::utils::hocon_kv::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, PID};
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 
@@ -154,11 +154,19 @@ pub mod ballot_leader_election {
         ) -> BallotLeaderElection {
             BallotLeaderElection::with(
                 peers,
-                cfg[PID].as_i64().unwrap_or_default() as u64,
-                cfg[HB_DELAY].as_i64().unwrap_or_default() as u64,
-                cfg[INCREMENT_DELAY].as_i64().unwrap_or_default() as u64,
+                cfg[PID].as_i64().expect("Failed to load PID") as u64,
+                cfg[HB_DELAY]
+                    .as_i64()
+                    .expect("Failed to load heartbeat delay") as u64,
+                cfg[INCREMENT_DELAY]
+                    .as_i64()
+                    .expect("Failed to load increment delay") as u64,
                 initial_leader,
-                Option::from(cfg[INITIAL_DELAY_FACTOR].as_i64().unwrap_or_default() as u64),
+                Option::from(
+                    cfg[INITIAL_DELAY_FACTOR]
+                        .as_i64()
+                        .expect("Failed to load initial delay factor") as u64,
+                ),
             )
         }
 

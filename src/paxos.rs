@@ -1,4 +1,4 @@
-use crate::key_values::{BUFFER_SIZE_PAXOS, CONFIG_ID, PID};
+use crate::utils::hocon_kv::{CONFIG_ID, PID};
 use crate::{
     leader_election::*,
     messages::*,
@@ -157,8 +157,8 @@ where
         skip_prepare_use_leader: Option<Leader<R>>,
     ) -> Paxos<R, S, P> {
         Paxos::<R, S, P>::with(
-            cfg[CONFIG_ID].as_i64().unwrap_or_default() as u32,
-            cfg[PID].as_i64().unwrap_or_default() as u64,
+            cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
+            cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
             storage,
             skip_prepare_use_leader,
