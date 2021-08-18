@@ -9,6 +9,7 @@ pub struct TestConfig {
     pub increment_delay: u64,
     pub num_proposals: u64,
     pub num_elections: u64,
+    pub gc_idx: u64,
 }
 
 impl TestConfig {
@@ -27,6 +28,7 @@ impl TestConfig {
             increment_delay: cfg["increment_delay"].as_i64().unwrap_or_default() as u64,
             num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
             num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
+            gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
         })
     }
 }

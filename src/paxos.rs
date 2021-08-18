@@ -7,7 +7,7 @@ use crate::{
     util::PromiseMetaData,
 };
 use hocon::Hocon;
-use slog::{debug, info, trace, Logger};
+use slog::{crit, debug, info, trace, Logger};
 use std::{fmt::Debug, sync::Arc};
 
 const BUFFER_SIZE: usize = 100000;
@@ -67,6 +67,7 @@ where
     disconnected_peers: Vec<u64>,
     /// Logger used to output the status of the component.
     logger: Logger,
+    cached_gc_index: u64,
 }
 
 impl<R, S, P> OmniPaxos<R, S, P>
@@ -153,6 +154,7 @@ where
             num_nodes,
             disconnected_peers: vec![],
             logger: l,
+            cached_gc_index: 0,
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -189,6 +191,72 @@ where
         )
     }
 
+    /// Initiates the garbage collection process using the provided index.
+    /// # Arguments
+    /// * `index` - Deletes all entries up to [`index`]
+    pub fn garbage_collect_by_index(&mut self, index: u64) {
+        self.gc_propose(Some(index));
+    }
+
+    /// Initiates the garbage collection process using the minimum last accepted sequence as the [`index`].
+    pub fn garbage_collect(&mut self) {
+        self.gc_propose(None);
+    }
+
+    /// Return garbage collection index from storage.
+    pub fn get_gc_from_storage(&self) -> u64 {
+        self.storage.get_gc_idx()
+    }
+
+    fn gc_propose(&mut self, index: Option<u64>) {
+        match self.state {
+            (Role::Leader, _) => {}
+            _ => self.forward_gc_proposal(index),
+        }
+    }
+
+    fn gc_leader(&mut self, index: Option<u64>) {
+        let mut idx;
+        if index.is_some() {
+            idx = self.las.iter().min().cloned();
+            if (idx.is_none()) | (idx.unwrap() < index.unwrap()) {
+                return;
+            }
+            idx = index;
+        } else {
+            idx = self.las.iter().min().cloned();
+            if idx.is_none() {
+                return;
+            }
+        }
+
+        for pid in &self.peers {
+            self.outgoing
+                .push(Message::with(self.pid, *pid, PaxosMsg::GarbageCollect(idx)));
+        }
+
+        self.gc(idx);
+    }
+
+    fn gc(&mut self, index: Option<u64>) {
+        if index.is_none() | (self.storage.get_decided_len() < index.unwrap()) {
+            crit!(
+                self.logger,
+                "Received invalid garbage collection index! index: {:?}, prev_ld {}",
+                index,
+                self.prev_ld
+            );
+            return;
+        }
+
+        trace!(self.logger, "Garbage Collection index: {:?}", index);
+
+        self.cached_gc_index = index.unwrap();
+
+        self.storage.set_gc_idx(index.unwrap());
+        self.storage.garbage_collect(index.unwrap());
+    }
+
     /// Returns the id of the current leader.
     pub fn get_current_leader(&self) -> u64 {
         self.leader
@@ -217,7 +285,10 @@ where
     pub fn get_latest_decided_entries(&mut self) -> &[Entry<R>] {
         let ld = self.storage.get_decided_len();
         if self.prev_ld < ld {
-            let decided = self.storage.get_entries(self.prev_ld, ld);
+            let decided = self.storage.get_entries(
+                self.prev_ld - self.cached_gc_index,
+                ld - self.cached_gc_index,
+            );
             self.prev_ld = ld;
             decided
         } else {
@@ -227,7 +298,8 @@ where
 
     /// Returns the entire decided entries of this replica.
     pub fn get_decided_entries(&self) -> &[Entry<R>] {
-        self.storage.get_entries(0, self.storage.get_decided_len())
+        self.storage
+            .get_entries(0, self.storage.get_decided_len() - self.cached_gc_index)
     }
 
     /// Handle an incoming message.
@@ -246,6 +318,8 @@ where
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
+            PaxosMsg::GarbageCollect(index) => self.gc(index),
+            PaxosMsg::ForwardGarbageCollect(index) => self.handle_forwarded_gc_proposal(index),
         }
     }
 
@@ -326,7 +400,12 @@ where
         if to_idx > max_idx {
             vec![]
         } else {
-            self.storage.get_entries(from_idx, to_idx).to_vec()
+            self.storage
+                .get_entries(
+                    from_idx - self.cached_gc_index,
+                    to_idx - self.cached_gc_index,
+                )
+                .to_vec()
         }
     }
 
@@ -403,7 +482,7 @@ where
             /* insert my promise */
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_len();
-            let sfx = self.storage.get_suffix(ld);
+            let sfx = self.storage.get_suffix(ld - self.cached_gc_index);
             let la = self.storage.get_sequence_len();
             let promise_meta = PromiseMetaData::with(na, la, self.pid);
             self.max_promise_meta = promise_meta.clone();
@@ -443,6 +522,19 @@ where
         }
     }
 
+    fn forward_gc_proposal(&mut self, index: Option<u64>) {
+        if self.leader > 0 && self.leader != self.pid {
+            trace!(
+                self.logger,
+                "Forwarding gc proposal to Leader {}",
+                self.leader
+            );
+            let pf = PaxosMsg::ForwardGarbageCollect(index);
+            let msg = Message::with(self.pid, self.leader, pf);
+            self.outgoing.push(msg);
+        }
+    }
+
     fn forward_proposals(&mut self, mut entries: Vec<Entry<R>>) {
         if self.leader > 0 && self.leader != self.pid {
             trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
@@ -451,6 +543,16 @@ where
             self.outgoing.push(msg);
         } else {
             self.proposals.append(&mut entries);
+        }
+    }
+
+    fn handle_forwarded_gc_proposal(&mut self, index: Option<u64>) {
+        trace!(self.logger, "Incoming Forwarded GC Proposal");
+        if !self.stopped() {
+            match self.state {
+                (Role::Leader, _) => self.gc_leader(index),
+                _ => self.forward_gc_proposal(index),
+            }
         }
     }
 
@@ -655,7 +757,7 @@ where
                             PaxosMsg::AcceptSync(max_promise_acc_sync.clone()),
                         )
                     } else if (promise_n == max_promise_n) && (promise_la < max_la) {
-                        let sfx = self.storage.get_suffix(*promise_la);
+                        let sfx = self.storage.get_suffix(*promise_la - self.cached_gc_index);
                         let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, *promise_la);
                         Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
                     } else {
@@ -665,7 +767,7 @@ where
                             .get(idx)
                             .expect("Received PromiseMetaData but not found in ld")
                             .unwrap();
-                        let sfx = self.storage.get_suffix(ld);
+                        let sfx = self.storage.get_suffix(ld - self.cached_gc_index);
                         let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, ld);
                         Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync))
                     };
@@ -703,7 +805,7 @@ where
             } else {
                 prom.ld
             };
-            let sfx = self.storage.get_suffix(sync_idx);
+            let sfx = self.storage.get_suffix(sync_idx - self.cached_gc_index);
             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, sync_idx);
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
@@ -797,9 +899,9 @@ where
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_sequence_len();
             let sfx = if na > prep.n_accepted {
-                self.storage.get_suffix(prep.ld)
+                self.storage.get_suffix(prep.ld - self.cached_gc_index)
             } else if na == prep.n_accepted && la > prep.la {
-                self.storage.get_suffix(prep.la)
+                self.storage.get_suffix(prep.la - self.cached_gc_index)
             } else {
                 vec![]
             };

@@ -9,7 +9,7 @@ use test_config::TestConfig;
 use util::TestSystem;
 
 /// Test Ballot Election Leader module.
-/// The test waits for [`NUM_ELECTIONS`] elections.
+/// The test waits for [`num_elections`] elections.
 /// After each election, the leader node is killed and the process repeats
 /// until the number of elections is achieved.
 #[test]

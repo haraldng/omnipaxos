@@ -393,6 +393,18 @@ pub mod omnireplica {
             self.paxos.propose_normal(data).expect("Failed to propose!");
         }
 
+        pub fn garbage_collect(&mut self) {
+            self.paxos.garbage_collect()
+        }
+
+        pub fn garbage_collect_by_index(&mut self, index: u64) {
+            self.paxos.garbage_collect_by_index(index)
+        }
+
+        pub fn get_garbage_collector_index(&self) -> u64 {
+            self.paxos.get_gc_from_storage()
+        }
+
         fn answer_future(&mut self) {
             if !self.ask_vector.is_empty() {
                 for ent in self.paxos.get_latest_decided_entries().iter() {
