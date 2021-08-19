@@ -96,6 +96,9 @@ where
     /// Returns true if the log contains a StopSign or a StopSign already has been decided.
     /// Note that the log could have a StopSign that later gets overwritten, and thus this function might first return true and later false.
     fn stopped(&self) -> bool;
+
+    /// Removes elements up to the given [`idx`] from storage.
+    fn garbage_collect(&mut self, idx: u64);
 }
 
 /// Trait to implement a back-end for the internal state used by an Omni-Paxos replica.
@@ -123,6 +126,12 @@ where
 
     /// Returns the round that has been promised.
     fn get_promise(&self) -> R;
+
+    /// Sets the garbage collected index.
+    fn set_gc_idx(&mut self, index: u64);
+
+    /// Returns the garbage collected index.
+    fn get_gc_idx(&self) -> u64;
 }
 
 enum PaxosSequence<R, S>
@@ -308,6 +317,23 @@ where
             _ => panic!("Storage should already have been stopped!"),
         }
     }
+
+    /// Removes elements up to the given [`idx`] from storage.
+    pub fn garbage_collect(&mut self, idx: u64) {
+        match self.sequence {
+            PaxosSequence::Active(ref mut s) => {
+                s.garbage_collect(idx - self.paxos_state.get_gc_idx());
+                self.paxos_state.set_gc_idx(idx);
+            }
+            PaxosSequence::Stopped(_) => {} // todo what to do when paxos is stopped?
+            _ => panic!("Got unexpected intermediate PaxosSequence::None in stopped()"),
+        }
+    }
+
+    /// Returns the garbage collector index from storage.
+    pub fn get_gc_idx(&self) -> u64 {
+        self.paxos_state.get_gc_idx()
+    }
 }
 
 /// A in-memory storage implementation for Paxos.
@@ -379,6 +405,10 @@ pub mod memory_storage {
                 None => false,
             }
         }
+
+        fn garbage_collect(&mut self, idx: u64) {
+            self.sequence.drain(0..idx as usize);
+        }
     }
 
     /// Stores the state of a paxos replica in-memory.
@@ -393,6 +423,8 @@ pub mod memory_storage {
         acc_round: R,
         /// Length of the decided sequence.
         ld: u64,
+        /// Garbage collected index.
+        gc_idx: u64,
     }
 
     impl<R> PaxosState<R> for MemoryState<R>
@@ -405,6 +437,7 @@ pub mod memory_storage {
                 n_prom: r.clone(),
                 acc_round: r,
                 ld: 0,
+                gc_idx: 0,
             }
         }
 
@@ -430,6 +463,14 @@ pub mod memory_storage {
 
         fn get_promise(&self) -> R {
             self.n_prom.clone()
+        }
+
+        fn set_gc_idx(&mut self, index: u64) {
+            self.gc_idx = index;
+        }
+
+        fn get_gc_idx(&self) -> u64 {
+            self.gc_idx
         }
     }
 }

@@ -202,6 +202,8 @@ where
     Decide(Decide<R>),
     /// Forward client proposals to the leader.
     ProposalForward(Vec<Entry<R>>),
+    GarbageCollect(u64),
+    ForwardGarbageCollect(Option<u64>),
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.
