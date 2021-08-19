@@ -7,7 +7,7 @@ use crate::{
     util::PromiseMetaData,
 };
 use hocon::Hocon;
-use slog::{crit, debug, info, trace, Logger};
+use slog::{crit, debug, info, trace, warn, Logger};
 use std::{fmt::Debug, sync::Arc};
 
 const BUFFER_SIZE: usize = 100000;
@@ -191,70 +191,81 @@ where
         )
     }
 
-    /// Initiates the garbage collection process using the provided index.
+    /// Initiates the garbage collection process.
     /// # Arguments
-    /// * `index` - Deletes all entries up to [`index`]
-    pub fn garbage_collect_by_index(&mut self, index: u64) {
-        self.gc_propose(Some(index));
-    }
-
-    /// Initiates the garbage collection process using the minimum last accepted sequence as the [`index`].
-    pub fn garbage_collect(&mut self) {
-        self.gc_propose(None);
-    }
-
-    /// Return garbage collection index from storage.
-    pub fn get_gc_from_storage(&self) -> u64 {
-        self.storage.get_gc_idx()
-    }
-
-    fn gc_propose(&mut self, index: Option<u64>) {
+    /// * `index` - Deletes all entries up to [`index`], if the [`index`] is None then the minimum index accepted by **ALL** servers will be used as the [`index`].
+    pub fn garbage_collect(&mut self, index: Option<u64>) {
         match self.state {
-            (Role::Leader, _) => {}
-            _ => self.forward_gc_proposal(index),
+            (Role::Leader, _) => self.gc_prepare(index),
+            _ => self.forward_gc_request(index),
         }
     }
 
-    fn gc_leader(&mut self, index: Option<u64>) {
-        let mut idx;
-        if index.is_some() {
-            idx = self.las.iter().min().cloned();
-            if (idx.is_none()) | (idx.unwrap() < index.unwrap()) {
-                return;
+    /// Return garbage collection index from storage.
+    pub fn get_gc_idx_from_storage(&self) -> u64 {
+        self.storage.get_gc_idx()
+    }
+
+    fn gc_prepare(&mut self, index: Option<u64>) {
+        let min_all_accepted_idx = self.las.iter().min().cloned();
+
+        if min_all_accepted_idx.is_none() {
+            return;
+        }
+
+        let final_idx;
+        match index {
+            Some(idx) => {
+                if (min_all_accepted_idx.unwrap() < idx) || (idx < self.cached_gc_index) {
+                    warn!(
+                        self.logger,
+                        "Invalid garbage collector index: {:?}, cached_index: {}, min_las_index: {:?}",
+                        index,
+                        self.cached_gc_index,
+                        min_all_accepted_idx
+                    );
+                    return;
+                }
+                final_idx = idx;
             }
-            idx = index;
-        } else {
-            idx = self.las.iter().min().cloned();
-            if idx.is_none() {
-                return;
+            None => {
+                trace!(
+                    self.logger,
+                    "No garbage collector index provided, using min_las_index: {:?}",
+                    min_all_accepted_idx
+                );
+                final_idx = min_all_accepted_idx.unwrap();
             }
         }
 
         for pid in &self.peers {
-            self.outgoing
-                .push(Message::with(self.pid, *pid, PaxosMsg::GarbageCollect(idx)));
+            self.outgoing.push(Message::with(
+                self.pid,
+                *pid,
+                PaxosMsg::GarbageCollect(final_idx),
+            ));
         }
 
-        self.gc(idx);
+        self.gc(final_idx);
     }
 
-    fn gc(&mut self, index: Option<u64>) {
-        if index.is_none() | (self.storage.get_decided_len() < index.unwrap()) {
+    fn gc(&mut self, index: u64) {
+        let decided_len = self.storage.get_decided_len();
+        if decided_len < index {
             crit!(
                 self.logger,
                 "Received invalid garbage collection index! index: {:?}, prev_ld {}",
                 index,
-                self.prev_ld
+                decided_len
             );
             return;
         }
 
         trace!(self.logger, "Garbage Collection index: {:?}", index);
 
-        self.cached_gc_index = index.unwrap();
+        self.cached_gc_index = index;
 
-        self.storage.set_gc_idx(index.unwrap());
-        self.storage.garbage_collect(index.unwrap());
+        self.storage.garbage_collect(index);
     }
 
     /// Returns the id of the current leader.
@@ -319,7 +330,7 @@ where
             PaxosMsg::Decide(d) => self.handle_decide(d),
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
             PaxosMsg::GarbageCollect(index) => self.gc(index),
-            PaxosMsg::ForwardGarbageCollect(index) => self.handle_forwarded_gc_proposal(index),
+            PaxosMsg::ForwardGarbageCollect(index) => self.handle_forwarded_gc_request(index),
         }
     }
 
@@ -522,12 +533,13 @@ where
         }
     }
 
-    fn forward_gc_proposal(&mut self, index: Option<u64>) {
+    fn forward_gc_request(&mut self, index: Option<u64>) {
         if self.leader > 0 && self.leader != self.pid {
             trace!(
                 self.logger,
-                "Forwarding gc proposal to Leader {}",
-                self.leader
+                "Forwarding gc request to Leader {}, index {:?}",
+                self.leader,
+                index
             );
             let pf = PaxosMsg::ForwardGarbageCollect(index);
             let msg = Message::with(self.pid, self.leader, pf);
@@ -546,13 +558,15 @@ where
         }
     }
 
-    fn handle_forwarded_gc_proposal(&mut self, index: Option<u64>) {
-        trace!(self.logger, "Incoming Forwarded GC Proposal");
-        if !self.stopped() {
-            match self.state {
-                (Role::Leader, _) => self.gc_leader(index),
-                _ => self.forward_gc_proposal(index),
-            }
+    fn handle_forwarded_gc_request(&mut self, index: Option<u64>) {
+        trace!(
+            self.logger,
+            "Incoming Forwarded GC Request, index: {:?}",
+            index
+        );
+        match self.state {
+            (Role::Leader, _) => self.gc_prepare(index),
+            _ => self.forward_gc_request(index),
         }
     }
 

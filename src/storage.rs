@@ -97,7 +97,7 @@ where
     /// Note that the log could have a StopSign that later gets overwritten, and thus this function might first return true and later false.
     fn stopped(&self) -> bool;
 
-    /// Starts the garbage collection process to free storage.
+    /// Removes elements up to the given [`idx`] from storage.
     fn garbage_collect(&mut self, idx: u64);
 }
 
@@ -127,10 +127,10 @@ where
     /// Returns the round that has been promised.
     fn get_promise(&self) -> R;
 
-    /// Sets the garbage collector index.
+    /// Sets the garbage collected index.
     fn set_gc_idx(&mut self, index: u64);
 
-    /// Returns the garbage collector index.
+    /// Returns the garbage collected index.
     fn get_gc_idx(&self) -> u64;
 }
 
@@ -322,17 +322,12 @@ where
     pub fn garbage_collect(&mut self, idx: u64) {
         match self.sequence {
             PaxosSequence::Active(ref mut s) => {
-                s.garbage_collect(idx);
+                s.garbage_collect(idx - self.paxos_state.get_gc_idx());
                 self.paxos_state.set_gc_idx(idx);
             }
             PaxosSequence::Stopped(_) => {} // todo what to do when paxos is stopped?
             _ => panic!("Got unexpected intermediate PaxosSequence::None in stopped()"),
         }
-    }
-
-    /// Sets the garbage collector index in storage.
-    pub fn set_gc_idx(&mut self, index: u64) {
-        self.paxos_state.set_gc_idx(index);
     }
 
     /// Returns the garbage collector index from storage.

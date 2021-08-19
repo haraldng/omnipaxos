@@ -50,7 +50,7 @@ fn gc_test() {
     }
 
     px.on_definition(|x| {
-        x.garbage_collect_by_index(cfg.gc_idx);
+        x.garbage_collect(Some(cfg.gc_idx));
     });
 
     thread::sleep(cfg.wait_timeout);

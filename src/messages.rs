@@ -202,7 +202,7 @@ where
     Decide(Decide<R>),
     /// Forward client proposals to the leader.
     ProposalForward(Vec<Entry<R>>),
-    GarbageCollect(Option<u64>),
+    GarbageCollect(u64),
     ForwardGarbageCollect(Option<u64>),
 }
 
