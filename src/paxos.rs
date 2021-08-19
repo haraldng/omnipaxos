@@ -202,7 +202,7 @@ where
     }
 
     /// Return garbage collection index from storage.
-    pub fn get_gc_idx_from_storage(&self) -> u64 {
+    pub fn get_garbage_collected_idx(&self) -> u64 {
         self.storage.get_gc_idx()
     }
 
@@ -213,7 +213,7 @@ where
             return;
         }
 
-        let final_idx;
+        let gc_idx;
         match index {
             Some(idx) => {
                 if (min_all_accepted_idx.unwrap() < idx) || (idx < self.cached_gc_index) {
@@ -226,7 +226,7 @@ where
                     );
                     return;
                 }
-                final_idx = idx;
+                gc_idx = idx;
             }
             None => {
                 trace!(
@@ -234,7 +234,7 @@ where
                     "No garbage collector index provided, using min_las_index: {:?}",
                     min_all_accepted_idx
                 );
-                final_idx = min_all_accepted_idx.unwrap();
+                gc_idx = min_all_accepted_idx.unwrap();
             }
         }
 
@@ -242,11 +242,11 @@ where
             self.outgoing.push(Message::with(
                 self.pid,
                 *pid,
-                PaxosMsg::GarbageCollect(final_idx),
+                PaxosMsg::GarbageCollect(gc_idx),
             ));
         }
 
-        self.gc(final_idx);
+        self.gc(gc_idx);
     }
 
     fn gc(&mut self, index: u64) {
@@ -263,9 +263,8 @@ where
 
         trace!(self.logger, "Garbage Collection index: {:?}", index);
 
-        self.cached_gc_index = index;
-
         self.storage.garbage_collect(index);
+        self.cached_gc_index = index;
     }
 
     /// Returns the id of the current leader.

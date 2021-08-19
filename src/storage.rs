@@ -423,7 +423,7 @@ pub mod memory_storage {
         acc_round: R,
         /// Length of the decided sequence.
         ld: u64,
-        /// Garbage collector index.
+        /// Garbage collected index.
         gc_idx: u64,
     }
 
