@@ -58,7 +58,6 @@ where
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
     max_promise_meta: PromiseMetaData<R>,
-    max_promise_sfx: Vec<Entry<R>>,             // TODO put in Storage
     batch_accept_meta: Vec<Option<(R, usize)>>, //  R, index in outgoing
     latest_decide_meta: Vec<Option<(R, usize)>>,
     latest_accepted_meta: Option<(R, usize)>,
@@ -146,7 +145,6 @@ where
             lc: 0,
             prev_ld: 0,
             max_promise_meta: PromiseMetaData::with(R::default(), 0, 0),
-            max_promise_sfx: vec![],
             batch_accept_meta: vec![None; num_nodes],
             latest_decide_meta: vec![None; num_nodes],
             latest_accepted_meta: None,
@@ -497,7 +495,7 @@ where
             let promise_meta = PromiseMetaData::with(na, la, self.pid);
             self.max_promise_meta = promise_meta.clone();
             self.promises_meta[self.pid as usize - 1] = Some(promise_meta);
-            self.max_promise_sfx = sfx;
+            self.storage.set_max_promise_sfx(sfx);
             /* initialise longest chosen sequence and update state */
             self.lc = 0;
             self.state = (Role::Leader, Phase::Prepare);
@@ -711,7 +709,7 @@ where
             let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
             if promise_meta > self.max_promise_meta {
                 self.max_promise_meta = promise_meta.clone();
-                self.max_promise_sfx = prom.sfx;
+                self.storage.set_max_promise_sfx(prom.sfx);
             }
             let idx = Self::get_idx_from_pid(from);
             self.promises_meta[idx] = Some(promise_meta);
@@ -723,17 +721,17 @@ where
                     la: max_la,
                     pid: max_pid,
                 } = &self.max_promise_meta;
-                let last_is_stop = match self.max_promise_sfx.last() {
+                let mut max_prm_sfx = self.storage.get_max_promise_sfx();
+                let last_is_stop = match max_prm_sfx.last() {
                     Some(e) => e.is_stopsign(),
                     None => false,
                 };
                 if max_pid != &self.pid {
                     // sync self with max pid's log
                     if max_promise_n == &self.storage.get_accepted_round() {
-                        self.storage.append_sequence(&mut self.max_promise_sfx);
+                        self.storage.append_sequence(&mut max_prm_sfx);
                     } else {
-                        self.storage
-                            .append_on_decided_prefix(std::mem::take(&mut self.max_promise_sfx))
+                        self.storage.append_on_decided_prefix(max_prm_sfx)
                     }
                 }
                 if last_is_stop {
