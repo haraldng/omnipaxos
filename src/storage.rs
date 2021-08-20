@@ -118,10 +118,10 @@ where
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: R);
 
-    /// Sets a vector of max promises suffix.
+    /// Stores the suffix from the maximum promise.
     fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<R>>);
 
-    /// Returns a vector of max promises suffix.
+    /// Returns the stored suffix of the maximum promise. Since this is only used once by the leader in the Prepare phase, it is recommended to return the consumed value.
     fn get_max_promise_sfx(&mut self) -> Vec<Entry<R>>;
 
     /// Returns the latest round in which entries have been accepted.
@@ -340,13 +340,13 @@ where
     pub fn get_gc_idx(&self) -> u64 {
         self.paxos_state.get_gc_idx()
     }
-    
-    /// Sets a vector of max promises suffix.
+
+    /// Stores the suffix from the maximum promise.
     pub fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<R>>) {
         self.paxos_state.set_max_promise_sfx(max_promise_sfx);
     }
-    
-    /// Returns a vector of max promises suffix.
+
+    /// Returns the stored suffix of the maximum promise.
     pub fn get_max_promise_sfx(&mut self) -> Vec<Entry<R>> {
         self.paxos_state.get_max_promise_sfx()
     }
@@ -456,7 +456,7 @@ pub mod memory_storage {
                 acc_round: r,
                 ld: 0,
                 gc_idx: 0,
-                max_promise_sfx: Default::default(),
+                max_promise_sfx: vec![],
             }
         }
 
