@@ -118,6 +118,12 @@ where
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: R);
 
+    /// Stores the suffix from the maximum promise.
+    fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<R>>);
+
+    /// Returns the stored suffix of the maximum promise. Since this is only used once by the leader in the Prepare phase, it is recommended to return the consumed value.
+    fn get_max_promise_sfx(&mut self) -> Vec<Entry<R>>;
+
     /// Returns the latest round in which entries have been accepted.
     fn get_accepted_round(&self) -> R;
 
@@ -334,6 +340,16 @@ where
     pub fn get_gc_idx(&self) -> u64 {
         self.paxos_state.get_gc_idx()
     }
+
+    /// Stores the suffix from the maximum promise.
+    pub fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<R>>) {
+        self.paxos_state.set_max_promise_sfx(max_promise_sfx);
+    }
+
+    /// Returns the stored suffix of the maximum promise.
+    pub fn get_max_promise_sfx(&mut self) -> Vec<Entry<R>> {
+        self.paxos_state.get_max_promise_sfx()
+    }
 }
 
 /// A in-memory storage implementation for Paxos.
@@ -425,6 +441,8 @@ pub mod memory_storage {
         ld: u64,
         /// Garbage collected index.
         gc_idx: u64,
+        /// Max promise suffix.
+        max_promise_sfx: Vec<Entry<R>>,
     }
 
     impl<R> PaxosState<R> for MemoryState<R>
@@ -438,6 +456,7 @@ pub mod memory_storage {
                 acc_round: r,
                 ld: 0,
                 gc_idx: 0,
+                max_promise_sfx: vec![],
             }
         }
 
@@ -451,6 +470,14 @@ pub mod memory_storage {
 
         fn set_accepted_round(&mut self, na: R) {
             self.acc_round = na;
+        }
+
+        fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<R>>) {
+            self.max_promise_sfx = max_promise_sfx;
+        }
+
+        fn get_max_promise_sfx(&mut self) -> Vec<Entry<R>> {
+            std::mem::take(&mut self.max_promise_sfx)
         }
 
         fn get_accepted_round(&self) -> R {
