@@ -1,0 +1,18 @@
+[book]
+title = "The OmniPaxos Book"
+authors = ["Harald Ng <hng@kth.se>"]
+description = "A User Guide, Manual, and Tutorial for the OmniPaxos library."
+
+language = "en"
+multilingual = false
+src = "src"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "ayu"
+curly-quotes = true
+mathjax-support = true
+git-repository-url = "https://github.com/haraldng/omnipaxos"
+
+#[output.linkcheck]
+#follow-web-links = false
