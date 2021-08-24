@@ -1,10 +1,10 @@
 # Project Info
 
-While OmniPaxos is primarily being developed at the [KTH Royal Institute of Technology](https://www.kth.se/en) and [RISE Research Institutes of Sweden](https://www.ri.se/en) in Stockholm, Sweden, we do wish to thank all [contributors](https://github.com/haraldng/omnipaxos/graphs/contributors).
+While OmniPaxos is primarily being developed at the [KTH Royal Institute of Technology](https://www.kth.se/en) and at [RISE Research Institutes of Sweden](https://www.ri.se/en) in Stockholm, Sweden, we do wish to thank all [contributors](https://github.com/haraldng/omnipaxos/graphs/contributors).
 
-<!-- ## Releases
+## Releases
 
-OmniPaxos releases are hosted on [crates.io](https://crates.io/crates/omnipaxos). -->
+OmniPaxos releases are hosted on [crates.io](https://crates.io/crates/omnipaxos).
 
 <!-- ## API Documentation
 
@@ -18,7 +18,7 @@ All issues and requests related to OmniPaxos should be posted there.
 
 ## Bleeding Edge
 
-This tutorial is built off the `master` branch on GitHub and thus tends to be a bit ahead of what is available in a release.
+This tutorial is built off the `master` branch on github and thus tends to be a bit ahead of what is available in a release.
 If you would like to try out new features before they are released, you can add the following to your `Cargo.toml`:
 
 ```toml
