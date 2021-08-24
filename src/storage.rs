@@ -354,8 +354,10 @@ where
 
 /// A in-memory storage implementation for Paxos.
 pub mod memory_storage {
-    use crate::leader_election::Round;
-    use crate::storage::{Entry, PaxosState, Sequence};
+    use crate::{
+        leader_election::Round,
+        storage::{Entry, PaxosState, Sequence},
+    };
 
     /// Stores all the accepted entries inside a vector.
     #[derive(Debug)]

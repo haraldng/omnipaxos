@@ -28,11 +28,13 @@ where
 
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
-    use crate::leader_election::{Leader, Round};
-    use crate::utils::hocon_kv::{
-        HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID,
+    use crate::{
+        leader_election::{Leader, Round},
+        utils::{
+            hocon_kv::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
+            logger::create_logger,
+        },
     };
-    use crate::utils::logger::create_logger;
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
     use slog::{debug, info, trace, warn, Logger};

@@ -1,10 +1,12 @@
-use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID};
-use crate::utils::logger::create_logger;
 use crate::{
     leader_election::*,
     messages::*,
     storage::{Entry, PaxosState, Sequence, StopSign, Storage},
     util::PromiseMetaData,
+    utils::{
+        hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
+        logger::create_logger,
+    },
 };
 use hocon::Hocon;
 use slog::{crit, debug, info, trace, warn, Logger};
