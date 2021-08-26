@@ -1,0 +1,1 @@
+# OmniPaxos Configuration
