@@ -1,0 +1,1 @@
+# Ballot Leader Election Configuration
