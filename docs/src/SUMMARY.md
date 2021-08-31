@@ -10,6 +10,7 @@
     - [Tick Timer](ble/timer.md)
 - [OmniPaxos](omnipaxos/index.md)
 	- [Communication](omnipaxos/communication.md)
+	- [Round](omnipaxos/round.md)
 	- [Logging](omnipaxos/logging.md)
 	- [Configuration](omnipaxos/configuration.md)
 	- [Storage](omnipaxos/storage.md)
