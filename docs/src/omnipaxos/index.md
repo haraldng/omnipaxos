@@ -2,7 +2,7 @@
 
 In this section we will introduce the features of OmniPaxos in detail.
 
-In particular, we will talk about [communication](communication.md), as well as how to [configure](configuration.md) it, before describing some of the advanced options for Omnipaxos, such as [garbage collection](garbage-collection.md), [logging](logging.md), and [storage](storage.md).
+In particular, we will talk about [communication](communication.md), [round](round.md), as well as how to [configure](configuration.md) it, before describing some of the advanced options for Omnipaxos, such as [garbage collection](garbage-collection.md), [logging](logging.md), and [storage](storage.md).
 
 As the library is based on the [Leader-based Sequence Paxos](https://arxiv.org/pdf/2008.13456.pdf) algorithm we will give an onverview of the properties it has to adhere to.
 

@@ -352,7 +352,7 @@ where
     }
 }
 
-/// A in-memory storage implementation for Paxos.
+/// An in-memory storage implementation for Paxos.
 pub mod memory_storage {
     use crate::{
         leader_election::Round,
