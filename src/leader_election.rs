@@ -137,7 +137,12 @@ pub mod ballot_leader_election {
             };
 
             let l = logger.unwrap_or_else(|| {
-                create_logger(log_file_path.unwrap_or(format!("logs/ble_{}.log", pid).as_str()))
+                if let Some(p) = log_file_path {
+                    create_logger(p)
+                } else {
+                    let t = format!("logs/ble_{}.log", pid);
+                    create_logger(log_file_path.unwrap_or_else(|| t.as_str()))
+                }
             });
 
             info!(l, "Ballot Leader Election component pid: {} created!", pid);

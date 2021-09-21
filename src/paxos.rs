@@ -125,7 +125,12 @@ where
         };
 
         let l = logger.unwrap_or_else(|| {
-            create_logger(log_file_path.unwrap_or(format!("logs/paxos_{}.log", pid).as_str()))
+            if let Some(p) = log_file_path {
+                create_logger(p)
+            } else {
+                let t = format!("logs/paxos_{}.log", pid);
+                create_logger(log_file_path.unwrap_or_else(|| t.as_str()))
+            }
         });
 
         info!(l, "Paxos component pid: {} created!", pid);
