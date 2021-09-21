@@ -31,7 +31,7 @@ pub mod ballot_leader_election {
     use crate::{
         leader_election::{Leader, Round},
         utils::{
-            hocon_kv::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
+            hocon_kv::{HB_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
             logger::create_logger,
         },
     };
@@ -80,10 +80,8 @@ pub mod ballot_leader_election {
         leader: Option<Ballot>,
         /// Internal delay used for timeout.
         hb_current_delay: u64,
-        /// Fixed delay of timeout. It is measured in ticks.
-        hb_delay: u64,
         /// How long time is waited before timing out on a Heartbeat response and possibly resulting in a leader-change. Measured in number of times [`tick()`] is called.
-        increment_delay: u64,
+        hb_delay: u64,
         /// The majority of replicas inside a cluster. It is measured in ticks.
         majority: usize,
         /// A factor used in the beginning for a shorter hb_delay.
@@ -103,8 +101,7 @@ pub mod ballot_leader_election {
         /// # Arguments
         /// * `peers` - Vector that holds all the other replicas.
         /// * `pid` -  Process identifier used to uniquely identify this instance.
-        /// * `hb_delay` -  A fixed delay between heartbeats. It is measured in ticks.
-        /// * `increment_delay` - A fixed delay that is added to the hb_delay. It is measured in ticks.
+        /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
         /// * `logger` - Used for logging events of Ballot Leader Election.
@@ -113,7 +110,6 @@ pub mod ballot_leader_election {
             peers: Vec<u64>,
             pid: u64,
             hb_delay: u64,
-            increment_delay: u64,
             initial_leader: Option<Leader<Ballot>>,
             initial_delay_factor: Option<u64>,
             logger: Option<Logger>,
@@ -158,7 +154,6 @@ pub mod ballot_leader_election {
                 leader,
                 hb_current_delay: hb_delay,
                 hb_delay,
-                increment_delay,
                 initial_delay_factor,
                 ticks_elapsed: 0,
                 outgoing: vec![],
@@ -185,15 +180,8 @@ pub mod ballot_leader_election {
                 cfg[HB_DELAY]
                     .as_i64()
                     .expect("Failed to load heartbeat delay") as u64,
-                cfg[INCREMENT_DELAY]
-                    .as_i64()
-                    .expect("Failed to load increment delay") as u64,
                 initial_leader,
-                Option::from(
-                    cfg[INITIAL_DELAY_FACTOR]
-                        .as_i64()
-                        .expect("Failed to load initial delay factor") as u64,
-                ),
+                cfg[INITIAL_DELAY_FACTOR].as_i64().map(|i| i as u64),
                 logger,
                 Option::from(
                     cfg[LOG_FILE_PATH]
@@ -282,12 +270,6 @@ pub mod ballot_leader_election {
                 // got a new leader with greater ballot
                 self.leader = Some(top_ballot);
                 let top_pid = top_ballot.pid;
-                if self.pid == top_pid {
-                    self.majority_connected = true;
-                } else {
-                    self.majority_connected = false;
-                }
-
                 debug!(
                     self.logger,
                     "New Leader elected, pid: {}, ballot: {:?}", top_pid, top_ballot
@@ -311,9 +293,7 @@ pub mod ballot_leader_election {
             self.hb_current_delay = if let Some(initial_delay) = self.initial_delay_factor {
                 debug!(self.logger, "Using initial heartbeat delay");
                 // use short timeout if still no first leader
-                let delay = self.hb_delay / initial_delay;
-                self.initial_delay_factor = None;
-                delay
+                self.hb_delay / initial_delay
             } else {
                 self.hb_delay
             };
@@ -380,7 +360,6 @@ pub mod ballot_leader_election {
                     self.hb_current_delay,
                     rep.ballot
                 );
-                self.hb_current_delay += self.increment_delay;
             }
         }
     }

@@ -39,7 +39,6 @@ impl TestSystem {
         ble_hb_delay: u64,
         ble_initial_delay_factor: Option<u64>,
         ble_initial_leader: Option<Leader<Ballot>>,
-        increment_delay: u64,
         num_threads: usize,
     ) -> Self {
         let mut conf = KompactConfig::default();
@@ -76,7 +75,6 @@ impl TestSystem {
                         peer_pids.clone(),
                         pid,
                         ble_hb_delay,
-                        increment_delay,
                         ble_initial_leader,
                         ble_initial_delay_factor,
                         None,
