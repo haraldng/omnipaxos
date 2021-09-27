@@ -1,11 +1,11 @@
 # Getting Started
 
-## Setting up Rust
-It is recommmended to run OmniPaxos on a *nightly* version of the rust toolchain.
+<!-- ## Setting up Rust
+It is recommended to run OmniPaxos on a *nightly* version of the Rust toolchain.
 
-We recommend using the [rustup](https://rustup.rs/) tool to easily install the latest nightly version of rust and keep it updated. Instructions should be on screen once rustup is downloaded.
+We recommend using the [rustup](https://rustup.rs/) tool to easily install the latest nightly version of rust and keep it updated. Instructions should be on the screen once rustup is downloaded.
 
-> **Using the nightly toolchain:** Rustup can be configured to default to the nightly toolchain by running `rustup default nightly`.
+> **Using the nightly toolchain:** Rustup can be configured to default to the nightly toolchain by running `rustup default nightly`. -->
 
 ## Cargo
 
@@ -15,7 +15,7 @@ Add OmniPaxos to your cargo project as a dependency:
 [dependencies]
 omnipaxos = "LATEST_VERSION"
 ```
-The latest version can be found on [crates.io](https://crates.io/crates/omnipaxos).
+<!-- The latest version can be found on [crates.io](https://crates.io/crates/omnipaxos). -->
 
 ### Github master
 
