@@ -3,7 +3,8 @@
 In some cases, the decided sequence can become very large and a portion of the sequence needs to be deleted. To solve this Omnipaxos offers a manual garbage collection.
 
 ```rust,edition2018,no_run,noplaypen
-// `index` - Deletes all entries up to index, if the index is None then the minimum index accepted by ALL servers will be used as the index.
+// `index` - Deletes all entries up to index, if the index is None then the 
+// minimum index accepted by ALL servers will be used as the index.
 crate::omnipaxos::OmniPaxos::garbage_collect(index)
 ```
 
