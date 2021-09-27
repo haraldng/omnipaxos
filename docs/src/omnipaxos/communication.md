@@ -2,8 +2,6 @@
 
 By default, OmniPaxos does not implement any network dispatcher. It is up to the user to provide an implementation of the network.
 
-Let us assume we have a network dispatcher courtesy of [Kompact](https://github.com/kompics/kompact).
-
 ```rust,edition2018,no_run,noplaypen
 // Create a timer that triggers once every 1ms
 // Get the outgoing messages and send them through the network to the receivers
