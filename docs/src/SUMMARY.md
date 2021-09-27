@@ -4,10 +4,7 @@
 [Getting Started](getting-started.md)
 
 - [Introduction](introduction/index.md)
-	- [Components](introduction/components.md)
-- [Ballot-Leader Election](ble/index.md)
-    - [Configuration](ble/configuration.md)
-    - [Tick Timer](ble/timer.md)
+- [Ballot Leader Election](ble/index.md)
 - [OmniPaxos](omnipaxos/index.md)
 	- [Communication](omnipaxos/communication.md)
 	- [Round](omnipaxos/round.md)

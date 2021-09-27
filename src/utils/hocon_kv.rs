@@ -3,7 +3,7 @@ pub const CONFIG_ID: &str = "config_id";
 /// The identifier of this replica.
 pub const PID: &str = "pid";
 /// A fixed delay between heartbeats. It is measured in ticks.
-pub const HB_DELAY: &str = "HB_DELAY";
+pub const HB_DELAY: &str = "hb_delay";
 /// A fixed delay that is added to the hb_delay. It is measured in ticks.
 pub const INCREMENT_DELAY: &str = "increment_delay";
 /// A factor used in the beginning for a shorter hb_delay.

@@ -1,6 +1,6 @@
 [book]
 title = "The OmniPaxos Book"
-authors = ["Harald Ng <hng@kth.se>"]
+authors = ["Harald Ng <hng@kth.se>", "Alexandru-Ionut Mindru <mindru@kth.se>"]
 description = "A User Guide, Manual, and Tutorial for the OmniPaxos library."
 
 language = "en"

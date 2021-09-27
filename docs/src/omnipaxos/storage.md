@@ -1,8 +1,8 @@
 # Storage
 
-OmniPaxos comes with an abstraction layer for the storage. This allows the user to store the decided sequences and the state of the replicas in memory or on the storage.
+OmniPaxos comes with an abstraction layer for storage. This allows the user to store the decided sequences and the state of the replicas in memory or on the storage.
 
-By default OmniPaxos comes with an in-memory storage option which can be passed as an argument to the OmniPaxos constructor.
+By default, OmniPaxos comes with an in-memory storage option which can be passed as an argument to the OmniPaxos constructor.
 
 ```rust,edition2018,no_run,noplaypen
 Storage::with(
