@@ -1,6 +1,6 @@
 # Garbage Collection
 
-In some cases, the decided sequence can become very large and a portion of the sequence needs to be deleted. To solve this Omnipaxos offers a manual garbage collection.
+OmniPaxos offers a garbage collection feature that can be called to compact the replicated log.
 
 ```rust,edition2018,no_run,noplaypen
 // `index` - Deletes all entries up to index, if the index is None then the 
