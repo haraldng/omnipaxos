@@ -74,3 +74,11 @@ for entry in paxos.get_decided_entries() {
 }
 
 ```
+
+## License
+
+This project is licensed under the [Apache-2.0 license](LICENSE).
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in OmniPaxos by you shall be licensed as Apache-2.0, without any additional terms or conditions.
