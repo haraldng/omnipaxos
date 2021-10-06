@@ -1,0 +1,464 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>The OmniPaxos Book</title>
+                <meta name="robots" content="noindex" />
+                
+
+        <!-- Custom HTML head -->
+        
+
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="A User Guide, Manual, and Tutorial for the OmniPaxos library.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+                <link rel="icon" href="favicon.svg">
+                        <link rel="shortcut icon" href="favicon.png">
+                <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+                <link rel="stylesheet" href="css/print.css" media="print">
+        
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+                <link rel="stylesheet" href="fonts/fonts.css">
+        
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+                <!-- MathJax -->
+        <script async type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+            </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="ble/index.html"><strong aria-hidden="true">2.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="omnipaxos/index.html"><strong aria-hidden="true">3.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="omnipaxos/communication.html"><strong aria-hidden="true">3.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="omnipaxos/round.html"><strong aria-hidden="true">3.2.</strong> Round</a></li><li class="chapter-item expanded "><a href="omnipaxos/logging.html"><strong aria-hidden="true">3.3.</strong> Logging</a></li><li class="chapter-item expanded "><a href="omnipaxos/configuration.html"><strong aria-hidden="true">3.4.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="omnipaxos/storage.html"><strong aria-hidden="true">3.5.</strong> Storage</a></li><li class="chapter-item expanded "><a href="omnipaxos/garbage-collection.html"><strong aria-hidden="true">3.6.</strong> Garbage Collection</a></li></ol></li><li class="chapter-item expanded "><a href="project.html">Project Info</a></li></ol>            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                                                <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                                            </div>
+
+                    <h1 class="menu-title">The OmniPaxos Book</h1>
+
+                    <div class="right-buttons">
+                                                <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                                                                        <a href="https://github.com/haraldng/omnipaxos" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                                                
+                    </div>
+                </div>
+
+                                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="foreword"><a class="header" href="#foreword">Foreword</a></h1>
+<p>OmniPaxos is an in-development sequence consensus library implemented in the Rust programming language.</p>
+<p>Similar to Raft, the Omni-Paxos algorithm can be used to build abstractions such as a distributed log or state-machine replication. However, Omni-Paxos uses a modular design that makes it resilient to partial connectivity and provides an efficient reconfiguration that allows the new server to catch up with the log in parallel.</p>
+<p>An OmniPaxos replica is implemented as a Rust <code>struct</code>. This should allow for convenient usage in general or on top of an actor framework such as <a href="https://github.com/kompics/kompact">Kompact</a>.</p>
+<p>In addition to the tutorial style presentation in this book, examples of usages of OmniPaxos can be found in the <a href="https://github.com/haraldng/omnipaxos/tree/master/tests">tests</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
+<!-- ## Setting up Rust
+It is recommended to run OmniPaxos on a *nightly* version of the Rust toolchain.
+
+We recommend using the [rustup](https://rustup.rs/) tool to easily install the latest nightly version of rust and keep it updated. Instructions should be on the screen once rustup is downloaded.
+
+> **Using the nightly toolchain:** Rustup can be configured to default to the nightly toolchain by running `rustup default nightly`. -->
+<h2 id="cargo"><a class="header" href="#cargo">Cargo</a></h2>
+<p>Add OmniPaxos to your cargo project as a dependency:</p>
+<pre><code class="language-toml">[dependencies]
+omnipaxos = &quot;LATEST_VERSION&quot;
+</code></pre>
+<!-- The latest version can be found on [crates.io](https://crates.io/crates/omnipaxos). -->
+<h3 id="github-master"><a class="header" href="#github-master">Github master</a></h3>
+<p>You can also point cargo to the latest <a href="https://github.com/haraldng/omnipaxos">Github</a> master version, instead of a release.
+To do so add the following to your Cargo.toml instead:</p>
+<pre><code class="language-toml">[dependencies]
+omnipaxos = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p>In this section of the tutorial, we will discuss the model assumptions and concepts that are underlying the implementation of OmniPaxos. We will look at how the <a href="introduction/../omnipaxos/index.html"><code>OmniPaxos</code></a> and <a href="introduction/../ble/index.html"><code>Ballot Leader Election</code></a> modules communicate between them, while also providing examples for the user utilising an actor framework such as <a href="https://github.com/kompics/kompact">Kompact</a>.</p>
+<p>The replicas that are created communicate by exchanging discrete pieces of information (<em>messages</em>). The network layer is provided by the user alongside the sending and receiving of messages.</p>
+<h2 id="components"><a class="header" href="#components">Components</a></h2>
+<p>The OmniPaxos library can be divided into two big components
+<a href="introduction/../omnipaxos/index.html"><strong>OmniPaxos</strong></a> and <a href="introduction/../ble/index.html"><strong>Ballot Leader Election</strong></a> (<em>BLE</em>). By default, OmniPaxos comes without a leader election algorithm as it can be provided by the user. The library includes the BLE algorithm as an already implemented alternative.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ballot-leader-election"><a class="header" href="#ballot-leader-election">Ballot Leader Election</a></h1>
+<p>In this section, we will introduce the features of <strong>Ballot Leader Election</strong> in detail.</p>
+<p>In particular, we will talk about how the BLE’s internal <a href="ble/index.html#tick-timer">tick timer</a> works, how to <a href="ble/index.html#configuration">configure</a> it.</p>
+<blockquote>
+<p><strong>Note:</strong> The <a href="ble/../omnipaxos/logging.html">logger</a> for the <strong>Ballot Leader Election</strong> is the same as the one in <strong>OmniPaxos</strong>.</p>
+</blockquote>
+<p>The user is able to use an already implemented leader election algorithm provided by the library. A BLE component can be initialised by calling one of the two constructors. The second constructor uses a hocon configuration which will be discussed in further detail in <a href="ble/index.html#configuration">configuration</a>.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">BallotLeaderElection::with(
+    peers: Vec&lt;u64&gt;,
+    pid: u64,
+    hb_delay: u64,
+    increment_delay: u64,
+    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,
+    initial_delay_factor: Option&lt;u64&gt;,
+    logger: Option&lt;Logger&gt;,
+    log_file_path: Option&lt;&amp;str&gt;,
+)
+
+BallotLeaderElection::with_hocon(
+    cfg: &amp;Hocon,
+    peers: Vec&lt;u64&gt;,
+    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,
+    logger: Option&lt;Logger&gt;,
+)
+</code></pre>
+<h2 id="tick-timer"><a class="header" href="#tick-timer">Tick Timer</a></h2>
+<p>The <strong>Ballot Leader Election</strong> has an internal logical clock that is driven by a tick() function.</p>
+<p>In the example below, we have a timer that repeats the provided function once every 100ms and the heartbeat delay would be 5 ticks, then the heartbeat timeout would happen once every 500ms.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// Create a timer that triggers once every 100ms
+// Call method tick() from ble and check if there is a leader event
+// Get the outgoing messages and send them through the network to the receivers
+timer = create_timer(100ms, {
+    let leader = ble.tick();
+    if let Some(l) = leader {
+        paxos.handle_leader(l);
+    }
+    
+    msgs = ble.get_outgoing_msgs();
+    for out_msg in msgs {
+        let receiver = out_msg.to;
+        // send out_msg to receiver
+    }
+})
+</code></pre>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>To ease up the configuration of the Ballot Leader Election module, a hocon configuration can be provided with the following keys set:</p>
+<pre><code class="language-json">{
+    // The identifier for the configuration that this Omni-Paxos replica is part of.
+    config_id: 1,
+    // The identifier of this replica.
+    pid: 1,
+    // A fixed delay between heartbeats. It is measured in ticks.
+    hb_delay: 5,
+    // A fixed delay that is added to the hb_delay. It is measured in ticks.
+    increment_delay: 2,
+    // A factor used in the beginning for a shorter hb_delay.
+    initial_delay_factor: 2,
+    // Path where the default logger logs events.
+    log_file_path: &quot;/ble/logs&quot;
+}
+</code></pre>
+<pre><code class="language-rust edition2018 no_run noplaypen">// config/my_configuration.txt
+---------------------------------------
+ble_config: {
+    config_id: 1,
+    pid: 1,
+    hb_delay: 5,
+    increment_delay: 2,
+    initial_delay_factor: 2,
+    log_file_path: &quot;/ble/logs&quot;
+}
+---------------------------------------
+
+let raw_cfg = HoconLoader::new()
+    .load_file(&quot;config/my_configuration.txt&quot;)?
+    .hocon()?;
+
+let cfg: &amp;Hocon = &amp;raw_cfg[&quot;ble_config&quot;];
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="omnipaxos"><a class="header" href="#omnipaxos">OmniPaxos</a></h1>
+<p>In this section, we will introduce the features of OmniPaxos in detail.</p>
+<p>In particular, we will talk about <a href="omnipaxos/communication.html">communication</a>, <a href="omnipaxos/round.html">round</a>, as well as how to <a href="omnipaxos/configuration.html">configure</a> it, before describing some of the advanced options for Omnipaxos, such as <a href="omnipaxos/garbage-collection.html">garbage collection</a>, <a href="omnipaxos/logging.html">logging</a>, and <a href="omnipaxos/storage.html">storage</a>.</p>
+<p>An OmniPaxos replica maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
+The user also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher-level application.</p>
+<p>An OmniPaxos replica can be initialised by calling one of the two constructors. The second constructor uses a hocon configuration which will be discussed in further detail in <a href="omnipaxos/../omnipaxos/configuration.html">configuration</a>.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">OmniPaxos::with(
+    config_id: u32,
+    pid: u64,
+    peers: Vec&lt;u64&gt;,
+    storage: Storage&lt;R, S, P&gt;,
+    skip_prepare_use_leader: Option&lt;Leader&lt;R&gt;&gt;,
+    logger: Option&lt;Logger&gt;,
+    log_file_path: Option&lt;&amp;str&gt;,
+)
+
+OmniPaxos::with_hocon(
+    cfg: &amp;Hocon,
+    peers: Vec&lt;u64&gt;,
+    storage: Storage&lt;R, S, P&gt;,
+    skip_prepare_use_leader: Option&lt;Leader&lt;R&gt;&gt;,
+    logger: Option&lt;Logger&gt;,
+)
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
+<p>By default, OmniPaxos does not implement any network dispatcher. It is up to the user to provide an implementation of the network.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// Create a timer that triggers once every 1ms
+// Get the outgoing messages and send them through the network to the receivers
+timer = create_timer(1ms, {
+    let msgs = paxos.get_outgoing_msgs();
+    for out_msg in msgs {
+        let receiver = out_msg.to;
+        // send out_msg to receiver
+    }
+})
+</code></pre>
+<p>In the example above we schedule a timer once every 1ms to extract a vector of messages (outgoing queue) from inside of a Paxos replica, then we iterate through each message and send it through the network to the target replica.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="round"><a class="header" href="#round">Round</a></h1>
+<p>Leader event that indicates a leader has been elected. Should be created when the user-defined leader election algorithm outputs a leader event. Should be then handled in Omni-Paxos by calling <code>crate::omnipaxos::OmniPaxos::handle_leader()</code>.</p>
+<blockquote>
+<p><strong>Note:</strong> Rounds in Omni-Paxos are totally ordered.</p>
+</blockquote>
+<pre><code class="language-rust edition2018 no_run noplaypen">let leader = leader_election.get_leader();
+
+if let Some(l) = leader {
+    paxos.handle_leader(l);
+}
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="logging"><a class="header" href="#logging">Logging</a></h1>
+<p>OmniPaxos uses the <a href="https://crates.io/crates/slog">slog</a> crate to provide system-wide logging facilities. Logging works out of the box with a default asynchronous console and file logger implementation.</p>
+<p>The actual logging levels are controlled via build features. The default features correspond to <code>max_level_trace</code> and <code>release_max_level_info</code>, that is in debug builds all levels are shown, while in the release profile only <code>info</code> and more severe message are shown.</p>
+<h2 id="custom-logger"><a class="header" href="#custom-logger">Custom Logger</a></h2>
+<p>Sometimes the default logging configuration is not sufficient for a particular application. For example, you might need a larger queue size in the <code>Async</code> drain, or you may want to write to a file instead of the terminal.</p>
+<p>The user can provide a custom implementation based on <a href="https://crates.io/crates/slog"><strong>slog</strong></a>.</p>
+<blockquote>
+<p><strong>Note:</strong> The custom logger can be created for the <a href="omnipaxos/../ble/index.html"><strong>Ballot Leader Election</strong></a> module as well.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="omnipaxos-configuration"><a class="header" href="#omnipaxos-configuration">OmniPaxos Configuration</a></h1>
+<p>To ease up the configuration of the OmniPaxos replica, a hocon configuration can be provided with the following keys set:</p>
+<pre><code class="language-json">{
+    // The identifier for the configuration that this Omni-Paxos replica is part of.
+    config_id: 1,
+    // The identifier of this replica.
+    pid: 1,
+    // Path where the default logger logs events.
+    log_file_path: &quot;/paxos/logs&quot;
+}
+</code></pre>
+<pre><code class="language-rust edition2018 no_run noplaypen">// config/my_configuration.txt
+---------------------------------------
+paxos_config: {
+    config_id: 1,
+    pid: 1,
+    log_file_path: &quot;/paxos/logs&quot;
+}
+---------------------------------------
+
+let raw_cfg = HoconLoader::new()
+    .load_file(&quot;config/my_configuration.txt&quot;)?
+    .hocon()?;
+
+let cfg: &amp;Hocon = &amp;raw_cfg[&quot;paxos_config&quot;];
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="storage"><a class="header" href="#storage">Storage</a></h1>
+<p>OmniPaxos comes with an abstraction layer for storage. This allows the user to store the decided sequences and the state of the replicas in memory or on the storage.</p>
+<p>By default, OmniPaxos comes with an in-memory storage option which can be passed as an argument to the OmniPaxos constructor.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">Storage::with(
+    MemorySequence::&lt;Ballot&gt;::new(),
+    MemoryState::&lt;Ballot&gt;::new(),
+)
+</code></pre>
+<h2 id="custom-storage"><a class="header" href="#custom-storage">Custom Storage</a></h2>
+<p>Sometimes the default storage provided is not sufficient for a particular application. The user might have more storage than RAM memory or they would like to do additional processing before storing.</p>
+<p>To implement a storage component for OmniPaxos the traits <code>PaxosState&lt;R&gt;</code> and <code>Sequence&lt;R&gt;</code> need to be implemented.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">#[derive(Debug)]
+pub struct MemorySequence&lt;R&gt;
+where
+    R: Round,
+{
+    sequence: Vec&lt;Entry&lt;R&gt;&gt;,
+}
+
+impl&lt;R&gt; Sequence&lt;R&gt; for MemorySequence&lt;R&gt;
+where
+    R: Round,
+{ ... }
+
+--------------------------------------------
+
+#[derive(Debug)]
+pub struct MemoryState&lt;R&gt;
+where
+    R: Round,
+{
+    n_prom: R,
+    acc_round: R,
+    ld: u64,
+    gc_idx: u64,
+    max_promise_sfx: Vec&lt;Entry&lt;R&gt;&gt;,
+}
+
+impl&lt;R&gt; PaxosState&lt;R&gt; for MemoryState&lt;R&gt;
+where
+    R: Round,
+{ ... }
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="garbage-collection"><a class="header" href="#garbage-collection">Garbage Collection</a></h1>
+<p>OmniPaxos offers a garbage collection feature that can be called to compact the replicated log.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// `index` - Deletes all entries up to index, if the index is None then the 
+// minimum index accepted by ALL servers will be used as the index.
+crate::omnipaxos::OmniPaxos::garbage_collect(index)
+</code></pre>
+<p>The function can be called from any replica. If the replica which initiates the garbage collection is not the leader then it will redirect the proposal for garbage collection to the leader which in turn will initiate the garbage collection for all the replicas in the system.</p>
+<blockquote>
+<p><strong>Note:</strong> At the moment there is no way of knowing if the garbage collection has been completed successfully. The only method would be to get the garbage_collected_idx and see if it is equal to the given index.</p>
+</blockquote>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="project-info"><a class="header" href="#project-info">Project Info</a></h1>
+<p>While OmniPaxos is primarily being developed at the <a href="https://www.kth.se/en">KTH Royal Institute of Technology</a> and <a href="https://www.ri.se/en">RISE Research Institutes of Sweden</a> in Stockholm, Sweden, we do wish to thank all <a href="https://github.com/haraldng/omnipaxos/graphs/contributors">contributors</a>.</p>
+<!-- ## Releases
+
+OmniPaxos releases are hosted on [crates.io](https://crates.io/crates/omnipaxos). -->
+<!-- ## API Documentation
+
+OmniPaxos API docs are hosted on [docs.rs](https://docs.rs/kompact/latest/kompact/). -->
+<h2 id="sources--issues"><a class="header" href="#sources--issues">Sources &amp; Issues</a></h2>
+<p>The sources for OmniPaxos can be found on <a href="https://github.com/haraldng/omnipaxos">Github</a>.</p>
+<p>All issues and requests related to OmniPaxos should be posted there.</p>
+<h2 id="bleeding-edge"><a class="header" href="#bleeding-edge">Bleeding Edge</a></h2>
+<p>This tutorial is built off the <code>master</code> branch on GitHub and thus tends to be a bit ahead of what is available in a release.
+If you would like to try out new features before they are released, you can add the following to your <code>Cargo.toml</code>:</p>
+<pre><code class="language-toml">omnipaxos = { git = &quot;https://github.com/haraldng/omnipaxos&quot;, branch = &quot;master&quot; }
+</code></pre>
+<h3 id="documentation"><a class="header" href="#documentation">Documentation</a></h3>
+<p>If you need the API docs for the latest master run the following at an appropriate location (e.g., outside another local git repository):</p>
+<pre><code class="language-bash">git checkout https://github.com/haraldng/omnipaxos
+cd omnipaxos
+cargo doc --open --no-deps
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+                        
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+                            </nav>
+
+        </div>
+
+        
+        
+        
+                <script type="text/javascript">
+            window.playground_copyable = true;
+        </script>
+        
+        
+                <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+                        <script type="text/javascript">
+        window.addEventListener('load', function() {
+            MathJax.Hub.Register.StartupHook('End', function() {
+                window.setTimeout(window.print, 100);
+            });
+        });
+        </script>
+                
+    </body>
+</html>
