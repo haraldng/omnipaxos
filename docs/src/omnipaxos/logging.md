@@ -10,4 +10,4 @@ Sometimes the default logging configuration is not sufficient for a particular a
 
 The user can provide a custom implementation based on [**slog**](https://crates.io/crates/slog).
 
-> **Note:** The custom logger can be created for the [**Ballot Leader Election**](../ble/index.md) module as well.
+> **Note:** This applies to [**Ballot Leader Election**](../ble/index.md) as well.
