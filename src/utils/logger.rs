@@ -1,6 +1,5 @@
 use slog::{o, Drain, Logger};
-use std::fs::OpenOptions;
-use std::sync::Mutex;
+use std::{fs::OpenOptions, sync::Mutex};
 
 /// Creates an asynchronous logger which outputs to both the terminal and a specified file_path.
 pub fn create_logger(file_path: &str) -> Logger {

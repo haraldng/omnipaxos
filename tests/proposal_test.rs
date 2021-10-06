@@ -2,9 +2,10 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::leader_election::ballot_leader_election::Ballot;
-use omnipaxos::leader_election::Leader;
-use omnipaxos::storage::Entry;
+use omnipaxos::{
+    leader_election::{ballot_leader_election::Ballot, Leader},
+    storage::Entry,
+};
 use rand::Rng;
 use serial_test::serial;
 use test_config::TestConfig;

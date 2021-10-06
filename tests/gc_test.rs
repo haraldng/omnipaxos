@@ -2,8 +2,10 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::leader_election::ballot_leader_election::Ballot;
-use omnipaxos::storage::{Entry, Sequence};
+use omnipaxos::{
+    leader_election::ballot_leader_election::Ballot,
+    storage::{Entry, Sequence},
+};
 use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;

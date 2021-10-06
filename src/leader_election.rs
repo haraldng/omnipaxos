@@ -28,11 +28,13 @@ where
 
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
-    use crate::leader_election::{Leader, Round};
-    use crate::utils::hocon_kv::{
-        HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID,
+    use crate::{
+        leader_election::{Leader, Round},
+        utils::{
+            hocon_kv::{HB_DELAY, INCREMENT_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
+            logger::create_logger,
+        },
     };
-    use crate::utils::logger::create_logger;
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
     use slog::{debug, info, trace, warn, Logger};
@@ -101,8 +103,8 @@ pub mod ballot_leader_election {
         /// # Arguments
         /// * `peers` - Vector that holds all the other replicas.
         /// * `pid` -  Process identifier used to uniquely identify this instance.
-        /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
-        /// * `increment_delay` - A fixed delay that is added to the current_delay. It is measured in ticks.
+        /// * `hb_delay` -  A fixed delay between heartbeats. It is measured in ticks.
+        /// * `increment_delay` - A fixed delay that is added to the hb_delay. It is measured in ticks.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
         /// * `logger` - Used for logging events of Ballot Leader Election.

@@ -2,23 +2,20 @@ use self::{
     ble::{BallotLeaderComp, BallotLeaderElectionPort},
     omnireplica::OmniPaxosReplica,
 };
-use kompact::config_keys::system;
-use kompact::executors::crossbeam_workstealing_pool;
-use kompact::prelude::*;
-use omnipaxos::leader_election::ballot_leader_election::BallotLeaderElection;
-use omnipaxos::paxos::OmniPaxos;
-use omnipaxos::storage::memory_storage::{MemorySequence, MemoryState};
-use omnipaxos::storage::{PaxosState, Sequence, Storage};
+use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
     leader_election::{
-        ballot_leader_election::{messages::BLEMessage, Ballot},
+        ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
         Leader,
     },
     messages::Message,
+    paxos::OmniPaxos,
+    storage::{
+        memory_storage::{MemorySequence, MemoryState},
+        PaxosState, Sequence, Storage,
+    },
 };
-use std::str;
-use std::time::Duration;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -305,15 +302,19 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::paxos::OmniPaxos;
-    use omnipaxos::storage::memory_storage::{MemorySequence, MemoryState};
-    use omnipaxos::storage::Entry;
     use omnipaxos::{
         leader_election::{ballot_leader_election::Ballot, Leader},
         messages::Message,
+        paxos::OmniPaxos,
+        storage::{
+            memory_storage::{MemorySequence, MemoryState},
+            Entry,
+        },
     };
-    use std::collections::{HashMap, LinkedList};
-    use std::time::Duration;
+    use std::{
+        collections::{HashMap, LinkedList},
+        time::Duration,
+    };
 
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosReplica {
