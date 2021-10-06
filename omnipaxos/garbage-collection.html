@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">2.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">3.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">3.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/round.html"><strong aria-hidden="true">3.2.</strong> Round</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">3.3.</strong> Logging</a></li><li class="chapter-item expanded "><a href="../omnipaxos/configuration.html"><strong aria-hidden="true">3.4.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">3.5.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html" class="active"><strong aria-hidden="true">3.6.</strong> Garbage Collection</a></li></ol></li><li class="chapter-item expanded "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html" class="active"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -149,25 +149,17 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="garbage-collection"><a class="header" href="#garbage-collection">Garbage Collection</a></h1>
-<p>OmniPaxos offers a garbage collection feature that can be called to compact the replicated log.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// `index` - Deletes all entries up to index, if the index is None then the 
-// minimum index accepted by ALL servers will be used as the index.
-crate::omnipaxos::OmniPaxos::garbage_collect(index)
-</code></pre>
-<p>The function can be called from any replica. If the replica which initiates the garbage collection is not the leader then it will redirect the proposal for garbage collection to the leader which in turn will initiate the garbage collection for all the replicas in the system.</p>
-<blockquote>
-<p><strong>Note:</strong> At the moment there is no way of knowing if the garbage collection has been completed successfully. The only method would be to get the garbage_collected_idx and see if it is equal to the given index.</p>
-</blockquote>
+<p>OmniPaxos offers a garbage collection feature that can be called to compact the replicated log. The <code>OmniPaxos::garbage_collect()</code> has an argument <code>Option&lt;u64&gt;</code> that specifies up to what index the log should be garbage collected. If <code>None</code>, then the minimum index accepted by ALL servers will be used as the index. The garbage collection is initiated by the leader and only completed if all servers respond that log entries up to that index has already been handled by the user. To determine if the garbage collection succeeded, the user can check the <code>garbage_collected_idx</code> field of <code>OmniPaxos</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../omnipaxos/storage.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/communication.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../project.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/logging.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -177,11 +169,11 @@ crate::omnipaxos::OmniPaxos::garbage_collect(index)
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../omnipaxos/storage.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/communication.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../project.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/logging.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

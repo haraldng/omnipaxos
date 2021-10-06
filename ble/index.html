@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../ble/index.html" class="active"><strong aria-hidden="true">2.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">3.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">3.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/round.html"><strong aria-hidden="true">3.2.</strong> Round</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">3.3.</strong> Logging</a></li><li class="chapter-item expanded "><a href="../omnipaxos/configuration.html"><strong aria-hidden="true">3.4.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">3.5.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">3.6.</strong> Garbage Collection</a></li></ol></li><li class="chapter-item expanded "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html" class="active"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -149,94 +149,66 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="ballot-leader-election"><a class="header" href="#ballot-leader-election">Ballot Leader Election</a></h1>
-<p>In this section, we will introduce the features of <strong>Ballot Leader Election</strong> in detail.</p>
-<p>In particular, we will talk about how the BLE’s internal <a href="#tick-timer">tick timer</a> works, how to <a href="#configuration">configure</a> it.</p>
-<blockquote>
-<p><strong>Note:</strong> The <a href="../omnipaxos/logging.html">logger</a> for the <strong>Ballot Leader Election</strong> is the same as the one in <strong>OmniPaxos</strong>.</p>
-</blockquote>
-<p>The user is able to use an already implemented leader election algorithm provided by the library. A BLE component can be initialised by calling one of the two constructors. The second constructor uses a hocon configuration which will be discussed in further detail in <a href="#configuration">configuration</a>.</p>
+<p>A unique feature of the Omni-Paxos protocol is guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos. Similar to <code>OmniPaxos</code>, <code>BallotLeaderElection</code> is represented as a Rust struct that should be started on every server in the cluster.</p>
+<p>The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, <code>BallotLeaderElection</code> uses an internal logical clock. It has a <code>tick()</code> function that progresses its logical clock. The expected time that heartbeats should be received in is specified by <code>hb_delay</code> of the <code>BallotLeaderElection</code> constructor:</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">BallotLeaderElection::with(
-    peers: Vec&lt;u64&gt;,
-    pid: u64,
-    hb_delay: u64,
-    increment_delay: u64,
-    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,
-    initial_delay_factor: Option&lt;u64&gt;,
+    peers: Vec&lt;u64&gt;,    // the PEERS of this server. I.e. this should not include `pid`    
+    pid: u64,           // the unique identifier of this server
+    hb_delay: u64,      // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
+    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,     // initial leader
+    initial_delay_factor: Option&lt;u64&gt;,          // allows for using a shorter delay when electing the initial leader.
     logger: Option&lt;Logger&gt;,
     log_file_path: Option&lt;&amp;str&gt;,
 )
+</code></pre>
+<p>For instance, we can create a BLE instance with a timeout of 800ms that is ticked every 100ms. The user has to call <code>tick()</code> every 100ms themselves and check if a leader has been elected. Once a leader is elected, <code>tick()</code> will return an instance of the struct <code>Leader&lt;Ballot&gt;</code>. This should be passed to the corresponding local <code>OmniPaxos</code> instance using <code>OmniPaxos::handle_leader()</code>, which will in turn use the <code>Ballot</code> as a round number for log replication.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::paxos::OmniPaxos;
+use omnipaxos::leader_election::ballot_leader_election::*;
 
-BallotLeaderElection::with_hocon(
-    cfg: &amp;Hocon,
-    peers: Vec&lt;u64&gt;,
-    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,
-    logger: Option&lt;Logger&gt;,
+let _cluster = vec![1, 2, 3];
+let my_pid = 2;
+let my_peers= vec![1, 3];
+
+let hb_delay = 8;                     // 8 ticks delay 
+let initial_delay_factor = Some(2);   // first hb_delay will be 8/2 = 4 ticks i.e. 400ms.
+
+let omni_paxos = OmniPaxos::with(... , my_pid, my_peers, ...); // see `OmniPaxos` section
+
+let ble = BallotLeaderElection::with(
+    my_peers,
+    my_pid,
+    hb_delay
+    None,
+    initial_delay_factor,
+    None,
+    None,
 )
-</code></pre>
-<h2 id="tick-timer"><a class="header" href="#tick-timer">Tick Timer</a></h2>
-<p>The <strong>Ballot Leader Election</strong> has an internal logical clock that is driven by a tick() function.</p>
-<p>In the example below, we have a timer that repeats the provided function once every 100ms and the heartbeat delay would be 5 ticks, then the heartbeat timeout would happen once every 500ms.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// Create a timer that triggers once every 100ms
-// Call method tick() from ble and check if there is a leader event
-// Get the outgoing messages and send them through the network to the receivers
-timer = create_timer(100ms, {
-    let leader = ble.tick();
-    if let Some(l) = leader {
-        paxos.handle_leader(l);
-    }
-    
-    msgs = ble.get_outgoing_msgs();
-    for out_msg in msgs {
-        let receiver = out_msg.to;
-        // send out_msg to receiver
-    }
-})
-</code></pre>
-<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
-<p>To ease up the configuration of the Ballot Leader Election module, a hocon configuration can be provided with the following keys set:</p>
-<pre><code class="language-json">{
-    // The identifier for the configuration that this Omni-Paxos replica is part of.
-    config_id: 1,
-    // The identifier of this replica.
-    pid: 1,
-    // A fixed delay between heartbeats. It is measured in ticks.
-    hb_delay: 5,
-    // A fixed delay that is added to the hb_delay. It is measured in ticks.
-    increment_delay: 2,
-    // A factor used in the beginning for a shorter hb_delay.
-    initial_delay_factor: 2,
-    // Path where the default logger logs events.
-    log_file_path: &quot;/ble/logs&quot;
-}
-</code></pre>
-<pre><code class="language-rust edition2018 no_run noplaypen">// config/my_configuration.txt
----------------------------------------
-ble_config: {
-    config_id: 1,
-    pid: 1,
-    hb_delay: 5,
-    increment_delay: 2,
-    initial_delay_factor: 2,
-    log_file_path: &quot;/ble/logs&quot;
-}
----------------------------------------
 
-let raw_cfg = HoconLoader::new()
-    .load_file(&quot;config/my_configuration.txt&quot;)?
-    .hocon()?;
+// every 100ms call the following
+if let Some(leader) = ble.tick() {
+    omni_paxos.handle_leader(leader);
+}
 
-let cfg: &amp;Hocon = &amp;raw_cfg[&quot;ble_config&quot;];
+for out_msg in ble.get_outgoings_msgs() {
+    let receiver = out_msg.to;
+    // send out_msg to receiver on network layer
+}
+
+// handle incoming message on network layer
+let msg: BLEMessage = ...;    // message received to this server.
+ble.handle(msg);
 </code></pre>
+<p>As seen in the example, incoming and outgoing messages are handled in the same manner as in <code>OmniPaxos</code>. Furthermore, BLE also has a constructor that uses hocon: <code>with_hocon()</code>. </p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../introduction/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/logging.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../omnipaxos/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../project.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -246,11 +218,11 @@ let cfg: &amp;Hocon = &amp;raw_cfg[&quot;ble_config&quot;];
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../introduction/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/logging.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../omnipaxos/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../project.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

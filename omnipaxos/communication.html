@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">2.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">3.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html" class="active"><strong aria-hidden="true">3.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/round.html"><strong aria-hidden="true">3.2.</strong> Round</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">3.3.</strong> Logging</a></li><li class="chapter-item expanded "><a href="../omnipaxos/configuration.html"><strong aria-hidden="true">3.4.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">3.5.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">3.6.</strong> Garbage Collection</a></li></ol></li><li class="chapter-item expanded "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html" class="active"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -149,18 +149,62 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
-<p>By default, OmniPaxos does not implement any network dispatcher. It is up to the user to provide an implementation of the network.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// Create a timer that triggers once every 1ms
-// Get the outgoing messages and send them through the network to the receivers
-timer = create_timer(1ms, {
-    let msgs = paxos.get_outgoing_msgs();
-    for out_msg in msgs {
-        let receiver = out_msg.to;
-        // send out_msg to receiver
-    }
-})
+<p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user interacts with OmniPaxos and its incoming and outgoing messages. Furthermore, we show how new log entries are proposed and handled when they get decided. </p>
+<h2 id="propose-entries"><a class="header" href="#propose-entries">Propose Entries</a></h2>
+<p>To propose a log entry to be replicated, the <code>OmniPaxos::propose_normal()</code> function is called (we reuse the <code>storage</code> and <code>omni_paxos</code> variables created in earlier <a href="../omnipaxos/index.html">examples</a>):</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let data: Vec&lt;u8&gt; = ... ;   // log entry as raw bytes
+omni_paxos.propose_normal(data).expect(&quot;Failed to propose normal proposal&quot;);
 </code></pre>
-<p>In the example above we schedule a timer once every 1ms to extract a vector of messages (outgoing queue) from inside of a Paxos replica, then we iterate through each message and send it through the network to the target replica.</p>
+<p>Proposals can be pipelined without waiting for preceeding entries to be decided. Furthermore, <code>propose_normal</code> can be called on any server. If the calling server is not the leader, the proposal will be forwarded. </p>
+<blockquote>
+<p><strong>Note</strong> For now, we only support proposing and deciding raw byte log entries with <code>Vec&lt;u8&gt;</code>. However, it would be possible to use a generic log entry type <code>T</code>. We would be more than happy to guide/help anyone interested in implementing this :)</p>
+</blockquote>
+<h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
+<p>By proposing a log entry, the <code>OmniPaxos</code> instance will produce outgoing messages to its peers. The outgoing messages can be accessed by calling <code>OmniPaxos::get_outgoing_msgs()</code>. These messages then need to be sent to the intended server by the user themselves on the network layer. An incoming message should then be handled with the function <code>OmniPaxos::handle()</code>. Handling the incoming message will change the state and produce outgoing messages of <code>OmniPaxos</code> according to the protocol.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages (this should be called periodically, e.g. every 500ms)
+for out_msg in omni_paxos.get_outgoings_msgs() {
+    let receiver = out_msg.to;
+    // send out_msg to receiver on network layer
+}
+
+// handle incoming message on network layer
+let msg: PaxosMsg = ...;    // message received to this server.
+omni_paxos.handle(msg);
+</code></pre>
+<h2 id="decided-entries"><a class="header" href="#decided-entries">Decided Entries</a></h2>
+<p>If a server is not partitioned from the leader, its local instance eventually decide log entries that are guaranteed to be consistent and linearizable. Thus, these entries can be fetched via <code>OmniPaxos::get_latest_decided_entries()</code> and are safe to be handled by a higher level application. </p>
+<blockquote>
+<p><strong>Note</strong> <code>get_latest_decided_entries()</code> returns all the decided elements <strong>since the last time it was called</strong> and is thus intended to be called periodically. To get all decided entries (since the start), use <code>get_decided_entries()</code></p>
+</blockquote>
+<h2 id="reconfiguration"><a class="header" href="#reconfiguration">Reconfiguration</a></h2>
+<p>Reconfiguration can be used to add or remove servers from the cluster. To propose a reconfiguration, use <code>OmniPaxos::propose_reconfiguration()</code>:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let new_cluster = vec![1, 2, 4];    // oops replica 3 appears to have crashed... let's replace it with a new replica 4
+omni_paxos.propose_reconfiguration(new_cluster, None).expect(&quot;Failed to propose reconfiguration&quot;);
+
+...
+
+// handle decided log entries periodically
+for entry in omni_paxos.get_latest_decided_entries() {
+    match entry {
+        Entry::Normal(data) =&gt; {    // handle decided normal log entry
+            // data in Vec&lt;u8&gt; that was proposed.
+        }
+        Entry::StopSign(ss) =&gt; {    // handle completed reconfiguration
+            let next_configuration_id = ss.config_id;
+            let next_cluster = ss.nodes;
+            let next_leader = ss.skip_prepare_use_leader;   // if Some(), then the replica instances in the new
+                                                            // configuration should use this in their constructor
+            // handle reconfiguration
+        }
+    }
+}
+
+</code></pre>
+<p>Upon deciding a <code>StopSign</code>, the user should create a new replica instance with the new configuration id if the corresponding server is in <code>StopSign.nodes</code>. Furthermore, the user should also notify and migrate the log to any new servers joining the cluster. To stop the old instance and get the final log in the old configuration, one can call:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let final_seq = self.omni_paxos.stop_and_get_sequence();
+// notify about reconfiguration and migrate log to new servers
+</code></pre>
+<p>The user has to implement the log migration themselves. We do not support it since depending on the deployed environment, it could require specific migration schemes to achieve best performance and lowest cost.</p>
 
                     </main>
 
@@ -170,7 +214,7 @@ timer = create_timer(1ms, {
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../omnipaxos/round.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/garbage-collection.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -184,7 +228,7 @@ timer = create_timer(1ms, {
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../omnipaxos/round.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/garbage-collection.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

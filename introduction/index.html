@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html" class="active"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">2.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">3.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">3.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/round.html"><strong aria-hidden="true">3.2.</strong> Round</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">3.3.</strong> Logging</a></li><li class="chapter-item expanded "><a href="../omnipaxos/configuration.html"><strong aria-hidden="true">3.4.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">3.5.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">3.6.</strong> Garbage Collection</a></li></ol></li><li class="chapter-item expanded "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html" class="active"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -149,12 +149,8 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>In this section of the tutorial, we will discuss the model assumptions and concepts that are underlying the implementation of OmniPaxos. We will look at how the <a href="../omnipaxos/index.html"><code>OmniPaxos</code></a> and <a href="../ble/index.html"><code>Ballot Leader Election</code></a> modules communicate between them, while also providing examples for the user utilising an actor framework such as <a href="https://github.com/kompics/kompact">Kompact</a>.</p>
-<p>The replicas that are created communicate by exchanging discrete pieces of information (<em>messages</em>). The network layer is provided by the user alongside the sending and receiving of messages.</p>
-<h2 id="components"><a class="header" href="#components">Components</a></h2>
-<p>The OmniPaxos library can be divided into two big components
-<a href="../omnipaxos/index.html"><strong>OmniPaxos</strong></a> and <a href="../ble/index.html"><strong>Ballot Leader Election</strong></a> (<em>BLE</em>). By default, OmniPaxos comes without a leader election algorithm as it can be provided by the user. The library includes the BLE algorithm as an already implemented alternative.</p>
-
+<p>The OmniPaxos library is mainly driven by the <a href="../omnipaxos/index.html"><strong>OmniPaxos</strong></a> and <a href="../ble/index.html"><strong>Ballot Leader Election</strong></a> (<em>BLE</em>) structs.  These are plain Rust structs and the user therefore needs to provide a network implementation themselves to actually send and receive messages. In this tutorial we will show how a user should interact with these structs in order to implement a fault-tolerant replicated log. This tutorial will focus on how to use the library and showcase its features. </p>
+<!-- For the properties and advantages of OmniPaxos in comparison to other similar protocols, we refer to the Omni-Paxos paper. -->
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
@@ -163,7 +159,7 @@
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../ble/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -177,7 +173,7 @@
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../ble/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>
