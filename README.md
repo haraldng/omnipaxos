@@ -5,10 +5,10 @@ OmniPaxos is an in-development sequence consensus library implemented in the Rus
 
 Similar to Raft, the Omni-Paxos algorithm can be used to build abstractions such as a distributed log or state-machine replication. However, Omni-Paxos uses a modular design that makes it resilient to partial connectivity and provides an efficient reconfiguration that allows new server to catch up the log in parallel.
 
-An OmniPaxos replica is implemented as a Rust ```struct```. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact).
+An OmniPaxos replica is implemented as a Rust ```struct```. This allows it to be used with any desired storage and network implementations. This should allow for convenient usage in general or on top of an actor framework such as [Kompact](https://github.com/kompics/kompact). For more detailed explanations and examples, check out the [tutorial](https://haraldng.github.io/omnipaxos/foreword.html).
 
 ## Example
-```rust
+```rust,edition2018,no_run,noplaypen
 use omnipaxos::{leader_election::*, paxos::*, storage::*};
 
 // configuration with id 1 and the following cluster
@@ -24,35 +24,48 @@ let paxos_state = P::new();     // P is a type that implements the storage::Paxo
 let storage = Storage::with(sequence, paxos_state);
 
 // create a replica in configuration 1 with process id 2
-let paxos = Paxos::with(
-    config_id: configuration_id,
-    pid: my_pid,
-    peers: my_peers,
+let omni_paxos = OmniPaxos::with(
+    configuration_id,
+    my_pid,
+    my_peers,
     storage,
     ...
 );
 
+// create the corresponding Ballot Leader Election instance of this replica
+let ble = BallotLeaderElection::with(
+    my_pid, 
+    my_peers,
+    ...
+)
+
 ...
 
-// external leader election indicates we are the leader with the event l
-paxos.handle_leader(l);
+if let Some(leader) = ble.tick() {
+    // BLE indicates a leader has been elected
+    omni_paxos.handle_leader(leader);
+} 
 
 ...
 
 // propose a client request
-let data: Vec<u8> = ...; // client request as raw bytes
-paxos.propose_normal(data).expect("Failed to propose normal proposal");
+let data: Vec<u8> = ...; // request as raw bytes
+omni_paxos.propose_normal(data).expect("Failed to propose normal proposal");
 
 ...
 
 // propose a reconfiguration
 let new_cluster = vec![1, 2, 4];    // oops replica 3 appears to have crashed... let's replace it with a new replica 4
-paxos.propose_reconfiguration(new_cluster).expect("Failed to propose reconfiguration");
+omni_paxos.propose_reconfiguration(new_cluster, None).expect("Failed to propose reconfiguration");
 
 ...
 
-// send outgoing messages
-for out_msg in paxos.get_outgoings_msgs() {
+// send outgoing messages. This should be called periodically by user
+for out_msg in omni_paxos.get_outgoings_msgs() {
+    let receiver = out_msg.to;
+    // send out_msg to receiver
+}
+for out_msg in ble.get_outgoings_msgs() {
     let receiver = out_msg.to;
     // send out_msg to receiver
 }
@@ -60,7 +73,7 @@ for out_msg in paxos.get_outgoings_msgs() {
 ...
 
 // handle decided client requests
-for entry in paxos.get_decided_entries() {
+for entry in omni_paxos.get_decided_entries() {
     match entry {
         Entry::Normal(data) => {    // handle normally decided entries
             // data is represented as raw bytes: Vec<u8>
@@ -72,7 +85,6 @@ for entry in paxos.get_decided_entries() {
         }
     }
 }
-
 ```
 
 ## License
