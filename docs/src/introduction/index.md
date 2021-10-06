@@ -1,10 +1,4 @@
 # Introduction
 
-In this section of the tutorial, we will discuss the model assumptions and concepts that are underlying the implementation of OmniPaxos. We will look at how the [`OmniPaxos`](../omnipaxos/index.md) and [`Ballot Leader Election`](../ble/index.md) modules communicate between them, while also providing examples for the user utilising an actor framework such as [Kompact](https://github.com/kompics/kompact).
-
-The replicas that are created communicate by exchanging discrete pieces of information (*messages*). The network layer is provided by the user alongside the sending and receiving of messages.
-
-## Components
-
-The OmniPaxos library can be divided into two big components
-[**OmniPaxos**](../omnipaxos/index.md) and [**Ballot Leader Election**](../ble/index.md) (*BLE*). By default, OmniPaxos comes without a leader election algorithm as it can be provided by the user. The library includes the BLE algorithm as an already implemented alternative.
+The OmniPaxos library is mainly driven by the [**OmniPaxos**](../omnipaxos/index.md) and [**Ballot Leader Election**](../ble/index.md) (*BLE*) structs.  These are plain Rust structs and the user therefore needs to provide a network implementation themselves to actually send and receive messages. In this tutorial we will show how a user should interact with these structs in order to implement a fault-tolerant replicated log. This tutorial will focus on how to use the library and showcase its features. 
+<!-- For the properties and advantages of OmniPaxos in comparison to other similar protocols, we refer to the Omni-Paxos paper. -->

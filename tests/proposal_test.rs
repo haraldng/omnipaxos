@@ -18,14 +18,7 @@ use util::TestSystem;
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.ble_hb_delay,
-        None,
-        None,
-        cfg.increment_delay,
-        cfg.num_threads,
-    );
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 

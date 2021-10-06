@@ -65,7 +65,6 @@ where
     latest_accepted_meta: Option<(R, usize)>,
     outgoing: Vec<Message<R>>,
     num_nodes: usize,
-    disconnected_peers: Vec<u64>,
     /// Logger used to output the status of the component.
     logger: Logger,
     cached_gc_index: u64,
@@ -83,7 +82,7 @@ where
     /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
     /// * `pid` - The identifier of this Omni-Paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
-    /// * `storage` - Implementation of a storage used to store the messages.
+    /// * `storage` - Implementation of a storage used to store the messages. If recovering from failure, make sure this is loaded with the previously persisted values and call `fail_recovery()` after construction.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     /// * `logger` - Used for logging events of OmniPaxos.
     /// * `log_file_path` - Path where the default logger logs events.
@@ -126,7 +125,12 @@ where
         };
 
         let l = logger.unwrap_or_else(|| {
-            create_logger(log_file_path.unwrap_or(format!("logs/paxos_{}.log", pid).as_str()))
+            if let Some(p) = log_file_path {
+                create_logger(p)
+            } else {
+                let t = format!("logs/paxos_{}.log", pid);
+                create_logger(log_file_path.unwrap_or_else(|| t.as_str()))
+            }
         });
 
         info!(l, "Paxos component pid: {} created!", pid);
@@ -152,7 +156,6 @@ where
             latest_accepted_meta: None,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             num_nodes,
-            disconnected_peers: vec![],
             logger: l,
             cached_gc_index: 0,
         };
@@ -204,6 +207,15 @@ where
     /// Return garbage collection index from storage.
     pub fn get_garbage_collected_idx(&self) -> u64 {
         self.storage.get_gc_idx()
+    }
+
+    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers. Assumes that `self.storage` contains the persisted values before failing.
+    pub fn fail_recovery(&mut self) {
+        self.state = (Role::Follower, Phase::Recover);
+        for pid in &self.peers {
+            let m = Message::with(self.pid, *pid, PaxosMsg::PrepareReq);
+            self.outgoing.push(m);
+        }
     }
 
     fn gc_prepare(&mut self, index: Option<u64>) {
@@ -430,24 +442,16 @@ where
         self.storage.stop_and_get_sequence()
     }
 
-    /// Handles a disconnection to another peer.
-    /// This should only be called if the underlying network implementation indicates that a connection has been dropped and some messages might have been lost.
-    pub fn connection_lost(&mut self, pid: u64) {
-        debug!(self.logger, "Connection lost to pid: {}", pid);
-        if self.state.0 == Role::Follower && self.leader == pid {
-            self.state = (Role::Follower, Phase::Recover);
-        }
-        self.disconnected_peers.push(pid);
-    }
-
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
-    pub fn connection_reestablished(&mut self, pid: u64) {
-        self.disconnected_peers.retain(|p| p != &pid);
-        if self.state.1 == Phase::Recover && self.leader == pid {
-            self.outgoing
-                .push(Message::with(self.pid, pid, PaxosMsg::PrepareReq));
+    pub fn reconnected(&mut self, pid: u64) {
+        if pid == self.pid {
+            return;
+        } else if pid == self.leader {
+            self.state = (Role::Follower, Phase::Recover);
         }
+        self.outgoing
+            .push(Message::with(self.pid, pid, PaxosMsg::PrepareReq));
     }
 
     fn propose_entry(&mut self, entry: Entry<R>) {
@@ -511,11 +515,6 @@ where
                 ));
             }
         } else {
-            if self.state.1 == Phase::Recover || self.disconnected_peers.contains(&leader_pid) {
-                self.disconnected_peers.retain(|pid| pid != &leader_pid);
-                self.outgoing
-                    .push(Message::with(self.pid, leader_pid, PaxosMsg::PrepareReq));
-            }
             self.state.0 = Role::Follower;
         }
     }
@@ -523,6 +522,16 @@ where
     fn handle_preparereq(&mut self, from: u64) {
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
+            let idx = Self::get_idx_from_pid(from);
+            self.lds[idx] = None;
+            #[cfg(feature = "batch_accept")]
+            {
+                self.batch_accept_meta[idx] = None;
+            }
+            #[cfg(feature = "latest_decide")]
+            {
+                self.latest_decide_meta[idx] = None;
+            }
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
             let la = self.storage.get_sequence_len();
@@ -803,7 +812,7 @@ where
             "Self role {:?}, phase {:?}. Incoming message Promise Accept from {}", r, p, from
         );
         if prom.n == self.n_leader {
-            let idx = from as usize - 1;
+            let idx = Self::get_idx_from_pid(from);
             self.lds[idx] = Some(prom.ld);
             let PromiseMetaData {
                 n: max_round,
@@ -822,6 +831,11 @@ where
             let acc_sync = AcceptSync::with(self.n_leader.clone(), sfx, sync_idx);
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
+            #[cfg(feature = "batch_accept")]
+            {
+                self.batch_accept_meta[idx] =
+                    Some((self.n_leader.clone(), self.outgoing.len() - 1));
+            }
             // inform what got decided already
             let ld = if self.lc > 0 {
                 self.lc
@@ -834,7 +848,6 @@ where
                     .push(Message::with(self.pid, from, PaxosMsg::Decide(d)));
                 #[cfg(feature = "latest_decide")]
                 {
-                    let idx = from as usize - 1;
                     let cached_idx = self.outgoing.len() - 1;
                     self.latest_decide_meta[idx] = Some((self.n_leader.clone(), cached_idx));
                 }
@@ -904,8 +917,7 @@ where
 
     /*** Follower ***/
     fn handle_prepare(&mut self, prep: Prepare<R>, from: u64) {
-        debug!(self.logger, "Incoming message Prepare from {}", from);
-        if self.storage.get_promise() < prep.n {
+        if self.storage.get_promise() <= prep.n {
             self.leader = from;
             self.storage.set_promise(prep.n.clone());
             self.state = (Role::Follower, Phase::Prepare);
@@ -925,8 +937,7 @@ where
     }
 
     fn handle_acceptsync(&mut self, accsync: AcceptSync<R>, from: u64) {
-        debug!(self.logger, "Incoming message Accept Sync from {}", from);
-        if self.state == (Role::Follower, Phase::Prepare) && self.storage.get_promise() == accsync.n
+        if self.storage.get_promise() == accsync.n && self.state == (Role::Follower, Phase::Prepare)
         {
             self.storage.set_accepted_round(accsync.n.clone());
             let mut entries = accsync.entries;
@@ -966,22 +977,18 @@ where
     }
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
-        trace!(self.logger, "Incoming message Accept Decide");
-        if self.storage.get_promise() == acc.n {
-            if let (Role::Follower, Phase::Accept) = self.state {
-                let mut entries = acc.entries;
-                self.accept_entries(acc.n, &mut entries);
-                // handle decide
-                if acc.ld > self.storage.get_decided_len() {
-                    self.storage.set_decided_len(acc.ld);
-                }
+        if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
+            let mut entries = acc.entries;
+            self.accept_entries(acc.n, &mut entries);
+            // handle decide
+            if acc.ld > self.storage.get_decided_len() {
+                self.storage.set_decided_len(acc.ld);
             }
         }
     }
 
     fn handle_decide(&mut self, dec: Decide<R>) {
-        trace!(self.logger, "Incoming message Decide");
-        if self.storage.get_promise() == dec.n && self.state.1 != Phase::Recover {
+        if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
             self.storage.set_decided_len(dec.ld);
         }
     }

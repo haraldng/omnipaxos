@@ -1,13 +1,3 @@
 # Garbage Collection
 
-OmniPaxos offers a garbage collection feature that can be called to compact the replicated log.
-
-```rust,edition2018,no_run,noplaypen
-// `index` - Deletes all entries up to index, if the index is None then the 
-// minimum index accepted by ALL servers will be used as the index.
-crate::omnipaxos::OmniPaxos::garbage_collect(index)
-```
-
-The function can be called from any replica. If the replica which initiates the garbage collection is not the leader then it will redirect the proposal for garbage collection to the leader which in turn will initiate the garbage collection for all the replicas in the system.
-
-> **Note:** At the moment there is no way of knowing if the garbage collection has been completed successfully. The only method would be to get the garbage_collected_idx and see if it is equal to the given index.
+OmniPaxos offers a garbage collection feature that can be called to compact the replicated log. The `OmniPaxos::garbage_collect()` has an argument `Option<u64>` that specifies up to what index the log should be garbage collected. If `None`, then the minimum index accepted by ALL servers will be used as the index. The garbage collection is initiated by the leader and only completed if all servers respond that log entries up to that index has already been handled by the user. To determine if the garbage collection succeeded, the user can check the `garbage_collected_idx` field of `OmniPaxos`.
