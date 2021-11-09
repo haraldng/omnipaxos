@@ -32,20 +32,24 @@ enum Role {
 /// An error returning the proposal that was failed due to that the current configuration is stopped.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub enum ProposeErr {
-    Normal(Vec<u8>),
+pub enum ProposeErr<T>
+where
+    T: AsRef<u8> + Clone,
+{
+    Normal(T),
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
 }
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<R, S, P>
+pub struct OmniPaxos<R, S, T, P>
 where
     R: Round,
-    S: Sequence<R>,
-    P: PaxosState<R>,
+    S: Sequence<T>,
+    P: PaxosState<R, T>,
+    T: AsRef<u8> + Clone,
 {
-    storage: Storage<R, S, P>,
+    storage: Storage<R, S, T, P>,
     config_id: u32,
     pid: u64,
     majority: usize,
@@ -56,25 +60,26 @@ where
     promises_meta: Vec<Option<PromiseMetaData<R>>>,
     las: Vec<u64>,
     lds: Vec<Option<u64>>,
-    proposals: Vec<Entry<R>>,
+    proposals: Vec<Entry<T>>,
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
     max_promise_meta: PromiseMetaData<R>,
     batch_accept_meta: Vec<Option<(R, usize)>>, //  R, index in outgoing
     latest_decide_meta: Vec<Option<(R, usize)>>,
     latest_accepted_meta: Option<(R, usize)>,
-    outgoing: Vec<Message<R>>,
+    outgoing: Vec<Message<R, T>>,
     num_nodes: usize,
     /// Logger used to output the status of the component.
     logger: Logger,
     cached_gc_index: u64,
 }
 
-impl<R, S, P> OmniPaxos<R, S, P>
+impl<R, S, T, P> OmniPaxos<R, S, T, P>
 where
     R: Round,
-    S: Sequence<R>,
-    P: PaxosState<R>,
+    S: Sequence<T>,
+    P: PaxosState<R, T>,
+    T: AsRef<u8> + Clone,
 {
     /*** User functions ***/
     /// Creates an Omni-Paxos replica.
@@ -90,11 +95,10 @@ where
         config_id: u32,
         pid: u64,
         peers: Vec<u64>,
-        storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> OmniPaxos<R, S, P> {
+    ) -> OmniPaxos<R, S, T, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -136,7 +140,7 @@ where
         info!(l, "Paxos component pid: {} created!", pid);
 
         let mut paxos = OmniPaxos {
-            storage,
+            storage: Storage::with(S::new(), P::new()),
             pid,
             config_id,
             majority,
@@ -174,15 +178,13 @@ where
         &self,
         cfg: &Hocon,
         peers: Vec<u64>,
-        storage: Storage<R, S, P>,
         skip_prepare_use_leader: Option<Leader<R>>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<R, S, P> {
-        OmniPaxos::<R, S, P>::with(
+    ) -> OmniPaxos<R, S, T, P> {
+        OmniPaxos::<R, S, T, P>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
-            storage,
             skip_prepare_use_leader,
             logger,
             Option::from(
@@ -285,7 +287,7 @@ where
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
-    pub fn get_outgoing_msgs(&mut self) -> Vec<Message<R>> {
+    pub fn get_outgoing_msgs(&mut self) -> Vec<Message<R, T>> {
         let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
@@ -304,7 +306,7 @@ where
     }
 
     /// Returns the decided entries since the last call of this function.
-    pub fn get_latest_decided_entries(&mut self) -> &[Entry<R>] {
+    pub fn get_latest_decided_entries(&mut self) -> &[Entry<T>] {
         let ld = self.storage.get_decided_len();
         if self.prev_ld < ld {
             let decided = self.storage.get_entries(
@@ -319,13 +321,13 @@ where
     }
 
     /// Returns the entire decided entries of this replica.
-    pub fn get_decided_entries(&self) -> &[Entry<R>] {
+    pub fn get_decided_entries(&self) -> &[Entry<T>] {
         self.storage
             .get_entries(0, self.storage.get_decided_len() - self.cached_gc_index)
     }
 
     /// Handle an incoming message.
-    pub fn handle(&mut self, m: Message<R>) {
+    pub fn handle(&mut self, m: Message<R, T>) {
         match m.msg {
             PaxosMsg::PrepareReq => self.handle_preparereq(m.from),
             PaxosMsg::Prepare(prep) => self.handle_prepare(prep, m.from),
@@ -351,7 +353,7 @@ where
     }
 
     /// Propose a normal entry to be replicated.
-    pub fn propose_normal(&mut self, data: Vec<u8>) -> Result<(), ProposeErr> {
+    pub fn propose_normal(&mut self, data: T) -> Result<(), ProposeErr<T>> {
         if self.stopped() {
             Err(ProposeErr::Normal(data))
         } else {
@@ -368,8 +370,8 @@ where
     pub fn propose_reconfiguration(
         &mut self,
         new_configuration: Vec<u64>,
-        prio_start_round: Option<R>,
-    ) -> Result<(), ProposeErr> {
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr<T>> {
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_configuration
@@ -377,38 +379,7 @@ where
         if self.stopped() {
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
-            let continued_nodes: Vec<&u64> = new_configuration
-                .iter()
-                .filter(|&pid| pid == &self.pid || self.peers.contains(pid))
-                .collect();
-            let skip_prepare_use_leader = {
-                let max_pid = if cfg!(feature = "continued_leader_reconfiguration")
-                    && continued_nodes.contains(&&self.pid)
-                {
-                    // make ourselves the initial leader in the next configuration
-                    self.pid
-                } else {
-                    let my_idx = self.pid as usize - 1;
-                    let max_idx = self
-                        .las
-                        .iter()
-                        .enumerate()
-                        .filter(|(idx, _)| {
-                            idx != &my_idx && continued_nodes.contains(&&(*idx as u64 + 1))
-                        })
-                        .max_by(|(_, la), (_, other_la)| la.cmp(other_la));
-                    match max_idx {
-                        Some((other_idx, _)) => other_idx as u64 + 1, // give leadership of new config to most up-to-date follower
-                        None => self.pid,
-                    }
-                };
-                Some(Leader::with(max_pid, prio_start_round.unwrap_or_default()))
-            };
-            let ss = StopSign::with(
-                self.config_id + 1,
-                new_configuration,
-                skip_prepare_use_leader,
-            );
+            let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
             let entry = Entry::StopSign(ss);
             self.propose_entry(entry);
             Ok(())
@@ -416,7 +387,7 @@ where
     }
 
     /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
-    pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<Entry<R>> {
+    pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<Entry<T>> {
         let ld = self.storage.get_decided_len();
         let max_idx = std::cmp::max(ld, self.lc);
         if to_idx > max_idx {
@@ -454,7 +425,7 @@ where
             .push(Message::with(self.pid, pid, PaxosMsg::PrepareReq));
     }
 
-    fn propose_entry(&mut self, entry: Entry<R>) {
+    fn propose_entry(&mut self, entry: Entry<T>) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.send_accept(entry),
@@ -555,7 +526,7 @@ where
         }
     }
 
-    fn forward_proposals(&mut self, mut entries: Vec<Entry<R>>) {
+    fn forward_proposals(&mut self, mut entries: Vec<Entry<T>>) {
         if self.leader > 0 && self.leader != self.pid {
             trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
@@ -578,7 +549,7 @@ where
         }
     }
 
-    fn handle_forwarded_proposal(&mut self, mut entries: Vec<Entry<R>>) {
+    fn handle_forwarded_proposal(&mut self, mut entries: Vec<Entry<T>>) {
         trace!(self.logger, "Incoming Forwarded Proposal");
         if !self.stopped() {
             match self.state {
@@ -594,7 +565,7 @@ where
         }
     }
 
-    fn send_first_accept(&mut self, entry: Entry<R>) {
+    fn send_first_accept(&mut self, entry: Entry<T>) {
         let promised_pids = self
             .lds
             .iter()
@@ -614,7 +585,7 @@ where
         self.state.1 = Phase::Accept;
     }
 
-    fn send_accept(&mut self, entry: Entry<R>) {
+    fn send_accept(&mut self, entry: Entry<T>) {
         let promised_idx = self
             .lds
             .iter()
@@ -661,7 +632,7 @@ where
         self.las[self.pid as usize - 1] = la;
     }
 
-    fn send_batch_accept(&mut self, mut entries: Vec<Entry<R>>) {
+    fn send_batch_accept(&mut self, mut entries: Vec<Entry<T>>) {
         let promised_idx = self
             .lds
             .iter()
@@ -710,7 +681,7 @@ where
         self.las[self.pid as usize - 1] = la;
     }
 
-    fn handle_promise_prepare(&mut self, prom: Promise<R>, from: u64) {
+    fn handle_promise_prepare(&mut self, prom: Promise<R, T>, from: u64) {
         let (r, p) = &self.state;
         debug!(
             self.logger,
@@ -805,7 +776,7 @@ where
         }
     }
 
-    fn handle_promise_accept(&mut self, prom: Promise<R>, from: u64) {
+    fn handle_promise_accept(&mut self, prom: Promise<R, T>, from: u64) {
         let (r, p) = &self.state;
         debug!(
             self.logger,
@@ -877,7 +848,9 @@ where
                                         PaxosMsg::AcceptDecide(a) => a.ld = self.lc,
                                         PaxosMsg::Decide(d) => d.ld = self.lc,
                                         _ => {
-                                            panic!("Cached Message<R> in outgoing was not Decide")
+                                            panic!(
+                                                "Cached Message<R, T> in outgoing was not Decide"
+                                            )
                                         }
                                     }
                                 }
@@ -936,7 +909,7 @@ where
         }
     }
 
-    fn handle_acceptsync(&mut self, accsync: AcceptSync<R>, from: u64) {
+    fn handle_acceptsync(&mut self, accsync: AcceptSync<R, T>, from: u64) {
         if self.storage.get_promise() == accsync.n && self.state == (Role::Follower, Phase::Prepare)
         {
             self.storage.set_accepted_round(accsync.n.clone());
@@ -961,7 +934,7 @@ where
         }
     }
 
-    fn handle_firstaccept(&mut self, f: FirstAccept<R>) {
+    fn handle_firstaccept(&mut self, f: FirstAccept<R, T>) {
         debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             let mut entries = f.entries;
@@ -976,7 +949,7 @@ where
         }
     }
 
-    fn handle_acceptdecide(&mut self, acc: AcceptDecide<R>) {
+    fn handle_acceptdecide(&mut self, acc: AcceptDecide<R, T>) {
         if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
             let mut entries = acc.entries;
             self.accept_entries(acc.n, &mut entries);
@@ -994,7 +967,7 @@ where
     }
 
     /*** algorithm specific functions ***/
-    fn drop_after_stopsign(entries: &mut Vec<Entry<R>>) {
+    fn drop_after_stopsign(entries: &mut Vec<Entry<T>>) {
         // drop all entries ordered after stopsign (if any)
         let ss_idx = entries.iter().position(|e| e.is_stopsign());
         if let Some(idx) = ss_idx {
@@ -1002,7 +975,7 @@ where
         };
     }
 
-    fn accept_entries(&mut self, n: R, entries: &mut Vec<Entry<R>>) {
+    fn accept_entries(&mut self, n: R, entries: &mut Vec<Entry<T>>) {
         let la = self.storage.append_sequence(entries);
         if cfg!(feature = "latest_accepted") {
             match &self.latest_accepted_meta {
@@ -1010,7 +983,7 @@ where
                     let Message { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
                     match msg {
                         PaxosMsg::Accepted(a) => a.la = la,
-                        _ => panic!("Cached idx is not an Accepted Message<R>!"),
+                        _ => panic!("Cached idx is not an Accepted Message<R, T>!"),
                     }
                 }
                 _ => {
