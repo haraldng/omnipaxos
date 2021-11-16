@@ -47,7 +47,7 @@ where
     R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R, T>,
+    P: PaxosState<R>,
 {
     storage: Storage<R, T, S, P>,
     config_id: u32,
@@ -64,6 +64,7 @@ where
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
     max_promise_meta: PromiseMetaData<R>,
+    max_promise_sfx: Option<Vec<Entry<T>>>,
     batch_accept_meta: Vec<Option<(R, usize)>>, //  R, index in outgoing
     latest_decide_meta: Vec<Option<(R, usize)>>,
     latest_accepted_meta: Option<(R, usize)>,
@@ -79,7 +80,7 @@ where
     R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R, T>,
+    P: PaxosState<R>,
 {
     /*** User functions ***/
     /// Creates an Omni-Paxos replica.
@@ -154,6 +155,7 @@ where
             lc: 0,
             prev_ld: 0,
             max_promise_meta: PromiseMetaData::with(R::default(), 0, 0),
+            max_promise_sfx: None,
             batch_accept_meta: vec![None; num_nodes],
             latest_decide_meta: vec![None; num_nodes],
             latest_accepted_meta: None,
@@ -470,12 +472,11 @@ where
             /* insert my promise */
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_len();
-            let sfx = self.storage.get_suffix(ld - self.cached_gc_index);
             let la = self.storage.get_sequence_len();
             let promise_meta = PromiseMetaData::with(na, la, self.pid);
             self.max_promise_meta = promise_meta.clone();
             self.promises_meta[self.pid as usize - 1] = Some(promise_meta);
-            self.storage.set_max_promise_sfx(sfx);
+            self.max_promise_sfx = None;
             /* initialise longest chosen sequence and update state */
             self.lc = 0;
             self.state = (Role::Leader, Phase::Prepare);
@@ -694,7 +695,7 @@ where
             let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
             if promise_meta > self.max_promise_meta {
                 self.max_promise_meta = promise_meta.clone();
-                self.storage.set_max_promise_sfx(prom.sfx);
+                self.max_promise_sfx = Some(prom.sfx);
             }
             let idx = Self::get_idx_from_pid(from);
             self.promises_meta[idx] = Some(promise_meta);
@@ -706,7 +707,10 @@ where
                     la: max_la,
                     pid: max_pid,
                 } = &self.max_promise_meta;
-                let mut max_prm_sfx = self.storage.get_max_promise_sfx();
+                let mut max_prm_sfx = self.max_promise_sfx.take().unwrap_or({
+                    let ld = self.storage.get_decided_len();
+                    self.storage.get_suffix(ld - self.cached_gc_index)
+                });
                 let last_is_stop = match max_prm_sfx.last() {
                     Some(e) => e.is_stopsign(),
                     None => false,
