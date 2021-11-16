@@ -87,7 +87,6 @@ where
     /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
     /// * `pid` - The identifier of this Omni-Paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
-    /// * `storage` - Implementation of a storage used to store the messages. If recovering from failure, make sure this is loaded with the previously persisted values and call `fail_recovery()` after construction.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     /// * `logger` - Used for logging events of OmniPaxos.
     /// * `log_file_path` - Path where the default logger logs events.
@@ -211,8 +210,12 @@ where
         self.storage.get_gc_idx()
     }
 
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers. Assumes that `self.storage` contains the persisted values before failing.
-    pub fn fail_recovery(&mut self) {
+    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
+    /// # Arguments
+    /// * `sequence`: The persisted log before crashing.
+    /// * `state`: The persisted state of this OmniPaxos before crashing.
+    pub fn fail_recovery(&mut self, sequence: S, state: P) {
+        self.storage = Storage::with(sequence, state);
         self.state = (Role::Follower, Phase::Recover);
         for pid in &self.peers {
             let m = Message::with(self.pid, *pid, PaxosMsg::PrepareReq);
