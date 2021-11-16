@@ -89,10 +89,9 @@ where
 }
 
 /// Trait to implement a back-end for the internal state used by an Omni-Paxos replica.
-pub trait PaxosState<R, T>
+pub trait PaxosState<R>
 where
     R: Round,
-    T: AsRef<u8> + Clone,
 {
     /// Creates an empty initial state.
     fn new() -> Self;
@@ -105,12 +104,6 @@ where
 
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: R);
-
-    /// Stores the suffix from the maximum promise.
-    fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<T>>);
-
-    /// Returns the stored suffix of the maximum promise. Since this is only used once by the leader in the Prepare phase, it is recommended to return the consumed value.
-    fn get_max_promise_sfx(&mut self) -> Vec<Entry<T>>;
 
     /// Returns the latest round in which entries have been accepted.
     fn get_accepted_round(&self) -> R;
@@ -145,7 +138,7 @@ where
     R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R, T>,
+    P: PaxosState<R>,
 {
     sequence: PaxosSequence<S, T>,
     paxos_state: P,
@@ -157,7 +150,7 @@ where
     R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R, T>,
+    P: PaxosState<R>,
 {
     /// Creates a [`Storage`] back-end for Omni-Paxos.
     /// The storage is divided into a [`Sequence`] and [`PaxosState`] allows for the log and the state to use different implementations.
@@ -327,16 +320,6 @@ where
     pub fn get_gc_idx(&self) -> u64 {
         self.paxos_state.get_gc_idx()
     }
-
-    /// Stores the suffix from the maximum promise.
-    pub fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<T>>) {
-        self.paxos_state.set_max_promise_sfx(max_promise_sfx);
-    }
-
-    /// Returns the stored suffix of the maximum promise.
-    pub fn get_max_promise_sfx(&mut self) -> Vec<Entry<T>> {
-        self.paxos_state.get_max_promise_sfx()
-    }
 }
 
 /// An in-memory storage implementation for Paxos.
@@ -418,10 +401,9 @@ pub mod memory_storage {
 
     /// Stores the state of a paxos replica in-memory.
     #[derive(Debug)]
-    pub struct MemoryState<R, T>
+    pub struct MemoryState<R>
     where
         R: Round,
-        T: AsRef<u8> + Clone,
     {
         /// Last promised round.
         n_prom: R,
@@ -431,14 +413,11 @@ pub mod memory_storage {
         ld: u64,
         /// Garbage collected index.
         gc_idx: u64,
-        /// Max promise suffix.
-        max_promise_sfx: Vec<Entry<T>>,
     }
 
-    impl<R, T> PaxosState<R, T> for MemoryState<R, T>
+    impl<R> PaxosState<R> for MemoryState<R>
     where
         R: Round,
-        T: AsRef<u8> + Clone,
     {
         fn new() -> Self {
             let r = R::default();
@@ -447,7 +426,6 @@ pub mod memory_storage {
                 acc_round: r,
                 ld: 0,
                 gc_idx: 0,
-                max_promise_sfx: vec![],
             }
         }
 
@@ -461,14 +439,6 @@ pub mod memory_storage {
 
         fn set_accepted_round(&mut self, na: R) {
             self.acc_round = na;
-        }
-
-        fn set_max_promise_sfx(&mut self, max_promise_sfx: Vec<Entry<T>>) {
-            self.max_promise_sfx = max_promise_sfx;
-        }
-
-        fn get_max_promise_sfx(&mut self) -> Vec<Entry<T>> {
-            std::mem::take(&mut self.max_promise_sfx)
         }
 
         fn get_accepted_round(&self) -> R {
