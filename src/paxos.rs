@@ -42,14 +42,14 @@ where
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<R, S, T, P>
+pub struct OmniPaxos<R, T, S, P>
 where
     R: Round,
+    T: AsRef<u8> + Clone,
     S: Sequence<T>,
     P: PaxosState<R, T>,
-    T: AsRef<u8> + Clone,
 {
-    storage: Storage<R, S, T, P>,
+    storage: Storage<R, T, S, P>,
     config_id: u32,
     pid: u64,
     majority: usize,
@@ -74,12 +74,12 @@ where
     cached_gc_index: u64,
 }
 
-impl<R, S, T, P> OmniPaxos<R, S, T, P>
+impl<R, T, S, P> OmniPaxos<R, T, S, P>
 where
     R: Round,
+    T: AsRef<u8> + Clone,
     S: Sequence<T>,
     P: PaxosState<R, T>,
-    T: AsRef<u8> + Clone,
 {
     /*** User functions ***/
     /// Creates an Omni-Paxos replica.
@@ -97,7 +97,7 @@ where
         skip_prepare_use_leader: Option<Leader<R>>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> OmniPaxos<R, S, T, P> {
+    ) -> OmniPaxos<R, T, S, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -179,8 +179,8 @@ where
         peers: Vec<u64>,
         skip_prepare_use_leader: Option<Leader<R>>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<R, S, T, P> {
-        OmniPaxos::<R, S, T, P>::with(
+    ) -> OmniPaxos<R, T, S, P> {
+        OmniPaxos::<R, T, S, P>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,

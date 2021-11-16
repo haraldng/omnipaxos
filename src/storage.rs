@@ -140,11 +140,11 @@ where
 }
 
 /// A storage back-end to be used for Omni-Paxos.
-pub(crate) struct Storage<R, S, T, P>
+pub(crate) struct Storage<R, T, S, P>
 where
     R: Round,
-    S: Sequence<T>,
     T: AsRef<u8> + Clone,
+    S: Sequence<T>,
     P: PaxosState<R, T>,
 {
     sequence: PaxosSequence<S, T>,
@@ -152,16 +152,16 @@ where
     _round_type: PhantomData<R>, // make cargo happy for unused type R
 }
 
-impl<R, S, T, P> Storage<R, S, T, P>
+impl<R, T, S, P> Storage<R, T, S, P>
 where
     R: Round,
-    S: Sequence<T>,
     T: AsRef<u8> + Clone,
+    S: Sequence<T>,
     P: PaxosState<R, T>,
 {
     /// Creates a [`Storage`] back-end for Omni-Paxos.
     /// The storage is divided into a [`Sequence`] and [`PaxosState`] allows for the log and the state to use different implementations.
-    pub fn with(seq: S, paxos_state: P) -> Storage<R, S, T, P> {
+    pub fn with(seq: S, paxos_state: P) -> Storage<R, T, S, P> {
         let sequence = PaxosSequence::Active(seq);
         Storage {
             sequence,
