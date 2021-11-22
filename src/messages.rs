@@ -29,7 +29,7 @@ impl Prepare {
 #[derive(Clone, Debug)]
 pub struct Promise<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// The current round.
     pub n: Ballot,
@@ -45,7 +45,7 @@ where
 
 impl<T> Promise<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates a [`Promise`] message.
     pub fn with(n: Ballot, n_accepted: Ballot, sfx: Vec<Entry<T>>, ld: u64, la: u64) -> Self {
@@ -63,7 +63,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptSync<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// The current round.
     pub n: Ballot,
@@ -75,7 +75,7 @@ where
 
 impl<T> AcceptSync<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates an [`AcceptSync`] message.
     pub fn with(n: Ballot, sfx: Vec<Entry<T>>, sync_idx: u64) -> Self {
@@ -91,7 +91,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FirstAccept<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// The current round.
     pub n: Ballot,
@@ -101,7 +101,7 @@ where
 
 impl<T> FirstAccept<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates a [`FirstAccept`] message.
     pub fn with(n: Ballot, entries: Vec<Entry<T>>) -> Self {
@@ -113,7 +113,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptDecide<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// The current round.
     pub n: Ballot,
@@ -125,7 +125,7 @@ where
 
 impl<T> AcceptDecide<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates an [`AcceptDecide`] message.
     pub fn with(n: Ballot, ld: u64, entries: Vec<Entry<T>>) -> Self {
@@ -170,7 +170,7 @@ impl Decide {
 #[derive(Clone, Debug)]
 pub enum PaxosMsg<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Ballotequest a [`Prepare`] to be sent from the leader. Used for fail-recovery.
     PrepareReq,
@@ -192,7 +192,7 @@ where
 #[derive(Clone, Debug)]
 pub struct Message<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Sender of `msg`.
     pub from: u64,
@@ -204,7 +204,7 @@ where
 
 impl<T> Message<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates a message.
     pub fn with(from: u64, to: u64, msg: PaxosMsg<T>) -> Self {

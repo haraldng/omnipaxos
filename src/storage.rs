@@ -5,7 +5,7 @@ use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Entry<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// A normal entry proposed by the client.
     Normal(T),
@@ -15,7 +15,7 @@ where
 
 impl<T> Entry<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Returns true if the entry is a stopsign else, returns false.
     pub fn is_stopsign(&self) -> bool {
@@ -54,7 +54,7 @@ impl PartialEq for StopSign {
 /// Trait to implement a back-end for the log replicated by an Omni-Paxos replica.
 pub trait Sequence<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     /// Creates an empty log.
     fn new() -> Self;
@@ -121,7 +121,7 @@ pub trait PaxosState {
 enum PaxosSequence<S, T>
 where
     S: Sequence<T>,
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     Active(S),
     Stopped(Arc<S>),
@@ -132,7 +132,7 @@ where
 /// A storage back-end to be used for Omni-Paxos.
 pub(crate) struct Storage<T, S, P>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
     S: Sequence<T>,
     P: PaxosState,
 {
@@ -142,7 +142,7 @@ where
 
 impl<T, S, P> Storage<T, S, P>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
     S: Sequence<T>,
     P: PaxosState,
 {
@@ -326,7 +326,7 @@ pub mod memory_storage {
     #[derive(Debug)]
     pub struct MemorySequence<T>
     where
-        T: AsRef<u8> + Clone,
+        T: Clone,
     {
         /// Vector which contains all the logged entries in-memory.
         sequence: Vec<Entry<T>>,
@@ -334,7 +334,7 @@ pub mod memory_storage {
 
     impl<T> Sequence<T> for MemorySequence<T>
     where
-        T: AsRef<u8> + Clone,
+        T: Clone,
     {
         fn new() -> Self {
             MemorySequence { sequence: vec![] }
