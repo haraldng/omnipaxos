@@ -34,7 +34,7 @@ enum Role {
 #[derive(Debug)]
 pub enum ProposeErr<T>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
 {
     Normal(T),
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
@@ -44,7 +44,7 @@ where
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct OmniPaxos<T, S, P>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
     S: Sequence<T>,
     P: PaxosState,
 {
@@ -76,7 +76,7 @@ where
 
 impl<T, S, P> OmniPaxos<T, S, P>
 where
-    T: AsRef<u8> + Clone,
+    T: Clone,
     S: Sequence<T>,
     P: PaxosState,
 {
