@@ -12,7 +12,7 @@ use omnipaxos::{
     paxos::OmniPaxos,
     storage::{
         memory_storage::{MemorySequence, MemoryState},
-        PaxosState, Sequence, Storage,
+        PaxosState, Sequence,
     },
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
@@ -62,7 +62,7 @@ impl TestSystem {
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<Ballot>>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<Ballot, u64>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let mut peer_pids = all_pids.clone();
@@ -86,18 +86,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosReplica::with(
                     pid,
-                    OmniPaxos::with(
-                        1,
-                        pid,
-                        peer_pids.clone(),
-                        Storage::with(
-                            MemorySequence::<Ballot>::new(),
-                            MemoryState::<Ballot>::new(),
-                        ),
-                        None,
-                        None,
-                        None,
-                    ),
+                    OmniPaxos::with(1, pid, peer_pids.clone(), None, None, None),
                 )
             });
 
@@ -319,10 +308,10 @@ pub mod omnireplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         pid: u64,
-        peers: HashMap<u64, ActorRef<Message<Ballot>>>,
+        peers: HashMap<u64, ActorRef<Message<Ballot, u64>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
-        ask_vector: LinkedList<Ask<(), Entry<Ballot>>>,
+        paxos: OmniPaxos<Ballot, u64, MemorySequence<u64>, MemoryState<Ballot>>,
+        ask_vector: LinkedList<Ask<(), Entry<u64>>>,
     }
 
     impl ComponentLifecycle for OmniPaxosReplica {
@@ -353,7 +342,7 @@ pub mod omnireplica {
     impl OmniPaxosReplica {
         pub fn with(
             pid: u64,
-            paxos: OmniPaxos<Ballot, MemorySequence<Ballot>, MemoryState<Ballot>>,
+            paxos: OmniPaxos<Ballot, u64, MemorySequence<u64>, MemoryState<Ballot>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -366,11 +355,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), Entry<Ballot>>) {
+        pub fn add_ask(&mut self, ask: Ask<(), Entry<u64>>) {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn stop_and_get_sequence(&mut self) -> Arc<MemorySequence<Ballot>> {
+        pub fn stop_and_get_sequence(&mut self) -> Arc<MemorySequence<u64>> {
             self.paxos.stop_and_get_sequence()
         }
 
@@ -384,11 +373,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Ballot>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Ballot, u64>>>) {
             self.peers = peers;
         }
 
-        pub fn propose(&mut self, data: Vec<u8>) {
+        pub fn propose(&mut self, data: u64) {
             self.paxos.propose_normal(data).expect("Failed to propose!");
         }
 
@@ -409,7 +398,7 @@ pub mod omnireplica {
     }
 
     impl Actor for OmniPaxosReplica {
-        type Message = Message<Ballot>;
+        type Message = Message<Ballot, u64>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
             self.paxos.handle(msg);

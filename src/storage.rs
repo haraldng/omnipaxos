@@ -1,4 +1,4 @@
-use crate::leader_election::Round;
+use crate::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData, sync::Arc};
 
 /// An entry in the replicated log.
@@ -89,30 +89,27 @@ where
 }
 
 /// Trait to implement a back-end for the internal state used by an Omni-Paxos replica.
-pub trait PaxosState<R>
-where
-    R: Round,
-{
+pub trait PaxosState {
     /// Creates an empty initial state.
     fn new() -> Self;
 
     /// Sets the round that has been promised.
-    fn set_promise(&mut self, nprom: R);
+    fn set_promise(&mut self, nprom: Ballot);
 
     /// Sets the decided index in the log.
     fn set_decided_len(&mut self, ld: u64);
 
     /// Sets the latest accepted round.
-    fn set_accepted_round(&mut self, na: R);
+    fn set_accepted_round(&mut self, na: Ballot);
 
     /// Returns the latest round in which entries have been accepted.
-    fn get_accepted_round(&self) -> R;
+    fn get_accepted_round(&self) -> Ballot;
 
     /// Returns the index in the log that has been decided up to.
     fn get_decided_len(&self) -> u64;
 
     /// Returns the round that has been promised.
-    fn get_promise(&self) -> R;
+    fn get_promise(&self) -> Ballot;
 
     /// Sets the garbage collected index.
     fn set_gc_idx(&mut self, index: u64);
@@ -133,33 +130,29 @@ where
 }
 
 /// A storage back-end to be used for Omni-Paxos.
-pub(crate) struct Storage<R, T, S, P>
+pub(crate) struct Storage<T, S, P>
 where
-    R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R>,
+    P: PaxosState,
 {
     sequence: PaxosSequence<S, T>,
     paxos_state: P,
-    _round_type: PhantomData<R>, // make cargo happy for unused type R
 }
 
-impl<R, T, S, P> Storage<R, T, S, P>
+impl<T, S, P> Storage<T, S, P>
 where
-    R: Round,
     T: AsRef<u8> + Clone,
     S: Sequence<T>,
-    P: PaxosState<R>,
+    P: PaxosState,
 {
     /// Creates a [`Storage`] back-end for Omni-Paxos.
     /// The storage is divided into a [`Sequence`] and [`PaxosState`] allows for the log and the state to use different implementations.
-    pub fn with(seq: S, paxos_state: P) -> Storage<R, T, S, P> {
+    pub fn with(seq: S, paxos_state: P) -> Storage<T, S, P> {
         let sequence = PaxosSequence::Active(seq);
         Storage {
             sequence,
             paxos_state,
-            _round_type: PhantomData,
         }
     }
 
@@ -224,7 +217,7 @@ where
     }
 
     /// Sets the round that has been promised.
-    pub fn set_promise(&mut self, nprom: R) {
+    pub fn set_promise(&mut self, nprom: Ballot) {
         self.paxos_state.set_promise(nprom);
     }
 
@@ -234,12 +227,12 @@ where
     }
 
     /// Sets the latest accepted round.
-    pub fn set_accepted_round(&mut self, na: R) {
+    pub fn set_accepted_round(&mut self, na: Ballot) {
         self.paxos_state.set_accepted_round(na);
     }
 
     /// Returns the latest round in which entries have been accepted.
-    pub fn get_accepted_round(&self) -> R {
+    pub fn get_accepted_round(&self) -> Ballot {
         self.paxos_state.get_accepted_round()
     }
 
@@ -276,7 +269,7 @@ where
     }
 
     /// Returns the round that has been promised.
-    pub fn get_promise(&self) -> R {
+    pub fn get_promise(&self) -> Ballot {
         self.paxos_state.get_promise()
     }
 
@@ -325,7 +318,7 @@ where
 /// An in-memory storage implementation for Paxos.
 pub mod memory_storage {
     use crate::{
-        leader_election::Round,
+        leader_election::ballot_leader_election::Ballot,
         storage::{Entry, PaxosState, Sequence},
     };
 
@@ -401,35 +394,29 @@ pub mod memory_storage {
 
     /// Stores the state of a paxos replica in-memory.
     #[derive(Debug)]
-    pub struct MemoryState<R>
-    where
-        R: Round,
-    {
+    pub struct MemoryState {
         /// Last promised round.
-        n_prom: R,
+        n_prom: Ballot,
         /// Last accepted round.
-        acc_round: R,
+        acc_round: Ballot,
         /// Length of the decided sequence.
         ld: u64,
         /// Garbage collected index.
         gc_idx: u64,
     }
 
-    impl<R> PaxosState<R> for MemoryState<R>
-    where
-        R: Round,
-    {
+    impl PaxosState for MemoryState {
         fn new() -> Self {
-            let r = R::default();
+            let r = Ballot::default();
             MemoryState {
-                n_prom: r.clone(),
+                n_prom: r,
                 acc_round: r,
                 ld: 0,
                 gc_idx: 0,
             }
         }
 
-        fn set_promise(&mut self, n_prom: R) {
+        fn set_promise(&mut self, n_prom: Ballot) {
             self.n_prom = n_prom;
         }
 
@@ -437,20 +424,20 @@ pub mod memory_storage {
             self.ld = ld;
         }
 
-        fn set_accepted_round(&mut self, na: R) {
+        fn set_accepted_round(&mut self, na: Ballot) {
             self.acc_round = na;
         }
 
-        fn get_accepted_round(&self) -> R {
-            self.acc_round.clone()
+        fn get_accepted_round(&self) -> Ballot {
+            self.acc_round
         }
 
         fn get_decided_len(&self) -> u64 {
             self.ld
         }
 
-        fn get_promise(&self) -> R {
-            self.n_prom.clone()
+        fn get_promise(&self) -> Ballot {
+            self.n_prom
         }
 
         fn set_gc_idx(&mut self, index: u64) {
