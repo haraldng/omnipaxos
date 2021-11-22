@@ -6,7 +6,6 @@ use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelu
 use omnipaxos::{
     leader_election::{
         ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
-        Leader,
     },
     messages::Message,
     paxos::OmniPaxos,
@@ -38,7 +37,7 @@ impl TestSystem {
         num_nodes: usize,
         ble_hb_delay: u64,
         ble_initial_delay_factor: Option<u64>,
-        ble_initial_leader: Option<Leader<Ballot>>,
+        ble_initial_leader: Option<Ballot>,
         num_threads: usize,
     ) -> Self {
         let mut conf = KompactConfig::default();
@@ -62,7 +61,7 @@ impl TestSystem {
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<Ballot, u64>>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<u64>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let mut peer_pids = all_pids.clone();
@@ -74,6 +73,7 @@ impl TestSystem {
                     BallotLeaderElection::with(
                         peer_pids.clone(),
                         pid,
+                        None,
                         ble_hb_delay,
                         ble_initial_leader,
                         ble_initial_delay_factor,
@@ -180,7 +180,7 @@ pub mod ble {
     pub struct BallotLeaderElectionPort;
 
     impl Port for BallotLeaderElectionPort {
-        type Indication = Leader<Ballot>;
+        type Indication = Ballot;
         type Request = ();
     }
 
@@ -193,7 +193,7 @@ pub mod ble {
         pub leader: Option<Ballot>,
         timer: Option<ScheduledTimer>,
         ble: BallotLeaderElection,
-        ask_vector: LinkedList<Ask<(), Leader<Ballot>>>,
+        ask_vector: LinkedList<Ask<(), Ballot>>,
     }
 
     impl BallotLeaderComp {
@@ -210,7 +210,7 @@ pub mod ble {
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), Leader<Ballot>>) {
+        pub fn add_ask(&mut self, ask: Ask<(), Ballot>) {
             self.ask_vector.push_back(ask);
         }
 
@@ -228,7 +228,7 @@ pub mod ble {
             }
         }
 
-        fn answer_future(&mut self, l: Leader<Ballot>) {
+        fn answer_future(&mut self, l: Ballot) {
             if !self.ask_vector.is_empty() {
                 match self.ask_vector.pop_front().unwrap().reply(l) {
                     Ok(_) => {}
@@ -290,7 +290,7 @@ pub mod ble {
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos::{
-        leader_election::{ballot_leader_election::Ballot, Leader},
+        leader_election::{ballot_leader_election::Ballot},
         messages::Message,
         paxos::OmniPaxos,
         storage::{
@@ -308,9 +308,9 @@ pub mod omnireplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         pid: u64,
-        peers: HashMap<u64, ActorRef<Message<Ballot, u64>>>,
+        peers: HashMap<u64, ActorRef<Message<u64>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<Ballot, u64, MemorySequence<u64>, MemoryState<Ballot>>,
+        paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
         ask_vector: LinkedList<Ask<(), Entry<u64>>>,
     }
 
@@ -342,7 +342,7 @@ pub mod omnireplica {
     impl OmniPaxosReplica {
         pub fn with(
             pid: u64,
-            paxos: OmniPaxos<Ballot, u64, MemorySequence<u64>, MemoryState<Ballot>>,
+            paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -373,7 +373,7 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Ballot, u64>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<u64>>>) {
             self.peers = peers;
         }
 
@@ -398,7 +398,7 @@ pub mod omnireplica {
     }
 
     impl Actor for OmniPaxosReplica {
-        type Message = Message<Ballot, u64>;
+        type Message = Message<u64>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
             self.paxos.handle(msg);
@@ -411,7 +411,7 @@ pub mod omnireplica {
     }
 
     impl Require<BallotLeaderElectionPort> for OmniPaxosReplica {
-        fn handle(&mut self, l: Leader<Ballot>) -> Handled {
+        fn handle(&mut self, l: Ballot) -> Handled {
             self.paxos.handle_leader(l);
             Handled::Ok
         }

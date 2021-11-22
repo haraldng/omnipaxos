@@ -2,7 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::leader_election::{ballot_leader_election::Ballot, Leader};
+use omnipaxos::leader_election::{ballot_leader_election::Ballot};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -22,7 +22,7 @@ fn ble_test() {
 
     let mut futures = vec![];
     for _ in 0..cfg.num_elections {
-        let (kprom, kfuture) = promise::<Leader<Ballot>>();
+        let (kprom, kfuture) = promise::<Ballot>();
         ble.on_definition(|x| x.add_ask(Ask::new(kprom, ())));
         futures.push(kfuture);
     }
@@ -33,7 +33,7 @@ fn ble_test() {
         let elected_leader = fr
             .wait_timeout(cfg.wait_timeout)
             .expect("No leader has been elected in the allocated time!");
-        println!("elected: {} {}", elected_leader.pid, elected_leader.round.n);
+        println!("elected: {:?}", elected_leader);
         sys.kill_node(elected_leader.pid);
     }
 
