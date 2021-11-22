@@ -477,11 +477,8 @@ where
             let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
             /* send prepare */
             for pid in &self.peers {
-                self.outgoing.push(Message::with(
-                    self.pid,
-                    *pid,
-                    PaxosMsg::Prepare(prep),
-                ));
+                self.outgoing
+                    .push(Message::with(self.pid, *pid, PaxosMsg::Prepare(prep)));
             }
         } else {
             self.state.0 = Role::Follower;
@@ -871,11 +868,8 @@ where
                             .filter(|(_, ld)| ld.is_some())
                             .map(|(idx, _)| idx as u64 + 1);
                         for pid in promised_pids {
-                            self.outgoing.push(Message::with(
-                                self.pid,
-                                pid,
-                                PaxosMsg::Decide(d),
-                            ));
+                            self.outgoing
+                                .push(Message::with(self.pid, pid, PaxosMsg::Decide(d)));
                         }
                     }
                     self.handle_decide(d);

@@ -2,10 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
-    leader_election::ballot_leader_election::Ballot,
-    storage::{Entry, Sequence},
-};
+use omnipaxos::storage::{Entry, Sequence};
 use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;
@@ -134,11 +131,7 @@ fn double_gc_test() {
     };
 }
 
-fn check_gc(
-    vec_proposals: Vec<Entry<u64>>,
-    seq_after: Vec<(&u64, Vec<Entry<u64>>)>,
-    gc_idx: u64,
-) {
+fn check_gc(vec_proposals: Vec<Entry<u64>>, seq_after: Vec<(&u64, Vec<Entry<u64>>)>, gc_idx: u64) {
     for i in 0..seq_after.len() {
         let (_, after) = seq_after.get(i).expect("After Sequence");
 
