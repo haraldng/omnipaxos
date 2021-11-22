@@ -21,15 +21,14 @@ fn consensus_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut vec_proposals: Vec<Entry<Ballot>> = vec![];
+    let mut vec_proposals: Vec<Entry<u64>> = vec![];
     let mut futures = vec![];
     for i in 0..cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Entry<Ballot>>();
-        let prop = format!("Decide Paxos {}", i).as_bytes().to_vec();
+        let (kprom, kfuture) = promise::<Entry<u64>>();
 
-        vec_proposals.push(Entry::Normal(prop.clone()));
+        vec_proposals.push(Entry::Normal(i));
         px.on_definition(|x| {
-            x.propose(prop);
+            x.propose(i);
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -42,7 +41,7 @@ fn consensus_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let mut seq: Vec<(&u64, Vec<Entry<Ballot>>)> = vec![];
+    let mut seq: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq.push(px.on_definition(|comp| {
             let seq = comp.stop_and_get_sequence();
@@ -63,9 +62,9 @@ fn consensus_test() {
 
 /// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
-    sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>,
+    sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>,
     quorum_size: usize,
-    num_proposals: Vec<Entry<Ballot>>,
+    num_proposals: Vec<Entry<u64>>,
 ) {
     for i in num_proposals {
         let num_nodes: usize = sequence_responses
@@ -88,8 +87,8 @@ fn check_quorum(
 
 /// Verifies that only proposed values are decided.
 fn check_validity(
-    sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>,
-    num_proposals: Vec<Entry<Ballot>>,
+    sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>,
+    num_proposals: Vec<Entry<u64>>,
 ) {
     let invalid_nodes: Vec<_> = sequence_responses
         .iter()
@@ -110,7 +109,7 @@ fn check_validity(
 }
 
 /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(sequence_responses: Vec<(&u64, Vec<Entry<Ballot>>)>) {
+fn check_uniform_agreement(sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>) {
     let (_, longest_seq) = sequence_responses
         .iter()
         .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))

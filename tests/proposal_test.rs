@@ -3,7 +3,7 @@ pub mod util;
 
 use kompact::prelude::{promise, Ask};
 use omnipaxos::{
-    leader_election::{ballot_leader_election::Ballot, Leader},
+    leader_election::{ballot_leader_election::Ballot},
     storage::Entry,
 };
 use rand::Rng;
@@ -22,7 +22,7 @@ fn forward_proposal_test() {
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let (kprom_ble, kfuture_ble) = promise::<Leader<Ballot>>();
+    let (kprom_ble, kfuture_ble) = promise::<Ballot>();
     ble.on_definition(|x| x.add_ask(Ask::new(kprom_ble, ())));
 
     sys.start_all_nodes();
@@ -30,7 +30,7 @@ fn forward_proposal_test() {
     let elected_leader = kfuture_ble
         .wait_timeout(cfg.wait_timeout)
         .expect("No leader has been elected in the allocated time!");
-    println!("elected: {} {}", elected_leader.pid, elected_leader.round.n);
+    println!("elected: {:?}", elected_leader);
 
     let mut proposal_node: u64;
     loop {
@@ -43,10 +43,10 @@ fn forward_proposal_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&proposal_node).unwrap();
 
-    let (kprom_px, kfuture_px) = promise::<Entry<Ballot>>();
+    let (kprom_px, kfuture_px) = promise::<Entry<u64>>();
     px.on_definition(|x| {
         x.add_ask(Ask::new(kprom_px, ()));
-        x.propose("Decide Paxos".as_bytes().to_vec());
+        x.propose(123);
     });
 
     kfuture_px
