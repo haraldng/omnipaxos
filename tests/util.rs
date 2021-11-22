@@ -4,15 +4,9 @@ use self::{
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
-    leader_election::{
-        ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
-    },
+    leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     paxos::OmniPaxos,
-    storage::{
-        memory_storage::{MemorySequence, MemoryState},
-        PaxosState, Sequence,
-    },
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -68,26 +62,20 @@ impl TestSystem {
             peer_pids.retain(|i| i != &pid);
             // create components
             let (ble_comp, ble_reg_f) = system.create_and_register(|| {
-                BallotLeaderComp::with(
+                BallotLeaderComp::with(BallotLeaderElection::with(
+                    peer_pids.clone(),
                     pid,
-                    BallotLeaderElection::with(
-                        peer_pids.clone(),
-                        pid,
-                        None,
-                        ble_hb_delay,
-                        ble_initial_leader,
-                        ble_initial_delay_factor,
-                        None,
-                        None,
-                    ),
-                )
+                    None,
+                    ble_hb_delay,
+                    ble_initial_leader,
+                    ble_initial_delay_factor,
+                    None,
+                    None,
+                ))
             });
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosReplica::with(
-                    pid,
-                    OmniPaxos::with(1, pid, peer_pids.clone(), None, None, None),
-                )
+                OmniPaxosReplica::with(OmniPaxos::with(1, pid, peer_pids.clone(), None, None, None))
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
@@ -188,7 +176,6 @@ pub mod ble {
     pub struct BallotLeaderComp {
         ctx: ComponentContext<Self>,
         ble_port: ProvidedPort<BallotLeaderElectionPort>,
-        pid: u64,
         peers: HashMap<u64, ActorRef<BLEMessage>>,
         pub leader: Option<Ballot>,
         timer: Option<ScheduledTimer>,
@@ -197,11 +184,10 @@ pub mod ble {
     }
 
     impl BallotLeaderComp {
-        pub fn with(pid: u64, ble: BallotLeaderElection) -> BallotLeaderComp {
+        pub fn with(ble: BallotLeaderElection) -> BallotLeaderComp {
             BallotLeaderComp {
                 ctx: ComponentContext::uninitialised(),
                 ble_port: ProvidedPort::uninitialised(),
-                pid,
                 peers: HashMap::new(),
                 leader: None,
                 timer: None,
@@ -290,7 +276,7 @@ pub mod ble {
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos::{
-        leader_election::{ballot_leader_election::Ballot},
+        leader_election::ballot_leader_election::Ballot,
         messages::Message,
         paxos::OmniPaxos,
         storage::{
@@ -307,7 +293,6 @@ pub mod omnireplica {
     pub struct OmniPaxosReplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        pid: u64,
         peers: HashMap<u64, ActorRef<Message<u64>>>,
         timer: Option<ScheduledTimer>,
         paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
@@ -340,14 +325,10 @@ pub mod omnireplica {
     }
 
     impl OmniPaxosReplica {
-        pub fn with(
-            pid: u64,
-            paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
-        ) -> Self {
+        pub fn with(paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
                 ble_port: RequiredPort::uninitialised(),
-                pid,
                 peers: HashMap::new(),
                 timer: None,
                 paxos,

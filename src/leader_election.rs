@@ -1,13 +1,12 @@
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
     use crate::utils::{
-        hocon_kv::{HB_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
+        hocon_kv::{HB_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID, PRIORITY},
         logger::create_logger,
     };
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
     use slog::{debug, info, trace, warn, Logger};
-    use crate::utils::hocon_kv::PRIORITY;
 
     /// Used to define an epoch
     #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]

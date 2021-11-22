@@ -150,7 +150,7 @@ impl Accepted {
 }
 
 /// Message sent by leader to followers to decide up to a certain index in the log.
-#[derive(Copy, Clone,  Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Decide {
     /// The current round.
     pub n: Ballot,
