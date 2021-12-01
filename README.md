@@ -17,18 +17,15 @@ let _cluster = vec![1, 2, 3];
 
 // create the replica 2 in this cluster
 let my_pid = 2;
-let my_peers= vec![1, 3];
+let my_peers= vec![1, 3]; 
 
-let sequence = S::new();        // S is a type that implements the storage::Sequence trait
-let paxos_state = P::new();     // P is a type that implements the storage::PaxosState trait
-let storage = Storage::with(sequence, paxos_state);
-
-// create a replica in configuration 1 with process id 2
-let omni_paxos = OmniPaxos::with(
+// create a replica in configuration 1 with process id 2.
+// Create a cluster that replicates a log of u64 entries. 
+// S and P are types that implements the traits storage::Sequence and storage::PaxosState respectively.
+let omni_paxos = OmniPaxos::<u64, S, P>::with(
     configuration_id,
     my_pid,
     my_peers,
-    storage,
     ...
 );
 
@@ -41,7 +38,7 @@ let ble = BallotLeaderElection::with(
 
 ...
 
-if let Some(leader) = ble.tick() {
+if let Some(leader_ballot) = ble.tick() {
     // BLE indicates a leader has been elected
     omni_paxos.handle_leader(leader);
 } 
@@ -49,7 +46,7 @@ if let Some(leader) = ble.tick() {
 ...
 
 // propose a client request
-let data: Vec<u8> = ...; // request as raw bytes
+let entry: u64 = ...; // value to be replicated in the log
 omni_paxos.propose_normal(data).expect("Failed to propose normal proposal");
 
 ...
@@ -60,7 +57,7 @@ omni_paxos.propose_reconfiguration(new_cluster, None).expect("Failed to propose 
 
 ...
 
-// send outgoing messages. This should be called periodically by user
+// send outgoing messages. This should be called periodically by the user
 for out_msg in omni_paxos.get_outgoings_msgs() {
     let receiver = out_msg.to;
     // send out_msg to receiver
@@ -75,8 +72,8 @@ for out_msg in ble.get_outgoings_msgs() {
 // handle decided client requests
 for entry in omni_paxos.get_decided_entries() {
     match entry {
-        Entry::Normal(data) => {    // handle normally decided entries
-            // data is represented as raw bytes: Vec<u8>
+        Entry::Normal(e) => {    // handle decided entries
+            // e is a u64 value that has now been replicated on a majority.
         }
         Entry::StopSign(ss) => {    // handle completed reconfiguration
             let next_configuration_id = ss.config_id;
