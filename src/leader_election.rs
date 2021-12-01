@@ -79,8 +79,8 @@ pub mod ballot_leader_election {
         /// * `log_file_path` - Path where the default logger logs events.
         #[allow(clippy::too_many_arguments)]
         pub fn with(
-            peers: Vec<u64>,
             pid: u64,
+            peers: Vec<u64>,
             priority: Option<u64>,
             hb_delay: u64,
             initial_leader: Option<Ballot>,
@@ -130,15 +130,14 @@ pub mod ballot_leader_election {
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `logger` - Used for logging events of Ballot Leader Election.
         pub fn with_hocon(
-            &self,
             cfg: &Hocon,
             peers: Vec<u64>,
             initial_leader: Option<Ballot>,
             logger: Option<Logger>,
         ) -> BallotLeaderElection {
             BallotLeaderElection::with(
-                peers,
                 cfg[PID].as_i64().expect("Failed to load PID") as u64,
+                peers,
                 cfg[PRIORITY].as_i64().map(|p| p as u64),
                 cfg[HB_DELAY]
                     .as_i64()
@@ -175,7 +174,6 @@ pub mod ballot_leader_election {
         /// Returns an Option with the elected leader otherwise None
         pub fn tick(&mut self) -> Option<Ballot> {
             self.ticks_elapsed += 1;
-
             if self.ticks_elapsed >= self.hb_current_delay {
                 self.ticks_elapsed = 0;
                 self.hb_timeout()
@@ -241,7 +239,6 @@ pub mod ballot_leader_election {
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
             self.hb_round += 1;
-
             trace!(
                 self.logger,
                 "Initiate new heartbeat round: {}",
@@ -269,7 +266,6 @@ pub mod ballot_leader_election {
 
         fn hb_timeout(&mut self) -> Option<Ballot> {
             trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
-
             let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
                 debug!(
                     self.logger,
@@ -294,7 +290,6 @@ pub mod ballot_leader_election {
 
         fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
             trace!(self.logger, "Heartbeat request from {}", from);
-
             let hb_reply =
                 HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
 
@@ -307,7 +302,6 @@ pub mod ballot_leader_election {
 
         fn handle_reply(&mut self, rep: HeartbeatReply) {
             trace!(self.logger, "Heartbeat reply {:?}", rep.ballot);
-
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {

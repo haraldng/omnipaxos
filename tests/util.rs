@@ -63,8 +63,8 @@ impl TestSystem {
             // create components
             let (ble_comp, ble_reg_f) = system.create_and_register(|| {
                 BallotLeaderComp::with(BallotLeaderElection::with(
-                    peer_pids.clone(),
                     pid,
+                    peer_pids.clone(),
                     None,
                     ble_hb_delay,
                     ble_initial_leader,
