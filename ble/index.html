@@ -152,15 +152,19 @@
 <p>A unique feature of the Omni-Paxos protocol is guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos. Similar to <code>OmniPaxos</code>, <code>BallotLeaderElection</code> is represented as a Rust struct that should be started on every server in the cluster.</p>
 <p>The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, <code>BallotLeaderElection</code> uses an internal logical clock. It has a <code>tick()</code> function that progresses its logical clock. The expected time that heartbeats should be received in is specified by <code>hb_delay</code> of the <code>BallotLeaderElection</code> constructor:</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">BallotLeaderElection::with(
-    peers: Vec&lt;u64&gt;,    // the PEERS of this server. I.e. this should not include `pid`    
-    pid: u64,           // the unique identifier of this server
-    hb_delay: u64,      // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
-    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,     // initial leader
-    initial_delay_factor: Option&lt;u64&gt;,          // allows for using a shorter delay when electing the initial leader.
+    peers: Vec&lt;u64&gt;,        // the PEERS of this server. I.e. this should not include `pid`    
+    pid: u64,               // the unique identifier of this server
+    hb_delay: u64,          // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
+    priority: Option&lt;u64&gt;,  // custom priority parameter.
+    initial_leader: Option&lt;Ballot&gt;,     // initial leader
+    initial_delay_factor: Option&lt;u64&gt;,  // allows for using a shorter delay when electing the initial leader.
     logger: Option&lt;Logger&gt;,
     log_file_path: Option&lt;&amp;str&gt;,
 )
 </code></pre>
+<blockquote>
+<p><strong>Note</strong> The <code>priority</code> parameter allows user to give desired servers a higher priority to become the leader. This is a best-effort approach upon a leader election or failure.</p>
+</blockquote>
 <p>For instance, we can create a BLE instance with a timeout of 800ms that is ticked every 100ms. The user has to call <code>tick()</code> every 100ms themselves and check if a leader has been elected. Once a leader is elected, <code>tick()</code> will return an instance of the struct <code>Leader&lt;Ballot&gt;</code>. This should be passed to the corresponding local <code>OmniPaxos</code> instance using <code>OmniPaxos::handle_leader()</code>, which will in turn use the <code>Ballot</code> as a round number for log replication.</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::paxos::OmniPaxos;
 use omnipaxos::leader_election::ballot_leader_election::*;
@@ -177,7 +181,8 @@ let omni_paxos = OmniPaxos::with(... , my_pid, my_peers, ...); // see `OmniPaxos
 let ble = BallotLeaderElection::with(
     my_peers,
     my_pid,
-    hb_delay
+    None,
+    hb_delay,
     None,
     initial_delay_factor,
     None,

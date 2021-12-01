@@ -174,34 +174,33 @@ To do so add the following to your Cargo.toml instead:</p>
 omnipaxos = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>The OmniPaxos library is mainly driven by the <a href="introduction/../omnipaxos/index.html"><strong>OmniPaxos</strong></a> and <a href="introduction/../ble/index.html"><strong>Ballot Leader Election</strong></a> (<em>BLE</em>) structs.  These are plain Rust structs and the user therefore needs to provide a network implementation themselves to actually send and receive messages. In this tutorial we will show how a user should interact with these structs in order to implement a fault-tolerant replicated log. This tutorial will focus on how to use the library and showcase its features. </p>
+<p>The OmniPaxos library is mainly driven by the <a href="introduction/../omnipaxos/index.html"><strong>OmniPaxos</strong></a> and <a href="introduction/../ble/index.html"><strong>Ballot Leader Election</strong></a> (<em>BLE</em>) structs.  These are plain Rust structs and the user therefore needs to provide a network implementation themselves to actually send and receive messages. In this tutorial we will show how a user should interact with these structs in order to implement a strongly consistent, replicated log. This tutorial will focus on how to use the library and showcase its features. </p>
 <!-- For the properties and advantages of OmniPaxos in comparison to other similar protocols, we refer to the Omni-Paxos paper. --><div style="break-before: page; page-break-before: always;"></div><h1 id="omnipaxos"><a class="header" href="#omnipaxos">OmniPaxos</a></h1>
 <p>Each server in the cluster should have a local instance of the  <code>OmniPaxos</code> struct. <code>OmniPaxos</code> maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The user also has to fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in a higher-level application.</p>
-<blockquote>
-<p><strong>Note:</strong> <code>OmniPaxos</code> has a type parameter <code>R</code> that must implement the trait <code>Round</code>. This is the round numbers used in the log replication. It will be provided and furthered explained in <a href="omnipaxos/../ble/index.html">Ballot Leader Election</a>, but for simplicity the reader can for now assume <code>R</code> to be <code>u64</code>.</p>
-</blockquote>
-<h2 id="storage"><a class="header" href="#storage">Storage</a></h2>
-<p>The replicated log can be stored using any underlying implementation provided by the user. OmniPaxos only requires a user to implement the traits <code>PaxosState&lt;R&gt;</code> and <code>Sequence&lt;R&gt;</code>. The <code>PaxosState&lt;R&gt;</code> maintains the internal state of the <code>OmniPaxos</code>, while <code>Sequence&lt;R&gt;</code> maintains the actual replicated log. The storage is split into these two traits since <code>PaxosState&lt;R&gt;</code> stores small values such as indexes, while <code>Sequence&lt;R&gt;</code> stores larger data (the log entries). Thus it is possible to tailor-fit the implementations respectively. </p>
-<h3 id="example-in-memory-storage"><a class="header" href="#example-in-memory-storage">Example: In-memory storage</a></h3>
-<p>OmniPaxos provides an in-memory storage implementation in the traits <code>MemorySequence</code> and <code>MemoryState</code>.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::storage::memory_storage::{MemorySequence, MemoryState, Storage};
-
-let storage = Storage::with(MemorySequence::&lt;R&gt;::new(), MemoryState::&lt;R&gt;::new());
+<h2 id="example-key-value-store"><a class="header" href="#example-key-value-store">Example: Key-Value store</a></h2>
+<p>As a guide for this tutorial, we will use OmniPaxos to implement a replicated log for the purpose of a consistent Key-Value store. </p>
+<p>We begin by defining the type that we want our log entries to consist of:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">pub struct KeyValue {
+    pub key: String,
+    pub value: u64
+}
 </code></pre>
+<h2 id="storage"><a class="header" href="#storage">Storage</a></h2>
+<p>The replicated log can be stored using any underlying implementation provided by the user. OmniPaxos only requires the user to implement the traits <code>PaxosState</code> and <code>Sequence&lt;T&gt;</code>. The <code>PaxosState</code> maintains the internal state of the protocol, while <code>Sequence&lt;T&gt;</code> maintains the actual replicated log. In our example, <code>T</code> is <code>KeyValue</code>. The storage is split into these two traits since <code>PaxosState</code> stores small values such as indexes, while <code>Sequence&lt;T&gt;</code> stores larger data (the log entries). Thus it is possible to tailor-fit the implementations respectively. </p>
+<p>OmniPaxos provides an in-memory storage implementation in the structs <code>MemoryState</code> and <code>MemorySequence&lt;T&gt;</code>.</p>
 <h2 id="creating-an-omnipaxos-instance"><a class="header" href="#creating-an-omnipaxos-instance">Creating an OmniPaxos instance</a></h2>
 <p>The constructor of <code>OmniPaxos</code> has the following parameters.</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">OmniPaxos::with(
     config_id: u32,                                 // the configuration id. See the section &quot;Reconfiguration&quot; in `Communication`.
     pid: u64,                                       // the unique identifier of this server
     peers: Vec&lt;u64&gt;,                                // the PEERS of this server. I.e. this should not include `pid`
-    storage: Storage&lt;R, S, P&gt;,
-    skip_prepare_use_leader: Option&lt;Leader&lt;R&gt;&gt;,     // optimization to start with pre-determined leader after
+    skip_prepare_use_leader: Option&lt;Ballot&gt;,        // optimization to start with pre-determined leader after
                                                     // reconfiguration. See &quot;Reconfiguration&quot;.
     logger: Option&lt;Logger&gt;,                         // custom logger
     log_file_path: Option&lt;&amp;str&gt;,                    
 )
 </code></pre>
-<p>With the initialized storage, we can go ahead and create our <code>OmniPaxos</code> replica instance:</p>
+<p>Let’s go ahead and create our <code>OmniPaxos</code> replica instance:</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::paxos::OmniPaxos;
 
 // configuration with id 1 and the following cluster
@@ -212,7 +211,7 @@ let _cluster = vec![1, 2, 3];
 let my_pid = 2;
 let my_peers= vec![1, 3];
 
-let omni_paxos = OmniPaxos::with(
+let omni_paxos: OmniPaxos&lt;KeyValue, MemorySequence, MemoryState&gt; = OmniPaxos::with(
     configuration_id,
     my_pid,
     my_peers,
@@ -246,27 +245,34 @@ let omni_paxos = OmniPaxos::with_hocon(
 <p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user interacts with OmniPaxos and its incoming and outgoing messages. Furthermore, we show how new log entries are proposed and handled when they get decided. </p>
 <h2 id="propose-entries"><a class="header" href="#propose-entries">Propose Entries</a></h2>
 <p>To propose a log entry to be replicated, the <code>OmniPaxos::propose_normal()</code> function is called (we reuse the <code>storage</code> and <code>omni_paxos</code> variables created in earlier <a href="omnipaxos/../omnipaxos/index.html">examples</a>):</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let data: Vec&lt;u8&gt; = ... ;   // log entry as raw bytes
-omni_paxos.propose_normal(data).expect(&quot;Failed to propose normal proposal&quot;);
+<pre><code class="language-rust edition2018 no_run noplaypen">let kv = KeyValue { key: String::from(&quot;a&quot;), value: &quot;123&quot; } ;   // log entry as raw bytes
+omni_paxos.propose_normal(kv).expect(&quot;Failed to propose normal proposal&quot;);
 </code></pre>
 <p>Proposals can be pipelined without waiting for preceeding entries to be decided. Furthermore, <code>propose_normal</code> can be called on any server. If the calling server is not the leader, the proposal will be forwarded. </p>
-<blockquote>
-<p><strong>Note</strong> For now, we only support proposing and deciding raw byte log entries with <code>Vec&lt;u8&gt;</code>. However, it would be possible to use a generic log entry type <code>T</code>. We would be more than happy to guide/help anyone interested in implementing this :)</p>
-</blockquote>
 <h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
 <p>By proposing a log entry, the <code>OmniPaxos</code> instance will produce outgoing messages to its peers. The outgoing messages can be accessed by calling <code>OmniPaxos::get_outgoing_msgs()</code>. These messages then need to be sent to the intended server by the user themselves on the network layer. An incoming message should then be handled with the function <code>OmniPaxos::handle()</code>. Handling the incoming message will change the state and produce outgoing messages of <code>OmniPaxos</code> according to the protocol.</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages (this should be called periodically, e.g. every 500ms)
-for out_msg in omni_paxos.get_outgoings_msgs() {
+for out_msg: Message&lt;KeyValue&gt; in omni_paxos.get_outgoings_msgs() {
     let receiver = out_msg.to;
     // send out_msg to receiver on network layer
 }
 
 // handle incoming message on network layer
-let msg: PaxosMsg = ...;    // message received to this server.
+let msg: PaxosMsg:&lt;KeyValue&gt; = ...;    // message received to this server.
 omni_paxos.handle(msg);
 </code></pre>
 <h2 id="decided-entries"><a class="header" href="#decided-entries">Decided Entries</a></h2>
-<p>If a server is not partitioned from the leader, its local instance eventually decide log entries that are guaranteed to be consistent and linearizable. Thus, these entries can be fetched via <code>OmniPaxos::get_latest_decided_entries()</code> and are safe to be handled by a higher level application. </p>
+<p>Once an entry has been appended to the log on a majority of the cluster, it has been <strong>decided</strong>. The decided entries can be fetched via <code>OmniPaxos::get_latest_decided_entries()</code> and are safe to be handled by a higher level application that requires strong consistency.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// handle decided log entries periodically
+for entry in omni_paxos.get_latest_decided_entries() {
+    match entry {
+        Entry::Normal(e) =&gt; {    // handle decided normal log entry
+            // e is of type KeyValue that was proposed.
+        }
+        _ =&gt; { /* see next section about reconfiguration */ }
+    }
+}
+</code></pre>
 <blockquote>
 <p><strong>Note</strong> <code>get_latest_decided_entries()</code> returns all the decided elements <strong>since the last time it was called</strong> and is thus intended to be called periodically. To get all decided entries (since the start), use <code>get_decided_entries()</code></p>
 </blockquote>
@@ -280,25 +286,25 @@ omni_paxos.propose_reconfiguration(new_cluster, None).expect(&quot;Failed to pro
 // handle decided log entries periodically
 for entry in omni_paxos.get_latest_decided_entries() {
     match entry {
-        Entry::Normal(data) =&gt; {    // handle decided normal log entry
-            // data in Vec&lt;u8&gt; that was proposed.
-        }
+        Entry::Normal(_) =&gt; { /* See previous section */ }
+    
         Entry::StopSign(ss) =&gt; {    // handle completed reconfiguration
             let next_configuration_id = ss.config_id;
             let next_cluster = ss.nodes;
             let next_leader = ss.skip_prepare_use_leader;   // if Some(), then the replica instances in the new
                                                             // configuration should use this in their constructor
-            // handle reconfiguration
         }
     }
 }
 
 </code></pre>
 <p>Upon deciding a <code>StopSign</code>, the user should create a new replica instance with the new configuration id if the corresponding server is in <code>StopSign.nodes</code>. Furthermore, the user should also notify and migrate the log to any new servers joining the cluster. To stop the old instance and get the final log in the old configuration, one can call:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let final_seq = self.omni_paxos.stop_and_get_sequence();
+<pre><code class="language-rust edition2018 no_run noplaypen">let log: Vec&lt;Entry&lt;KeyValue&gt;&gt; = self.omni_paxos.stop_and_get_sequence();
 // notify about reconfiguration and migrate log to new servers
 </code></pre>
-<p>The user has to implement the log migration themselves. We do not support it since depending on the deployed environment, it could require specific migration schemes to achieve best performance and lowest cost.</p>
+<blockquote>
+<p><strong>Note</strong> The user has to implement the log migration themselves before starting the new <code>OmniPaxos</code> instances.</p>
+</blockquote>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="garbage-collection"><a class="header" href="#garbage-collection">Garbage Collection</a></h1>
 <p>OmniPaxos offers a garbage collection feature that can be called to compact the replicated log. The <code>OmniPaxos::garbage_collect()</code> has an argument <code>Option&lt;u64&gt;</code> that specifies up to what index the log should be garbage collected. If <code>None</code>, then the minimum index accepted by ALL servers will be used as the index. The garbage collection is initiated by the leader and only completed if all servers respond that log entries up to that index has already been handled by the user. To determine if the garbage collection succeeded, the user can check the <code>garbage_collected_idx</code> field of <code>OmniPaxos</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="logging"><a class="header" href="#logging">Logging</a></h1>
@@ -314,15 +320,19 @@ for entry in omni_paxos.get_latest_decided_entries() {
 <p>A unique feature of the Omni-Paxos protocol is guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos. Similar to <code>OmniPaxos</code>, <code>BallotLeaderElection</code> is represented as a Rust struct that should be started on every server in the cluster.</p>
 <p>The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, <code>BallotLeaderElection</code> uses an internal logical clock. It has a <code>tick()</code> function that progresses its logical clock. The expected time that heartbeats should be received in is specified by <code>hb_delay</code> of the <code>BallotLeaderElection</code> constructor:</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">BallotLeaderElection::with(
-    peers: Vec&lt;u64&gt;,    // the PEERS of this server. I.e. this should not include `pid`    
-    pid: u64,           // the unique identifier of this server
-    hb_delay: u64,      // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
-    initial_leader: Option&lt;Leader&lt;Ballot&gt;&gt;,     // initial leader
-    initial_delay_factor: Option&lt;u64&gt;,          // allows for using a shorter delay when electing the initial leader.
+    peers: Vec&lt;u64&gt;,        // the PEERS of this server. I.e. this should not include `pid`    
+    pid: u64,               // the unique identifier of this server
+    hb_delay: u64,          // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
+    priority: Option&lt;u64&gt;,  // custom priority parameter.
+    initial_leader: Option&lt;Ballot&gt;,     // initial leader
+    initial_delay_factor: Option&lt;u64&gt;,  // allows for using a shorter delay when electing the initial leader.
     logger: Option&lt;Logger&gt;,
     log_file_path: Option&lt;&amp;str&gt;,
 )
 </code></pre>
+<blockquote>
+<p><strong>Note</strong> The <code>priority</code> parameter allows user to give desired servers a higher priority to become the leader. This is a best-effort approach upon a leader election or failure.</p>
+</blockquote>
 <p>For instance, we can create a BLE instance with a timeout of 800ms that is ticked every 100ms. The user has to call <code>tick()</code> every 100ms themselves and check if a leader has been elected. Once a leader is elected, <code>tick()</code> will return an instance of the struct <code>Leader&lt;Ballot&gt;</code>. This should be passed to the corresponding local <code>OmniPaxos</code> instance using <code>OmniPaxos::handle_leader()</code>, which will in turn use the <code>Ballot</code> as a round number for log replication.</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::paxos::OmniPaxos;
 use omnipaxos::leader_election::ballot_leader_election::*;
@@ -339,7 +349,8 @@ let omni_paxos = OmniPaxos::with(... , my_pid, my_peers, ...); // see `OmniPaxos
 let ble = BallotLeaderElection::with(
     my_peers,
     my_pid,
-    hb_delay
+    None,
+    hb_delay,
     None,
     initial_delay_factor,
     None,
