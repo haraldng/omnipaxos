@@ -6,3 +6,5 @@ Cargo.lock
 *.iml
 .idea/*
 *.log
+docs/.DS_Store
+.DS_Store

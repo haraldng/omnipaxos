@@ -13,7 +13,7 @@ slog-async = "2.7.0"
 hocon = "0.5.2"
 
 [dev-dependencies]
-kompact = { git = "https://github.com/kompics/kompact", rev = "94956af" }
+kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"]}
 serial_test = "0.5.1"
 rand = "0.8.4"
 

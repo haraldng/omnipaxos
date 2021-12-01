@@ -4,15 +4,18 @@ A unique feature of the Omni-Paxos protocol is guaranteed progress with one quor
 The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, `BallotLeaderElection` uses an internal logical clock. It has a `tick()` function that progresses its logical clock. The expected time that heartbeats should be received in is specified by `hb_delay` of the `BallotLeaderElection` constructor:
 ```rust,edition2018,no_run,noplaypen
 BallotLeaderElection::with(
-    peers: Vec<u64>,    // the PEERS of this server. I.e. this should not include `pid`    
-    pid: u64,           // the unique identifier of this server
-    hb_delay: u64,      // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
-    initial_leader: Option<Leader<Ballot>>,     // initial leader
-    initial_delay_factor: Option<u64>,          // allows for using a shorter delay when electing the initial leader.
+    peers: Vec<u64>,        // the PEERS of this server. I.e. this should not include `pid`    
+    pid: u64,               // the unique identifier of this server
+    hb_delay: u64,          // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
+    priority: Option<u64>,  // custom priority parameter.
+    initial_leader: Option<Ballot>,     // initial leader
+    initial_delay_factor: Option<u64>,  // allows for using a shorter delay when electing the initial leader.
     logger: Option<Logger>,
     log_file_path: Option<&str>,
 )
 ```
+> **Note** The `priority` parameter allows user to give desired servers a higher priority to become the leader. This is a best-effort approach upon a leader election or failure.
+
 For instance, we can create a BLE instance with a timeout of 800ms that is ticked every 100ms. The user has to call `tick()` every 100ms themselves and check if a leader has been elected. Once a leader is elected, `tick()` will return an instance of the struct `Leader<Ballot>`. This should be passed to the corresponding local `OmniPaxos` instance using `OmniPaxos::handle_leader()`, which will in turn use the `Ballot` as a round number for log replication.
 
 ```rust,edition2018,no_run,noplaypen
@@ -31,7 +34,8 @@ let omni_paxos = OmniPaxos::with(... , my_pid, my_peers, ...); // see `OmniPaxos
 let ble = BallotLeaderElection::with(
     my_peers,
     my_pid,
-    hb_delay
+    None,
+    hb_delay,
     None,
     initial_delay_factor,
     None,

@@ -1,39 +1,8 @@
-use std::fmt::Debug;
-
-/// Rounds in Omni-Paxos must be totally ordered.
-pub trait Round: Clone + Debug + Ord + Default + Send + 'static {}
-
-/// Leader event that indicates a leader has been elected. Should be created when the user-defined BLE algorithm
-/// outputs a leader event. Should be then handled in Omni-Paxos by calling [`crate::paxos::Paxos::handle_leader()`].
-#[derive(Copy, Clone, Debug)]
-pub struct Leader<R>
-where
-    R: Round,
-{
-    /// The pid of the elected leader.
-    pub pid: u64,
-    /// The round in which `pid` is elected in.
-    pub round: R,
-}
-
-impl<R> Leader<R>
-where
-    R: Round,
-{
-    /// Constructor for [`Leader`].
-    pub fn with(pid: u64, round: R) -> Self {
-        Leader { pid, round }
-    }
-}
-
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
-    use crate::{
-        leader_election::{Leader, Round},
-        utils::{
-            hocon_kv::{HB_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID},
-            logger::create_logger,
-        },
+    use crate::utils::{
+        hocon_kv::{HB_DELAY, INITIAL_DELAY_FACTOR, LOG_FILE_PATH, PID, PRIORITY},
+        logger::create_logger,
     };
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
@@ -44,6 +13,8 @@ pub mod ballot_leader_election {
     pub struct Ballot {
         /// Ballot number
         pub n: u32,
+        /// Custom priority parameter
+        pub priority: u64,
         /// The pid of the process
         pub pid: u64,
     }
@@ -52,13 +23,12 @@ pub mod ballot_leader_election {
         /// Creates a new Ballot
         /// # Arguments
         /// * `n` - Ballot number.
+        /// * `priority` - Custom priority parameter.
         /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-        pub fn with(n: u32, pid: u64) -> Ballot {
-            Ballot { n, pid }
+        pub fn with(n: u32, priority: u64, pid: u64) -> Ballot {
+            Ballot { n, priority, pid }
         }
     }
-
-    impl Round for Ballot {}
 
     /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
     /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
@@ -101,35 +71,27 @@ pub mod ballot_leader_election {
         /// # Arguments
         /// * `peers` - Vector that holds all the other replicas.
         /// * `pid` -  Process identifier used to uniquely identify this instance.
+        /// * `priority` - Custom priority parameter.
         /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `initial_delay_factor` -  A factor used in the beginning for a shorter hb_delay.
         /// * `logger` - Used for logging events of Ballot Leader Election.
         /// * `log_file_path` - Path where the default logger logs events.
+        #[allow(clippy::too_many_arguments)]
         pub fn with(
-            peers: Vec<u64>,
             pid: u64,
+            peers: Vec<u64>,
+            priority: Option<u64>,
             hb_delay: u64,
-            initial_leader: Option<Leader<Ballot>>,
+            initial_leader: Option<Ballot>,
             initial_delay_factor: Option<u64>,
             logger: Option<Logger>,
             log_file_path: Option<&str>,
         ) -> BallotLeaderElection {
             let n = &peers.len() + 1;
-            let (leader, initial_ballot) = match initial_leader {
-                Some(l) => {
-                    let leader_ballot = Ballot::with(l.round.n, l.pid);
-                    let initial_ballot = if l.pid == pid {
-                        leader_ballot
-                    } else {
-                        Ballot::with(0, pid)
-                    };
-                    (Some(leader_ballot), initial_ballot)
-                }
-                None => {
-                    let initial_ballot = Ballot::with(0, pid);
-                    (None, initial_ballot)
-                }
+            let initial_ballot = match initial_leader {
+                Some(leader_ballot) if leader_ballot.pid == pid => leader_ballot,
+                _ => Ballot::with(0, priority.unwrap_or_default(), pid),
             };
 
             let l = logger.unwrap_or_else(|| {
@@ -151,7 +113,7 @@ pub mod ballot_leader_election {
                 ballots: Vec::with_capacity(n),
                 current_ballot: initial_ballot,
                 majority_connected: true,
-                leader,
+                leader: initial_leader,
                 hb_current_delay: hb_delay,
                 hb_delay,
                 initial_delay_factor,
@@ -168,15 +130,15 @@ pub mod ballot_leader_election {
         /// * `initial_leader` -  Initial leader which will be elected.
         /// * `logger` - Used for logging events of Ballot Leader Election.
         pub fn with_hocon(
-            &self,
             cfg: &Hocon,
             peers: Vec<u64>,
-            initial_leader: Option<Leader<Ballot>>,
+            initial_leader: Option<Ballot>,
             logger: Option<Logger>,
         ) -> BallotLeaderElection {
             BallotLeaderElection::with(
-                peers,
                 cfg[PID].as_i64().expect("Failed to load PID") as u64,
+                peers,
+                cfg[PRIORITY].as_i64().map(|p| p as u64),
                 cfg[HB_DELAY]
                     .as_i64()
                     .expect("Failed to load heartbeat delay") as u64,
@@ -192,23 +154,26 @@ pub mod ballot_leader_election {
             )
         }
 
-        /// Returns the outgoing vector
+        /// Update the custom priority used in the Ballot for this server.
+        pub fn set_priority(&mut self, p: u64) {
+            self.current_ballot.priority = p;
+        }
+
+        /// Returns outgoing messages
         pub fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
             std::mem::take(&mut self.outgoing)
         }
 
         /// Returns the currently elected leader.
-        pub fn get_leader(&self) -> Option<Leader<Ballot>> {
+        pub fn get_leader(&self) -> Option<Ballot> {
             self.leader
-                .map(|ballot: Ballot| -> Leader<Ballot> { Leader::with(ballot.pid, ballot) })
         }
 
         /// Tick is run by all servers to simulate the passage of time
         /// If one wishes to have hb_delay of 500ms, one can set a periodic timer of 100ms to call tick(). After 5 calls to this function, the timeout will occur.
         /// Returns an Option with the elected leader otherwise None
-        pub fn tick(&mut self) -> Option<Leader<Ballot>> {
+        pub fn tick(&mut self) -> Option<Ballot> {
             self.ticks_elapsed += 1;
-
             if self.ticks_elapsed >= self.hb_current_delay {
                 self.ticks_elapsed = 0;
                 self.hb_timeout()
@@ -227,23 +192,19 @@ pub mod ballot_leader_election {
             }
         }
 
-        /// Sets initial state after creation. Should only be used before being started.
+        /// Sets initial state after creation. *Must only be used before being started*.
         /// # Arguments
-        /// * `l` - Initial leader.
-        pub fn set_initial_leader(&mut self, l: Leader<Ballot>) {
+        /// * `leader_ballot` - Initial leader.
+        pub fn set_initial_leader(&mut self, leader_ballot: Ballot) {
             assert!(self.leader.is_none());
-            let leader_ballot = Ballot::with(l.round.n, l.pid);
-            self.leader = Some(leader_ballot);
-            if l.pid == self.pid {
+            if leader_ballot.pid == self.pid {
                 self.current_ballot = leader_ballot;
                 self.majority_connected = true;
-            } else {
-                self.current_ballot = Ballot::with(0, self.pid);
-                self.majority_connected = false;
-            };
+            }
+            self.leader = Some(leader_ballot);
         }
 
-        fn check_leader(&mut self) -> Option<Leader<Ballot>> {
+        fn check_leader(&mut self) -> Option<Ballot> {
             let ballots = std::mem::take(&mut self.ballots);
             let top_ballot = ballots
                 .into_iter()
@@ -264,17 +225,12 @@ pub mod ballot_leader_election {
                 self.current_ballot.n = self.leader.unwrap_or_default().n + 1;
                 self.leader = None;
                 self.majority_connected = true;
-
                 None
             } else if self.leader != Some(top_ballot) {
                 // got a new leader with greater ballot
                 self.leader = Some(top_ballot);
-                let top_pid = top_ballot.pid;
-                debug!(
-                    self.logger,
-                    "New Leader elected, pid: {}, ballot: {:?}", top_pid, top_ballot
-                );
-                Some(Leader::with(top_pid, top_ballot))
+                debug!(self.logger, "New Leader elected: {:?}", top_ballot);
+                Some(top_ballot)
             } else {
                 None
             }
@@ -283,7 +239,6 @@ pub mod ballot_leader_election {
         /// Initiates a new heartbeat round.
         pub fn new_hb_round(&mut self) {
             self.hb_round += 1;
-
             trace!(
                 self.logger,
                 "Initiate new heartbeat round: {}",
@@ -309,10 +264,9 @@ pub mod ballot_leader_election {
             }
         }
 
-        fn hb_timeout(&mut self) -> Option<Leader<Ballot>> {
+        fn hb_timeout(&mut self) -> Option<Ballot> {
             trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
-
-            let result: Option<Leader<Ballot>> = if self.ballots.len() + 1 >= self.majority {
+            let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
                 debug!(
                     self.logger,
                     "Received a majority of heartbeats {:?}", self.ballots
@@ -336,7 +290,6 @@ pub mod ballot_leader_election {
 
         fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
             trace!(self.logger, "Heartbeat request from {}", from);
-
             let hb_reply =
                 HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
 
@@ -349,7 +302,6 @@ pub mod ballot_leader_election {
 
         fn handle_reply(&mut self, rep: HeartbeatReply) {
             trace!(self.logger, "Heartbeat reply {:?}", rep.ballot);
-
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {

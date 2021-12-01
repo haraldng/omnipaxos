@@ -2,10 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
-    leader_election::ballot_leader_election::Ballot,
-    storage::{Entry, Sequence},
-};
+use omnipaxos::storage::{Entry, Sequence};
 use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;
@@ -25,15 +22,13 @@ fn gc_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut vec_proposals: Vec<Entry<Ballot>> = vec![];
+    let mut vec_proposals: Vec<Entry<u64>> = vec![];
     let mut futures = vec![];
     for i in 0..cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Entry<Ballot>>();
-        let prop = format!("Decide Paxos {}", i).as_bytes().to_vec();
-
-        vec_proposals.push(Entry::Normal(prop.clone()));
+        let (kprom, kfuture) = promise::<Entry<u64>>();
+        vec_proposals.push(Entry::Normal(i));
         px.on_definition(|x| {
-            x.propose(prop);
+            x.propose(i);
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -52,7 +47,7 @@ fn gc_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seq_after: Vec<(&u64, Vec<Entry<Ballot>>)> = vec![];
+    let mut seq_after: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after.push(px.on_definition(|comp| {
             let seq = comp.stop_and_get_sequence();
@@ -82,15 +77,14 @@ fn double_gc_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut vec_proposals: Vec<Entry<Ballot>> = vec![];
+    let mut vec_proposals: Vec<Entry<u64>> = vec![];
     let mut futures = vec![];
     for i in 0..cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Entry<Ballot>>();
-        let prop = format!("Decide Paxos {}", i).as_bytes().to_vec();
+        let (kprom, kfuture) = promise::<Entry<u64>>();
 
-        vec_proposals.push(Entry::Normal(prop.clone()));
+        vec_proposals.push(Entry::Normal(i));
         px.on_definition(|x| {
-            x.propose(prop);
+            x.propose(i);
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -115,7 +109,7 @@ fn double_gc_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seq_after_double: Vec<(&u64, Vec<Entry<Ballot>>)> = vec![];
+    let mut seq_after_double: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after_double.push(px.on_definition(|comp| {
             let seq = comp.stop_and_get_sequence();
@@ -137,11 +131,7 @@ fn double_gc_test() {
     };
 }
 
-fn check_gc(
-    vec_proposals: Vec<Entry<Ballot>>,
-    seq_after: Vec<(&u64, Vec<Entry<Ballot>>)>,
-    gc_idx: u64,
-) {
+fn check_gc(vec_proposals: Vec<Entry<u64>>, seq_after: Vec<(&u64, Vec<Entry<u64>>)>, gc_idx: u64) {
     for i in 0..seq_after.len() {
         let (_, after) = seq_after.get(i).expect("After Sequence");
 
