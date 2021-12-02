@@ -280,7 +280,7 @@ pub mod omnireplica {
         messages::Message,
         paxos::OmniPaxos,
         storage::{
-            memory_storage::{MemorySequence, MemoryState},
+            memory_storage::{MemoryLog, MemoryState},
             Entry,
         },
     };
@@ -295,7 +295,7 @@ pub mod omnireplica {
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<u64>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
+        paxos: OmniPaxos<u64, MemoryLog<u64>, MemoryState>,
         ask_vector: LinkedList<Ask<(), Entry<u64>>>,
     }
 
@@ -325,7 +325,7 @@ pub mod omnireplica {
     }
 
     impl OmniPaxosReplica {
-        pub fn with(paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>) -> Self {
+        pub fn with(paxos: OmniPaxos<u64, MemoryLog<u64>, MemoryState>) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
                 ble_port: RequiredPort::uninitialised(),
@@ -340,8 +340,8 @@ pub mod omnireplica {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn stop_and_get_sequence(&mut self) -> Arc<MemorySequence<u64>> {
-            self.paxos.stop_and_get_sequence()
+        pub fn stop_and_get_log(&mut self) -> Arc<MemoryLog<u64>> {
+            self.paxos.stop_and_get_log()
         }
 
         fn send_outgoing_msgs(&mut self) {

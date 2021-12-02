@@ -2,7 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::storage::{Entry, Sequence};
+use omnipaxos::storage::{Entry, Log};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -38,18 +38,18 @@ fn consensus_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let mut seq: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
+    let mut log: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
-        seq.push(px.on_definition(|comp| {
-            let seq = comp.stop_and_get_sequence();
-            (i, seq.get_entries(0, seq.get_sequence_len()).to_vec())
+        log.push(px.on_definition(|comp| {
+            let log = comp.stop_and_get_log();
+            (i, log.get_entries(0, log.get_len()).to_vec())
         }));
     }
 
     let quorum_size = cfg.num_nodes as usize / 2 + 1;
-    check_quorum(seq.clone(), quorum_size, vec_proposals.clone());
-    check_validity(seq.clone(), vec_proposals);
-    check_uniform_agreement(seq);
+    check_quorum(log.clone(), quorum_size, vec_proposals.clone());
+    check_validity(log.clone(), vec_proposals);
+    check_uniform_agreement(log);
 
     match sys.kompact_system.shutdown() {
         Ok(_) => {}
@@ -59,12 +59,12 @@ fn consensus_test() {
 
 /// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
-    sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>,
+    log_responses: Vec<(&u64, Vec<Entry<u64>>)>,
     quorum_size: usize,
     num_proposals: Vec<Entry<u64>>,
 ) {
     for i in num_proposals {
-        let num_nodes: usize = sequence_responses
+        let num_nodes: usize = log_responses
             .iter()
             .filter(|(_, sr)| sr.contains(&i))
             .map(|sr| sr.0)
@@ -83,11 +83,8 @@ fn check_quorum(
 }
 
 /// Verifies that only proposed values are decided.
-fn check_validity(
-    sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>,
-    num_proposals: Vec<Entry<u64>>,
-) {
-    let invalid_nodes: Vec<_> = sequence_responses
+fn check_validity(log_responses: Vec<(&u64, Vec<Entry<u64>>)>, num_proposals: Vec<Entry<u64>>) {
+    let invalid_nodes: Vec<_> = log_responses
         .iter()
         .filter(|(_, sr)| {
             sr.iter()
@@ -106,13 +103,13 @@ fn check_validity(
 }
 
 /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(sequence_responses: Vec<(&u64, Vec<Entry<u64>>)>) {
-    let (_, longest_seq) = sequence_responses
+fn check_uniform_agreement(log_responses: Vec<(&u64, Vec<Entry<u64>>)>) {
+    let (_, longest_log) = log_responses
         .iter()
         .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
         .expect("Empty SequenceResp from nodes!");
-    for (_, sr) in &sequence_responses {
-        assert!(longest_seq.starts_with(sr.as_slice()));
+    for (_, sr) in &log_responses {
+        assert!(longest_log.starts_with(sr.as_slice()));
     }
 
     println!("Pass check_uniform_agreement");

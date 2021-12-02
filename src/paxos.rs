@@ -1,7 +1,7 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
-    storage::{Entry, PaxosState, Sequence, StopSign, Storage},
+    storage::{Entry, Log, PaxosState, StopSign, Storage},
     util::PromiseMetaData,
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
@@ -42,13 +42,13 @@ where
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<T, S, P>
+pub struct OmniPaxos<T, L, P>
 where
     T: Clone,
-    S: Sequence<T>,
+    L: Log<T>,
     P: PaxosState,
 {
-    storage: Storage<T, S, P>,
+    storage: Storage<T, L, P>,
     config_id: u32,
     pid: u64,
     majority: usize,
@@ -74,10 +74,10 @@ where
     cached_gc_index: u64,
 }
 
-impl<T, S, P> OmniPaxos<T, S, P>
+impl<T, L, P> OmniPaxos<T, L, P>
 where
     T: Clone,
-    S: Sequence<T>,
+    L: Log<T>,
     P: PaxosState,
 {
     /*** User functions ***/
@@ -96,7 +96,7 @@ where
         skip_prepare_use_leader: Option<Ballot>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> OmniPaxos<T, S, P> {
+    ) -> OmniPaxos<T, L, P> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -138,7 +138,7 @@ where
         info!(l, "Paxos component pid: {} created!", pid);
 
         let mut paxos = OmniPaxos {
-            storage: Storage::with(S::new(), P::new()),
+            storage: Storage::with(L::new(), P::new()),
             pid,
             config_id,
             majority,
@@ -179,8 +179,8 @@ where
         peers: Vec<u64>,
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<T, S, P> {
-        OmniPaxos::<T, S, P>::with(
+    ) -> OmniPaxos<T, L, P> {
+        OmniPaxos::<T, L, P>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
@@ -214,7 +214,7 @@ where
     /// # Arguments
     /// * `sequence`: The persisted log before crashing.
     /// * `state`: The persisted state of this OmniPaxos before crashing.
-    pub fn fail_recovery(&mut self, sequence: S, state: P) {
+    pub fn fail_recovery(&mut self, sequence: L, state: P) {
         self.storage = Storage::with(sequence, state);
         self.state = (Role::Follower, Phase::Recover);
         for pid in &self.peers {
@@ -412,8 +412,8 @@ where
 
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
-    pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
-        self.storage.stop_and_get_sequence()
+    pub fn stop_and_get_log(&mut self) -> Arc<L> {
+        self.storage.stop_and_get_log()
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.
@@ -466,7 +466,7 @@ where
             /* insert my promise */
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_len();
-            let la = self.storage.get_sequence_len();
+            let la = self.storage.get_log_len();
             let promise_meta = PromiseMetaData::with(na, la, self.pid);
             self.max_promise_meta = promise_meta;
             self.promises_meta[self.pid as usize - 1] = Some(promise_meta);
@@ -500,7 +500,7 @@ where
             }
             let ld = self.storage.get_decided_len();
             let n_accepted = self.storage.get_accepted_round();
-            let la = self.storage.get_sequence_len();
+            let la = self.storage.get_log_len();
             let prep = Prepare::with(self.n_leader, ld, n_accepted, la);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Prepare(prep)));
@@ -670,7 +670,7 @@ where
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
             }
         }
-        let la = self.storage.append_sequence(&mut entries);
+        let la = self.storage.append_entries(&mut entries);
         self.las[self.pid as usize - 1] = la;
     }
 
@@ -707,7 +707,7 @@ where
                 if max_pid != &self.pid {
                     // sync self with max pid's log
                     if max_promise_n == &self.storage.get_accepted_round() {
-                        self.storage.append_sequence(&mut max_prm_sfx);
+                        self.storage.append_entries(&mut max_prm_sfx);
                     } else {
                         self.storage.append_on_decided_prefix(max_prm_sfx)
                     }
@@ -722,7 +722,7 @@ where
                 let max_promise_acc_sync =
                     AcceptSync::with(self.n_leader, new_entries.clone(), *max_la);
                 // append new proposals in my sequence
-                let la = self.storage.append_sequence(&mut new_entries);
+                let la = self.storage.append_entries(&mut new_entries);
                 self.storage.set_accepted_round(self.n_leader);
                 self.las[Self::get_idx_from_pid(self.pid)] = la;
                 self.state = (Role::Leader, Phase::Accept);
@@ -885,7 +885,7 @@ where
             self.storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
-            let la = self.storage.get_sequence_len();
+            let la = self.storage.get_log_len();
             let sfx = if na > prep.n_accepted {
                 self.storage.get_suffix(prep.ld - self.cached_gc_index)
             } else if na == prep.n_accepted && la > prep.la {
@@ -966,7 +966,7 @@ where
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: &mut Vec<Entry<T>>) {
-        let la = self.storage.append_sequence(entries);
+        let la = self.storage.append_entries(entries);
         if cfg!(feature = "latest_accepted") {
             match &self.latest_accepted_meta {
                 Some((round, outgoing_idx)) if round == &n => {

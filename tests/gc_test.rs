@@ -2,7 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::storage::{Entry, Sequence};
+use omnipaxos::storage::{Entry, Log};
 use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;
@@ -11,7 +11,7 @@ use util::TestSystem;
 const GC_INDEX_INCREMENT: u64 = 10;
 
 /// Test Garbage Collection.
-/// At the end the sequence is retrieved from each replica and verified
+/// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] are removed.
 #[test]
 #[serial]
@@ -50,8 +50,8 @@ fn gc_test() {
     let mut seq_after: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after.push(px.on_definition(|comp| {
-            let seq = comp.stop_and_get_sequence();
-            (i, seq.get_entries(0, seq.get_sequence_len()).to_vec())
+            let seq = comp.stop_and_get_log();
+            (i, seq.get_entries(0, seq.get_len()).to_vec())
         }));
     }
 
@@ -66,7 +66,7 @@ fn gc_test() {
 }
 
 /// Test double Garbage Collection.
-/// At the end the sequence is retrieved from each replica and verified
+/// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] + an increment are removed.
 #[test]
 #[serial]
@@ -112,8 +112,8 @@ fn double_gc_test() {
     let mut seq_after_double: Vec<(&u64, Vec<Entry<u64>>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.stop_and_get_sequence();
-            (i, seq.get_entries(0, seq.get_sequence_len()).to_vec())
+            let seq = comp.stop_and_get_log();
+            (i, seq.get_entries(0, seq.get_len()).to_vec())
         }));
     }
 
@@ -133,7 +133,7 @@ fn double_gc_test() {
 
 fn check_gc(vec_proposals: Vec<Entry<u64>>, seq_after: Vec<(&u64, Vec<Entry<u64>>)>, gc_idx: u64) {
     for i in 0..seq_after.len() {
-        let (_, after) = seq_after.get(i).expect("After Sequence");
+        let (_, after) = seq_after.get(i).expect("After log");
 
         assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
         assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
