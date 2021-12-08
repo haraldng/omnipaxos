@@ -359,7 +359,7 @@ pub mod omnireplica {
         }
 
         pub fn propose(&mut self, data: u64) {
-            self.paxos.propose_normal(data).expect("Failed to propose!");
+            self.paxos.append(data).expect("Failed to propose!");
         }
 
         pub fn garbage_collect(&mut self, index: Option<u64>) {

@@ -1,7 +1,7 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
-    storage::{Entry, Log, PaxosState, StopSign, Storage},
+    storage::{Entry, Snapshot, StopSign, Storage},
     util::PromiseMetaData,
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
@@ -10,7 +10,7 @@ use crate::{
 };
 use hocon::Hocon;
 use slog::{crit, debug, info, trace, warn, Logger};
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData};
 
 const BUFFER_SIZE: usize = 100000;
 
@@ -42,13 +42,13 @@ where
 
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<T, L, P>
+pub struct OmniPaxos<T, S, B>
 where
     T: Clone,
-    L: Log<T>,
-    P: PaxosState,
+    S: Snapshot<T>,
+    B: Storage<T, S>,
 {
-    storage: Storage<T, L, P>,
+    storage: B,
     config_id: u32,
     pid: u64,
     majority: usize,
@@ -72,13 +72,14 @@ where
     /// Logger used to output the status of the component.
     logger: Logger,
     cached_gc_index: u64,
+    s: PhantomData<S>,
 }
 
-impl<T, L, P> OmniPaxos<T, L, P>
+impl<T, S, B> OmniPaxos<T, S, B>
 where
     T: Clone,
-    L: Log<T>,
-    P: PaxosState,
+    S: Snapshot<T>,
+    B: Storage<T, S>,
 {
     /*** User functions ***/
     /// Creates an Omni-Paxos replica.
@@ -93,10 +94,11 @@ where
         config_id: u32,
         pid: u64,
         peers: Vec<u64>,
+        storage: B,
         skip_prepare_use_leader: Option<Ballot>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> OmniPaxos<T, L, P> {
+    ) -> OmniPaxos<T, S, B> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -138,7 +140,7 @@ where
         info!(l, "Paxos component pid: {} created!", pid);
 
         let mut paxos = OmniPaxos {
-            storage: Storage::with(L::new(), P::new()),
+            storage,
             pid,
             config_id,
             majority,
@@ -161,6 +163,7 @@ where
             num_nodes,
             logger: l,
             cached_gc_index: 0,
+            s: PhantomData,
         };
         paxos.storage.set_promise(n_leader);
         paxos
@@ -177,13 +180,15 @@ where
         &self,
         cfg: &Hocon,
         peers: Vec<u64>,
+        storage: B,
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<T, L, P> {
-        OmniPaxos::<T, L, P>::with(
+    ) -> OmniPaxos<T, S, B> {
+        OmniPaxos::<T, S, B>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
+            storage,
             skip_prepare_use_leader,
             logger,
             Option::from(
@@ -195,6 +200,7 @@ where
         )
     }
 
+    /*
     /// Initiates the garbage collection process.
     /// # Arguments
     /// * `index` - Deletes all entries up to [`index`], if the [`index`] is None then the minimum index accepted by **ALL** servers will be used as the [`index`].
@@ -204,18 +210,15 @@ where
             _ => self.forward_gc_request(index),
         }
     }
+    */
 
     /// Return garbage collection index from storage.
     pub fn get_garbage_collected_idx(&self) -> u64 {
-        self.storage.get_gc_idx()
+        self.storage.get_trim_idx()
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    /// # Arguments
-    /// * `sequence`: The persisted log before crashing.
-    /// * `state`: The persisted state of this OmniPaxos before crashing.
-    pub fn fail_recovery(&mut self, sequence: L, state: P) {
-        self.storage = Storage::with(sequence, state);
+    pub fn fail_recovery(&mut self) {
         self.state = (Role::Follower, Phase::Recover);
         for pid in &self.peers {
             let m = Message::with(self.pid, *pid, PaxosMsg::PrepareReq);
@@ -280,7 +283,7 @@ where
 
         trace!(self.logger, "Garbage Collection index: {:?}", index);
 
-        self.storage.garbage_collect(index);
+        self.storage.trim(index);
         self.cached_gc_index = index;
     }
 
@@ -356,12 +359,12 @@ where
     }
 
     /// Propose a normal entry to be replicated.
-    pub fn propose_normal(&mut self, data: T) -> Result<(), ProposeErr<T>> {
+    pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
         if self.stopped() {
-            Err(ProposeErr::Normal(data))
+            Err(ProposeErr::Normal(entry))
         } else {
-            let entry = Entry::Normal(data);
-            self.propose_entry(entry);
+            let e = Entry::Normal(entry);
+            self.propose_entry(e);
             Ok(())
         }
     }
@@ -412,9 +415,10 @@ where
 
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
-    pub fn stop_and_get_log(&mut self) -> Arc<L> {
-        self.storage.stop_and_get_log()
-    }
+    // TODO with new reconfiguration
+    // pub fn stop_and_get_log(&mut self) -> Arc<L> {
+    //     self.storage.stop_and_get_log()
+    // }
 
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
@@ -709,7 +713,8 @@ where
                     if max_promise_n == &self.storage.get_accepted_round() {
                         self.storage.append_entries(&mut max_prm_sfx);
                     } else {
-                        self.storage.append_on_decided_prefix(max_prm_sfx)
+                        let ld = self.storage.get_decided_len();
+                        self.storage.append_on_prefix(ld, &mut max_prm_sfx);
                     }
                 }
                 if last_is_stop {
