@@ -1,9 +1,9 @@
 use crate::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
-
+/*
 /// An entry in the replicated log.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Entry<T>
+pub enum T
 where
     T: Clone,
 {
@@ -13,7 +13,7 @@ where
     StopSign(StopSign),
 }
 
-impl<T> Entry<T>
+impl<T> T
 where
     T: Clone,
 {
@@ -22,6 +22,7 @@ where
         matches!(self, Entry::StopSign(_))
     }
 }
+*/
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
@@ -66,7 +67,7 @@ pub trait Snapshot<T>: Clone
 where
     T: Clone,
 {
-    fn create(entries: &[Entry<T>]) -> Self;
+    fn create(entries: &[T]) -> Self;
 
     //fn create_delta(&self, other: Self) -> Self    // TODO create delta snapshot that can be merged() with other to become self.
 
@@ -84,13 +85,13 @@ where
     S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
-    fn append_entry(&mut self, entry: Entry<T>) -> u64;
+    fn append_entry(&mut self, entry: T) -> u64;
 
     /// Appends the entries of `entries` to the end of the log and returns the log length.
-    fn append_entries(&mut self, entries: &mut Vec<Entry<T>>) -> u64;
+    fn append_entries(&mut self, entries: Vec<T>) -> u64;
 
     /// Appends the entries of `entries` to the prefix from index `from_index` in the log and returns the log length.
-    fn append_on_prefix(&mut self, from_idx: u64, entries: &mut Vec<Entry<T>>) -> u64;
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64;
 
     /// Sets the round that has been promised.
     fn set_promise(&mut self, nprom: Ballot);
@@ -107,24 +108,28 @@ where
     fn get_accepted_round(&self) -> Ballot;
 
     /// Returns the entries in the log in the index interval of [from, to)
-    fn get_entries(&self, from: u64, to: u64) -> &[Entry<T>];
+    fn get_entries(&self, from: u64, to: u64) -> &[T];
 
     /// Returns the current length of the log.
     fn get_log_len(&self) -> u64;
 
     /// Returns the suffix of entries in the log from index `from`.
-    fn get_suffix(&self, from: u64) -> Vec<Entry<T>>;
+    fn get_suffix(&self, from: u64) -> &[T];
 
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;
 
-    fn stopped(&self) -> Option<StopSign>;
+    fn set_stopsign(&mut self, ss: StopSign);
+
+    fn get_stopsign(&self) -> Option<StopSign>;
 
     /// Removes elements up to the given [`idx`] from storage.
-    fn trim(&mut self, idx: u64);
+    fn trim(&mut self, trimmed_idx: u64);
+
+    fn set_trimmed_idx(&mut self, trimmed_idx: u64);
 
     /// Returns the garbage collector index from storage.
-    fn get_trim_idx(&self) -> u64;
+    fn get_trimmed_idx(&self) -> u64;
 
     fn set_snapshot(&mut self, trimmed_idx: u64, snapshot: S) -> Result<(), ()>;
 
@@ -147,7 +152,7 @@ pub mod memory_storage {
         S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
-        log: Vec<Entry<T>>,
+        log: Vec<T>,
         /// Last promised round.
         n_prom: Ballot,
         /// Last accepted round.
@@ -165,17 +170,17 @@ pub mod memory_storage {
         T: Clone,
         S: Snapshot<T>,
     {
-        fn append_entry(&mut self, entry: Entry<T>) -> u64 {
+        fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
             self.get_decided_len()
         }
 
-        fn append_entries(&mut self, entries: &mut Vec<Entry<T>>) -> u64 {
+        fn append_entries(&mut self, entries: &mut Vec<T>) -> u64 {
             self.log.append(entries);
             self.get_decided_len()
         }
 
-        fn append_on_prefix(&mut self, from_idx: u64, entries: &mut Vec<Entry<T>>) -> u64 {
+        fn append_on_prefix(&mut self, from_idx: u64, entries: &mut Vec<T>) -> u64 {
             self.log.truncate(from_idx as usize);
             self.log.append(entries);
             self.get_decided_len()
@@ -201,7 +206,7 @@ pub mod memory_storage {
             self.acc_round
         }
 
-        fn get_entries(&self, from: u64, to: u64) -> &[Entry<T>] {
+        fn get_entries(&self, from: u64, to: u64) -> &[T] {
             match self.log.get(from as usize..to as usize) {
                 Some(ents) => ents,
                 None => panic!(
@@ -217,7 +222,7 @@ pub mod memory_storage {
             self.log.len() as u64
         }
 
-        fn get_suffix(&self, from: u64) -> Vec<Entry<T>> {
+        fn get_suffix(&self, from: u64) -> Vec<T> {
             match self.log.get(from as usize..) {
                 Some(s) => s.to_vec(),
                 None => vec![],

@@ -1,6 +1,6 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
-    storage::{Entry, Snapshot, SnapshotType, StopSign},
+    storage::{Snapshot, SnapshotType, StopSign},
 };
 use std::marker::PhantomData;
 
@@ -40,7 +40,7 @@ where
     /// The latest round in which an entry was accepted.
     pub n_accepted: Ballot,
     /// The suffix of missing entries at the leader.
-    pub sfx: Vec<Entry<T>>,
+    pub sfx: Vec<T>,
     /// The decided index of this follower.
     pub ld: u64,
     /// The log length of this follower.
@@ -56,7 +56,7 @@ where
     pub fn with(
         n: Ballot,
         n_accepted: Ballot,
-        sfx: Vec<Entry<T>>,
+        sfx: Vec<T>,
         ld: u64,
         la: u64,
         stop_sign: Option<StopSign>,
@@ -127,7 +127,7 @@ where
     /// The current round.
     pub n: Ballot,
     /// Entries that the receiving replica is missing in its log.
-    pub entries: Vec<Entry<T>>,
+    pub entries: Vec<T>,
     /// The index of the log where `entries` should be applied at.
     pub sync_idx: u64,
     pub decide_idx: Option<u64>,
@@ -138,7 +138,7 @@ where
     T: Clone,
 {
     /// Creates an [`AcceptSync`] message.
-    pub fn with(n: Ballot, sfx: Vec<Entry<T>>, sync_idx: u64, decide_idx: Option<u64>) -> Self {
+    pub fn with(n: Ballot, sfx: Vec<T>, sync_idx: u64, decide_idx: Option<u64>) -> Self {
         AcceptSync {
             n,
             entries: sfx,
@@ -189,7 +189,7 @@ where
     /// The current round.
     pub n: Ballot,
     /// Entries to be replicated.
-    pub entries: Vec<Entry<T>>,
+    pub entries: Vec<T>,
 }
 
 impl<T> FirstAccept<T>
@@ -197,7 +197,7 @@ where
     T: Clone,
 {
     /// Creates a [`FirstAccept`] message.
-    pub fn with(n: Ballot, entries: Vec<Entry<T>>) -> Self {
+    pub fn with(n: Ballot, entries: Vec<T>) -> Self {
         FirstAccept { n, entries }
     }
 }
@@ -213,7 +213,7 @@ where
     /// The decided index.
     pub ld: u64,
     /// Entries to be replicated.
-    pub entries: Vec<Entry<T>>,
+    pub entries: Vec<T>,
 }
 
 impl<T> AcceptDecide<T>
@@ -221,7 +221,7 @@ where
     T: Clone,
 {
     /// Creates an [`AcceptDecide`] message.
-    pub fn with(n: Ballot, ld: u64, entries: Vec<Entry<T>>) -> Self {
+    pub fn with(n: Ballot, ld: u64, entries: Vec<T>) -> Self {
         AcceptDecide { n, ld, entries }
     }
 }
@@ -266,7 +266,7 @@ where
     T: Clone,
     S: Snapshot<T>,
 {
-    /// Ballotequest a [`Prepare`] to be sent from the leader. Used for fail-recovery.
+    /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
     PrepareReq,
     #[allow(missing_docs)]
     Prepare(Prepare),
@@ -279,9 +279,10 @@ where
     Accepted(Accepted),
     Decide(Decide),
     /// Forward client proposals to the leader.
-    ProposalForward(Vec<Entry<T>>),
+    ProposalForward(Vec<T>),
     GarbageCollect(u64),
     ForwardGarbageCollect(Option<u64>),
+
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.

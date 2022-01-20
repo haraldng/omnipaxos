@@ -1,6 +1,6 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
-    storage::{Entry, Snapshot, SnapshotType},
+    storage::{Snapshot, SnapshotType},
 };
 
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
@@ -22,7 +22,7 @@ where
     T: Clone,
     S: Snapshot<T>,
 {
-    Entries(Vec<Entry<T>>),
+    Entries(Vec<T>),
     Snapshot(SnapshotType<T, S>),
     None,
 }
