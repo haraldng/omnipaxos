@@ -10,7 +10,7 @@
 //! * `latest_decide` - Only send latest decided log index as all preceding entries are implicitly decided. Reduces message overhead.
 //! * `continued_leader_reconfiguration` - Let the cluster pick the current leader as the initial leader in the new configuration (if possible) to shorten down-time during reconfiguration.
 
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod leader_election;
 /// The different messages Omni-Paxos replicas can communicate to each other with.

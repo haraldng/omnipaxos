@@ -1,4 +1,7 @@
-use crate::leader_election::ballot_leader_election::Ballot;
+use crate::{
+    leader_election::ballot_leader_election::Ballot,
+    storage::{Entry, Snapshot, SnapshotType},
+};
 
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
 /// Promise without the suffix
@@ -12,6 +15,16 @@ impl PromiseMetaData {
     pub fn with(n: Ballot, la: u64, pid: u64) -> Self {
         Self { n, la, pid }
     }
+}
+
+pub enum PromiseType<T, S>
+where
+    T: Clone,
+    S: Snapshot<T>,
+{
+    Entries(Vec<Entry<T>>),
+    Snapshot(SnapshotType<T, S>),
+    None,
 }
 
 // impl Ord for PromiseMetaData

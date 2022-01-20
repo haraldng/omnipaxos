@@ -1,5 +1,5 @@
 use crate::leader_election::ballot_leader_election::Ballot;
-use std::fmt::Debug;
+use std::{fmt::Debug, marker::PhantomData};
 
 /// An entry in the replicated log.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,13 +51,33 @@ impl PartialEq for StopSign {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum SnapshotType<T, S>
+where
+    T: Clone,
+    S: Snapshot<T>,
+{
+    Complete(S),
+    Delta(S),
+    _Phantom(PhantomData<T>),
+}
+
 pub trait Snapshot<T>: Clone
 where
     T: Clone,
 {
-    fn create(entries: &Vec<T>) -> Self;
+    fn create(entries: &[Entry<T>]) -> Self;
+
+    //fn create_delta(&self, other: Self) -> Self    // TODO create delta snapshot that can be merged() with other to become self.
+
+    fn merge(&mut self, delta: Self);
+
+    fn snapshottable() -> bool; // TODO: somehow check if user is using snapshots statically?
+
+    //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
+// TODO create an internal storage struct that calls these user provided functions to hide logic from user e.g. stopped()
 pub trait Storage<T, S>
 where
     T: Clone,
@@ -98,7 +118,7 @@ where
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;
 
-    fn stopped(&self) -> bool;
+    fn stopped(&self) -> Option<StopSign>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64);
@@ -106,11 +126,13 @@ where
     /// Returns the garbage collector index from storage.
     fn get_trim_idx(&self) -> u64;
 
-    fn set_snapshot(&mut self, snapshot: S) -> Result<(), ()>;
+    fn set_snapshot(&mut self, trimmed_idx: u64, snapshot: S) -> Result<(), ()>;
 
-    fn get_snapshot(&self) -> Option<S>;
+    fn merge_snapshot(&mut self, trimmed_idx: u64, delta_snapshot: S);
+
+    fn get_snapshot(&self) -> Option<(u64, S)>;
 }
-
+/*
 /// An in-memory storage implementation for Paxos.
 pub mod memory_storage {
     use crate::{
@@ -227,3 +249,4 @@ pub mod memory_storage {
         }
     }
 }
+*/
