@@ -1,8 +1,8 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
-    storage::{Snapshot, SnapshotType, StopSign},
+    storage::{Snapshot, StopSign},
+    util::SyncItem,
 };
-use std::marker::PhantomData;
 
 /// Prepare message sent by a newly-elected leader to initiate the Prepare phase.
 #[derive(Copy, Clone, Debug)]
@@ -31,16 +31,17 @@ impl Prepare {
 
 /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
 #[derive(Clone, Debug)]
-pub struct Promise<T>
+pub struct Promise<T, S>
 where
     T: Clone,
+    S: Snapshot<T>,
 {
     /// The current round.
     pub n: Ballot,
     /// The latest round in which an entry was accepted.
     pub n_accepted: Ballot,
     /// The suffix of missing entries at the leader.
-    pub sfx: Vec<T>,
+    pub sync_item: Option<SyncItem<T, S>>,
     /// The decided index of this follower.
     pub ld: u64,
     /// The log length of this follower.
@@ -48,15 +49,16 @@ where
     pub stop_sign: Option<StopSign>,
 }
 
-impl<T> Promise<T>
+impl<T, S> Promise<T, S>
 where
     T: Clone,
+    S: Snapshot<T>,
 {
     /// Creates a [`Promise`] message.
     pub fn with(
         n: Ballot,
         n_accepted: Ballot,
-        sfx: Vec<T>,
+        sync_item: Option<SyncItem<T, S>>,
         ld: u64,
         la: u64,
         stop_sign: Option<StopSign>,
@@ -64,7 +66,7 @@ where
         Self {
             n,
             n_accepted,
-            sfx,
+            sync_item,
             ld,
             la,
             stop_sign,
@@ -72,110 +74,39 @@ where
     }
 }
 
-/// Promise message using Snapshot sent by a follower in response to a [`Prepare`] sent by the leader.
-#[derive(Clone, Debug)]
-pub struct SnapshotPromise<T, S>
-where
-    T: Clone,
-    S: Snapshot<T>,
-{
-    /// The current round.
-    pub n: Ballot,
-    /// The latest round in which an entry was accepted.
-    pub n_accepted: Ballot,
-    /// The decided index of this follower.
-    pub ld: u64,
-    /// The log length of this follower.
-    pub trimmed_idx: u64,
-    pub snapshot: Option<SnapshotType<T, S>>,
-    pub stop_sign: Option<StopSign>,
-    phantom: PhantomData<T>,
-}
-
-impl<T, S> SnapshotPromise<T, S>
-where
-    T: Clone,
-    S: Snapshot<T>,
-{
-    /// Creates a [`Promise`] message.
-    pub fn with(
-        n: Ballot,
-        n_accepted: Ballot,
-        snapshot: Option<SnapshotType<T, S>>,
-        ld: u64,
-        trimmed_idx: u64,
-        stop_sign: Option<StopSign>,
-    ) -> Self {
-        Self {
-            n,
-            n_accepted,
-            snapshot,
-            ld,
-            trimmed_idx,
-            stop_sign,
-            phantom: PhantomData,
-        }
-    }
-}
-
 /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
 #[derive(Clone, Debug)]
-pub struct AcceptSync<T>
+pub struct AcceptSync<T, S>
 where
     T: Clone,
+    S: Snapshot<T>,
 {
     /// The current round.
     pub n: Ballot,
     /// Entries that the receiving replica is missing in its log.
-    pub entries: Vec<T>,
+    pub sync_item: SyncItem<T, S>,
     /// The index of the log where `entries` should be applied at.
     pub sync_idx: u64,
     pub decide_idx: Option<u64>,
 }
 
-impl<T> AcceptSync<T>
+impl<T, S> AcceptSync<T, S>
 where
     T: Clone,
+    S: Snapshot<T>,
 {
     /// Creates an [`AcceptSync`] message.
-    pub fn with(n: Ballot, sfx: Vec<T>, sync_idx: u64, decide_idx: Option<u64>) -> Self {
+    pub fn with(
+        n: Ballot,
+        sync_item: SyncItem<T, S>,
+        sync_idx: u64,
+        decide_idx: Option<u64>,
+    ) -> Self {
         AcceptSync {
             n,
-            entries: sfx,
+            sync_item,
             sync_idx,
             decide_idx,
-        }
-    }
-}
-
-/// AcceptSync message with snapshot sent by the leader to synchronize the logs of all replicas in the prepare phase.
-#[derive(Clone, Debug)]
-pub struct SnapshotAcceptSync<T, S>
-where
-    T: Clone,
-    S: Snapshot<T>,
-{
-    /// The current round.
-    pub n: Ballot,
-    /// Snapshot that the receiving replica should sync with.
-    pub snapshot: SnapshotType<T, S>,
-    /// The index of the log where `entries` should be applied at.
-    pub trimmed_idx: u64,
-    phantom: PhantomData<T>,
-}
-
-impl<T, S> SnapshotAcceptSync<T, S>
-where
-    T: Clone,
-    S: Snapshot<T>,
-{
-    /// Creates an [`AcceptSync`] message.
-    pub fn with(n: Ballot, snapshot: SnapshotType<T, S>, trimmed_idx: u64) -> Self {
-        Self {
-            n,
-            snapshot,
-            trimmed_idx,
-            phantom: PhantomData,
         }
     }
 }
@@ -270,10 +201,8 @@ where
     PrepareReq,
     #[allow(missing_docs)]
     Prepare(Prepare),
-    Promise(Promise<T>),
-    SnapshotPromise(SnapshotPromise<T, S>),
-    AcceptSync(AcceptSync<T>),
-    SnapshotAcceptSync(SnapshotAcceptSync<T, S>),
+    Promise(Promise<T, S>),
+    AcceptSync(AcceptSync<T, S>),
     FirstAccept(FirstAccept<T>),
     AcceptDecide(AcceptDecide<T>),
     Accepted(Accepted),
@@ -282,7 +211,6 @@ where
     ProposalForward(Vec<T>),
     GarbageCollect(u64),
     ForwardGarbageCollect(Option<u64>),
-
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.

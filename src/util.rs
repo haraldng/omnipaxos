@@ -17,7 +17,8 @@ impl PromiseMetaData {
     }
 }
 
-pub enum PromiseType<T, S>
+#[derive(Debug, Clone)]
+pub enum SyncItem<T, S>
 where
     T: Clone,
     S: Snapshot<T>,
