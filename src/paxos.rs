@@ -1,7 +1,7 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::{AcceptSync, *},
-    storage::{Snapshot, SnapshotType, StopSign, Storage},
+    storage::{Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{PromiseMetaData, SyncItem},
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
@@ -60,6 +60,7 @@ where
     las: Vec<u64>,
     lds: Vec<Option<u64>>,
     pending_proposals: Vec<T>,
+    pending_stopsign: Option<StopSign>,
     lc: u64, // length of longest chosen seq
     prev_ld: u64,
     max_promise_meta: PromiseMetaData,
@@ -72,6 +73,7 @@ where
     /// Logger used to output the status of the component.
     logger: Logger,
     cached_gc_index: u64,
+    accepted_stopsign: Vec<bool>,
     s: PhantomData<S>,
 }
 
@@ -151,9 +153,10 @@ where
             las: vec![0; num_nodes],
             lds,
             pending_proposals: Vec::with_capacity(BUFFER_SIZE),
+            pending_stopsign: None,
             lc: 0,
             prev_ld: 0,
-            max_promise_meta: PromiseMetaData::with(Ballot::default(), 0, 0),
+            max_promise_meta: PromiseMetaData::with(Ballot::default(), 0, 0, None),
             max_promise: SyncItem::None,
             batch_accept_meta: vec![None; num_nodes + 1],
             latest_decide_meta: vec![None; num_nodes + 1],
@@ -162,6 +165,7 @@ where
             num_nodes,
             logger: l,
             cached_gc_index: 0,
+            accepted_stopsign: vec![false; num_nodes + 1],
             s: PhantomData,
         };
         paxos.storage.set_promise(n_leader);
@@ -345,12 +349,15 @@ where
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
             PaxosMsg::GarbageCollect(index) => self.gc(index),
             PaxosMsg::ForwardGarbageCollect(index) => self.handle_forwarded_gc_request(index),
+            PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
+            PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
+            PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
         }
     }
 
     /// Returns whether this Omni-Paxos instance is stopped, i.e. if it has been reconfigured.
     pub fn stopped(&self) -> bool {
-        self.storage.get_stopsign().is_some()
+        self.get_stopsign().is_some()
     }
 
     /// Propose a normal entry to be replicated.
@@ -380,7 +387,37 @@ where
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
             let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
-            todo!()
+            match self.state {
+                (Role::Leader, Phase::Prepare) => {
+                    if self.pending_stopsign.is_none() {
+                        self.pending_stopsign = Some(ss);
+                        Ok(())
+                    } else {
+                        todo!("Return ProposeErr with pending reconfig");
+                    }
+                }
+                (Role::Leader, Phase::Accept) => {
+                    if !self.stopped() {
+                        self.storage
+                            .set_stopsign(StopSignEntry::with(ss.clone(), false));
+                        self.accepted_stopsign[self.pid as usize] = true;
+                        self.send_accept_stopsign(ss);
+                        Ok(())
+                    } else {
+                        todo!("Return ProposeErr with pending reconfig");
+                    }
+                }
+                (Role::Leader, Phase::FirstAccept) => todo!("special first accept stopsign? -.-"),
+                _ => todo!("forward stopsign"),
+            }
+        }
+    }
+
+    fn send_accept_stopsign(&mut self, ss: StopSign) {
+        let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign::with(self.n_leader, ss.clone()));
+        for pid in self.get_promised_followers() {
+            self.outgoing
+                .push(Message::with(self.pid, pid, acc_ss.clone()));
         }
     }
 
@@ -439,6 +476,10 @@ where
         self.lds = vec![None; self.num_nodes];
     }
 
+    fn get_stopsign(&self) -> Option<StopSign> {
+        self.storage.get_stopsign().map(|x| x.stopsign)
+    }
+
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
     pub fn handle_leader(&mut self, n: Ballot) {
@@ -459,8 +500,8 @@ where
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_len();
             let la = self.storage.get_log_len();
-            let promise_meta = PromiseMetaData::with(na, la, self.pid);
-            self.max_promise_meta = promise_meta;
+            let promise_meta = PromiseMetaData::with(na, la, self.pid, self.get_stopsign());
+            self.max_promise_meta = promise_meta.clone();
             self.promises_meta[self.pid as usize] = Some(promise_meta);
             self.max_promise = SyncItem::None;
             /* initialise longest chosen sequence and update state */
@@ -553,14 +594,8 @@ where
     }
 
     fn send_first_accept(&mut self, entry: T) {
-        let promised_pids = self
-            .lds
-            .iter()
-            .enumerate()
-            .filter(|(_, x)| x.is_some())
-            .map(|(idx, _)| idx as u64 + 1);
         let f = FirstAccept::with(self.n_leader, vec![entry.clone()]);
-        for pid in promised_pids {
+        for pid in self.get_promised_followers() {
             self.outgoing.push(Message::with(
                 self.pid,
                 pid,
@@ -572,16 +607,19 @@ where
         self.state.1 = Phase::Accept;
     }
 
-    fn send_accept(&mut self, entry: T) {
-        let promised_idx = self
-            .lds
+    fn get_promised_followers(&self) -> Vec<u64> {
+        self.lds
             .iter()
             .enumerate()
             .filter(|(_, x)| x.is_some())
-            .map(|(idx, _)| idx);
-        for idx in promised_idx {
+            .map(|(idx, _)| idx as u64)
+            .collect()
+    }
+
+    fn send_accept(&mut self, entry: T) {
+        for pid in self.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
-                match self.batch_accept_meta.get_mut(idx).unwrap() {
+                match self.batch_accept_meta.get_mut(pid as usize).unwrap() {
                     Some((n, outgoing_idx)) if n == &self.n_leader => {
                         let Message { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
                         match msg {
@@ -593,21 +631,20 @@ where
                     _ => {
                         let acc = AcceptDecide::with(self.n_leader, self.lc, vec![entry.clone()]);
                         let cache_idx = self.outgoing.len();
-                        let pid = idx as u64 + 1;
                         self.outgoing.push(Message::with(
                             self.pid,
                             pid,
                             PaxosMsg::AcceptDecide(acc),
                         ));
-                        self.batch_accept_meta[idx] = Some((self.n_leader, cache_idx));
+                        self.batch_accept_meta[pid as usize] = Some((self.n_leader, cache_idx));
                         #[cfg(feature = "latest_decide")]
                         {
-                            self.latest_decide_meta[idx] = Some((self.n_leader, cache_idx));
+                            self.latest_decide_meta[pid as usize] =
+                                Some((self.n_leader, cache_idx));
                         }
                     }
                 }
             } else {
-                let pid = idx as u64 + 1;
                 let acc = AcceptDecide::with(self.n_leader, self.lc, vec![entry.clone()]);
                 self.outgoing
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
@@ -670,22 +707,19 @@ where
     }
 
     fn send_accsync_with_snapshot(&mut self) {
-        let (trim_idx, snapshot) = self.storage.get_snapshot().unwrap();
+        let trim_idx = self.storage.get_trimmed_idx();
+        let snapshot = self.storage.get_snapshot().unwrap();
         let acc_sync = AcceptSync::with(
             self.n_leader,
             SyncItem::Snapshot(SnapshotType::Complete(snapshot)),
             trim_idx,
             None,
+            self.get_stopsign(),
         );
-        let promised_followers = self
-            .promises_meta
-            .iter()
-            .filter_map(|p| p.map(|s| s.pid))
-            .filter(|p| p != &self.pid);
-        let mut acc_sync_msgs = promised_followers
-            .map(|pid| Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync.clone())))
-            .collect();
-        self.outgoing.append(&mut acc_sync_msgs);
+        for pid in self.get_promised_followers() {
+            let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync.clone()));
+            self.outgoing.push(msg);
+        }
     }
 
     fn send_accsync_with_entries(&mut self) {
@@ -695,24 +729,21 @@ where
             la: max_la,
             ..
         } = &self.max_promise_meta;
-        let leader_pid = self.pid;
-        let promised_followers = self
-            .promises_meta
-            .iter()
-            .filter_map(|p| p.as_ref())
-            .filter(|p| p.pid != leader_pid);
-        for PromiseMetaData {
-            n: promise_n,
-            la: promise_la,
-            pid,
-        } in promised_followers
-        {
-            let acc_sync = if (promise_n == max_promise_n) && (promise_la < max_la) {
+        for pid in self.get_promised_followers() {
+            let PromiseMetaData {
+                n: promise_n,
+                la: promise_la,
+                pid,
+                ..
+            } = self.promises_meta[pid as usize]
+                .as_ref()
+                .expect("No Metadata found for promised follower");
+            let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
                 let sfx = self
                     .storage
                     .get_suffix(*promise_la - self.cached_gc_index)
                     .to_vec();
-                AcceptSync::with(self.n_leader, SyncItem::Entries(sfx), *promise_la, None)
+                (sfx, *promise_la)
             } else {
                 let idx = *pid as usize;
                 let ld = self
@@ -721,10 +752,24 @@ where
                     .expect("Received PromiseMetaData but not found in ld")
                     .unwrap();
                 let sfx = self.storage.get_suffix(ld - self.cached_gc_index).to_vec();
-                AcceptSync::with(self.n_leader, SyncItem::Entries(sfx), ld, None)
+                (sfx, ld)
             };
+            let acc_sync = AcceptSync::with(
+                self.n_leader,
+                SyncItem::Entries(sfx),
+                sync_idx,
+                None,
+                self.get_stopsign(),
+            );
             let msg = Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
+        }
+    }
+
+    fn adopt_pending_stopsign(&mut self) {
+        if let Some(ss) = self.pending_stopsign.take() {
+            self.storage.set_stopsign(StopSignEntry::with(ss, false));
+            self.accepted_stopsign[self.pid as usize] = true;
         }
     }
 
@@ -737,11 +782,19 @@ where
         }
     }
 
+    fn merge_snapshot(&mut self, trimmed_idx: u64, delta: S) {
+        let mut snapshot = self.storage.get_snapshot().unwrap();
+        snapshot.merge(delta);
+        // TODO use and_then
+        self.storage.set_trimmed_idx(trimmed_idx);
+        self.storage.set_snapshot(snapshot);
+    }
+
     fn merge_pending_proposals_with_snapshot(&mut self) {
         if !self.pending_proposals.is_empty() {
-            let (trimmed_idx, snapshot) = self.create_pending_proposals_snapshot();
+            let (trimmed_idx, delta) = self.create_pending_proposals_snapshot();
             self.storage.set_accepted_round(self.n_leader);
-            self.storage.merge_snapshot(trimmed_idx, snapshot);
+            self.merge_snapshot(trimmed_idx, delta);
         }
     }
 
@@ -758,33 +811,45 @@ where
                     let ld = self.storage.get_decided_len();
                     self.storage.append_on_prefix(ld, sfx);
                 }
-                // TODO check for StopSign in log?
-                self.append_pending_proposals();
+                if let Some(ss) = self.max_promise_meta.stopsign.take() {
+                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                    self.accepted_stopsign[self.pid as usize] = true;
+                } else {
+                    self.append_pending_proposals();
+                    self.adopt_pending_stopsign();
+                }
                 self.send_accsync_with_entries();
             }
             SyncItem::Snapshot(s) => {
                 match s {
                     SnapshotType::Complete(c) => {
-                        self.storage
-                            .set_snapshot(self.max_promise_meta.la, c)
-                            .expect("Failed to set snapshot");
+                        // TODO chain together these calls using Result and and_then
+                        self.storage.set_trimmed_idx(self.max_promise_meta.la);
+                        self.storage.set_snapshot(c);
                     }
                     SnapshotType::Delta(d) => {
-                        self.storage.merge_snapshot(self.max_promise_meta.la, d);
+                        self.merge_snapshot(self.max_promise_meta.la, d);
                     }
                     _ => unimplemented!(),
                 }
-                self.merge_pending_proposals_with_snapshot();
+                if let Some(ss) = self.max_promise_meta.stopsign.take() {
+                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                    self.accepted_stopsign[self.pid as usize] = true;
+                } else {
+                    self.merge_pending_proposals_with_snapshot();
+                    self.adopt_pending_stopsign();
+                }
                 self.send_accsync_with_snapshot();
             }
             SyncItem::None => {
                 // I am the most updated
-                // TODO check for StopSign in log?
                 if S::snapshottable() {
                     self.merge_pending_proposals_with_snapshot();
+                    self.adopt_pending_stopsign();
                     self.send_accsync_with_snapshot();
                 } else {
                     self.append_pending_proposals();
+                    self.adopt_pending_stopsign();
                     self.send_accsync_with_entries();
                 }
             }
@@ -797,8 +862,8 @@ where
             "Handling promise from {} in Prepare phase", from
         );
         if prom.n == self.n_leader {
-            let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from);
-            self.promises_meta[from as usize] = Some(promise_meta);
+            let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from, prom.stopsign);
+            self.promises_meta[from as usize] = Some(promise_meta.clone());
             self.lds[from as usize] = Some(prom.ld);
             if promise_meta > self.max_promise_meta {
                 self.max_promise_meta = promise_meta;
@@ -835,6 +900,7 @@ where
                     SyncItem::Snapshot(snapshot),
                     trimmed_idx,
                     None,
+                    self.get_stopsign(),
                 ) // TODO decided_idx with snapshot?
             } else {
                 let sync_idx = if prom.n_accepted == self.max_promise_meta.n
@@ -854,7 +920,13 @@ where
                 } else {
                     self.storage.get_decided_len()
                 };
-                AcceptSync::with(self.n_leader, SyncItem::Entries(sfx), sync_idx, Some(ld))
+                AcceptSync::with(
+                    self.n_leader,
+                    SyncItem::Entries(sfx),
+                    sync_idx,
+                    Some(ld),
+                    self.get_stopsign(),
+                )
             };
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
@@ -901,13 +973,7 @@ where
                             }
                         }
                     } else {
-                        let promised_pids = self
-                            .lds
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, ld)| ld.is_some())
-                            .map(|(idx, _)| idx as u64 + 1);
-                        for pid in promised_pids {
+                        for pid in self.get_promised_followers() {
                             self.outgoing
                                 .push(Message::with(self.pid, pid, PaxosMsg::Decide(d)));
                         }
@@ -918,24 +984,33 @@ where
         }
     }
 
+    fn handle_accepted_stopsign(&mut self, acc_stopsign: AcceptedStopSign, from: u64) {
+        if acc_stopsign.n == self.n_leader && self.state == (Role::Leader, Phase::Accept) {
+            self.accepted_stopsign[from as usize] = true;
+            let num_accepted = self
+                .accepted_stopsign
+                .iter()
+                .filter(|x| **x == true)
+                .count();
+            if num_accepted >= self.majority {
+                self.handle_decide_stopsign(DecideStopSign::with(self.n_leader));
+                for pid in self.get_promised_followers() {
+                    let d = DecideStopSign::with(self.n_leader);
+                    self.outgoing
+                        .push(Message::with(self.pid, pid, PaxosMsg::DecideStopSign(d)));
+                }
+            }
+        }
+    }
+
     fn create_complete_snapshot(&mut self) -> (u64, S) {
         let log_len = self.storage.get_log_len();
         let snapshot = S::create(self.storage.get_entries(0, log_len));
-        match self.storage.get_snapshot() {
-            Some((trimmed_idx, snapshot)) => {
-                let trim_idx = trimmed_idx + log_len;
-                self.storage
-                    .set_snapshot(trim_idx, snapshot.clone())
-                    .expect("Failed to set snapshot");
-                (trim_idx, snapshot)
-            }
-            None => {
-                self.storage
-                    .set_snapshot(log_len, snapshot.clone())
-                    .expect("Failed to set snapshot");
-                (log_len, snapshot)
-            }
-        }
+        let trim_idx = log_len + self.storage.get_trimmed_idx();
+        // TODO use and_then
+        self.storage.set_trimmed_idx(trim_idx);
+        self.storage.set_snapshot(snapshot.clone());
+        (trim_idx, snapshot)
     }
 
     fn create_delta_snapshot(&self, idx: u64) -> S {
@@ -953,7 +1028,7 @@ where
             let la = self.storage.get_log_len();
             let promise = if S::snapshottable() {
                 let (trimmed_idx, sync_item, stop_sign) = if na > prep.n_accepted {
-                    let stop_sign = self.storage.get_stopsign();
+                    let stop_sign = self.get_stopsign();
                     let (trimmed_idx, snapshot) = self.create_complete_snapshot();
                     (
                         trimmed_idx,
@@ -961,7 +1036,7 @@ where
                         stop_sign,
                     )
                 } else if na == prep.n_accepted && la > prep.la {
-                    let stop_sign = self.storage.get_stopsign();
+                    let stop_sign = self.get_stopsign();
                     let d = self.create_delta_snapshot(prep.la);
                     let trimmed_idx = self.storage.get_trimmed_idx() + la;
                     (
@@ -1021,12 +1096,12 @@ where
                 SyncItem::Snapshot(s) => {
                     match s {
                         SnapshotType::Complete(c) => {
-                            self.storage
-                                .set_snapshot(accsync.sync_idx, c)
-                                .expect("Failed to set snapshot");
+                            // TODO use and_then
+                            self.storage.set_trimmed_idx(accsync.sync_idx);
+                            self.storage.set_snapshot(c);
                         }
                         SnapshotType::Delta(d) => {
-                            self.storage.merge_snapshot(accsync.sync_idx, d);
+                            self.merge_snapshot(accsync.sync_idx, d);
                         }
                         _ => unimplemented!(),
                     };
@@ -1046,7 +1121,30 @@ where
             if let Some(idx) = accsync.decide_idx {
                 self.storage.set_decided_len(idx);
             }
-            self.forward_pending_proposals();
+            match accsync.stopsign {
+                Some(ss) => {
+                    if let Some(ss_entry) = self.storage.get_stopsign() {
+                        let StopSignEntry {
+                            decided: has_decided,
+                            stopsign: _my_ss,
+                        } = ss_entry;
+                        if !has_decided {
+                            self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                        } /*else {
+                              assert_eq!(ss, my_ss);
+                          }*/
+                    } else {
+                        self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                    }
+                    let a = AcceptedStopSign::with(accsync.n);
+                    self.outgoing.push(Message::with(
+                        self.pid,
+                        from,
+                        PaxosMsg::AcceptedStopSign(a),
+                    ));
+                }
+                None => self.forward_pending_proposals(),
+            }
         }
     }
 
@@ -1079,9 +1177,33 @@ where
         }
     }
 
+    fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
+        if self.storage.get_promise() == acc_ss.n && self.state == (Role::Follower, Phase::Accept) {
+            self.storage
+                .set_stopsign(StopSignEntry::with(acc_ss.ss, false));
+            let a = AcceptedStopSign::with(acc_ss.n);
+            self.outgoing.push(Message::with(
+                self.pid,
+                self.leader,
+                PaxosMsg::AcceptedStopSign(a),
+            ));
+        }
+    }
+
     fn handle_decide(&mut self, dec: Decide) {
         if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
             self.storage.set_decided_len(dec.ld);
+        }
+    }
+
+    fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
+        if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
+            let mut ss = self
+                .storage
+                .get_stopsign()
+                .expect("No stopsign found when deciding!");
+            ss.decided = true;
+            self.storage.set_stopsign(ss)
         }
     }
 

@@ -46,7 +46,7 @@ where
     pub ld: u64,
     /// The log length of this follower.
     pub la: u64,
-    pub stop_sign: Option<StopSign>,
+    pub stopsign: Option<StopSign>,
 }
 
 impl<T, S> Promise<T, S>
@@ -61,7 +61,7 @@ where
         sync_item: Option<SyncItem<T, S>>,
         ld: u64,
         la: u64,
-        stop_sign: Option<StopSign>,
+        stopsign: Option<StopSign>,
     ) -> Self {
         Self {
             n,
@@ -69,7 +69,7 @@ where
             sync_item,
             ld,
             la,
-            stop_sign,
+            stopsign,
         }
     }
 }
@@ -88,6 +88,7 @@ where
     /// The index of the log where `entries` should be applied at.
     pub sync_idx: u64,
     pub decide_idx: Option<u64>,
+    pub stopsign: Option<StopSign>,
 }
 
 impl<T, S> AcceptSync<T, S>
@@ -101,12 +102,14 @@ where
         sync_item: SyncItem<T, S>,
         sync_idx: u64,
         decide_idx: Option<u64>,
+        stopsign: Option<StopSign>,
     ) -> Self {
         AcceptSync {
             n,
             sync_item,
             sync_idx,
             decide_idx,
+            stopsign,
         }
     }
 }
@@ -189,6 +192,47 @@ impl Decide {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AcceptStopSign {
+    /// The current round.
+    pub n: Ballot,
+    /// The decided index.
+    pub ss: StopSign,
+}
+
+impl AcceptStopSign {
+    /// Creates a [`AcceptStopSign`] message.
+    pub fn with(n: Ballot, ss: StopSign) -> Self {
+        AcceptStopSign { n, ss }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct AcceptedStopSign {
+    /// The current round.
+    pub n: Ballot,
+}
+
+impl AcceptedStopSign {
+    /// Creates a [`AcceptedStopSign`] message.
+    pub fn with(n: Ballot) -> Self {
+        AcceptedStopSign { n }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct DecideStopSign {
+    /// The current round.
+    pub n: Ballot,
+}
+
+impl DecideStopSign {
+    /// Creates a [`DecideStopSign`] message.
+    pub fn with(n: Ballot) -> Self {
+        DecideStopSign { n }
+    }
+}
+
 /// An enum for all the different message types.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
@@ -211,6 +255,9 @@ where
     ProposalForward(Vec<T>),
     GarbageCollect(u64),
     ForwardGarbageCollect(Option<u64>),
+    AcceptStopSign(AcceptStopSign),
+    AcceptedStopSign(AcceptedStopSign),
+    DecideStopSign(DecideStopSign),
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.
@@ -222,7 +269,7 @@ where
 {
     /// Sender of `msg`.
     pub from: u64,
-    /// Balloteceiver of `msg`.
+    /// Receiver of `msg`.
     pub to: u64,
     /// The message content.
     pub msg: PaxosMsg<T, S>,

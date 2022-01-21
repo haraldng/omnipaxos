@@ -1,28 +1,19 @@
 use crate::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
-/*
-/// An entry in the replicated log.
-#[derive(Clone, Debug, PartialEq)]
-pub enum T
-where
-    T: Clone,
-{
-    /// A normal entry proposed by the client.
-    Normal(T),
-    /// A StopSign entry used for reconfiguration. See [`StopSign`].
-    StopSign(StopSign),
+
+/// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
+#[derive(Clone, Debug)]
+pub struct StopSignEntry {
+    pub stopsign: StopSign,
+    pub decided: bool,
 }
 
-impl<T> T
-where
-    T: Clone,
-{
-    /// Returns true if the entry is a stopsign else, returns false.
-    pub fn is_stopsign(&self) -> bool {
-        matches!(self, Entry::StopSign(_))
+impl StopSignEntry {
+    /// Creates a [`StopSign`].
+    pub fn with(stopsign: StopSign, decided: bool) -> Self {
+        StopSignEntry { stopsign, decided }
     }
 }
-*/
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
@@ -79,6 +70,7 @@ where
 }
 
 // TODO create an internal storage struct that calls these user provided functions to hide logic from user e.g. stopped()
+// TODO return Result and use and_then in paxos
 pub trait Storage<T, S>
 where
     T: Clone,
@@ -119,9 +111,9 @@ where
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;
 
-    fn set_stopsign(&mut self, ss: StopSign);
+    fn set_stopsign(&mut self, s: StopSignEntry);
 
-    fn get_stopsign(&self) -> Option<StopSign>;
+    fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, trimmed_idx: u64);
@@ -131,11 +123,9 @@ where
     /// Returns the garbage collector index from storage.
     fn get_trimmed_idx(&self) -> u64;
 
-    fn set_snapshot(&mut self, trimmed_idx: u64, snapshot: S) -> Result<(), ()>;
+    fn set_snapshot(&mut self, snapshot: S);
 
-    fn merge_snapshot(&mut self, trimmed_idx: u64, delta_snapshot: S);
-
-    fn get_snapshot(&self) -> Option<(u64, S)>;
+    fn get_snapshot(&self) -> Option<S>;
 }
 /*
 /// An in-memory storage implementation for Paxos.
