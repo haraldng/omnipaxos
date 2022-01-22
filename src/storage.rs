@@ -69,6 +69,20 @@ where
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
+/*pub struct LogEntry<T> where T: Clone
+{
+    data: T,
+    decided: bool,
+}
+
+impl<T> LogEntry<T> where
+    T: Clone,
+{
+    pub fn with(data: T, decided: bool) -> Self {
+        Self { data, decided }
+    }
+}*/
+
 // TODO create an internal storage struct that calls these user provided functions to hide logic from user e.g. stopped()
 // TODO return Result and use and_then in paxos
 pub trait Storage<T, S>
@@ -86,7 +100,7 @@ where
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64;
 
     /// Sets the round that has been promised.
-    fn set_promise(&mut self, nprom: Ballot);
+    fn set_promise(&mut self, n_prom: Ballot);
 
     /// Sets the decided index in the log.
     fn set_decided_len(&mut self, ld: u64);
@@ -127,12 +141,12 @@ where
 
     fn get_snapshot(&self) -> Option<S>;
 }
-/*
+
 /// An in-memory storage implementation for Paxos.
 pub mod memory_storage {
     use crate::{
         leader_election::ballot_leader_election::Ballot,
-        storage::{Entry, Snapshot, Storage},
+        storage::{Snapshot, StopSignEntry, Storage},
     };
 
     #[derive(Clone)]
@@ -150,9 +164,11 @@ pub mod memory_storage {
         /// Length of the decided log.
         ld: u64,
         /// Garbage collected index.
-        gc_idx: u64,
-        // TODO index?
-        snapshot: S,
+        trimmed_idx: u64,
+        /// Stored snapshot
+        snapshot: Option<S>,
+        /// Stored StopSign
+        stopsign: Option<StopSignEntry>,
     }
 
     impl<T, S> Storage<T, S> for MemoryStorage<T, S>
@@ -165,15 +181,15 @@ pub mod memory_storage {
             self.get_decided_len()
         }
 
-        fn append_entries(&mut self, entries: &mut Vec<T>) -> u64 {
-            self.log.append(entries);
+        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+            let mut e = entries;
+            self.log.append(&mut e);
             self.get_decided_len()
         }
 
-        fn append_on_prefix(&mut self, from_idx: u64, entries: &mut Vec<T>) -> u64 {
+        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
             self.log.truncate(from_idx as usize);
-            self.log.append(entries);
-            self.get_decided_len()
+            self.append_entries(entries)
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
@@ -212,10 +228,10 @@ pub mod memory_storage {
             self.log.len() as u64
         }
 
-        fn get_suffix(&self, from: u64) -> Vec<T> {
+        fn get_suffix(&self, from: u64) -> &[T] {
             match self.log.get(from as usize..) {
-                Some(s) => s.to_vec(),
-                None => vec![],
+                Some(s) => s,
+                None => &[],
             }
         }
 
@@ -223,25 +239,32 @@ pub mod memory_storage {
             self.n_prom
         }
 
-        fn stopped(&self) -> bool {
-            todo!()
+        fn set_stopsign(&mut self, s: StopSignEntry) {
+            self.stopsign = Some(s);
         }
 
-        fn trim(&mut self, idx: u64) {
-            todo!()
+        fn get_stopsign(&self) -> Option<StopSignEntry> {
+            self.stopsign.clone()
         }
 
-        fn get_trim_idx(&self) -> u64 {
-            todo!()
+        fn trim(&mut self, trimmed_idx: u64) {
+            self.log.drain(0..trimmed_idx as usize);
         }
 
-        fn set_snapshot(&mut self, snapshot: S) -> Result<(), ()> {
-            todo!()
+        fn set_trimmed_idx(&mut self, trimmed_idx: u64) {
+            self.trimmed_idx = trimmed_idx;
+        }
+
+        fn get_trimmed_idx(&self) -> u64 {
+            self.trimmed_idx
+        }
+
+        fn set_snapshot(&mut self, snapshot: S) {
+            self.snapshot = Some(snapshot);
         }
 
         fn get_snapshot(&self) -> Option<S> {
-            todo!()
+            self.snapshot.clone()
         }
     }
 }
-*/
