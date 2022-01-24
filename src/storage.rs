@@ -46,7 +46,7 @@ impl PartialEq for StopSign {
 #[derive(Clone, Debug)]
 pub enum SnapshotType<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     Complete(S),
@@ -56,7 +56,7 @@ where
 
 pub trait Snapshot<T>: Clone
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     fn create(entries: &[T]) -> Self;
 
@@ -76,7 +76,7 @@ where
 }
 
 impl<T> LogEntry<T> where
-    T: Clone,
+    T: Clone + Debug,
 {
     pub fn with(data: T, decided: bool) -> Self {
         Self { data, decided }
@@ -87,7 +87,7 @@ impl<T> LogEntry<T> where
 // TODO return Result and use and_then in paxos
 pub trait Storage<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
@@ -148,11 +148,12 @@ pub mod memory_storage {
         leader_election::ballot_leader_election::Ballot,
         storage::{Snapshot, StopSignEntry, Storage},
     };
+    use std::fmt::Debug;
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct MemoryStorage<T, S>
     where
-        T: Clone,
+        T: Clone + Debug,
         S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
@@ -173,18 +174,18 @@ pub mod memory_storage {
 
     impl<T, S> Storage<T, S> for MemoryStorage<T, S>
     where
-        T: Clone,
+        T: Clone + Debug,
         S: Snapshot<T>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
-            self.get_decided_len()
+            self.get_log_len()
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             let mut e = entries;
             self.log.append(&mut e);
-            self.get_decided_len()
+            self.get_log_len()
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {

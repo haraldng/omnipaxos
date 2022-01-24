@@ -3,7 +3,7 @@ use crate::{
     messages::Promise,
     storage::{Snapshot, SnapshotType, StopSign},
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Debug};
 
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
@@ -47,7 +47,7 @@ impl PartialEq for PromiseMetaData {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LeaderState<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     pub n_leader: Ballot,
@@ -66,7 +66,7 @@ where
 
 impl<T, S> LeaderState<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     pub fn with(
@@ -208,7 +208,7 @@ where
 #[derive(Debug, Clone)]
 pub enum SyncItem<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     Entries(Vec<T>),
@@ -218,7 +218,7 @@ where
 
 impl<T, S> Default for SyncItem<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     fn default() -> Self {

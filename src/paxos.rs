@@ -34,7 +34,7 @@ enum Role {
 #[derive(Debug)]
 pub enum ProposeErr<T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     Normal(T),
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
@@ -44,7 +44,7 @@ where
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct OmniPaxos<T, S, B>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -68,7 +68,7 @@ where
 
 impl<T, S, B> OmniPaxos<T, S, B>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -641,7 +641,6 @@ where
                             entries.clone(),
                         );
                         let cache_idx = self.outgoing.len();
-                        let pid = pid as u64 + 1;
                         self.outgoing.push(Message::with(
                             self.pid,
                             pid,
@@ -657,7 +656,6 @@ where
                     }
                 }
             } else {
-                let pid = pid as u64 + 1;
                 let acc = AcceptDecide::with(
                     self.leader_state.n_leader,
                     self.leader_state.get_chosen_idx(),
@@ -679,8 +677,11 @@ where
     }
 
     fn send_accsync_with_snapshot(&mut self) {
-        let trim_idx = self.storage.get_trimmed_idx();
-        let snapshot = self.storage.get_snapshot().unwrap();
+        let current_snapshot = self.storage.get_snapshot();
+        let (trim_idx, snapshot) = match current_snapshot {
+            Some(s) => (self.storage.get_trimmed_idx(), s),
+            None => self.create_complete_snapshot(),
+        };
         let acc_sync = AcceptSync::with(
             self.leader_state.n_leader,
             SyncItem::Snapshot(SnapshotType::Complete(snapshot)),
@@ -900,7 +901,13 @@ where
     }
 
     fn handle_accepted(&mut self, accepted: Accepted, from: u64) {
-        trace!(self.logger, "Incoming message Accepted {}", from);
+        trace!(
+            self.logger,
+            "Got Accepted from {}, idx: {}, chosen_idx: {}",
+            from,
+            accepted.la,
+            self.leader_state.get_chosen_idx()
+        );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state.set_accepted_idx(from, accepted.la);
             if accepted.la > self.leader_state.get_chosen_idx() {
@@ -933,7 +940,6 @@ where
                                     let cache_dec_idx = self.outgoing.len();
                                     self.leader_state
                                         .set_latest_decide_meta(pid, Some(cache_dec_idx));
-                                    let pid = pid as u64 + 1;
                                     self.outgoing.push(Message::with(
                                         self.pid,
                                         pid,

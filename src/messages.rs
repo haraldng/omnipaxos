@@ -3,6 +3,7 @@ use crate::{
     storage::{Snapshot, StopSign},
     util::SyncItem,
 };
+use std::fmt::Debug;
 
 /// Prepare message sent by a newly-elected leader to initiate the Prepare phase.
 #[derive(Copy, Clone, Debug)]
@@ -33,7 +34,7 @@ impl Prepare {
 #[derive(Clone, Debug)]
 pub struct Promise<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// The current round.
@@ -51,7 +52,7 @@ where
 
 impl<T, S> Promise<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Creates a [`Promise`] message.
@@ -78,7 +79,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptSync<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// The current round.
@@ -93,7 +94,7 @@ where
 
 impl<T, S> AcceptSync<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Creates an [`AcceptSync`] message.
@@ -118,7 +119,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FirstAccept<T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     /// The current round.
     pub n: Ballot,
@@ -128,7 +129,7 @@ where
 
 impl<T> FirstAccept<T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Creates a [`FirstAccept`] message.
     pub fn with(n: Ballot, entries: Vec<T>) -> Self {
@@ -140,7 +141,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptDecide<T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     /// The current round.
     pub n: Ballot,
@@ -152,7 +153,7 @@ where
 
 impl<T> AcceptDecide<T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Creates an [`AcceptDecide`] message.
     pub fn with(n: Ballot, ld: u64, entries: Vec<T>) -> Self {
@@ -238,7 +239,7 @@ impl DecideStopSign {
 #[derive(Clone, Debug)]
 pub enum PaxosMsg<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
@@ -264,7 +265,7 @@ where
 #[derive(Clone, Debug)]
 pub struct Message<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Sender of `msg`.
@@ -277,7 +278,7 @@ where
 
 impl<T, S> Message<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
     S: Snapshot<T>,
 {
     /// Creates a message.
