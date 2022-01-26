@@ -254,8 +254,8 @@ where
     Decide(Decide),
     /// Forward client proposals to the leader.
     ProposalForward(Vec<T>),
-    GarbageCollect(u64),
-    ForwardGarbageCollect(Option<u64>),
+    Trim(u64),
+    ForwardTrim(Option<u64>),
     AcceptStopSign(AcceptStopSign),
     AcceptedStopSign(AcceptedStopSign),
     DecideStopSign(DecideStopSign),

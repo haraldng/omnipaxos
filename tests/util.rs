@@ -361,7 +361,7 @@ pub mod omnireplica {
         }
 
         pub fn garbage_collect(&mut self, index: Option<u64>) {
-            self.paxos.garbage_collect(index)
+            self.paxos.trim(index)
         }
 
         fn answer_future(&mut self) {
