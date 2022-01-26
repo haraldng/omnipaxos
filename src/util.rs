@@ -77,22 +77,26 @@ where
     ) -> Self {
         Self {
             n_leader,
-            promises_meta: vec![None; max_pid + 1],
-            las: vec![0; max_pid + 1],
-            lds: lds.unwrap_or(vec![None; max_pid + 1]),
+            promises_meta: vec![None; max_pid],
+            las: vec![0; max_pid],
+            lds: lds.unwrap_or(vec![None; max_pid]),
             lc: 0,
             max_promise_meta: PromiseMetaData::default(),
             max_promise: SyncItem::None,
-            batch_accept_meta: vec![None; max_pid + 1],
-            latest_decide_meta: vec![None; max_pid + 1],
-            accepted_stopsign: vec![false; max_pid + 1],
+            batch_accept_meta: vec![None; max_pid],
+            latest_decide_meta: vec![None; max_pid],
+            accepted_stopsign: vec![false; max_pid],
             max_pid,
             majority,
         }
     }
 
+    fn pid_to_idx(pid: u64) -> usize {
+        (pid - 1) as usize
+    }
+
     pub fn set_decided_idx(&mut self, pid: u64, idx: Option<u64>) {
-        self.lds[pid as usize] = idx;
+        self.lds[Self::pid_to_idx(pid)] = idx;
     }
 
     pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64) -> bool {
@@ -101,8 +105,8 @@ where
             self.max_promise_meta = promise_meta.clone();
             self.max_promise = prom.sync_item.unwrap_or(SyncItem::None); // TODO: this should be fine?
         }
-        self.lds[from as usize] = Some(prom.ld);
-        self.promises_meta[from as usize] = Some(promise_meta);
+        self.lds[Self::pid_to_idx(from)] = Some(prom.ld);
+        self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
         let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
         num_promised >= self.majority
     }
@@ -116,25 +120,29 @@ where
     }
 
     pub fn set_accepted_stopsign(&mut self, from: u64) {
-        self.accepted_stopsign[from as usize] = true;
+        self.accepted_stopsign[Self::pid_to_idx(from)] = true;
     }
 
     pub fn get_promise_meta(&self, pid: u64) -> &PromiseMetaData {
-        self.promises_meta[pid as usize]
+        self.promises_meta[Self::pid_to_idx(pid)]
             .as_ref()
             .expect("No Metadata found for promised follower")
     }
 
-    pub fn get_min_all_accepted_idx(&self) -> Option<&u64> {
-        self.las.iter().min().clone()
+    pub fn get_min_all_accepted_idx(&self) -> &u64 {
+        self.las
+            .iter()
+            .min()
+            .clone()
+            .expect("Should be all initialised to 0!")
     }
 
     pub fn reset_batch_accept_meta(&mut self) {
-        self.batch_accept_meta = vec![None; self.max_pid + 1];
+        self.batch_accept_meta = vec![None; self.max_pid];
     }
 
     pub fn reset_latest_decided_meta(&mut self) {
-        self.latest_decide_meta = vec![None; self.max_pid + 1];
+        self.latest_decide_meta = vec![None; self.max_pid];
     }
 
     pub fn set_chosen_idx(&mut self, idx: u64) {
@@ -149,42 +157,42 @@ where
         self.lds
             .iter()
             .enumerate()
-            .filter(|(pid, x)| x.is_some() && *pid != self.n_leader.pid as usize)
-            .map(|(idx, _)| idx as u64)
+            .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
+            .map(|(idx, _)| (idx + 1) as u64)
             .collect()
     }
 
     pub fn set_batch_accept_meta(&mut self, pid: u64, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
-        self.batch_accept_meta[pid as usize] = meta;
+        self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
     pub fn set_latest_decide_meta(&mut self, pid: u64, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
-        self.latest_decide_meta[pid as usize] = meta;
+        self.latest_decide_meta[Self::pid_to_idx(pid)] = meta;
     }
 
     pub fn set_accepted_idx(&mut self, pid: u64, idx: u64) {
-        self.las[pid as usize] = idx;
+        self.las[Self::pid_to_idx(pid)] = idx;
     }
 
     pub fn get_batch_accept_meta(&self, pid: u64) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
-            .get(pid as usize)
+            .get(Self::pid_to_idx(pid))
             .unwrap()
             .as_ref()
             .copied()
     }
     pub fn get_latest_decide_meta(&self, pid: u64) -> Option<(Ballot, usize)> {
         self.latest_decide_meta
-            .get(pid as usize)
+            .get(Self::pid_to_idx(pid))
             .unwrap()
             .as_ref()
             .copied()
     }
 
     pub fn get_decided_idx(&self, pid: u64) -> &Option<u64> {
-        self.lds.get(pid as usize).unwrap()
+        self.lds.get(Self::pid_to_idx(pid)).unwrap()
     }
 
     pub fn is_stopsign_chosen(&self) -> bool {

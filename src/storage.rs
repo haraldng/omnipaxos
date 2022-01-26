@@ -60,8 +60,6 @@ where
 {
     fn create(entries: &[T]) -> Self;
 
-    //fn create_delta(&self, other: Self) -> Self    // TODO create delta snapshot that can be merged() with other to become self.
-
     fn merge(&mut self, delta: Self);
 
     fn snapshottable() -> bool; // TODO: somehow check if user is using snapshots statically?
@@ -69,21 +67,6 @@ where
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
-/*pub struct LogEntry<T> where T: Clone
-{
-    data: T,
-    decided: bool,
-}
-
-impl<T> LogEntry<T> where
-    T: Clone + Debug,
-{
-    pub fn with(data: T, decided: bool) -> Self {
-        Self { data, decided }
-    }
-}*/
-
-// TODO create an internal storage struct that calls these user provided functions to hide logic from user e.g. stopped()
 // TODO return Result and use and_then in paxos
 pub trait Storage<T, S>
 where

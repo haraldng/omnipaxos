@@ -98,10 +98,10 @@ where
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
-                    let mut v = vec![None; max_pid + 1];
-                    for pid in peers.iter().map(|x| *x as usize) {
+                    let mut v = vec![None; max_pid];
+                    for idx in peers.iter().map(|pid| *pid as usize - 1) {
                         // this works as a promise
-                        v[pid] = Some(0);
+                        v[idx] = Some(0);
                     }
                     (Role::Leader, Some(v))
                 } else {
@@ -206,23 +206,19 @@ where
 
     fn gc_prepare(&mut self, index: Option<u64>) {
         let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
-        if min_all_accepted_idx.is_none() {
-            return;
-        }
-        let gc_idx;
-        match index {
+        let gc_idx = match index {
             Some(idx) => {
-                if (min_all_accepted_idx.unwrap() < &idx) || (idx < self.cached_gc_index) {
+                if (min_all_accepted_idx < &idx) || (idx < self.cached_gc_index) {
                     warn!(
                         self.logger,
-                        "Invalid garbage collector index: {:?}, cached_index: {}, min_las_index: {:?}",
+                        "Invalid garbage collector index: {:?}, cached_index: {}, las: {:?}",
                         index,
                         self.cached_gc_index,
-                        min_all_accepted_idx
+                        self.leader_state.las
                     );
                     return;
                 }
-                gc_idx = idx;
+                idx
             }
             None => {
                 trace!(
@@ -230,9 +226,9 @@ where
                     "No garbage collector index provided, using min_las_index: {:?}",
                     min_all_accepted_idx
                 );
-                gc_idx = *min_all_accepted_idx.unwrap();
+                *min_all_accepted_idx
             }
-        }
+        };
         for pid in &self.peers {
             self.outgoing.push(Message::with(
                 self.pid,
@@ -255,7 +251,8 @@ where
             return;
         }
         trace!(self.logger, "Garbage Collection index: {:?}", index);
-        self.storage.trim(index);
+        self.storage.trim(index - self.cached_gc_index);
+        self.storage.set_trimmed_idx(index);
         self.cached_gc_index = index;
     }
 
@@ -755,8 +752,9 @@ where
         let mut snapshot = self.storage.get_snapshot().unwrap();
         snapshot.merge(delta);
         // TODO use and_then
-        self.storage.set_trimmed_idx(trimmed_idx);
         self.storage.set_snapshot(snapshot);
+        self.storage.set_trimmed_idx(trimmed_idx);
+        self.cached_gc_index = trimmed_idx;
     }
 
     fn merge_pending_proposals_with_snapshot(&mut self) {
@@ -981,8 +979,9 @@ where
         let snapshot = S::create(self.storage.get_entries(0, log_len));
         let trim_idx = log_len + self.storage.get_trimmed_idx();
         // TODO use and_then
-        self.storage.set_trimmed_idx(trim_idx);
         self.storage.set_snapshot(snapshot.clone());
+        self.storage.set_trimmed_idx(trim_idx);
+        self.cached_gc_index = trim_idx;
         (trim_idx, snapshot)
     }
 
@@ -1068,8 +1067,9 @@ where
                     match s {
                         SnapshotType::Complete(c) => {
                             // TODO use and_then
-                            self.storage.set_trimmed_idx(accsync.sync_idx);
                             self.storage.set_snapshot(c);
+                            self.storage.set_trimmed_idx(accsync.sync_idx);
+                            self.cached_gc_index = accsync.sync_idx;
                         }
                         SnapshotType::Delta(d) => {
                             self.merge_snapshot(accsync.sync_idx, d);
@@ -1082,13 +1082,14 @@ where
             };
             self.storage.set_accepted_round(accsync.n);
             self.state = (Role::Follower, Phase::Accept);
-            self.outgoing
-                .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
             #[cfg(feature = "latest_accepted")]
             {
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((accsync.n, cached_idx));
             }
+            self.outgoing
+                .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
+
             if let Some(idx) = accsync.decide_idx {
                 self.storage.set_decided_len(idx);
             }
