@@ -60,7 +60,7 @@ where
     outgoing: Vec<Message<T, S>>,
     /// Logger used to output the status of the component.
     logger: Logger,
-    cached_gc_index: u64,
+    cached_trim_index: u64,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     s: PhantomData<S>,
@@ -140,7 +140,7 @@ where
             prev_ld: 0,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             logger: l,
-            cached_gc_index: 0,
+            cached_trim_index: 0,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             s: PhantomData,
@@ -183,10 +183,10 @@ where
     /// Initiates the garbage collection process.
     /// # Arguments
     /// * `index` - Deletes all entries up to [`index`], if the [`index`] is None then the minimum index accepted by **ALL** servers will be used as the [`index`].
-    pub fn garbage_collect(&mut self, index: Option<u64>) {
+    pub fn trim(&mut self, index: Option<u64>) {
         match self.state {
-            (Role::Leader, _) => self.gc_prepare(index),
-            _ => self.forward_gc_request(index),
+            (Role::Leader, _) => self.trim_prepare(index),
+            _ => self.forward_trim_request(index),
         }
     }
 
@@ -204,16 +204,16 @@ where
         }
     }
 
-    fn gc_prepare(&mut self, index: Option<u64>) {
+    fn trim_prepare(&mut self, index: Option<u64>) {
         let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
-        let gc_idx = match index {
+        let trim_idx = match index {
             Some(idx) => {
-                if (min_all_accepted_idx < &idx) || (idx < self.cached_gc_index) {
+                if (min_all_accepted_idx < &idx) || (idx < self.cached_trim_index) {
                     warn!(
                         self.logger,
                         "Invalid garbage collector index: {:?}, cached_index: {}, las: {:?}",
                         index,
-                        self.cached_gc_index,
+                        self.cached_trim_index,
                         self.leader_state.las
                     );
                     return;
@@ -233,13 +233,13 @@ where
             self.outgoing.push(Message::with(
                 self.pid,
                 *pid,
-                PaxosMsg::GarbageCollect(gc_idx),
+                PaxosMsg::Trim(trim_idx),
             ));
         }
-        self.gc(gc_idx);
+        self.trim_log(trim_idx);
     }
 
-    fn gc(&mut self, index: u64) {
+    fn trim_log(&mut self, index: u64) {
         let decided_len = self.storage.get_decided_len();
         if decided_len < index {
             crit!(
@@ -251,9 +251,9 @@ where
             return;
         }
         trace!(self.logger, "Garbage Collection index: {:?}", index);
-        self.storage.trim(index - self.cached_gc_index);
+        self.storage.trim(index - self.cached_trim_index);
         self.storage.set_trimmed_idx(index);
-        self.cached_gc_index = index;
+        self.cached_trim_index = index;
     }
 
     /// Returns the id of the current leader.
@@ -285,8 +285,8 @@ where
         let ld = self.storage.get_decided_len();
         if self.prev_ld < ld {
             let decided = self.storage.get_entries(
-                self.prev_ld - self.cached_gc_index,
-                ld - self.cached_gc_index,
+                self.prev_ld - self.cached_trim_index,
+                ld - self.cached_trim_index,
             );
             self.prev_ld = ld;
             decided
@@ -298,7 +298,7 @@ where
     /// Returns the entire decided entries of this replica.
     pub fn get_decided_entries(&self) -> &[T] {
         self.storage
-            .get_entries(0, self.storage.get_decided_len() - self.cached_gc_index)
+            .get_entries(0, self.storage.get_decided_len() - self.cached_trim_index)
     }
 
     /// Handle an incoming message.
@@ -317,8 +317,8 @@ where
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
-            PaxosMsg::GarbageCollect(index) => self.gc(index),
-            PaxosMsg::ForwardGarbageCollect(index) => self.handle_forwarded_gc_request(index),
+            PaxosMsg::Trim(index) => self.trim_log(index),
+            PaxosMsg::ForwardTrim(index) => self.handle_forwarded_trim_request(index),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
             PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
@@ -401,8 +401,8 @@ where
         } else {
             self.storage
                 .get_entries(
-                    from_idx - self.cached_gc_index,
-                    to_idx - self.cached_gc_index,
+                    from_idx - self.cached_trim_index,
+                    to_idx - self.cached_trim_index,
                 )
                 .to_vec()
         }
@@ -505,15 +505,15 @@ where
         }
     }
 
-    fn forward_gc_request(&mut self, index: Option<u64>) {
+    fn forward_trim_request(&mut self, index: Option<u64>) {
         if self.leader > 0 && self.leader != self.pid {
             trace!(
                 self.logger,
-                "Forwarding gc request to Leader {}, index {:?}",
+                "Forwarding trim request to Leader {}, index {:?}",
                 self.leader,
                 index
             );
-            let pf = PaxosMsg::ForwardGarbageCollect(index);
+            let pf = PaxosMsg::ForwardTrim(index);
             let msg = Message::with(self.pid, self.leader, pf);
             self.outgoing.push(msg);
         }
@@ -530,15 +530,15 @@ where
         }
     }
 
-    fn handle_forwarded_gc_request(&mut self, index: Option<u64>) {
+    fn handle_forwarded_trim_request(&mut self, index: Option<u64>) {
         trace!(
             self.logger,
-            "Incoming Forwarded GC Request, index: {:?}",
+            "Incoming Forwarded trim Request, index: {:?}",
             index
         );
         match self.state {
-            (Role::Leader, _) => self.gc_prepare(index),
-            _ => self.forward_gc_request(index),
+            (Role::Leader, _) => self.trim_prepare(index),
+            _ => self.forward_trim_request(index),
         }
     }
 
@@ -709,7 +709,7 @@ where
             let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
                 let sfx = self
                     .storage
-                    .get_suffix(*promise_la - self.cached_gc_index)
+                    .get_suffix(*promise_la - self.cached_trim_index)
                     .to_vec();
                 (sfx, *promise_la)
             } else {
@@ -717,7 +717,10 @@ where
                     .leader_state
                     .get_decided_idx(*pid)
                     .expect("Received PromiseMetaData but not found in ld");
-                let sfx = self.storage.get_suffix(ld - self.cached_gc_index).to_vec();
+                let sfx = self
+                    .storage
+                    .get_suffix(ld - self.cached_trim_index)
+                    .to_vec();
                 (sfx, ld)
             };
             let acc_sync = AcceptSync::with(
@@ -754,7 +757,7 @@ where
         // TODO use and_then
         self.storage.set_snapshot(snapshot);
         self.storage.set_trimmed_idx(trimmed_idx);
-        self.cached_gc_index = trimmed_idx;
+        self.cached_trim_index = trimmed_idx;
     }
 
     fn merge_pending_proposals_with_snapshot(&mut self) {
@@ -877,7 +880,7 @@ where
                 };
                 let sfx = self
                     .storage
-                    .get_suffix(sync_idx - self.cached_gc_index)
+                    .get_suffix(sync_idx - self.cached_trim_index)
                     .to_vec();
                 // inform what got decided already
                 let ld = if self.leader_state.get_chosen_idx() > 0 {
@@ -981,7 +984,7 @@ where
         // TODO use and_then
         self.storage.set_snapshot(snapshot.clone());
         self.storage.set_trimmed_idx(trim_idx);
-        self.cached_gc_index = trim_idx;
+        self.cached_trim_index = trim_idx;
         (trim_idx, snapshot)
     }
 
@@ -1029,13 +1032,13 @@ where
                 let (sync_item, stopsign) = if na > prep.n_accepted {
                     let entries = self
                         .storage
-                        .get_suffix(prep.ld - self.cached_gc_index)
+                        .get_suffix(prep.ld - self.cached_trim_index)
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self
                         .storage
-                        .get_suffix(prep.la - self.cached_gc_index)
+                        .get_suffix(prep.la - self.cached_trim_index)
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else {
@@ -1069,7 +1072,7 @@ where
                             // TODO use and_then
                             self.storage.set_snapshot(c);
                             self.storage.set_trimmed_idx(accsync.sync_idx);
-                            self.cached_gc_index = accsync.sync_idx;
+                            self.cached_trim_index = accsync.sync_idx;
                         }
                         SnapshotType::Delta(d) => {
                             self.merge_snapshot(accsync.sync_idx, d);
