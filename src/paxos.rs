@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use hocon::Hocon;
-use slog::{crit, debug, info, trace, warn, Logger};
+use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, marker::PhantomData};
 
 const BUFFER_SIZE: usize = 100000;
@@ -182,11 +182,34 @@ where
 
     /// Initiates the trim process.
     /// # Arguments
-    /// * `index` - Deletes all entries up to [`index`], if the [`index`] is None then the minimum index accepted by **ALL** servers will be used as the [`index`].
-    pub fn trim(&mut self, index: Option<u64>) {
+    /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is None then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
+    pub fn trim(&mut self, trim_index: Option<u64>) {
         match self.state {
-            (Role::Leader, _) => self.trim_prepare(index),
-            _ => self.forward_trim_request(index),
+            (Role::Leader, _) => self.trim_prepare(trim_index),
+            _ => self.forward_compaction(Compaction::Trim(trim_index)),
+        }
+    }
+
+    pub fn snapshot(&mut self, trim_idx: Option<u64>, local_only: bool) {
+        let decided_idx = self.storage.get_decided_len();
+        let trim_idx = match trim_idx {
+            Some(idx) => {
+                if idx < decided_idx {
+                    idx
+                } else {
+                    todo!("Return Snapshot Error")
+                }
+            }
+            None => decided_idx,
+        };
+        let snapshot = self.create_snapshot(trim_idx);
+        self.set_snapshot(trim_idx, snapshot);
+        if !local_only {
+            // since it is decided, it is ok even for a follower to send this
+            for pid in &self.peers {
+                let msg = PaxosMsg::Compaction(Compaction::Snapshot(trim_idx));
+                self.outgoing.push(Message::with(self.pid, *pid, msg));
+            }
         }
     }
 
@@ -230,27 +253,32 @@ where
             }
         };
         for pid in &self.peers {
-            self.outgoing
-                .push(Message::with(self.pid, *pid, PaxosMsg::Trim(trim_idx)));
+            let msg = PaxosMsg::Compaction(Compaction::Trim(Some(trim_idx)));
+            self.outgoing.push(Message::with(self.pid, *pid, msg));
         }
-        self.trim_log(trim_idx);
+        self.handle_compaction(Compaction::Trim(Some(trim_idx)));
     }
 
-    fn trim_log(&mut self, index: u64) {
-        let decided_len = self.storage.get_decided_len();
-        if decided_len < index {
-            crit!(
-                self.logger,
-                "Received invalid trim index! index: {:?}, prev_ld {}",
-                index,
-                decided_len
-            );
-            return;
+    fn handle_compaction(&mut self, c: Compaction) {
+        let decided_idx = self.storage.get_decided_len();
+        match c {
+            Compaction::Trim(Some(trim_idx)) if trim_idx <= decided_idx => {
+                trace!(self.logger, "trim index: {:?}", trim_idx);
+                self.storage.trim(trim_idx - self.cached_trim_index);
+                self.storage.set_trimmed_idx(trim_idx);
+                self.cached_trim_index = trim_idx;
+            }
+            Compaction::Snapshot(trim_idx) if trim_idx <= decided_idx => {
+                let s = self.create_snapshot(trim_idx);
+                self.set_snapshot(trim_idx, s);
+            }
+            _ => {
+                warn!(
+                    self.logger,
+                    "Received invalid Compaction: {:?}, decided_idx {}", c, decided_idx
+                );
+            }
         }
-        trace!(self.logger, "trim index: {:?}", index);
-        self.storage.trim(index - self.cached_trim_index);
-        self.storage.set_trimmed_idx(index);
-        self.cached_trim_index = index;
     }
 
     /// Returns the id of the current leader.
@@ -314,8 +342,8 @@ where
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
-            PaxosMsg::Trim(index) => self.trim_log(index),
-            PaxosMsg::ForwardTrim(index) => self.handle_forwarded_trim_request(index),
+            PaxosMsg::Compaction(c) => self.handle_compaction(c),
+            PaxosMsg::ForwardCompaction(c) => self.handle_forwarded_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
             PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
@@ -502,16 +530,16 @@ where
         }
     }
 
-    fn forward_trim_request(&mut self, index: Option<u64>) {
+    fn forward_compaction(&mut self, c: Compaction) {
         if self.leader > 0 && self.leader != self.pid {
             trace!(
                 self.logger,
-                "Forwarding trim request to Leader {}, index {:?}",
+                "Forwarding Compaction request to Leader {}, {:?}",
                 self.leader,
-                index
+                c
             );
-            let pf = PaxosMsg::ForwardTrim(index);
-            let msg = Message::with(self.pid, self.leader, pf);
+            let fc = PaxosMsg::ForwardCompaction(c);
+            let msg = Message::with(self.pid, self.leader, fc);
             self.outgoing.push(msg);
         }
     }
@@ -527,15 +555,21 @@ where
         }
     }
 
-    fn handle_forwarded_trim_request(&mut self, index: Option<u64>) {
+    fn handle_forwarded_compaction(&mut self, c: Compaction) {
         trace!(
             self.logger,
-            "Incoming Forwarded trim Request, index: {:?}",
-            index
+            "Incoming Forwarded Compaction Request: {:?}",
+            c
         );
         match self.state {
-            (Role::Leader, _) => self.trim_prepare(index),
-            _ => self.forward_trim_request(index),
+            (Role::Leader, _) => {
+                if let Compaction::Trim(idx) = c {
+                    self.trim_prepare(idx);
+                } else {
+                    warn!(self.logger, "Got unexpected forwarded {:?}", c);
+                }
+            }
+            _ => self.forward_compaction(c),
         }
     }
 
@@ -674,7 +708,12 @@ where
         let current_snapshot = self.storage.get_snapshot();
         let (trim_idx, snapshot) = match current_snapshot {
             Some(s) => (self.storage.get_trimmed_idx(), s),
-            None => self.create_complete_snapshot(),
+            None => {
+                let trim_idx = self.storage.get_log_len();
+                let snapshot = self.create_snapshot(trim_idx);
+                self.set_snapshot(trim_idx, snapshot.clone());
+                (trim_idx, snapshot)
+            }
         };
         let acc_sync = AcceptSync::with(
             self.leader_state.n_leader,
@@ -748,13 +787,17 @@ where
         }
     }
 
-    fn merge_snapshot(&mut self, trimmed_idx: u64, delta: S) {
-        let mut snapshot = self.storage.get_snapshot().unwrap();
-        snapshot.merge(delta);
+    fn set_snapshot(&mut self, trimmed_idx: u64, snapshot: S) {
         // TODO use and_then
         self.storage.set_snapshot(snapshot);
         self.storage.set_trimmed_idx(trimmed_idx);
         self.cached_trim_index = trimmed_idx;
+    }
+
+    fn merge_snapshot(&mut self, trimmed_idx: u64, delta: S) {
+        let mut snapshot = self.storage.get_snapshot().unwrap();
+        snapshot.merge(delta);
+        self.set_snapshot(trimmed_idx, snapshot);
     }
 
     fn merge_pending_proposals_with_snapshot(&mut self) {
@@ -854,11 +897,13 @@ where
                     && prom.la < self.leader_state.get_max_promise_meta().la
                 {
                     let trimmed_idx = self.storage.get_trimmed_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
-                    let snapshot = SnapshotType::Delta(self.create_delta_snapshot(prom.la));
+                    let entries = self.storage.get_suffix(prom.la);
+                    let snapshot = SnapshotType::Delta(S::create(entries));
                     (trimmed_idx, snapshot)
                 } else {
-                    let (trimmed_idx, snapshot) = self.create_complete_snapshot();
-                    (trimmed_idx, SnapshotType::Complete(snapshot))
+                    let trim_idx = self.storage.get_log_len();
+                    let snapshot = self.create_snapshot(trim_idx);
+                    (trim_idx, SnapshotType::Complete(snapshot))
                 };
                 AcceptSync::with(
                     self.leader_state.n_leader,
@@ -974,20 +1019,16 @@ where
         }
     }
 
-    fn create_complete_snapshot(&mut self) -> (u64, S) {
-        let log_len = self.storage.get_log_len();
-        let snapshot = S::create(self.storage.get_entries(0, log_len));
-        let trim_idx = log_len + self.storage.get_trimmed_idx();
-        // TODO use and_then
-        self.storage.set_snapshot(snapshot.clone());
-        self.storage.set_trimmed_idx(trim_idx);
-        self.cached_trim_index = trim_idx;
-        (trim_idx, snapshot)
-    }
-
-    fn create_delta_snapshot(&self, idx: u64) -> S {
-        let changes = self.storage.get_suffix(idx);
-        S::create(changes)
+    fn create_snapshot(&mut self, trim_idx: u64) -> S {
+        let entries = self.storage.get_entries(0, trim_idx);
+        let delta = S::create(entries);
+        match self.storage.get_snapshot() {
+            Some(mut s) => {
+                s.merge(delta);
+                s
+            }
+            None => delta,
+        }
     }
 
     /*** Follower ***/
@@ -1000,18 +1041,20 @@ where
             let la = self.storage.get_log_len();
             let promise = if S::snapshottable() {
                 let (trimmed_idx, sync_item, stopsign) = if na > prep.n_accepted {
-                    let (trimmed_idx, snapshot) = self.create_complete_snapshot();
+                    let trim_idx = self.storage.get_log_len();
+                    let snapshot = self.create_snapshot(trim_idx);
                     (
-                        trimmed_idx,
+                        trim_idx,
                         Some(SyncItem::Snapshot(SnapshotType::Complete(snapshot))),
                         self.get_stopsign(),
                     )
                 } else if na == prep.n_accepted && la > prep.la {
-                    let d = self.create_delta_snapshot(prep.la);
+                    let entries = self.storage.get_suffix(prep.la);
+                    let snapshot = SnapshotType::Delta(S::create(entries));
                     let trimmed_idx = self.storage.get_trimmed_idx() + la;
                     (
                         trimmed_idx,
-                        Some(SyncItem::Snapshot(SnapshotType::Delta(d))),
+                        Some(SyncItem::Snapshot(snapshot)),
                         self.get_stopsign(),
                     )
                 } else {

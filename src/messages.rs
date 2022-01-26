@@ -234,6 +234,12 @@ impl DecideStopSign {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Compaction {
+    Trim(Option<u64>),
+    Snapshot(u64),
+}
+
 /// An enum for all the different message types.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
@@ -254,8 +260,8 @@ where
     Decide(Decide),
     /// Forward client proposals to the leader.
     ProposalForward(Vec<T>),
-    Trim(u64),
-    ForwardTrim(Option<u64>),
+    Compaction(Compaction),
+    ForwardCompaction(Compaction),
     AcceptStopSign(AcceptStopSign),
     AcceptedStopSign(AcceptedStopSign),
     DecideStopSign(DecideStopSign),
