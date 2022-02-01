@@ -397,7 +397,7 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {
     value: u64,
 }

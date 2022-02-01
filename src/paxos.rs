@@ -2,7 +2,7 @@ use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
     storage::{Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
-    util::{LeaderState, PromiseMetaData, SyncItem},
+    util::{LeaderState, LogEntry, LogEntryType, PromiseMetaData, SyncItem},
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
         logger::create_logger,
@@ -10,7 +10,7 @@ use crate::{
 };
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
-use std::{fmt::Debug, marker::PhantomData};
+use std::{fmt::Debug, marker::PhantomData, vec};
 
 const BUFFER_SIZE: usize = 100000;
 
@@ -56,11 +56,9 @@ where
     leader: u64,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
-    prev_ld: u64,
     outgoing: Vec<Message<T, S>>,
     /// Logger used to output the status of the component.
     logger: Logger,
-    cached_trim_index: u64,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     s: PhantomData<S>,
@@ -137,10 +135,8 @@ where
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            prev_ld: 0,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             logger: l,
-            cached_trim_index: 0,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             s: PhantomData,
@@ -190,32 +186,32 @@ where
         }
     }
 
-    pub fn snapshot(&mut self, trim_idx: Option<u64>, local_only: bool) {
+    pub fn snapshot(&mut self, compact_idx: Option<u64>, local_only: bool) {
         let decided_idx = self.storage.get_decided_len();
-        let trim_idx = match trim_idx {
-            Some(idx) => {
-                if idx < decided_idx {
-                    idx
+        let idx = match compact_idx {
+            Some(i) => {
+                if i <= decided_idx {
+                    i
                 } else {
                     todo!("Return Snapshot Error")
                 }
             }
             None => decided_idx,
         };
-        let snapshot = self.create_snapshot(trim_idx);
-        self.set_snapshot(trim_idx, snapshot);
+        let snapshot = self.create_snapshot(idx);
+        self.set_snapshot(idx, snapshot);
         if !local_only {
             // since it is decided, it is ok even for a follower to send this
             for pid in &self.peers {
-                let msg = PaxosMsg::Compaction(Compaction::Snapshot(trim_idx));
+                let msg = PaxosMsg::Compaction(Compaction::Snapshot(idx));
                 self.outgoing.push(Message::with(self.pid, *pid, msg));
             }
         }
     }
 
     /// Return trim index from storage.
-    pub fn get_trimmed_idx(&self) -> u64 {
-        self.storage.get_trimmed_idx()
+    pub fn get_compacted_idx(&self) -> u64 {
+        self.storage.get_compacted_idx()
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
@@ -229,14 +225,14 @@ where
 
     fn trim_prepare(&mut self, index: Option<u64>) {
         let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
-        let trim_idx = match index {
+        let compact_idx = match index {
             Some(idx) => {
-                if (min_all_accepted_idx < &idx) || (idx < self.cached_trim_index) {
+                if (min_all_accepted_idx < &idx) || (idx < self.storage.get_compacted_idx()) {
                     warn!(
                         self.logger,
-                        "Invalid trim index: {:?}, cached_index: {}, las: {:?}",
+                        "Invalid trim index: {:?}, compacted_idx: {}, las: {:?}",
                         index,
-                        self.cached_trim_index,
+                        self.storage.get_compacted_idx(),
                         self.leader_state.las
                     );
                     return;
@@ -253,29 +249,31 @@ where
             }
         };
         for pid in &self.peers {
-            let msg = PaxosMsg::Compaction(Compaction::Trim(Some(trim_idx)));
+            let msg = PaxosMsg::Compaction(Compaction::Trim(Some(compact_idx)));
             self.outgoing.push(Message::with(self.pid, *pid, msg));
         }
-        self.handle_compaction(Compaction::Trim(Some(trim_idx)));
+        self.handle_compaction(Compaction::Trim(Some(compact_idx)));
     }
 
     fn handle_compaction(&mut self, c: Compaction) {
         let decided_idx = self.storage.get_decided_len();
+        let compacted_idx = self.storage.get_compacted_idx();
         match c {
-            Compaction::Trim(Some(trim_idx)) if trim_idx <= decided_idx => {
-                trace!(self.logger, "trim index: {:?}", trim_idx);
-                self.storage.trim(trim_idx - self.cached_trim_index);
-                self.storage.set_trimmed_idx(trim_idx);
-                self.cached_trim_index = trim_idx;
+            Compaction::Trim(Some(idx)) if idx <= decided_idx && idx < compacted_idx => {
+                self.storage.trim(idx - compacted_idx);
+                self.storage.set_compacted_idx(idx);
             }
-            Compaction::Snapshot(trim_idx) if trim_idx <= decided_idx => {
-                let s = self.create_snapshot(trim_idx);
-                self.set_snapshot(trim_idx, s);
+            Compaction::Snapshot(idx) if idx <= decided_idx && idx < compacted_idx => {
+                let s = self.create_snapshot(idx);
+                self.set_snapshot(idx, s);
             }
             _ => {
                 warn!(
                     self.logger,
-                    "Received invalid Compaction: {:?}, decided_idx {}", c, decided_idx
+                    "Received invalid Compaction: {:?}, decided_idx: {}, compacted_idx: {}",
+                    c,
+                    decided_idx,
+                    compacted_idx
                 );
             }
         }
@@ -307,23 +305,149 @@ where
 
     /// Returns the decided entries since the last call of this function.
     pub fn get_latest_decided_entries(&mut self) -> &[T] {
-        let ld = self.storage.get_decided_len();
-        if self.prev_ld < ld {
-            let decided = self.storage.get_entries(
-                self.prev_ld - self.cached_trim_index,
-                ld - self.cached_trim_index,
-            );
-            self.prev_ld = ld;
-            decided
-        } else {
-            &[]
-        }
+        todo!("REMOVE")
     }
 
     /// Returns the entire decided entries of this replica.
     pub fn get_decided_entries(&self) -> &[T] {
-        self.storage
-            .get_entries(0, self.storage.get_decided_len() - self.cached_trim_index)
+        todo!("REMOVE")
+    }
+
+    pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
+        let compacted_idx = self.get_compacted_idx();
+        if idx < compacted_idx {
+            Some(self.create_compacted_entry(compacted_idx))
+        } else {
+            let suffix_idx = idx - compacted_idx;
+            let log_len = self.storage.get_log_len();
+            if suffix_idx >= log_len {
+                match self.storage.get_stopsign() {
+                    Some(ss) if ss.decided && suffix_idx == log_len => {
+                        Some(LogEntry::StopSign(ss.stopsign))
+                    }
+                    _ => None,
+                }
+            } else {
+                match self.storage.get_entries(suffix_idx, suffix_idx + 1).first() {
+                    // TODO
+                    Some(data) => {
+                        if idx < self.storage.get_decided_len() {
+                            Some(LogEntry::Decided(data))
+                        } else {
+                            Some(LogEntry::Undecided(data))
+                        }
+                    }
+                    None => None,
+                }
+            }
+        }
+    }
+
+    pub fn read_entries(&self, from_idx: u64, to_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+        let compacted_idx = self.get_compacted_idx();
+        if to_idx < compacted_idx {
+            Some(vec![self.create_compacted_entry(compacted_idx)])
+        } else {
+            let log_len = self.storage.get_log_len();
+            let from_type = if from_idx < compacted_idx {
+                LogEntryType::Compacted
+            } else {
+                if from_idx - compacted_idx < log_len {
+                    LogEntryType::Entry
+                } else if from_idx - compacted_idx == log_len {
+                    match self.storage.get_stopsign() {
+                        Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                        _ => {
+                            return None;
+                        }
+                    }
+                } else {
+                    return None;
+                }
+            };
+            let to_suffix_idx = to_idx - compacted_idx;
+            let to_type = if to_suffix_idx < log_len {
+                LogEntryType::Entry
+            } else if to_suffix_idx == log_len + 1 {
+                match self.storage.get_stopsign() {
+                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    _ => {
+                        return None;
+                    }
+                }
+            } else {
+                return None;
+            };
+            match (from_type, to_type) {
+                (LogEntryType::Entry, LogEntryType::Entry) => {
+                    Some(self.create_read_log_entries(from_idx, to_idx))
+                }
+                (LogEntryType::Entry, LogEntryType::StopSign(ss)) => {
+                    let mut entries = self.create_read_log_entries(from_idx, to_idx - 1);
+                    entries.push(LogEntry::StopSign(ss));
+                    Some(entries)
+                }
+                (LogEntryType::Compacted, LogEntryType::Entry) => {
+                    let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
+                    let compacted = self.create_compacted_entry(compacted_idx);
+                    entries.push(compacted);
+                    let mut e = self.create_read_log_entries(compacted_idx, to_idx);
+                    entries.append(&mut e);
+                    Some(entries)
+                }
+                (LogEntryType::Compacted, LogEntryType::StopSign(ss)) => {
+                    let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
+                    let compacted = self.create_compacted_entry(compacted_idx);
+                    entries.push(compacted);
+                    let mut e = self.create_read_log_entries(compacted_idx, to_idx - 1);
+                    entries.append(&mut e);
+                    entries.push(LogEntry::StopSign(ss));
+                    Some(entries)
+                }
+                (LogEntryType::StopSign(ss), LogEntryType::StopSign(_)) => {
+                    Some(vec![LogEntry::StopSign(ss)])
+                }
+                e => {
+                    unimplemented!("{}", format!("Unexpected read combination: {:?}", e))
+                }
+            }
+        }
+    }
+
+    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+        let decided_idx = self.storage.get_decided_len();
+        if from_idx < decided_idx {
+            self.read_entries(from_idx, decided_idx)
+        } else {
+            None
+        }
+    }
+
+    fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T, S> {
+        match self.storage.get_snapshot() {
+            Some(s) => LogEntry::Snapshotted(compacted_idx, s),
+            None => LogEntry::Trimmed(compacted_idx),
+        }
+    }
+
+    fn create_read_log_entries(&self, from_idx: u64, to_idx: u64) -> Vec<LogEntry<T, S>> {
+        let compacted_idx = self.get_compacted_idx();
+        let entries = self
+            .storage
+            .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
+        let decided_suffix_idx = self.storage.get_decided_len();
+        entries
+            .iter()
+            .enumerate()
+            .map(|(idx, e)| {
+                let log_idx = idx as u64 + compacted_idx;
+                if log_idx > decided_suffix_idx {
+                    LogEntry::Undecided(e)
+                } else {
+                    LogEntry::Decided(e)
+                }
+            })
+            .collect()
     }
 
     /// Handle an incoming message.
@@ -424,11 +548,9 @@ where
         if to_idx > max_idx {
             vec![]
         } else {
+            let compacted_idx = self.storage.get_compacted_idx();
             self.storage
-                .get_entries(
-                    from_idx - self.cached_trim_index,
-                    to_idx - self.cached_trim_index,
-                )
+                .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
                 .to_vec()
         }
     }
@@ -700,25 +822,25 @@ where
     fn create_pending_proposals_snapshot(&mut self) -> (u64, S) {
         let pending_proposals = std::mem::take(&mut self.pending_proposals);
         let s = S::create(pending_proposals.as_slice());
-        let trimmed_idx = self.storage.get_trimmed_idx() + pending_proposals.len() as u64;
-        (trimmed_idx, s)
+        let compacted_idx = self.storage.get_compacted_idx() + pending_proposals.len() as u64;
+        (compacted_idx, s)
     }
 
     fn send_accsync_with_snapshot(&mut self) {
         let current_snapshot = self.storage.get_snapshot();
-        let (trim_idx, snapshot) = match current_snapshot {
-            Some(s) => (self.storage.get_trimmed_idx(), s),
+        let (compacted_idx, snapshot) = match current_snapshot {
+            Some(s) => (self.storage.get_compacted_idx(), s),
             None => {
-                let trim_idx = self.storage.get_log_len();
-                let snapshot = self.create_snapshot(trim_idx);
-                self.set_snapshot(trim_idx, snapshot.clone());
-                (trim_idx, snapshot)
+                let compact_idx = self.storage.get_log_len();
+                let snapshot = self.create_snapshot(compact_idx);
+                self.set_snapshot(compact_idx, snapshot.clone());
+                (compact_idx, snapshot)
             }
         };
         let acc_sync = AcceptSync::with(
             self.leader_state.n_leader,
             SyncItem::Snapshot(SnapshotType::Complete(snapshot)),
-            trim_idx,
+            compacted_idx,
             None,
             self.get_stopsign(),
         );
@@ -745,7 +867,7 @@ where
             let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
                 let sfx = self
                     .storage
-                    .get_suffix(*promise_la - self.cached_trim_index)
+                    .get_suffix(*promise_la - self.storage.get_compacted_idx())
                     .to_vec();
                 (sfx, *promise_la)
             } else {
@@ -755,7 +877,7 @@ where
                     .expect("Received PromiseMetaData but not found in ld");
                 let sfx = self
                     .storage
-                    .get_suffix(ld - self.cached_trim_index)
+                    .get_suffix(ld - self.storage.get_compacted_idx())
                     .to_vec();
                 (sfx, ld)
             };
@@ -787,24 +909,24 @@ where
         }
     }
 
-    fn set_snapshot(&mut self, trimmed_idx: u64, snapshot: S) {
+    fn set_snapshot(&mut self, compacted_idx: u64, snapshot: S) {
         // TODO use and_then
         self.storage.set_snapshot(snapshot);
-        self.storage.set_trimmed_idx(trimmed_idx);
-        self.cached_trim_index = trimmed_idx;
+        self.storage.trim(compacted_idx - self.get_compacted_idx());
+        self.storage.set_compacted_idx(compacted_idx);
     }
 
-    fn merge_snapshot(&mut self, trimmed_idx: u64, delta: S) {
+    fn merge_snapshot(&mut self, compacted_idx: u64, delta: S) {
         let mut snapshot = self.storage.get_snapshot().unwrap();
         snapshot.merge(delta);
-        self.set_snapshot(trimmed_idx, snapshot);
+        self.set_snapshot(compacted_idx, snapshot);
     }
 
     fn merge_pending_proposals_with_snapshot(&mut self) {
         if !self.pending_proposals.is_empty() {
-            let (trimmed_idx, delta) = self.create_pending_proposals_snapshot();
+            let (compacted_idx, delta) = self.create_pending_proposals_snapshot();
             self.storage.set_accepted_round(self.leader_state.n_leader);
-            self.merge_snapshot(trimmed_idx, delta);
+            self.merge_snapshot(compacted_idx, delta);
         }
     }
 
@@ -837,7 +959,7 @@ where
                     SnapshotType::Complete(c) => {
                         // TODO chain together these calls using Result and and_then
                         self.storage
-                            .set_trimmed_idx(self.leader_state.get_max_promise_meta().la);
+                            .set_compacted_idx(self.leader_state.get_max_promise_meta().la);
                         self.storage.set_snapshot(c);
                     }
                     SnapshotType::Delta(d) => {
@@ -892,23 +1014,24 @@ where
         if prom.n == self.leader_state.n_leader {
             self.leader_state.set_decided_idx(from, Some(prom.ld));
             let acc_sync = if S::snapshottable() {
-                let (trimmed_idx, snapshot) = if prom.n_accepted
+                let (compacted_idx, snapshot) = if prom.n_accepted
                     == self.leader_state.get_max_promise_meta().n
                     && prom.la < self.leader_state.get_max_promise_meta().la
                 {
-                    let trimmed_idx = self.storage.get_trimmed_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
+                    let compacted_idx =
+                        self.storage.get_compacted_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
                     let entries = self.storage.get_suffix(prom.la);
                     let snapshot = SnapshotType::Delta(S::create(entries));
-                    (trimmed_idx, snapshot)
+                    (compacted_idx, snapshot)
                 } else {
-                    let trim_idx = self.storage.get_log_len();
-                    let snapshot = self.create_snapshot(trim_idx);
-                    (trim_idx, SnapshotType::Complete(snapshot))
+                    let compact_idx = self.storage.get_log_len();
+                    let snapshot = self.create_snapshot(compact_idx);
+                    (compact_idx, SnapshotType::Complete(snapshot))
                 };
                 AcceptSync::with(
                     self.leader_state.n_leader,
                     SyncItem::Snapshot(snapshot),
-                    trimmed_idx,
+                    compacted_idx,
                     None,
                     self.get_stopsign(),
                 ) // TODO decided_idx with snapshot?
@@ -922,7 +1045,7 @@ where
                 };
                 let sfx = self
                     .storage
-                    .get_suffix(sync_idx - self.cached_trim_index)
+                    .get_suffix(sync_idx - self.storage.get_compacted_idx())
                     .to_vec();
                 // inform what got decided already
                 let ld = if self.leader_state.get_chosen_idx() > 0 {
@@ -1019,8 +1142,10 @@ where
         }
     }
 
-    fn create_snapshot(&mut self, trim_idx: u64) -> S {
-        let entries = self.storage.get_entries(0, trim_idx);
+    fn create_snapshot(&mut self, compact_idx: u64) -> S {
+        let entries = self
+            .storage
+            .get_entries(0, compact_idx - self.storage.get_compacted_idx());
         let delta = S::create(entries);
         match self.storage.get_snapshot() {
             Some(mut s) => {
@@ -1040,20 +1165,20 @@ where
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_log_len();
             let promise = if S::snapshottable() {
-                let (trimmed_idx, sync_item, stopsign) = if na > prep.n_accepted {
-                    let trim_idx = self.storage.get_log_len();
-                    let snapshot = self.create_snapshot(trim_idx);
+                let (compacted_idx, sync_item, stopsign) = if na > prep.n_accepted {
+                    let compact_idx = self.storage.get_log_len();
+                    let snapshot = self.create_snapshot(compact_idx);
                     (
-                        trim_idx,
+                        compact_idx,
                         Some(SyncItem::Snapshot(SnapshotType::Complete(snapshot))),
                         self.get_stopsign(),
                     )
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self.storage.get_suffix(prep.la);
                     let snapshot = SnapshotType::Delta(S::create(entries));
-                    let trimmed_idx = self.storage.get_trimmed_idx() + la;
+                    let compacted_idx = self.storage.get_compacted_idx() + la;
                     (
-                        trimmed_idx,
+                        compacted_idx,
                         Some(SyncItem::Snapshot(snapshot)),
                         self.get_stopsign(),
                     )
@@ -1065,20 +1190,20 @@ where
                     na,
                     sync_item,
                     self.storage.get_decided_len(),
-                    trimmed_idx,
+                    compacted_idx,
                     stopsign,
                 )
             } else {
                 let (sync_item, stopsign) = if na > prep.n_accepted {
                     let entries = self
                         .storage
-                        .get_suffix(prep.ld - self.cached_trim_index)
+                        .get_suffix(prep.ld - self.storage.get_compacted_idx())
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self
                         .storage
-                        .get_suffix(prep.la - self.cached_trim_index)
+                        .get_suffix(prep.la - self.storage.get_compacted_idx())
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else {
@@ -1111,8 +1236,7 @@ where
                         SnapshotType::Complete(c) => {
                             // TODO use and_then
                             self.storage.set_snapshot(c);
-                            self.storage.set_trimmed_idx(accsync.sync_idx);
-                            self.cached_trim_index = accsync.sync_idx;
+                            self.storage.set_compacted_idx(accsync.sync_idx);
                         }
                         SnapshotType::Delta(d) => {
                             self.merge_snapshot(accsync.sync_idx, d);
@@ -1218,7 +1342,8 @@ where
                 .get_stopsign()
                 .expect("No stopsign found when deciding!");
             ss.decided = true;
-            self.storage.set_stopsign(ss)
+            self.storage.set_stopsign(ss);
+            self.storage.set_decided_len(self.storage.get_log_len() + 1);
         }
     }
 

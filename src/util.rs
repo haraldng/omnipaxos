@@ -233,3 +233,24 @@ where
         SyncItem::None
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum LogEntry<'a, T, S>
+where
+    T: Clone + Debug,
+    S: Snapshot<T>,
+{
+    Decided(&'a T),
+    Undecided(&'a T),
+    Trimmed(u64),
+    Snapshotted(u64, S),
+    StopSign(StopSign),
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum LogEntryType {
+    Entry,
+    Compacted,
+    StopSign(StopSign),
+}

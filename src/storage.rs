@@ -113,12 +113,12 @@ where
     fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
-    fn trim(&mut self, trimmed_idx: u64);
+    fn trim(&mut self, idx: u64);
 
-    fn set_trimmed_idx(&mut self, trimmed_idx: u64);
+    fn set_compacted_idx(&mut self, idx: u64);
 
     /// Returns the garbage collector index from storage.
-    fn get_trimmed_idx(&self) -> u64;
+    fn get_compacted_idx(&self) -> u64;
 
     fn set_snapshot(&mut self, snapshot: S);
 
@@ -197,15 +197,7 @@ pub mod memory_storage {
         }
 
         fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            match self.log.get(from as usize..to as usize) {
-                Some(ents) => ents,
-                None => panic!(
-                    "get_entries out of bounds. From: {}, To: {}, len: {}",
-                    from,
-                    to,
-                    self.log.len()
-                ),
-            }
+            self.log.get(from as usize..to as usize).unwrap_or(&[])
         }
 
         fn get_log_len(&self) -> u64 {
@@ -235,11 +227,11 @@ pub mod memory_storage {
             self.log.drain(0..trimmed_idx as usize);
         }
 
-        fn set_trimmed_idx(&mut self, trimmed_idx: u64) {
+        fn set_compacted_idx(&mut self, trimmed_idx: u64) {
             self.trimmed_idx = trimmed_idx;
         }
 
-        fn get_trimmed_idx(&self) -> u64 {
+        fn get_compacted_idx(&self) -> u64 {
             self.trimmed_idx
         }
 
