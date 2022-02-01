@@ -10,7 +10,7 @@ use crate::{
 };
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
-use std::{fmt::Debug, marker::PhantomData, vec};
+use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
 
 const BUFFER_SIZE: usize = 100000;
 
@@ -50,7 +50,7 @@ where
 {
     storage: B,
     config_id: u32,
-    pid: u64,
+    pub pid: u64,
     peers: Vec<u64>, // excluding self pid
     state: (Role, Phase),
     leader: u64,
@@ -209,6 +209,10 @@ where
         }
     }
 
+    pub fn get_decided_idx(&self) -> u64 {
+        self.storage.get_decided_len()
+    }
+
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> u64 {
         self.storage.get_compacted_idx()
@@ -259,11 +263,11 @@ where
         let decided_idx = self.storage.get_decided_len();
         let compacted_idx = self.storage.get_compacted_idx();
         match c {
-            Compaction::Trim(Some(idx)) if idx <= decided_idx && idx < compacted_idx => {
+            Compaction::Trim(Some(idx)) if idx <= decided_idx && idx > compacted_idx => {
                 self.storage.trim(idx - compacted_idx);
                 self.storage.set_compacted_idx(idx);
             }
-            Compaction::Snapshot(idx) if idx <= decided_idx && idx < compacted_idx => {
+            Compaction::Snapshot(idx) if idx <= decided_idx && idx > compacted_idx => {
                 let s = self.create_snapshot(idx);
                 self.set_snapshot(idx, s);
             }
@@ -303,16 +307,6 @@ where
         outgoing
     }
 
-    /// Returns the decided entries since the last call of this function.
-    pub fn get_latest_decided_entries(&mut self) -> &[T] {
-        todo!("REMOVE")
-    }
-
-    /// Returns the entire decided entries of this replica.
-    pub fn get_decided_entries(&self) -> &[T] {
-        todo!("REMOVE")
-    }
-
     pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
         if idx < compacted_idx {
@@ -343,7 +337,26 @@ where
         }
     }
 
-    pub fn read_entries(&self, from_idx: u64, to_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+    pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T, S>>>
+    where
+        R: RangeBounds<u64>,
+    {
+        let from_idx = match r.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(e) => *e + 1,
+            Bound::Unbounded => 0,
+        };
+        let to_idx = match r.end_bound() {
+            Bound::Included(i) => *i + 1,
+            Bound::Excluded(e) => *e,
+            Bound::Unbounded => {
+                let idx = self.storage.get_compacted_idx() + self.storage.get_log_len();
+                match self.storage.get_stopsign() {
+                    Some(ss) if ss.decided => idx + 1,
+                    _ => idx,
+                }
+            }
+        };
         let compacted_idx = self.get_compacted_idx();
         if to_idx < compacted_idx {
             Some(vec![self.create_compacted_entry(compacted_idx)])
@@ -366,7 +379,7 @@ where
                 }
             };
             let to_suffix_idx = to_idx - compacted_idx;
-            let to_type = if to_suffix_idx < log_len {
+            let to_type = if to_suffix_idx <= log_len {
                 LogEntryType::Entry
             } else if to_suffix_idx == log_len + 1 {
                 match self.storage.get_stopsign() {
@@ -417,7 +430,7 @@ where
     pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
         let decided_idx = self.storage.get_decided_len();
         if from_idx < decided_idx {
-            self.read_entries(from_idx, decided_idx)
+            self.read_entries(from_idx..decided_idx)
         } else {
             None
         }

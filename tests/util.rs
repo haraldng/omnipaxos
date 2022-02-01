@@ -282,7 +282,7 @@ pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos::{
         leader_election::ballot_leader_election::Ballot, messages::Message, paxos::OmniPaxos,
-        storage::memory_storage::MemoryStorage,
+        storage::memory_storage::MemoryStorage, util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
@@ -297,6 +297,7 @@ pub mod omnireplica {
         timer: Option<ScheduledTimer>,
         paxos: OmniPaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>,
         ask_vector: LinkedList<Ask<(), u64>>,
+        decided_idx: u64,
     }
 
     impl ComponentLifecycle for OmniPaxosReplica {
@@ -331,6 +332,7 @@ pub mod omnireplica {
                 timer: None,
                 paxos,
                 ask_vector: LinkedList::new(),
+                decided_idx: 0,
             }
         }
 
@@ -338,8 +340,23 @@ pub mod omnireplica {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn get_log(&self) -> &[u64] {
-            self.paxos.get_decided_entries()
+        pub fn get_trimmed_suffix(&self) -> Vec<u64> {
+            if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
+                let ents = match decided_ents.first().unwrap() {
+                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_, _) => {
+                        decided_ents.get(1..).unwrap()
+                    }
+                    _ => decided_ents.as_slice(),
+                };
+                ents.iter()
+                    .map(|x| match x {
+                        LogEntry::Decided(i) => **i,
+                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
         }
 
         fn send_outgoing_msgs(&mut self) {
@@ -366,11 +383,19 @@ pub mod omnireplica {
 
         fn answer_future(&mut self) {
             if !self.ask_vector.is_empty() {
-                for ent in self.paxos.get_latest_decided_entries().iter() {
-                    match self.ask_vector.pop_front().unwrap().reply(ent.clone()) {
-                        Ok(_) => {}
-                        Err(e) => println!("Error in promise {}", e),
+                if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+                    for e in entries {
+                        match e {
+                            LogEntry::Decided(i) => self
+                                .ask_vector
+                                .pop_front()
+                                .unwrap()
+                                .reply(*i)
+                                .expect("Failed to reply promise!"),
+                            err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                        }
                     }
+                    self.decided_idx = self.paxos.get_decided_idx();
                 }
             }
         }

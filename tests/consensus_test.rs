@@ -45,7 +45,7 @@ fn consensus_test() {
     let mut log: Vec<(&u64, Vec<u64>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         log.push(px.on_definition(|comp| {
-            let log = comp.get_log();
+            let log = comp.get_trimmed_suffix();
             (i, log.to_vec())
         }));
     }
@@ -75,29 +75,89 @@ fn read_test() {
     mem_storage.set_decided_len(decided_idx);
 
     let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
+
+    // read decided entries
+    let entries = op.read_decided_suffix(0).expect("No decided entries");
+    let expected_entries = log.get(0..decided_idx as usize).unwrap();
+    verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
+
+    // create snapshot
+    op.snapshot(Some(snapshotted_idx), true);
+
+    // read entry
+    let idx = snapshotted_idx;
+    let entry = op.read(idx).expect("No entry");
+    let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
+    verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
+
+    // read snapshot
+    let snapshot = op.read(0).expect("No snapshot");
+    verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
+
+    // read none
+    let idx = log.len() as u64;
+    let entry = op.read(idx);
+    assert!(entry.is_none(), "Expected None, got: {:?}", entry);
+
+    // create stopped storage and OmniPaxos to test reading StopSign.
+    let mut stopped_storage = MemoryStorage::<u64, LatestValue>::default();
+    let ss = StopSign::with(2, vec![], None);
+    let log_len = log.len() as u64;
+    stopped_storage.append_entries(log.clone());
+    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
+    stopped_storage.set_decided_len(log_len);
+
+    let mut stopped_op = OmniPaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    stopped_op.snapshot(Some(snapshotted_idx), true);
+
+    // read stopsign
+    let idx = log_len;
+    let stopsign = stopped_op.read(idx).expect("No StopSign");
+    verify_stopsign(&[stopsign], &ss);
+}
+
+#[test]
+fn read_entries_test() {
+    let log = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12];
+    let decided_idx = 6;
+    let snapshotted_idx: u64 = 4;
+    let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
+
+    let exp_snapshot = LatestValue::create(snapshotted);
+
+    let mut mem_storage = MemoryStorage::<u64, LatestValue>::default();
+    mem_storage.append_entries(log.clone());
+    mem_storage.set_decided_len(decided_idx);
+
+    let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
     op.snapshot(Some(snapshotted_idx), true);
 
     // read entries only
     let from_idx = snapshotted_idx + 1;
-    let to_idx = decided_idx + 1;
-    let entries = op.read_entries(from_idx, to_idx).expect("No entries");
-    let expected_entries = log.get(from_idx as usize..to_idx as usize).unwrap();
+    let entries = op.read_entries(from_idx..=decided_idx).expect("No entries");
+    let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
 
     // read snapshot only
-    let entries = op.read_entries(0, snapshotted_idx).expect("No snapshot");
+    let entries = op.read_entries(0..snapshotted_idx).expect("No snapshot");
     verify_snapshot(entries.as_slice(), snapshotted_idx, &exp_snapshot);
 
     // read snapshot + entries
     let from_idx = 3;
     let to_idx = decided_idx;
     let entries = op
-        .read_entries(from_idx, to_idx)
+        .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
     let expected_entries = log.get(snapshotted_idx as usize..to_idx as usize).unwrap();
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
     verify_entries(suffix, expected_entries, snapshotted_idx, decided_idx);
+
+    // read none
+    let from_idx = 0;
+    let to_idx = log.len() as u64;
+    let entries = op.read_entries(from_idx..=to_idx);
+    assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and OmniPaxos to test reading StopSign.
     let mut stopped_storage = MemoryStorage::<u64, LatestValue>::default();
@@ -111,18 +171,14 @@ fn read_test() {
     stopped_op.snapshot(Some(snapshotted_idx), true);
 
     // read stopsign only
-    let from_idx = log_len;
-    let to_idx = log_len + 1;
-    let entries = stopped_op
-        .read_entries(from_idx, to_idx)
-        .expect("No StopSign");
+    let idx = log_len;
+    let entries = stopped_op.read_entries(idx..=idx).expect("No StopSign");
     verify_stopsign(entries.as_slice(), &ss);
 
     // read entries + stopsign
     let from_idx = snapshotted_idx + 2;
-    let to_idx = log_len + 1;
     let entries = stopped_op
-        .read_entries(from_idx, to_idx)
+        .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
     verify_entries(
@@ -135,9 +191,8 @@ fn read_test() {
 
     // read snapshot + entries + stopsign
     let from_idx = 0;
-    let to_idx = log_len + 1;
     let entries = stopped_op
-        .read_entries(from_idx, to_idx)
+        .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
     let (snapshot, ents) = prefix.split_at(1);
@@ -155,9 +210,8 @@ fn read_test() {
     stopped_op.snapshot(Some(log_len), true);
     let snapshotted_idx = log_len;
     let from_idx = 0;
-    let to_idx = log_len + 1;
     let entries = stopped_op
-        .read_entries(from_idx, to_idx)
+        .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));

@@ -49,7 +49,7 @@ fn gc_test() {
     let mut seq_after: Vec<(&u64, Vec<u64>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after.push(px.on_definition(|comp| {
-            let seq = comp.get_log();
+            let seq = comp.get_trimmed_suffix();
             (i, seq.to_vec())
         }));
     }
@@ -111,7 +111,7 @@ fn double_gc_test() {
     let mut seq_after_double: Vec<(&u64, Vec<u64>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.get_log();
+            let seq = comp.get_trimmed_suffix();
             (i, seq.to_vec())
         }));
     }
