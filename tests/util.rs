@@ -343,7 +343,7 @@ pub mod omnireplica {
         pub fn get_trimmed_suffix(&self) -> Vec<u64> {
             if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
                 let ents = match decided_ents.first().unwrap() {
-                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_, _) => {
+                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
                         decided_ents.get(1..).unwrap()
                     }
                     _ => decided_ents.as_slice(),
@@ -377,8 +377,8 @@ pub mod omnireplica {
             self.paxos.append(data).expect("Failed to propose!");
         }
 
-        pub fn garbage_collect(&mut self, index: Option<u64>) {
-            self.paxos.trim(index)
+        pub fn trim(&mut self, index: Option<u64>) {
+            self.paxos.trim(index).expect("Failed to trim!");
         }
 
         fn answer_future(&mut self) {

@@ -72,7 +72,7 @@ fn read_test() {
 
     let mut mem_storage = MemoryStorage::<u64, LatestValue>::default();
     mem_storage.append_entries(log.clone());
-    mem_storage.set_decided_len(decided_idx);
+    mem_storage.set_decided_idx(decided_idx);
 
     let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
 
@@ -82,7 +82,8 @@ fn read_test() {
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
-    op.snapshot(Some(snapshotted_idx), true);
+    op.snapshot(Some(snapshotted_idx), true)
+        .expect("Failed to snapshot");
 
     // read entry
     let idx = snapshotted_idx;
@@ -105,10 +106,12 @@ fn read_test() {
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_len(log_len);
+    stopped_storage.set_decided_idx(log_len);
 
     let mut stopped_op = OmniPaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
-    stopped_op.snapshot(Some(snapshotted_idx), true);
+    stopped_op
+        .snapshot(Some(snapshotted_idx), true)
+        .expect("Failed to snapshot");
 
     // read stopsign
     let idx = log_len;
@@ -127,10 +130,11 @@ fn read_entries_test() {
 
     let mut mem_storage = MemoryStorage::<u64, LatestValue>::default();
     mem_storage.append_entries(log.clone());
-    mem_storage.set_decided_len(decided_idx);
+    mem_storage.set_decided_idx(decided_idx);
 
     let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
-    op.snapshot(Some(snapshotted_idx), true);
+    op.snapshot(Some(snapshotted_idx), true)
+        .expect("Failed to snapshot");
 
     // read entries only
     let from_idx = snapshotted_idx + 1;
@@ -165,10 +169,12 @@ fn read_entries_test() {
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_len(log_len);
+    stopped_storage.set_decided_idx(log_len);
 
     let mut stopped_op = OmniPaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
-    stopped_op.snapshot(Some(snapshotted_idx), true);
+    stopped_op
+        .snapshot(Some(snapshotted_idx), true)
+        .expect("Failed to snapshot");
 
     // read stopsign only
     let idx = log_len;
@@ -207,7 +213,9 @@ fn read_entries_test() {
 
     // read snapshot + stopsign
     // snapshot entire log
-    stopped_op.snapshot(Some(log_len), true);
+    stopped_op
+        .snapshot(Some(log_len), true)
+        .expect("Failed to snapshot");
     let snapshotted_idx = log_len;
     let from_idx = 0;
     let entries = stopped_op
@@ -225,9 +233,9 @@ fn verify_snapshot(
 ) {
     assert_eq!(read_entries.len(), 1);
     match read_entries.first().unwrap() {
-        LogEntry::Snapshotted(idx, snapshot) => {
-            assert_eq!(*idx, exp_compacted_idx);
-            assert_eq!(snapshot, exp_snapshot);
+        LogEntry::Snapshotted(s) => {
+            assert_eq!(s.trimmed_idx, exp_compacted_idx);
+            assert_eq!(&s.snapshot, exp_snapshot);
         }
         e => {
             panic!("{}", format!("Not a snapshot: {:?}", e))

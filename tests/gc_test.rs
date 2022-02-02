@@ -41,7 +41,7 @@ fn gc_test() {
     }
 
     px.on_definition(|x| {
-        x.garbage_collect(Some(cfg.gc_idx));
+        x.trim(Some(cfg.gc_idx));
     });
 
     thread::sleep(cfg.wait_timeout);
@@ -97,13 +97,13 @@ fn double_gc_test() {
     }
 
     px.on_definition(|x| {
-        x.garbage_collect(Some(cfg.gc_idx));
+        x.trim(Some(cfg.gc_idx));
     });
 
     thread::sleep(cfg.wait_timeout);
 
     px.on_definition(|x| {
-        x.garbage_collect(Some(cfg.gc_idx + GC_INDEX_INCREMENT));
+        x.trim(Some(cfg.gc_idx + GC_INDEX_INCREMENT));
     });
 
     thread::sleep(cfg.wait_timeout);

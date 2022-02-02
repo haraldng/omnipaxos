@@ -47,6 +47,7 @@ where
     pub ld: u64,
     /// The log length of this follower.
     pub la: u64,
+    /// The StopSign accepted by this follower
     pub stopsign: Option<StopSign>,
 }
 
@@ -86,9 +87,11 @@ where
     pub n: Ballot,
     /// Entries that the receiving replica is missing in its log.
     pub sync_item: SyncItem<T, S>,
-    /// The index of the log where `entries` should be applied at.
+    /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
     pub sync_idx: u64,
+    /// The decided index
     pub decide_idx: Option<u64>,
+    /// StopSign to be accepted
     pub stopsign: Option<StopSign>,
 }
 
@@ -193,6 +196,7 @@ impl Decide {
     }
 }
 
+/// Message sent by leader to followers to accept a StopSign
 #[derive(Clone, Debug)]
 pub struct AcceptStopSign {
     /// The current round.
@@ -208,6 +212,7 @@ impl AcceptStopSign {
     }
 }
 
+/// Message sent by followers to leader when accepted StopSign
 #[derive(Copy, Clone, Debug)]
 pub struct AcceptedStopSign {
     /// The current round.
@@ -221,6 +226,7 @@ impl AcceptedStopSign {
     }
 }
 
+/// Message sent by leader to decide a StopSign
 #[derive(Copy, Clone, Debug)]
 pub struct DecideStopSign {
     /// The current round.
@@ -234,6 +240,8 @@ impl DecideStopSign {
     }
 }
 
+/// Compaction Request
+#[allow(missing_docs)]
 #[derive(Clone, Debug)]
 pub enum Compaction {
     Trim(Option<u64>),

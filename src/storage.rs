@@ -3,6 +3,7 @@ use std::{fmt::Debug, marker::PhantomData};
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
+#[allow(missing_docs)]
 pub struct StopSignEntry {
     pub stopsign: StopSign,
     pub decided: bool,
@@ -43,6 +44,8 @@ impl PartialEq for StopSign {
     }
 }
 
+/// Snapshot type. A `Complete` snapshot contains all snapshotted data while `Delta` has snapshotted changes since an earlier snapshot.
+#[allow(missing_docs)]
 #[derive(Clone, Debug)]
 pub enum SnapshotType<T, S>
 where
@@ -54,20 +57,24 @@ where
     _Phantom(PhantomData<T>),
 }
 
+/// Functions required by OmniPaxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
 pub trait Snapshot<T>: Clone
 where
     T: Clone + Debug,
 {
+    /// Create a snapshot from the log `entries`.
     fn create(entries: &[T]) -> Self;
 
+    /// Merge another snapshot `delta` into self.
     fn merge(&mut self, delta: Self);
 
+    /// Whether `T` is snapshottable. If not, simply return `false` and leave the other functions `unimplemented!()`.
     fn snapshottable() -> bool; // TODO: somehow check if user is using snapshots statically?
 
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
-// TODO return Result and use and_then in paxos
+/// Trait for implementing the storage backend of OmniPaxos.
 pub trait Storage<T, S>
 where
     T: Clone + Debug,
@@ -86,9 +93,10 @@ where
     fn set_promise(&mut self, n_prom: Ballot);
 
     /// Sets the decided index in the log.
-    fn set_decided_len(&mut self, ld: u64);
+    fn set_decided_idx(&mut self, ld: u64);
 
-    fn get_decided_len(&self) -> u64;
+    /// Returns the decided index in the log.
+    fn get_decided_idx(&self) -> u64;
 
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: Ballot);
@@ -108,24 +116,29 @@ where
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;
 
+    /// Sets the StopSign used for reconfiguration.
     fn set_stopsign(&mut self, s: StopSignEntry);
 
+    /// Returns the stored StopSign.
     fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64);
 
+    /// Sets the compacted (i.e. trimmed or snapshotted) index.
     fn set_compacted_idx(&mut self, idx: u64);
 
     /// Returns the garbage collector index from storage.
     fn get_compacted_idx(&self) -> u64;
 
+    /// Sets the snapshot.
     fn set_snapshot(&mut self, snapshot: S);
 
+    /// Returns the stored snapshot.
     fn get_snapshot(&self) -> Option<S>;
 }
 
-/// An in-memory storage implementation for Paxos.
+#[allow(missing_docs)]
 pub mod memory_storage {
     use crate::{
         leader_election::ballot_leader_election::Ballot,
@@ -133,6 +146,7 @@ pub mod memory_storage {
     };
     use std::fmt::Debug;
 
+    /// An in-memory storage implementation for Paxos.
     #[derive(Clone, Default)]
     pub struct MemoryStorage<T, S>
     where
@@ -180,11 +194,11 @@ pub mod memory_storage {
             self.n_prom = n_prom;
         }
 
-        fn set_decided_len(&mut self, ld: u64) {
+        fn set_decided_idx(&mut self, ld: u64) {
             self.ld = ld;
         }
 
-        fn get_decided_len(&self) -> u64 {
+        fn get_decided_idx(&self) -> u64 {
             self.ld
         }
 

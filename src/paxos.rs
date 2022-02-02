@@ -2,7 +2,10 @@ use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
     storage::{Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
-    util::{LeaderState, LogEntry, LogEntryType, PromiseMetaData, SyncItem},
+    util::{
+        LeaderState, LogEntry, LogEntryType, PromiseMetaData, SnapshottedEntry, SyncItem,
+        TrimmedEntry,
+    },
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
         logger::create_logger,
@@ -40,6 +43,15 @@ where
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
 }
 
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[derive(Copy, Clone, Debug)]
+pub enum CompactionErr {
+    /// Snapshot was called with an index that is not decided yet.
+    UndecidedIndex(u64),
+    /// Trim was called with an index that is not accepted by all servers yet.
+    NotAllAccepted(u64),
+}
+
 /// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct OmniPaxos<T, S, B>
@@ -50,7 +62,7 @@ where
 {
     storage: B,
     config_id: u32,
-    pub pid: u64,
+    pid: u64,
     peers: Vec<u64>, // excluding self pid
     state: (Role, Phase),
     leader: u64,
@@ -178,22 +190,33 @@ where
 
     /// Initiates the trim process.
     /// # Arguments
-    /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is None then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
-    pub fn trim(&mut self, trim_index: Option<u64>) {
+    /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
+    pub fn trim(&mut self, trim_index: Option<u64>) -> Result<(), CompactionErr> {
         match self.state {
             (Role::Leader, _) => self.trim_prepare(trim_index),
-            _ => self.forward_compaction(Compaction::Trim(trim_index)),
+            _ => {
+                self.forward_compaction(Compaction::Trim(trim_index));
+                Ok(())
+            }
         }
     }
 
-    pub fn snapshot(&mut self, compact_idx: Option<u64>, local_only: bool) {
-        let decided_idx = self.storage.get_decided_len();
+    /// Trim the log and create a snapshot. ** Note: only up to the `decided_idx` can be snapshotted **
+    /// # Arguments
+    /// `compact_idx` - Snapshots all entries < [`trim_index`], if the [`trim_index`] is None then the decided index will be used.
+    /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
+    pub fn snapshot(
+        &mut self,
+        compact_idx: Option<u64>,
+        local_only: bool,
+    ) -> Result<(), CompactionErr> {
+        let decided_idx = self.storage.get_decided_idx();
         let idx = match compact_idx {
             Some(i) => {
                 if i <= decided_idx {
                     i
                 } else {
-                    todo!("Return Snapshot Error")
+                    return Err(CompactionErr::UndecidedIndex(i));
                 }
             }
             None => decided_idx,
@@ -207,10 +230,12 @@ where
                 self.outgoing.push(Message::with(self.pid, *pid, msg));
             }
         }
+        Ok(())
     }
 
+    /// Return the decided index.
     pub fn get_decided_idx(&self) -> u64 {
-        self.storage.get_decided_len()
+        self.storage.get_decided_idx()
     }
 
     /// Return trim index from storage.
@@ -227,7 +252,7 @@ where
         }
     }
 
-    fn trim_prepare(&mut self, index: Option<u64>) {
+    fn trim_prepare(&mut self, index: Option<u64>) -> Result<(), CompactionErr> {
         let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
         let compact_idx = match index {
             Some(idx) => {
@@ -239,7 +264,7 @@ where
                         self.storage.get_compacted_idx(),
                         self.leader_state.las
                     );
-                    return;
+                    return Err(CompactionErr::NotAllAccepted(idx));
                 }
                 idx
             }
@@ -257,10 +282,11 @@ where
             self.outgoing.push(Message::with(self.pid, *pid, msg));
         }
         self.handle_compaction(Compaction::Trim(Some(compact_idx)));
+        Ok(())
     }
 
     fn handle_compaction(&mut self, c: Compaction) {
-        let decided_idx = self.storage.get_decided_len();
+        let decided_idx = self.storage.get_decided_idx();
         let compacted_idx = self.storage.get_compacted_idx();
         match c {
             Compaction::Trim(Some(idx)) if idx <= decided_idx && idx > compacted_idx => {
@@ -307,6 +333,7 @@ where
         outgoing
     }
 
+    /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
     pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
         if idx < compacted_idx {
@@ -325,7 +352,7 @@ where
                 match self.storage.get_entries(suffix_idx, suffix_idx + 1).first() {
                     // TODO
                     Some(data) => {
-                        if idx < self.storage.get_decided_len() {
+                        if idx < self.storage.get_decided_idx() {
                             Some(LogEntry::Decided(data))
                         } else {
                             Some(LogEntry::Undecided(data))
@@ -337,6 +364,7 @@ where
         }
     }
 
+    /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
     pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T, S>>>
     where
         R: RangeBounds<u64>,
@@ -364,19 +392,17 @@ where
             let log_len = self.storage.get_log_len();
             let from_type = if from_idx < compacted_idx {
                 LogEntryType::Compacted
-            } else {
-                if from_idx - compacted_idx < log_len {
-                    LogEntryType::Entry
-                } else if from_idx - compacted_idx == log_len {
-                    match self.storage.get_stopsign() {
-                        Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
-                        _ => {
-                            return None;
-                        }
+            } else if from_idx - compacted_idx < log_len {
+                LogEntryType::Entry
+            } else if from_idx - compacted_idx == log_len {
+                match self.storage.get_stopsign() {
+                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    _ => {
+                        return None;
                     }
-                } else {
-                    return None;
                 }
+            } else {
+                return None;
             };
             let to_suffix_idx = to_idx - compacted_idx;
             let to_type = if to_suffix_idx <= log_len {
@@ -427,8 +453,9 @@ where
         }
     }
 
+    /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
     pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
-        let decided_idx = self.storage.get_decided_len();
+        let decided_idx = self.storage.get_decided_idx();
         if from_idx < decided_idx {
             self.read_entries(from_idx..decided_idx)
         } else {
@@ -438,8 +465,8 @@ where
 
     fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T, S> {
         match self.storage.get_snapshot() {
-            Some(s) => LogEntry::Snapshotted(compacted_idx, s),
-            None => LogEntry::Trimmed(compacted_idx),
+            Some(s) => LogEntry::Snapshotted(SnapshottedEntry::with(compacted_idx, s)),
+            None => LogEntry::Trimmed(TrimmedEntry::with(compacted_idx)),
         }
     }
 
@@ -448,7 +475,7 @@ where
         let entries = self
             .storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
-        let decided_suffix_idx = self.storage.get_decided_len();
+        let decided_suffix_idx = self.storage.get_decided_idx();
         entries
             .iter()
             .enumerate()
@@ -518,36 +545,35 @@ where
         if self.stopped() {
             Err(ProposeErr::Reconfiguration(new_configuration))
         } else {
-            let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.is_none() {
+                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                         self.pending_stopsign = Some(ss);
-                        Ok(())
                     } else {
-                        todo!("Return ProposeErr with pending reconfig");
+                        return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
                     if !self.stopped() {
+                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                         self.storage
                             .set_stopsign(StopSignEntry::with(ss.clone(), false));
                         self.leader_state.set_accepted_stopsign(self.pid);
                         self.send_accept_stopsign(ss);
-                        Ok(())
                     } else {
-                        todo!("Return ProposeErr with pending reconfig");
+                        return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
                 }
-                (Role::Leader, Phase::FirstAccept) => todo!("special first accept stopsign? -.-"),
+                (Role::Leader, Phase::FirstAccept) => todo!("Remove entry from first accept"),
                 _ => todo!("forward stopsign"),
             }
+            Ok(())
         }
     }
 
     fn send_accept_stopsign(&mut self, ss: StopSign) {
-        let acc_ss =
-            PaxosMsg::AcceptStopSign(AcceptStopSign::with(self.leader_state.n_leader, ss.clone()));
+        let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign::with(self.leader_state.n_leader, ss));
         for pid in self.leader_state.get_promised_followers() {
             self.outgoing
                 .push(Message::with(self.pid, pid, acc_ss.clone()));
@@ -556,7 +582,7 @@ where
 
     /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
     pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<T> {
-        let ld = self.storage.get_decided_len();
+        let ld = self.storage.get_decided_idx();
         let max_idx = std::cmp::max(ld, self.leader_state.get_chosen_idx());
         if to_idx > max_idx {
             vec![]
@@ -627,7 +653,7 @@ where
             self.storage.set_promise(n);
             /* insert my promise */
             let na = self.storage.get_accepted_round();
-            let ld = self.storage.get_decided_len();
+            let ld = self.storage.get_decided_idx();
             let la = self.storage.get_log_len();
             let my_promise = Promise::with(n, na, None, ld, la, self.get_stopsign());
             self.leader_state.set_promise(my_promise, self.pid);
@@ -656,7 +682,7 @@ where
             {
                 self.leader_state.set_latest_decide_meta(from, None);
             }
-            let ld = self.storage.get_decided_len();
+            let ld = self.storage.get_decided_idx();
             let n_accepted = self.storage.get_accepted_round();
             let la = self.storage.get_log_len();
             let prep = Prepare::with(self.leader_state.n_leader, ld, n_accepted, la);
@@ -699,7 +725,7 @@ where
         match self.state {
             (Role::Leader, _) => {
                 if let Compaction::Trim(idx) = c {
-                    self.trim_prepare(idx);
+                    let _ = self.trim_prepare(idx);
                 } else {
                     warn!(self.logger, "Got unexpected forwarded {:?}", c);
                 }
@@ -954,12 +980,11 @@ where
                     self.storage.append_entries(sfx);
                 } else {
                     // TODO check all decided/trim index
-                    let ld = self.storage.get_decided_len();
+                    let ld = self.storage.get_decided_idx();
                     self.storage.append_on_prefix(ld, sfx);
                 }
                 if let Some(ss) = max_stopsign {
-                    self.storage
-                        .set_stopsign(StopSignEntry::with(ss.clone(), false));
+                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
                     self.leader_state.set_accepted_stopsign(self.pid);
                 } else {
                     self.append_pending_proposals();
@@ -981,8 +1006,7 @@ where
                     _ => unimplemented!(),
                 }
                 if let Some(ss) = max_stopsign {
-                    self.storage
-                        .set_stopsign(StopSignEntry::with(ss.clone(), false));
+                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
                     self.leader_state.set_accepted_stopsign(self.pid);
                 } else {
                     self.merge_pending_proposals_with_snapshot();
@@ -1064,7 +1088,7 @@ where
                 let ld = if self.leader_state.get_chosen_idx() > 0 {
                     self.leader_state.get_chosen_idx()
                 } else {
-                    self.storage.get_decided_len()
+                    self.storage.get_decided_idx()
                 };
                 AcceptSync::with(
                     self.leader_state.n_leader,
@@ -1089,52 +1113,52 @@ where
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state.set_accepted_idx(from, accepted.la);
-            if accepted.la > self.leader_state.get_chosen_idx() {
-                if self.leader_state.is_chosen(accepted.la) {
-                    self.leader_state.set_chosen_idx(accepted.la);
-                    let d = Decide::with(
-                        self.leader_state.n_leader,
-                        self.leader_state.get_chosen_idx(),
-                    );
-                    if cfg!(feature = "latest_decide") {
-                        let promised_followers = self.leader_state.get_promised_followers();
-                        for pid in promised_followers {
-                            match self.leader_state.get_latest_decide_meta(pid) {
-                                Some((n, outgoing_dec_idx)) if n == self.leader_state.n_leader => {
-                                    let Message { msg, .. } =
-                                        self.outgoing.get_mut(outgoing_dec_idx).unwrap();
-                                    match msg {
-                                        PaxosMsg::AcceptDecide(a) => {
-                                            a.ld = self.leader_state.get_chosen_idx()
-                                        }
-                                        PaxosMsg::Decide(d) => {
-                                            d.ld = self.leader_state.get_chosen_idx()
-                                        }
-                                        _ => {
-                                            panic!("Cached Message<T> in outgoing was not Decide")
-                                        }
+            if accepted.la > self.leader_state.get_chosen_idx()
+                && self.leader_state.is_chosen(accepted.la)
+            {
+                self.leader_state.set_chosen_idx(accepted.la);
+                let d = Decide::with(
+                    self.leader_state.n_leader,
+                    self.leader_state.get_chosen_idx(),
+                );
+                if cfg!(feature = "latest_decide") {
+                    let promised_followers = self.leader_state.get_promised_followers();
+                    for pid in promised_followers {
+                        match self.leader_state.get_latest_decide_meta(pid) {
+                            Some((n, outgoing_dec_idx)) if n == self.leader_state.n_leader => {
+                                let Message { msg, .. } =
+                                    self.outgoing.get_mut(outgoing_dec_idx).unwrap();
+                                match msg {
+                                    PaxosMsg::AcceptDecide(a) => {
+                                        a.ld = self.leader_state.get_chosen_idx()
+                                    }
+                                    PaxosMsg::Decide(d) => {
+                                        d.ld = self.leader_state.get_chosen_idx()
+                                    }
+                                    _ => {
+                                        panic!("Cached Message<T> in outgoing was not Decide")
                                     }
                                 }
-                                _ => {
-                                    let cache_dec_idx = self.outgoing.len();
-                                    self.leader_state
-                                        .set_latest_decide_meta(pid, Some(cache_dec_idx));
-                                    self.outgoing.push(Message::with(
-                                        self.pid,
-                                        pid,
-                                        PaxosMsg::Decide(d),
-                                    ));
-                                }
+                            }
+                            _ => {
+                                let cache_dec_idx = self.outgoing.len();
+                                self.leader_state
+                                    .set_latest_decide_meta(pid, Some(cache_dec_idx));
+                                self.outgoing.push(Message::with(
+                                    self.pid,
+                                    pid,
+                                    PaxosMsg::Decide(d),
+                                ));
                             }
                         }
-                    } else {
-                        for pid in self.leader_state.get_promised_followers() {
-                            self.outgoing
-                                .push(Message::with(self.pid, pid, PaxosMsg::Decide(d)));
-                        }
                     }
-                    self.handle_decide(d);
+                } else {
+                    for pid in self.leader_state.get_promised_followers() {
+                        self.outgoing
+                            .push(Message::with(self.pid, pid, PaxosMsg::Decide(d)));
+                    }
                 }
+                self.handle_decide(d);
             }
         }
     }
@@ -1202,7 +1226,7 @@ where
                     prep.n,
                     na,
                     sync_item,
-                    self.storage.get_decided_len(),
+                    self.storage.get_decided_idx(),
                     compacted_idx,
                     stopsign,
                 )
@@ -1226,7 +1250,7 @@ where
                     prep.n,
                     na,
                     sync_item,
-                    self.storage.get_decided_len(),
+                    self.storage.get_decided_idx(),
                     la,
                     stopsign,
                 )
@@ -1271,7 +1295,7 @@ where
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
 
             if let Some(idx) = accsync.decide_idx {
-                self.storage.set_decided_len(idx);
+                self.storage.set_decided_idx(idx);
             }
             match accsync.stopsign {
                 Some(ss) => {
@@ -1282,9 +1306,7 @@ where
                         } = ss_entry;
                         if !has_decided {
                             self.storage.set_stopsign(StopSignEntry::with(ss, false));
-                        } /*else {
-                              assert_eq!(ss, my_ss);
-                          }*/
+                        }
                     } else {
                         self.storage.set_stopsign(StopSignEntry::with(ss, false));
                     }
@@ -1323,8 +1345,8 @@ where
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
             // handle decide
-            if acc.ld > self.storage.get_decided_len() {
-                self.storage.set_decided_len(acc.ld);
+            if acc.ld > self.storage.get_decided_idx() {
+                self.storage.set_decided_idx(acc.ld);
             }
         }
     }
@@ -1344,7 +1366,7 @@ where
 
     fn handle_decide(&mut self, dec: Decide) {
         if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            self.storage.set_decided_len(dec.ld);
+            self.storage.set_decided_idx(dec.ld);
         }
     }
 
@@ -1356,7 +1378,7 @@ where
                 .expect("No stopsign found when deciding!");
             ss.decided = true;
             self.storage.set_stopsign(ss);
-            self.storage.set_decided_len(self.storage.get_log_len() + 1);
+            self.storage.set_decided_idx(self.storage.get_log_len() + 1);
         }
     }
 

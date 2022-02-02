@@ -3,7 +3,7 @@ use crate::{
     messages::Promise,
     storage::{Snapshot, SnapshotType, StopSign},
 };
-use std::{cmp::Ordering, fmt::Debug};
+use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
@@ -79,7 +79,7 @@ where
             n_leader,
             promises_meta: vec![None; max_pid],
             las: vec![0; max_pid],
-            lds: lds.unwrap_or(vec![None; max_pid]),
+            lds: lds.unwrap_or_else(|| vec![None; max_pid]),
             lc: 0,
             max_promise_meta: PromiseMetaData::default(),
             max_promise: SyncItem::None,
@@ -133,7 +133,6 @@ where
         self.las
             .iter()
             .min()
-            .clone()
             .expect("Should be all initialised to 0!")
     }
 
@@ -196,11 +195,7 @@ where
     }
 
     pub fn is_stopsign_chosen(&self) -> bool {
-        let num_accepted = self
-            .accepted_stopsign
-            .iter()
-            .filter(|x| **x == true)
-            .count();
+        let num_accepted = self.accepted_stopsign.iter().filter(|x| **x).count();
         num_accepted >= self.majority
     }
 
@@ -213,6 +208,8 @@ where
     }
 }
 
+/// Item used for log synchronization in the Prepare phase.
+#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub enum SyncItem<T, S>
 where
@@ -234,23 +231,67 @@ where
     }
 }
 
+/// The entry read in the log.
 #[derive(Debug, Clone)]
 pub enum LogEntry<'a, T, S>
 where
     T: Clone + Debug,
     S: Snapshot<T>,
 {
+    /// The entry is decided.
     Decided(&'a T),
+    /// The entry is NOT decided. Might be removed from the log at a later time.
     Undecided(&'a T),
-    Trimmed(u64),
-    Snapshotted(u64, S),
+    /// The entry has been trimmed.
+    Trimmed(TrimmedEntry),
+    /// The entry has been snapshotted.
+    Snapshotted(SnapshottedEntry<T, S>),
+    /// This OmniPaxos instance has been stopped for reconfiguration.
     StopSign(StopSign),
-    None,
 }
 
+/// Convenience struct for checking if a certain index exists, is compacted or is a StopSign.
 #[derive(Debug, Clone)]
 pub(crate) enum LogEntryType {
     Entry,
     Compacted,
     StopSign(StopSign),
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, Copy, Clone)]
+pub struct TrimmedEntry {
+    pub trimmed_idx: u64,
+}
+
+impl TrimmedEntry {
+    pub(crate) fn with(trimmed_idx: u64) -> Self {
+        Self { trimmed_idx }
+    }
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, Clone)]
+pub struct SnapshottedEntry<T, S>
+where
+    T: Clone + Debug,
+    S: Snapshot<T>,
+{
+    pub trimmed_idx: u64,
+    pub snapshot: S,
+    _p: PhantomData<T>,
+}
+
+impl<T, S> SnapshottedEntry<T, S>
+where
+    T: Clone + Debug,
+    S: Snapshot<T>,
+{
+    pub(crate) fn with(trimmed_idx: u64, snapshot: S) -> Self {
+        Self {
+            trimmed_idx,
+            snapshot,
+            _p: PhantomData,
+        }
+    }
 }
