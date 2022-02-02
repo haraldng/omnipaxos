@@ -1,4 +1,4 @@
-use crate::leader_election::ballot_leader_election::Ballot;
+use super::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -140,7 +140,7 @@ where
 
 #[allow(missing_docs)]
 pub mod memory_storage {
-    use crate::{
+    use crate::core::{
         leader_election::ballot_leader_election::Ballot,
         storage::{Snapshot, StopSignEntry, Storage},
     };

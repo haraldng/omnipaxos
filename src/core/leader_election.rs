@@ -318,7 +318,7 @@ pub mod ballot_leader_election {
 
     /// The different messages BLE uses to communicate with other replicas.
     pub mod messages {
-        use crate::leader_election::ballot_leader_election::Ballot;
+        use crate::core::leader_election::ballot_leader_election::Ballot;
 
         /// An enum for all the different BLE message types.
         #[allow(missing_docs)]

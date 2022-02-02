@@ -3,7 +3,7 @@ pub mod util;
 
 use crate::util::LatestValue;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
+use omnipaxos::core::{
     paxos::OmniPaxos,
     storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,

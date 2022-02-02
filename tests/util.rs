@@ -3,7 +3,7 @@ use self::{
     omnireplica::OmniPaxosReplica,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos::{
+use omnipaxos::core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     paxos::OmniPaxos,
@@ -280,7 +280,7 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::{
+    use omnipaxos::core::{
         leader_election::ballot_leader_election::Ballot, messages::Message, paxos::OmniPaxos,
         storage::memory_storage::MemoryStorage, util::LogEntry,
     };

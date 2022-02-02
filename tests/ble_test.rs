@@ -2,7 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::leader_election::ballot_leader_election::Ballot;
+use omnipaxos::core::leader_election::ballot_leader_election::Ballot;
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
