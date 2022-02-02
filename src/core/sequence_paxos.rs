@@ -52,9 +52,9 @@ pub enum CompactionErr {
     NotAllAccepted(u64),
 }
 
-/// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
+/// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<T, S, B>
+pub struct SequencePaxos<T, S, B>
 where
     T: Clone + Debug,
     S: Snapshot<T>,
@@ -76,20 +76,20 @@ where
     s: PhantomData<S>,
 }
 
-impl<T, S, B> OmniPaxos<T, S, B>
+impl<T, S, B> SequencePaxos<T, S, B>
 where
     T: Clone + Debug,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
     /*** User functions ***/
-    /// Creates an Omni-Paxos replica.
+    /// Creates a Sequence Paxos replica.
     /// # Arguments
-    /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
-    /// * `pid` - The identifier of this Omni-Paxos replica.
+    /// * `config_id` - The identifier for the configuration that this Sequence Paxos replica is part of.
+    /// * `pid` - The identifier of this Sequence Paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of OmniPaxos.
+    /// * `logger` - Used for logging events of Sequence Paxos.
     /// * `log_file_path` - Path where the default logger logs events.
     pub fn with(
         config_id: u32,
@@ -99,7 +99,7 @@ where
         skip_prepare_use_leader: Option<Ballot>, // skipped prepare phase with the following leader event
         logger: Option<Logger>,
         log_file_path: Option<&str>,
-    ) -> OmniPaxos<T, S, B> {
+    ) -> SequencePaxos<T, S, B> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -138,7 +138,7 @@ where
 
         info!(l, "Paxos component pid: {} created!", pid);
 
-        let mut paxos = OmniPaxos {
+        let mut paxos = SequencePaxos {
             storage,
             pid,
             config_id,
@@ -157,13 +157,13 @@ where
         paxos
     }
 
-    /// Creates an Omni-Paxos replica.
+    /// Creates a Sequence Paxos replica.
     /// # Arguments
     /// * `cfg` - Hocon configuration used for paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `storage` - Implementation of a storage used to store the messages.
     /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of OmniPaxos.
+    /// * `logger` - Used for logging events of Sequence Paxos.
     pub fn with_hocon(
         self,
         cfg: &Hocon,
@@ -171,8 +171,8 @@ where
         storage: B,
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<T, S, B> {
-        OmniPaxos::<T, S, B>::with(
+    ) -> SequencePaxos<T, S, B> {
+        SequencePaxos::<T, S, B>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
@@ -514,7 +514,7 @@ where
         }
     }
 
-    /// Returns whether this Omni-Paxos instance is stopped, i.e. if it has been reconfigured.
+    /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
     pub fn stopped(&self) -> bool {
         self.get_stopsign().is_some()
     }

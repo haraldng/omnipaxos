@@ -57,7 +57,7 @@ where
     _Phantom(PhantomData<T>),
 }
 
-/// Functions required by OmniPaxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
+/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
 pub trait Snapshot<T>: Clone
 where
     T: Clone + Debug,
@@ -74,7 +74,7 @@ where
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
-/// Trait for implementing the storage backend of OmniPaxos.
+/// Trait for implementing the storage backend of Sequence Paxos.
 pub trait Storage<T, S>
 where
     T: Clone + Debug,

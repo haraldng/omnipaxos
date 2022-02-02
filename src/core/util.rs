@@ -246,7 +246,7 @@ where
     Trimmed(TrimmedEntry),
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T, S>),
-    /// This OmniPaxos instance has been stopped for reconfiguration.
+    /// This Sequence Paxos instance has been stopped for reconfiguration.
     StopSign(StopSign),
 }
 
