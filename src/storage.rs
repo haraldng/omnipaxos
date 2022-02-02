@@ -1,25 +1,18 @@
 use crate::leader_election::ballot_leader_election::Ballot;
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, marker::PhantomData};
 
-/// An entry in the replicated log.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Entry<T>
-where
-    T: Clone,
-{
-    /// A normal entry proposed by the client.
-    Normal(T),
-    /// A StopSign entry used for reconfiguration. See [`StopSign`].
-    StopSign(StopSign),
+/// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
+#[derive(Clone, Debug)]
+#[allow(missing_docs)]
+pub struct StopSignEntry {
+    pub stopsign: StopSign,
+    pub decided: bool,
 }
 
-impl<T> Entry<T>
-where
-    T: Clone,
-{
-    /// Returns true if the entry is a stopsign else, returns false.
-    pub fn is_stopsign(&self) -> bool {
-        matches!(self, Entry::StopSign(_))
+impl StopSignEntry {
+    /// Creates a [`StopSign`].
+    pub fn with(stopsign: StopSign, decided: bool) -> Self {
+        StopSignEntry { stopsign, decided }
     }
 }
 
@@ -51,53 +44,59 @@ impl PartialEq for StopSign {
     }
 }
 
-/// Trait to implement a back-end for the log replicated by an Omni-Paxos replica.
-pub trait Sequence<T>
+/// Snapshot type. A `Complete` snapshot contains all snapshotted data while `Delta` has snapshotted changes since an earlier snapshot.
+#[allow(missing_docs)]
+#[derive(Clone, Debug)]
+pub enum SnapshotType<T, S>
 where
-    T: Clone,
+    T: Clone + Debug,
+    S: Snapshot<T>,
 {
-    /// Creates an empty log.
-    fn new() -> Self;
-
-    /// Creates a log that is preloaded with the entries of `seq`.
-    fn new_with_sequence(seq: Vec<Entry<T>>) -> Self;
-
-    /// Appends an entry to the end of the log.
-    fn append_entry(&mut self, entry: Entry<T>);
-
-    /// Appends the entries of `seq` to the end of the log.
-    fn append_sequence(&mut self, seq: &mut Vec<Entry<T>>);
-
-    /// Appends the entries of `seq` to the prefix from index `from_index` in the log.
-    fn append_on_prefix(&mut self, from_idx: u64, seq: &mut Vec<Entry<T>>);
-
-    /// Returns the entries in the log in the index interval of [from, to)
-    fn get_entries(&self, from: u64, to: u64) -> &[Entry<T>];
-
-    /// Returns the suffix of entries in the log from index `from`.
-    fn get_suffix(&self, from: u64) -> Vec<Entry<T>>;
-
-    /// Returns the current length of the log.
-    fn get_sequence_len(&self) -> u64;
-
-    /// Returns true if the log contains a StopSign or a StopSign already has been decided.
-    /// Note that the log could have a StopSign that later gets overwritten, and thus this function might first return true and later false.
-    fn stopped(&self) -> bool;
-
-    /// Removes elements up to the given [`idx`] from storage.
-    fn garbage_collect(&mut self, idx: u64);
+    Complete(S),
+    Delta(S),
+    _Phantom(PhantomData<T>),
 }
 
-/// Trait to implement a back-end for the internal state used by an Omni-Paxos replica.
-pub trait PaxosState {
-    /// Creates an empty initial state.
-    fn new() -> Self;
+/// Functions required by OmniPaxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
+pub trait Snapshot<T>: Clone
+where
+    T: Clone + Debug,
+{
+    /// Create a snapshot from the log `entries`.
+    fn create(entries: &[T]) -> Self;
+
+    /// Merge another snapshot `delta` into self.
+    fn merge(&mut self, delta: Self);
+
+    /// Whether `T` is snapshottable. If not, simply return `false` and leave the other functions `unimplemented!()`.
+    fn snapshottable() -> bool; // TODO: somehow check if user is using snapshots statically?
+
+    //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
+}
+
+/// Trait for implementing the storage backend of OmniPaxos.
+pub trait Storage<T, S>
+where
+    T: Clone + Debug,
+    S: Snapshot<T>,
+{
+    /// Appends an entry to the end of the log and returns the log length.
+    fn append_entry(&mut self, entry: T) -> u64;
+
+    /// Appends the entries of `entries` to the end of the log and returns the log length.
+    fn append_entries(&mut self, entries: Vec<T>) -> u64;
+
+    /// Appends the entries of `entries` to the prefix from index `from_index` in the log and returns the log length.
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64;
 
     /// Sets the round that has been promised.
-    fn set_promise(&mut self, nprom: Ballot);
+    fn set_promise(&mut self, n_prom: Ballot);
 
     /// Sets the decided index in the log.
-    fn set_decided_len(&mut self, ld: u64);
+    fn set_decided_idx(&mut self, ld: u64);
+
+    /// Returns the decided index in the log.
+    fn get_decided_idx(&self) -> u64;
 
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: Ballot);
@@ -105,323 +104,102 @@ pub trait PaxosState {
     /// Returns the latest round in which entries have been accepted.
     fn get_accepted_round(&self) -> Ballot;
 
-    /// Returns the index in the log that has been decided up to.
-    fn get_decided_len(&self) -> u64;
+    /// Returns the entries in the log in the index interval of [from, to)
+    fn get_entries(&self, from: u64, to: u64) -> &[T];
+
+    /// Returns the current length of the log.
+    fn get_log_len(&self) -> u64;
+
+    /// Returns the suffix of entries in the log from index `from`.
+    fn get_suffix(&self, from: u64) -> &[T];
 
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;
 
-    /// Sets the garbage collected index.
-    fn set_gc_idx(&mut self, index: u64);
+    /// Sets the StopSign used for reconfiguration.
+    fn set_stopsign(&mut self, s: StopSignEntry);
 
-    /// Returns the garbage collected index.
-    fn get_gc_idx(&self) -> u64;
-}
-
-enum PaxosSequence<S, T>
-where
-    S: Sequence<T>,
-    T: Clone,
-{
-    Active(S),
-    Stopped(Arc<S>),
-    None,
-    _Never(PhantomData<T>),
-}
-
-/// A storage back-end to be used for Omni-Paxos.
-pub(crate) struct Storage<T, S, P>
-where
-    T: Clone,
-    S: Sequence<T>,
-    P: PaxosState,
-{
-    sequence: PaxosSequence<S, T>,
-    paxos_state: P,
-}
-
-impl<T, S, P> Storage<T, S, P>
-where
-    T: Clone,
-    S: Sequence<T>,
-    P: PaxosState,
-{
-    /// Creates a [`Storage`] back-end for Omni-Paxos.
-    /// The storage is divided into a [`Sequence`] and [`PaxosState`] allows for the log and the state to use different implementations.
-    pub fn with(seq: S, paxos_state: P) -> Storage<T, S, P> {
-        let sequence = PaxosSequence::Active(seq);
-        Storage {
-            sequence,
-            paxos_state,
-        }
-    }
-
-    /// Appends an entry to the end of the log.
-    pub fn append_entry(&mut self, entry: Entry<T>) -> u64 {
-        match &mut self.sequence {
-            PaxosSequence::Active(s) => {
-                s.append_entry(entry);
-                s.get_sequence_len()
-            }
-            PaxosSequence::Stopped(_) => {
-                panic!("Sequence should not be modified after reconfiguration");
-            }
-            _ => panic!("Got unexpected intermediate PaxosSequence::None"),
-        }
-    }
-
-    /// Appends the entries of `seq` to the end of the log.
-    pub fn append_sequence(&mut self, seq: &mut Vec<Entry<T>>) -> u64 {
-        match &mut self.sequence {
-            PaxosSequence::Active(s) => {
-                s.append_sequence(seq);
-                s.get_sequence_len()
-            }
-            PaxosSequence::Stopped(_) => {
-                panic!("Sequence should not be modified after reconfiguration");
-            }
-            _ => panic!("Got unexpected intermediate PaxosSequence::None"),
-        }
-    }
-
-    /// Appends the entries of `seq` to the prefix from index `from_index` in the log.
-    pub fn append_on_prefix(&mut self, from_idx: u64, seq: &mut Vec<Entry<T>>) -> u64 {
-        match &mut self.sequence {
-            PaxosSequence::Active(s) => {
-                s.append_on_prefix(from_idx, seq);
-                s.get_sequence_len()
-            }
-            PaxosSequence::Stopped(s) => {
-                assert!(seq.is_empty());
-                s.get_sequence_len()
-            }
-            _ => panic!("Got unexpected intermediate PaxosSequence::None"),
-        }
-    }
-
-    /// Appends the entries of `seq` to the decided prefix in the log.
-    pub fn append_on_decided_prefix(&mut self, seq: Vec<Entry<T>>) {
-        let from_idx = self.get_decided_len();
-        match &mut self.sequence {
-            PaxosSequence::Active(s) => {
-                let mut sequence = seq;
-                s.append_on_prefix(from_idx, &mut sequence);
-            }
-            PaxosSequence::Stopped(_) => {
-                if !seq.is_empty() {
-                    panic!("Sequence should not be modified after reconfiguration");
-                }
-            }
-            _ => panic!("Got unexpected intermediate PaxosSequence::None"),
-        }
-    }
-
-    /// Sets the round that has been promised.
-    pub fn set_promise(&mut self, nprom: Ballot) {
-        self.paxos_state.set_promise(nprom);
-    }
-
-    /// Sets the decided index in the log.
-    pub fn set_decided_len(&mut self, ld: u64) {
-        self.paxos_state.set_decided_len(ld);
-    }
-
-    /// Sets the latest accepted round.
-    pub fn set_accepted_round(&mut self, na: Ballot) {
-        self.paxos_state.set_accepted_round(na);
-    }
-
-    /// Returns the latest round in which entries have been accepted.
-    pub fn get_accepted_round(&self) -> Ballot {
-        self.paxos_state.get_accepted_round()
-    }
-
-    /// Returns the entries in the log in the index interval of [from, to)
-    pub fn get_entries(&self, from: u64, to: u64) -> &[Entry<T>] {
-        match &self.sequence {
-            PaxosSequence::Active(s) => s.get_entries(from, to),
-            PaxosSequence::Stopped(s) => s.get_entries(from, to),
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in get_entries"),
-        }
-    }
-
-    /// Returns the current length of the log.
-    pub fn get_sequence_len(&self) -> u64 {
-        match self.sequence {
-            PaxosSequence::Active(ref s) => s.get_sequence_len(),
-            PaxosSequence::Stopped(ref arc_s) => arc_s.get_sequence_len(),
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in get_sequence_len"),
-        }
-    }
-
-    /// Returns the index in the log that has been decided up to.
-    pub fn get_decided_len(&self) -> u64 {
-        self.paxos_state.get_decided_len()
-    }
-
-    /// Returns the suffix of entries in the log from index `from`.
-    pub fn get_suffix(&self, from: u64) -> Vec<Entry<T>> {
-        match self.sequence {
-            PaxosSequence::Active(ref s) => s.get_suffix(from),
-            PaxosSequence::Stopped(ref arc_s) => arc_s.get_suffix(from),
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in get_suffix"),
-        }
-    }
-
-    /// Returns the round that has been promised.
-    pub fn get_promise(&self) -> Ballot {
-        self.paxos_state.get_promise()
-    }
-
-    /// Returns true if the log contains a StopSign or a StopSign already has been decided.
-    /// Note that the log could have a StopSign that later gets overwritten, and thus this function might first return true and later false.
-    pub fn stopped(&self) -> bool {
-        match self.sequence {
-            PaxosSequence::Active(ref s) => s.stopped(),
-            PaxosSequence::Stopped(_) => true,
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in stopped()"),
-        }
-    }
-
-    /// Stops any new writes to the log and returns the whole log as an [`Arc`]. This should **only be used when a [`StopSign`]
-    /// i.e. a reconfiguration has been **decided.
-    pub fn stop_and_get_sequence(&mut self) -> Arc<S> {
-        let a = std::mem::replace(&mut self.sequence, PaxosSequence::None);
-        match a {
-            PaxosSequence::Active(s) => {
-                let arc_s = Arc::from(s);
-                self.sequence = PaxosSequence::Stopped(arc_s.clone());
-                arc_s
-            }
-            _ => panic!("Storage should already have been stopped!"),
-        }
-    }
+    /// Returns the stored StopSign.
+    fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
-    pub fn garbage_collect(&mut self, idx: u64) {
-        match self.sequence {
-            PaxosSequence::Active(ref mut s) => {
-                s.garbage_collect(idx - self.paxos_state.get_gc_idx());
-                self.paxos_state.set_gc_idx(idx);
-            }
-            PaxosSequence::Stopped(_) => {} // todo what to do when paxos is stopped?
-            _ => panic!("Got unexpected intermediate PaxosSequence::None in stopped()"),
-        }
-    }
+    fn trim(&mut self, idx: u64);
+
+    /// Sets the compacted (i.e. trimmed or snapshotted) index.
+    fn set_compacted_idx(&mut self, idx: u64);
 
     /// Returns the garbage collector index from storage.
-    pub fn get_gc_idx(&self) -> u64 {
-        self.paxos_state.get_gc_idx()
-    }
+    fn get_compacted_idx(&self) -> u64;
+
+    /// Sets the snapshot.
+    fn set_snapshot(&mut self, snapshot: S);
+
+    /// Returns the stored snapshot.
+    fn get_snapshot(&self) -> Option<S>;
 }
 
-/// An in-memory storage implementation for Paxos.
+#[allow(missing_docs)]
 pub mod memory_storage {
     use crate::{
         leader_election::ballot_leader_election::Ballot,
-        storage::{Entry, PaxosState, Sequence},
+        storage::{Snapshot, StopSignEntry, Storage},
     };
+    use std::fmt::Debug;
 
-    /// Stores all the accepted entries inside a vector.
-    #[derive(Debug)]
-    pub struct MemorySequence<T>
+    /// An in-memory storage implementation for Paxos.
+    #[derive(Clone, Default)]
+    pub struct MemoryStorage<T, S>
     where
-        T: Clone,
+        T: Clone + Debug,
+        S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
-        sequence: Vec<Entry<T>>,
-    }
-
-    impl<T> Sequence<T> for MemorySequence<T>
-    where
-        T: Clone,
-    {
-        fn new() -> Self {
-            MemorySequence { sequence: vec![] }
-        }
-
-        fn new_with_sequence(seq: Vec<Entry<T>>) -> Self {
-            MemorySequence { sequence: seq }
-        }
-
-        fn append_entry(&mut self, entry: Entry<T>) {
-            self.sequence.push(entry);
-        }
-
-        fn append_sequence(&mut self, seq: &mut Vec<Entry<T>>) {
-            self.sequence.append(seq);
-        }
-
-        fn append_on_prefix(&mut self, from_idx: u64, seq: &mut Vec<Entry<T>>) {
-            self.sequence.truncate(from_idx as usize);
-            self.sequence.append(seq);
-        }
-
-        fn get_entries(&self, from: u64, to: u64) -> &[Entry<T>] {
-            match self.sequence.get(from as usize..to as usize) {
-                Some(ents) => ents,
-                None => panic!(
-                    "get_entries out of bounds. From: {}, To: {}, len: {}",
-                    from,
-                    to,
-                    self.sequence.len()
-                ),
-            }
-        }
-
-        fn get_suffix(&self, from: u64) -> Vec<Entry<T>> {
-            match self.sequence.get(from as usize..) {
-                Some(s) => s.to_vec(),
-                None => vec![],
-            }
-        }
-
-        fn get_sequence_len(&self) -> u64 {
-            self.sequence.len() as u64
-        }
-
-        fn stopped(&self) -> bool {
-            match self.sequence.last() {
-                Some(entry) => entry.is_stopsign(),
-                None => false,
-            }
-        }
-
-        fn garbage_collect(&mut self, idx: u64) {
-            self.sequence.drain(0..idx as usize);
-        }
-    }
-
-    /// Stores the state of a paxos replica in-memory.
-    #[derive(Debug)]
-    pub struct MemoryState {
+        log: Vec<T>,
         /// Last promised round.
         n_prom: Ballot,
         /// Last accepted round.
         acc_round: Ballot,
-        /// Length of the decided sequence.
+        /// Length of the decided log.
         ld: u64,
         /// Garbage collected index.
-        gc_idx: u64,
+        trimmed_idx: u64,
+        /// Stored snapshot
+        snapshot: Option<S>,
+        /// Stored StopSign
+        stopsign: Option<StopSignEntry>,
     }
 
-    impl PaxosState for MemoryState {
-        fn new() -> Self {
-            let r = Ballot::default();
-            MemoryState {
-                n_prom: r,
-                acc_round: r,
-                ld: 0,
-                gc_idx: 0,
-            }
+    impl<T, S> Storage<T, S> for MemoryStorage<T, S>
+    where
+        T: Clone + Debug,
+        S: Snapshot<T>,
+    {
+        fn append_entry(&mut self, entry: T) -> u64 {
+            self.log.push(entry);
+            self.get_log_len()
+        }
+
+        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+            let mut e = entries;
+            self.log.append(&mut e);
+            self.get_log_len()
+        }
+
+        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+            self.log.truncate(from_idx as usize);
+            self.append_entries(entries)
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
             self.n_prom = n_prom;
         }
 
-        fn set_decided_len(&mut self, ld: u64) {
+        fn set_decided_idx(&mut self, ld: u64) {
             self.ld = ld;
+        }
+
+        fn get_decided_idx(&self) -> u64 {
+            self.ld
         }
 
         fn set_accepted_round(&mut self, na: Ballot) {
@@ -432,20 +210,51 @@ pub mod memory_storage {
             self.acc_round
         }
 
-        fn get_decided_len(&self) -> u64 {
-            self.ld
+        fn get_entries(&self, from: u64, to: u64) -> &[T] {
+            self.log.get(from as usize..to as usize).unwrap_or(&[])
+        }
+
+        fn get_log_len(&self) -> u64 {
+            self.log.len() as u64
+        }
+
+        fn get_suffix(&self, from: u64) -> &[T] {
+            match self.log.get(from as usize..) {
+                Some(s) => s,
+                None => &[],
+            }
         }
 
         fn get_promise(&self) -> Ballot {
             self.n_prom
         }
 
-        fn set_gc_idx(&mut self, index: u64) {
-            self.gc_idx = index;
+        fn set_stopsign(&mut self, s: StopSignEntry) {
+            self.stopsign = Some(s);
         }
 
-        fn get_gc_idx(&self) -> u64 {
-            self.gc_idx
+        fn get_stopsign(&self) -> Option<StopSignEntry> {
+            self.stopsign.clone()
+        }
+
+        fn trim(&mut self, trimmed_idx: u64) {
+            self.log.drain(0..trimmed_idx as usize);
+        }
+
+        fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+            self.trimmed_idx = trimmed_idx;
+        }
+
+        fn get_compacted_idx(&self) -> u64 {
+            self.trimmed_idx
+        }
+
+        fn set_snapshot(&mut self, snapshot: S) {
+            self.snapshot = Some(snapshot);
+        }
+
+        fn get_snapshot(&self) -> Option<S> {
+            self.snapshot.clone()
         }
     }
 }

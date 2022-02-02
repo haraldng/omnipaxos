@@ -7,6 +7,7 @@ use omnipaxos::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     paxos::OmniPaxos,
+    storage::{memory_storage::MemoryStorage, Snapshot},
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -55,7 +56,7 @@ impl TestSystem {
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<u64>>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<u64, LatestValue>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let mut peer_pids = all_pids.clone();
@@ -75,7 +76,15 @@ impl TestSystem {
             });
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosReplica::with(OmniPaxos::with(1, pid, peer_pids.clone(), None, None, None))
+                OmniPaxosReplica::with(OmniPaxos::with(
+                    1,
+                    pid,
+                    peer_pids.clone(),
+                    MemoryStorage::default(),
+                    None,
+                    None,
+                    None,
+                ))
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
@@ -206,10 +215,8 @@ pub mod ble {
 
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.ble.get_outgoing_msgs();
-
             for out in outgoing {
                 let receiver = self.peers.get(&out.to).unwrap();
-
                 receiver.tell(out);
             }
         }
@@ -232,11 +239,9 @@ pub mod ble {
                     self.schedule_periodic(BLE_TIMER_TIMEOUT, BLE_TIMER_TIMEOUT, move |c, _| {
                         if let Some(l) = c.ble.tick() {
                             c.answer_future(l);
-
                             c.ble_port.trigger(l);
                         }
                         c.send_outgoing_msgs();
-
                         Handled::Ok
                     }),
                 );
@@ -276,13 +281,8 @@ pub mod ble {
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos::{
-        leader_election::ballot_leader_election::Ballot,
-        messages::Message,
-        paxos::OmniPaxos,
-        storage::{
-            memory_storage::{MemorySequence, MemoryState},
-            Entry,
-        },
+        leader_election::ballot_leader_election::Ballot, messages::Message, paxos::OmniPaxos,
+        storage::memory_storage::MemoryStorage, util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
@@ -293,10 +293,11 @@ pub mod omnireplica {
     pub struct OmniPaxosReplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<Message<u64>>>,
+        peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>,
-        ask_vector: LinkedList<Ask<(), Entry<u64>>>,
+        paxos: OmniPaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>,
+        ask_vector: LinkedList<Ask<(), u64>>,
+        decided_idx: u64,
     }
 
     impl ComponentLifecycle for OmniPaxosReplica {
@@ -306,9 +307,7 @@ pub mod omnireplica {
                 Duration::from_millis(1),
                 move |c, _| {
                     c.send_outgoing_msgs();
-
                     c.answer_future();
-
                     Handled::Ok
                 },
             ));
@@ -325,7 +324,7 @@ pub mod omnireplica {
     }
 
     impl OmniPaxosReplica {
-        pub fn with(paxos: OmniPaxos<u64, MemorySequence<u64>, MemoryState>) -> Self {
+        pub fn with(paxos: OmniPaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
                 ble_port: RequiredPort::uninitialised(),
@@ -333,15 +332,31 @@ pub mod omnireplica {
                 timer: None,
                 paxos,
                 ask_vector: LinkedList::new(),
+                decided_idx: 0,
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), Entry<u64>>) {
+        pub fn add_ask(&mut self, ask: Ask<(), u64>) {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn stop_and_get_sequence(&mut self) -> Arc<MemorySequence<u64>> {
-            self.paxos.stop_and_get_sequence()
+        pub fn get_trimmed_suffix(&self) -> Vec<u64> {
+            if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
+                let ents = match decided_ents.first().unwrap() {
+                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
+                        decided_ents.get(1..).unwrap()
+                    }
+                    _ => decided_ents.as_slice(),
+                };
+                ents.iter()
+                    .map(|x| match x {
+                        LogEntry::Decided(i) => **i,
+                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
         }
 
         fn send_outgoing_msgs(&mut self) {
@@ -354,32 +369,40 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<u64>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>) {
             self.peers = peers;
         }
 
         pub fn propose(&mut self, data: u64) {
-            self.paxos.propose_normal(data).expect("Failed to propose!");
+            self.paxos.append(data).expect("Failed to propose!");
         }
 
-        pub fn garbage_collect(&mut self, index: Option<u64>) {
-            self.paxos.garbage_collect(index)
+        pub fn trim(&mut self, index: Option<u64>) {
+            self.paxos.trim(index).expect("Failed to trim!");
         }
 
         fn answer_future(&mut self) {
             if !self.ask_vector.is_empty() {
-                for ent in self.paxos.get_latest_decided_entries().iter() {
-                    match self.ask_vector.pop_front().unwrap().reply(ent.clone()) {
-                        Ok(_) => {}
-                        Err(e) => println!("Error in promise {}", e),
+                if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+                    for e in entries {
+                        match e {
+                            LogEntry::Decided(i) => self
+                                .ask_vector
+                                .pop_front()
+                                .unwrap()
+                                .reply(*i)
+                                .expect("Failed to reply promise!"),
+                            err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                        }
                     }
+                    self.decided_idx = self.paxos.get_decided_idx();
                 }
             }
         }
     }
 
     impl Actor for OmniPaxosReplica {
-        type Message = Message<u64>;
+        type Message = Message<u64, LatestValue>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
             self.paxos.handle(msg);
@@ -396,5 +419,26 @@ pub mod omnireplica {
             self.paxos.handle_leader(l);
             Handled::Ok
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+pub struct LatestValue {
+    value: u64,
+}
+
+impl Snapshot<u64> for LatestValue {
+    fn create(entries: &[u64]) -> Self {
+        Self {
+            value: *entries.last().unwrap_or(&0u64),
+        }
+    }
+
+    fn merge(&mut self, delta: Self) {
+        self.value = delta.value;
+    }
+
+    fn snapshottable() -> bool {
+        true
     }
 }

@@ -2,7 +2,7 @@ pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::{leader_election::ballot_leader_election::Ballot, storage::Entry};
+use omnipaxos::leader_election::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
 use test_config::TestConfig;
@@ -40,7 +40,7 @@ fn forward_proposal_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&proposal_node).unwrap();
 
-    let (kprom_px, kfuture_px) = promise::<Entry<u64>>();
+    let (kprom_px, kfuture_px) = promise::<u64>();
     px.on_definition(|x| {
         x.add_ask(Ask::new(kprom_px, ()));
         x.propose(123);

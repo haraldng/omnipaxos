@@ -20,6 +20,6 @@ pub mod paxos;
 /// Traits and structs related to the backend storage of an Omni-Paxos replica.
 pub mod storage;
 /// A module containing helper functions and structs.
-mod util;
+pub mod util;
 /// Holds helpful functions for the user.
 pub mod utils;
