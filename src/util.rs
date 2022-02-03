@@ -1,7 +1,7 @@
 use crate::{
     leader_election::ballot_leader_election::Ballot,
     messages::Promise,
-    storage::{Snapshot, SnapshotType, StopSign},
+    storage::{LogEntryType, Snapshot, SnapshotType, StopSign},
 };
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
@@ -47,7 +47,7 @@ impl PartialEq for PromiseMetaData {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LeaderState<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     pub n_leader: Ballot,
@@ -66,7 +66,7 @@ where
 
 impl<T, S> LeaderState<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     pub fn with(
@@ -213,7 +213,7 @@ where
 #[derive(Debug, Clone)]
 pub enum SyncItem<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     Entries(Vec<T>),
@@ -223,7 +223,7 @@ where
 
 impl<T, S> Default for SyncItem<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     fn default() -> Self {
@@ -235,7 +235,7 @@ where
 #[derive(Debug, Clone)]
 pub enum LogEntry<'a, T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// The entry is decided.
@@ -252,7 +252,7 @@ where
 
 /// Convenience struct for checking if a certain index exists, is compacted or is a StopSign.
 #[derive(Debug, Clone)]
-pub(crate) enum LogEntryType {
+pub(crate) enum IndexEntry {
     Entry,
     Compacted,
     StopSign(StopSign),
@@ -274,7 +274,7 @@ impl TrimmedEntry {
 #[derive(Debug, Clone)]
 pub struct SnapshottedEntry<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     pub trimmed_idx: u64,
@@ -284,7 +284,7 @@ where
 
 impl<T, S> SnapshottedEntry<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     pub(crate) fn with(trimmed_idx: u64, snapshot: S) -> Self {

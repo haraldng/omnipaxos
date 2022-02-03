@@ -7,7 +7,7 @@ use omnipaxos::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     paxos::OmniPaxos,
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    storage::{memory_storage::MemoryStorage, LogEntryType, Snapshot},
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -56,7 +56,7 @@ impl TestSystem {
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<u64, LatestValue>>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let mut peer_pids = all_pids.clone();
@@ -293,10 +293,10 @@ pub mod omnireplica {
     pub struct OmniPaxosReplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>,
+        peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>,
-        ask_vector: LinkedList<Ask<(), u64>>,
+        paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
 
@@ -324,7 +324,9 @@ pub mod omnireplica {
     }
 
     impl OmniPaxosReplica {
-        pub fn with(paxos: OmniPaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>) -> Self {
+        pub fn with(
+            paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
                 ble_port: RequiredPort::uninitialised(),
@@ -336,11 +338,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), u64>) {
+        pub fn add_ask(&mut self, ask: Ask<(), Value>) {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn get_trimmed_suffix(&self) -> Vec<u64> {
+        pub fn get_trimmed_suffix(&self) -> Vec<Value> {
             if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
                 let ents = match decided_ents.first().unwrap() {
                     LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
@@ -369,11 +371,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>) {
             self.peers = peers;
         }
 
-        pub fn propose(&mut self, data: u64) {
+        pub fn propose(&mut self, data: Value) {
             self.paxos.append(data).expect("Failed to propose!");
         }
 
@@ -402,7 +404,7 @@ pub mod omnireplica {
     }
 
     impl Actor for OmniPaxosReplica {
-        type Message = Message<u64, LatestValue>;
+        type Message = Message<Value, LatestValue>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
             self.paxos.handle(msg);
@@ -423,14 +425,19 @@ pub mod omnireplica {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+pub struct Value(pub u64);
+
+impl LogEntryType for Value {}
+
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {
-    value: u64,
+    value: Value,
 }
 
-impl Snapshot<u64> for LatestValue {
-    fn create(entries: &[u64]) -> Self {
+impl Snapshot<Value> for LatestValue {
+    fn create(entries: &[Value]) -> Self {
         Self {
-            value: *entries.last().unwrap_or(&0u64),
+            value: *entries.last().unwrap_or(&Value(0)),
         }
     }
 

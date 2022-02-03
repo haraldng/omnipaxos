@@ -1,6 +1,9 @@
 use crate::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
 
+/// Type of the entries stored in the log.
+pub trait LogEntryType: Clone + Debug {}
+
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
@@ -49,7 +52,7 @@ impl PartialEq for StopSign {
 #[derive(Clone, Debug)]
 pub enum SnapshotType<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     Complete(S),
@@ -60,7 +63,7 @@ where
 /// Functions required by OmniPaxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
 pub trait Snapshot<T>: Clone
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     /// Create a snapshot from the log `entries`.
     fn create(entries: &[T]) -> Self;
@@ -77,7 +80,7 @@ where
 /// Trait for implementing the storage backend of OmniPaxos.
 pub trait Storage<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
@@ -142,15 +145,14 @@ where
 pub mod memory_storage {
     use crate::{
         leader_election::ballot_leader_election::Ballot,
-        storage::{Snapshot, StopSignEntry, Storage},
+        storage::{LogEntryType, Snapshot, StopSignEntry, Storage},
     };
-    use std::fmt::Debug;
 
     /// An in-memory storage implementation for Paxos.
     #[derive(Clone, Default)]
     pub struct MemoryStorage<T, S>
     where
-        T: Clone + Debug,
+        T: LogEntryType,
         S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
@@ -171,7 +173,7 @@ pub mod memory_storage {
 
     impl<T, S> Storage<T, S> for MemoryStorage<T, S>
     where
-        T: Clone + Debug,
+        T: LogEntryType,
         S: Snapshot<T>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {
