@@ -1,13 +1,13 @@
 use self::{
     ble::{BallotLeaderComp, BallotLeaderElectionPort},
-    omnireplica::SequencePaxosReplica,
+    omnireplica::OmniPaxosReplica,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos::core::{
+use omnipaxos::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
-    sequence_paxos::SequencePaxos,
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    paxos::OmniPaxos,
+    storage::{memory_storage::MemoryStorage, LogEntryType, Snapshot},
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -22,7 +22,7 @@ pub struct TestSystem {
         u64,
         (
             Arc<Component<BallotLeaderComp>>,
-            Arc<Component<SequencePaxosReplica>>,
+            Arc<Component<OmniPaxosReplica>>,
         ),
     >,
 }
@@ -50,13 +50,13 @@ impl TestSystem {
             u64,
             (
                 Arc<Component<BallotLeaderComp>>,
-                Arc<Component<SequencePaxosReplica>>,
+                Arc<Component<OmniPaxosReplica>>,
             ),
         > = HashMap::new();
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<u64, LatestValue>>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let mut peer_pids = all_pids.clone();
@@ -76,7 +76,7 @@ impl TestSystem {
             });
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                SequencePaxosReplica::with(SequencePaxos::with(
+                OmniPaxosReplica::with(OmniPaxos::with(
                     1,
                     pid,
                     peer_pids.clone(),
@@ -88,7 +88,7 @@ impl TestSystem {
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
-                .expect("Could not connect BLE and SequencePaxosReplica!");
+                .expect("Could not connect BLE and OmniPaxosReplica!");
 
             ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -153,7 +153,7 @@ impl TestSystem {
         u64,
         (
             Arc<Component<BallotLeaderComp>>,
-            Arc<Component<SequencePaxosReplica>>,
+            Arc<Component<OmniPaxosReplica>>,
         ),
     > {
         &self.ble_paxos_nodes
@@ -280,9 +280,9 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::core::{
-        leader_election::ballot_leader_election::Ballot, messages::Message,
-        sequence_paxos::SequencePaxos, storage::memory_storage::MemoryStorage, util::LogEntry,
+    use omnipaxos::{
+        leader_election::ballot_leader_election::Ballot, messages::Message, paxos::OmniPaxos,
+        storage::memory_storage::MemoryStorage, util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
@@ -290,17 +290,17 @@ pub mod omnireplica {
     };
 
     #[derive(ComponentDefinition)]
-    pub struct SequencePaxosReplica {
+    pub struct OmniPaxosReplica {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>,
+        peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        paxos: SequencePaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>,
-        ask_vector: LinkedList<Ask<(), u64>>,
+        paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
 
-    impl ComponentLifecycle for SequencePaxosReplica {
+    impl ComponentLifecycle for OmniPaxosReplica {
         fn on_start(&mut self) -> Handled {
             self.timer = Some(self.schedule_periodic(
                 Duration::from_millis(1),
@@ -323,9 +323,9 @@ pub mod omnireplica {
         }
     }
 
-    impl SequencePaxosReplica {
+    impl OmniPaxosReplica {
         pub fn with(
-            paxos: SequencePaxos<u64, LatestValue, MemoryStorage<u64, LatestValue>>,
+            paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -338,11 +338,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), u64>) {
+        pub fn add_ask(&mut self, ask: Ask<(), Value>) {
             self.ask_vector.push_back(ask);
         }
 
-        pub fn get_trimmed_suffix(&self) -> Vec<u64> {
+        pub fn get_trimmed_suffix(&self) -> Vec<Value> {
             if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
                 let ents = match decided_ents.first().unwrap() {
                     LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
@@ -371,11 +371,11 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<u64, LatestValue>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>) {
             self.peers = peers;
         }
 
-        pub fn propose(&mut self, data: u64) {
+        pub fn propose(&mut self, data: Value) {
             self.paxos.append(data).expect("Failed to propose!");
         }
 
@@ -403,8 +403,8 @@ pub mod omnireplica {
         }
     }
 
-    impl Actor for SequencePaxosReplica {
-        type Message = Message<u64, LatestValue>;
+    impl Actor for OmniPaxosReplica {
+        type Message = Message<Value, LatestValue>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
             self.paxos.handle(msg);
@@ -416,7 +416,7 @@ pub mod omnireplica {
         }
     }
 
-    impl Require<BallotLeaderElectionPort> for SequencePaxosReplica {
+    impl Require<BallotLeaderElectionPort> for OmniPaxosReplica {
         fn handle(&mut self, l: Ballot) -> Handled {
             self.paxos.handle_leader(l);
             Handled::Ok
@@ -425,14 +425,19 @@ pub mod omnireplica {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+pub struct Value(pub u64);
+
+impl LogEntryType for Value {}
+
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {
-    value: u64,
+    value: Value,
 }
 
-impl Snapshot<u64> for LatestValue {
-    fn create(entries: &[u64]) -> Self {
+impl Snapshot<Value> for LatestValue {
+    fn create(entries: &[Value]) -> Self {
         Self {
-            value: *entries.last().unwrap_or(&0u64),
+            value: *entries.last().unwrap_or(&Value(0)),
         }
     }
 

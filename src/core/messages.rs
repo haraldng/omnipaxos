@@ -1,6 +1,6 @@
 use super::{
     leader_election::ballot_leader_election::Ballot,
-    storage::{Snapshot, StopSign},
+    storage::{LogEntryType, Snapshot, StopSign},
     util::SyncItem,
 };
 use std::fmt::Debug;
@@ -34,7 +34,7 @@ impl Prepare {
 #[derive(Clone, Debug)]
 pub struct Promise<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// The current round.
@@ -53,7 +53,7 @@ where
 
 impl<T, S> Promise<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Creates a [`Promise`] message.
@@ -80,7 +80,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptSync<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// The current round.
@@ -97,7 +97,7 @@ where
 
 impl<T, S> AcceptSync<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Creates an [`AcceptSync`] message.
@@ -122,7 +122,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FirstAccept<T>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     /// The current round.
     pub n: Ballot,
@@ -132,7 +132,7 @@ where
 
 impl<T> FirstAccept<T>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     /// Creates a [`FirstAccept`] message.
     pub fn with(n: Ballot, entries: Vec<T>) -> Self {
@@ -144,7 +144,7 @@ where
 #[derive(Clone, Debug)]
 pub struct AcceptDecide<T>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     /// The current round.
     pub n: Ballot,
@@ -156,7 +156,7 @@ where
 
 impl<T> AcceptDecide<T>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     /// Creates an [`AcceptDecide`] message.
     pub fn with(n: Ballot, ld: u64, entries: Vec<T>) -> Self {
@@ -253,7 +253,7 @@ pub enum Compaction {
 #[derive(Clone, Debug)]
 pub enum PaxosMsg<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
@@ -279,7 +279,7 @@ where
 #[derive(Clone, Debug)]
 pub struct Message<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Sender of `msg`.
@@ -292,7 +292,7 @@ where
 
 impl<T, S> Message<T, S>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
 {
     /// Creates a message.

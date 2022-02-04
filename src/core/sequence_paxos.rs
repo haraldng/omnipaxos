@@ -1,9 +1,9 @@
 use super::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
-    storage::{Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
+    storage::{LogEntryType, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
-        LeaderState, LogEntry, LogEntryType, PromiseMetaData, SnapshottedEntry, SyncItem,
+        IndexEntry, LeaderState, LogEntry, PromiseMetaData, SnapshottedEntry, SyncItem,
         TrimmedEntry,
     },
 };
@@ -37,7 +37,7 @@ enum Role {
 #[derive(Debug)]
 pub enum ProposeErr<T>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
 {
     Normal(T),
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
@@ -56,7 +56,7 @@ pub enum CompactionErr {
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct SequencePaxos<T, S, B>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -78,7 +78,7 @@ where
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where
-    T: Clone + Debug,
+    T: LogEntryType,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -391,12 +391,12 @@ where
         } else {
             let log_len = self.storage.get_log_len();
             let from_type = if from_idx < compacted_idx {
-                LogEntryType::Compacted
+                IndexEntry::Compacted
             } else if from_idx - compacted_idx < log_len {
-                LogEntryType::Entry
+                IndexEntry::Entry
             } else if from_idx - compacted_idx == log_len {
                 match self.storage.get_stopsign() {
-                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
                     }
@@ -406,10 +406,10 @@ where
             };
             let to_suffix_idx = to_idx - compacted_idx;
             let to_type = if to_suffix_idx <= log_len {
-                LogEntryType::Entry
+                IndexEntry::Entry
             } else if to_suffix_idx == log_len + 1 {
                 match self.storage.get_stopsign() {
-                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
                     }
@@ -418,15 +418,15 @@ where
                 return None;
             };
             match (from_type, to_type) {
-                (LogEntryType::Entry, LogEntryType::Entry) => {
+                (IndexEntry::Entry, IndexEntry::Entry) => {
                     Some(self.create_read_log_entries(from_idx, to_idx))
                 }
-                (LogEntryType::Entry, LogEntryType::StopSign(ss)) => {
+                (IndexEntry::Entry, IndexEntry::StopSign(ss)) => {
                     let mut entries = self.create_read_log_entries(from_idx, to_idx - 1);
                     entries.push(LogEntry::StopSign(ss));
                     Some(entries)
                 }
-                (LogEntryType::Compacted, LogEntryType::Entry) => {
+                (IndexEntry::Compacted, IndexEntry::Entry) => {
                     let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
                     let compacted = self.create_compacted_entry(compacted_idx);
                     entries.push(compacted);
@@ -434,7 +434,7 @@ where
                     entries.append(&mut e);
                     Some(entries)
                 }
-                (LogEntryType::Compacted, LogEntryType::StopSign(ss)) => {
+                (IndexEntry::Compacted, IndexEntry::StopSign(ss)) => {
                     let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
                     let compacted = self.create_compacted_entry(compacted_idx);
                     entries.push(compacted);
@@ -443,7 +443,7 @@ where
                     entries.push(LogEntry::StopSign(ss));
                     Some(entries)
                 }
-                (LogEntryType::StopSign(ss), LogEntryType::StopSign(_)) => {
+                (IndexEntry::StopSign(ss), IndexEntry::StopSign(_)) => {
                     Some(vec![LogEntry::StopSign(ss)])
                 }
                 e => {

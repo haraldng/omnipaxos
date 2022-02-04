@@ -1,6 +1,7 @@
 pub mod test_config;
 pub mod util;
 
+use crate::util::Value;
 use kompact::prelude::{promise, Ask};
 use omnipaxos::core::leader_election::ballot_leader_election::Ballot;
 use rand::Rng;
@@ -40,10 +41,10 @@ fn forward_proposal_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&proposal_node).unwrap();
 
-    let (kprom_px, kfuture_px) = promise::<u64>();
+    let (kprom_px, kfuture_px) = promise::<Value>();
     px.on_definition(|x| {
         x.add_ask(Ask::new(kprom_px, ()));
-        x.propose(123);
+        x.propose(Value(123));
     });
 
     kfuture_px
