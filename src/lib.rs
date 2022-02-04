@@ -15,3 +15,4 @@
 pub mod core;
 /// Holds helpful functions for the user.
 pub mod utils;
+pub mod omnipaxos;
