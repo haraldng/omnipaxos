@@ -3,10 +3,10 @@ use self::{
     omnireplica::OmniPaxosReplica,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos::{
+use omnipaxos::core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
-    paxos::OmniPaxos,
+    sequence_paxos::SequencePaxos,
     storage::{memory_storage::MemoryStorage, LogEntryType, Snapshot},
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
@@ -76,7 +76,7 @@ impl TestSystem {
             });
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosReplica::with(OmniPaxos::with(
+                OmniPaxosReplica::with(SequencePaxos::with(
                     1,
                     pid,
                     peer_pids.clone(),
@@ -280,8 +280,8 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::{
-        leader_election::ballot_leader_election::Ballot, messages::Message, paxos::OmniPaxos,
+    use omnipaxos::core::{
+        leader_election::ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
         storage::memory_storage::MemoryStorage, util::LogEntry,
     };
     use std::{
@@ -295,7 +295,7 @@ pub mod omnireplica {
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -325,7 +325,7 @@ pub mod omnireplica {
 
     impl OmniPaxosReplica {
         pub fn with(
-            paxos: OmniPaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+            paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),

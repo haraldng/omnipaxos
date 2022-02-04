@@ -3,8 +3,8 @@ pub mod util;
 
 use crate::util::{LatestValue, Value};
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
-    paxos::OmniPaxos,
+use omnipaxos::core::{
+    sequence_paxos::SequencePaxos,
     storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
@@ -77,7 +77,7 @@ fn read_test() {
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
-    let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
+    let mut op = SequencePaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
 
     // read decided entries
     let entries = op.read_decided_suffix(0).expect("No decided entries");
@@ -103,7 +103,7 @@ fn read_test() {
     let entry = op.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
-    // create stopped storage and OmniPaxos to test reading StopSign.
+    // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
@@ -111,7 +111,7 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = OmniPaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op = SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -138,7 +138,7 @@ fn read_entries_test() {
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
-    let mut op = OmniPaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
+    let mut op = SequencePaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
     op.snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
@@ -169,7 +169,7 @@ fn read_entries_test() {
     let entries = op.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
-    // create stopped storage and OmniPaxos to test reading StopSign.
+    // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
@@ -177,7 +177,7 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = OmniPaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op = SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
