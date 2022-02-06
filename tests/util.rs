@@ -7,7 +7,7 @@ use omnipaxos::core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{memory_storage::MemoryStorage, LogEntryType, Snapshot},
+    storage::{memory_storage::MemoryStorage, Entry, Snapshot},
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -427,7 +427,7 @@ pub mod omnireplica {
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct Value(pub u64);
 
-impl LogEntryType for Value {}
+impl Entry for Value {}
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {

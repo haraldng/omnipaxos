@@ -2,7 +2,7 @@ use super::leader_election::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
 
 /// Type of the entries stored in the log.
-pub trait LogEntryType: Clone + Debug {}
+pub trait Entry: Clone + Debug {}
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
@@ -52,7 +52,7 @@ impl PartialEq for StopSign {
 #[derive(Clone, Debug)]
 pub enum SnapshotType<T, S>
 where
-    T: LogEntryType,
+    T: Entry,
     S: Snapshot<T>,
 {
     Complete(S),
@@ -60,10 +60,10 @@ where
     _Phantom(PhantomData<T>),
 }
 
-/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable` and leave the other functions `unimplemented!()`.
+/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable()` and leave the other functions `unimplemented!()`.
 pub trait Snapshot<T>: Clone
 where
-    T: LogEntryType,
+    T: Entry,
 {
     /// Create a snapshot from the log `entries`.
     fn create(entries: &[T]) -> Self;
@@ -80,7 +80,7 @@ where
 /// Trait for implementing the storage backend of Sequence Paxos.
 pub trait Storage<T, S>
 where
-    T: LogEntryType,
+    T: Entry,
     S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
@@ -145,14 +145,14 @@ where
 pub mod memory_storage {
     use crate::core::{
         leader_election::ballot_leader_election::Ballot,
-        storage::{LogEntryType, Snapshot, StopSignEntry, Storage},
+        storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
 
     /// An in-memory storage implementation for Paxos.
     #[derive(Clone, Default)]
     pub struct MemoryStorage<T, S>
     where
-        T: LogEntryType,
+        T: Entry,
         S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
@@ -173,7 +173,7 @@ pub mod memory_storage {
 
     impl<T, S> Storage<T, S> for MemoryStorage<T, S>
     where
-        T: LogEntryType,
+        T: Entry,
         S: Snapshot<T>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {

@@ -1,10 +1,10 @@
 use super::{
     leader_election::ballot_leader_election::Ballot,
     messages::*,
-    storage::{LogEntryType, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
+    storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
         IndexEntry, LeaderState, LogEntry, PromiseMetaData, SnapshottedEntry, SyncItem,
-        TrimmedEntry,
+        TrimmedEntry, defaults::BUFFER_SIZE
     },
 };
 use crate::utils::{
@@ -14,49 +14,13 @@ use crate::utils::{
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
-
-const BUFFER_SIZE: usize = 100000;
-
-#[derive(PartialEq, Debug)]
-enum Phase {
-    Prepare,
-    FirstAccept,
-    Accept,
-    Recover,
-    None,
-}
-
-#[derive(PartialEq, Debug)]
-enum Role {
-    Follower,
-    Leader,
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[allow(missing_docs)]
-#[derive(Debug)]
-pub enum ProposeErr<T>
-where
-    T: LogEntryType,
-{
-    Normal(T),
-    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[derive(Copy, Clone, Debug)]
-pub enum CompactionErr {
-    /// Snapshot was called with an index that is not decided yet.
-    UndecidedIndex(u64),
-    /// Trim was called with an index that is not accepted by all servers yet.
-    NotAllAccepted(u64),
-}
+use crate::omnipaxos::NodeConfig;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct SequencePaxos<T, S, B>
 where
-    T: LogEntryType,
+    T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -73,12 +37,13 @@ where
     logger: Logger,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
+    buffer_size: usize,
     s: PhantomData<S>,
 }
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where
-    T: LogEntryType,
+    T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -96,15 +61,13 @@ where
         pid: u64,
         peers: Vec<u64>,
         storage: B,
-        skip_prepare_use_leader: Option<Ballot>, // skipped prepare phase with the following leader event
-        logger: Option<Logger>,
-        log_file_path: Option<&str>,
+        config: SequencePaxosConfig
     ) -> SequencePaxos<T, S, B> {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, n_leader, lds) = match skip_prepare_use_leader {
+        let (state, leader, n_leader, lds) = match config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -127,13 +90,9 @@ where
             }
         };
 
-        let l = logger.unwrap_or_else(|| {
-            if let Some(p) = log_file_path {
-                create_logger(p)
-            } else {
-                let t = format!("logs/paxos_{}.log", pid);
-                create_logger(log_file_path.unwrap_or_else(|| t.as_str()))
-            }
+        let l = config.logger.unwrap_or_else(|| {
+            let s = config.logger_file_path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+            create_logger(s.as_str())
         });
 
         info!(l, "Paxos component pid: {} created!", pid);
@@ -147,10 +106,11 @@ where
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            outgoing: Vec::with_capacity(BUFFER_SIZE),
+            outgoing: Vec::with_capacity(DEFAULT_BUFFER_SIZE),
             logger: l,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
+            buffer_size: config.buffer_size,
             s: PhantomData,
         };
         paxos.storage.set_promise(n_leader);
@@ -172,19 +132,22 @@ where
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
     ) -> SequencePaxos<T, S, B> {
+        let mut config = SequencePaxosConfig::default();
+        if let Some(l) = logger {
+            config.set_logger(l);
+        }
+        if let Some(s) = skip_prepare_use_leader {
+            config.set_skip_prepare_use_leader(s);
+        }
+        if let Some(p) = cfg[LOG_FILE_PATH].as_string() {
+            config.set_logger_file_path(p);
+        }
         SequencePaxos::<T, S, B>::with(
             cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
             storage,
-            skip_prepare_use_leader,
-            logger,
-            Option::from(
-                cfg[LOG_FILE_PATH]
-                    .as_string()
-                    .expect("Failed to load log file path")
-                    .as_str(),
-            ),
+            config
         )
     }
 
@@ -316,7 +279,7 @@ where
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
     pub fn get_outgoing_msgs(&mut self) -> Vec<Message<T, S>> {
-        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
+        let mut outgoing = Vec::with_capacity(self.buffer_size);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
         {
@@ -1412,5 +1375,85 @@ where
                 PaxosMsg::Accepted(accepted),
             ));
         }
+    }
+}
+
+#[derive(PartialEq, Debug)]
+enum Phase {
+    Prepare,
+    FirstAccept,
+    Accept,
+    Recover,
+    None,
+}
+
+#[derive(PartialEq, Debug)]
+enum Role {
+    Follower,
+    Leader,
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[allow(missing_docs)]
+#[derive(Debug)]
+pub enum ProposeErr<T>
+    where
+        T: Entry,
+{
+    Normal(T),
+    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[derive(Copy, Clone, Debug)]
+pub enum CompactionErr {
+    /// Snapshot was called with an index that is not decided yet.
+    UndecidedIndex(u64),
+    /// Trim was called with an index that is not accepted by all servers yet.
+    NotAllAccepted(u64),
+}
+
+
+#[derive(Clone, Debug)]
+pub struct SequencePaxosConfig {
+    buffer_size: usize,
+    skip_prepare_use_leader: Option<Ballot>,
+    logger: Option<Logger>,
+    logger_file_path: Option<String>
+}
+
+impl SequencePaxosConfig {
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buffer_size = size;
+    }
+
+    pub fn set_skip_prepare_use_leader(&mut self, b: Ballot) {
+        self.skip_prepare_use_leader = Some(b);
+    }
+
+    pub fn set_logger(&mut self, l: Logger) {
+        self.logger = Some(l);
+    }
+
+    pub fn set_logger_file_path(&mut self, s: String) {
+        self.logger_file_path = Some(s);
+    }
+
+    pub(crate) fn from_node_conf(c: &NodeConfig) -> Self {
+        let mut conf = Self::default();
+        conf.set_buffer_size(c.buffer_size);
+        if let Some(l) = c.initial_leader {
+            conf.set_skip_prepare_use_leader(l);
+        }
+        if let Some(p) = &c.logger_path {
+            conf.set_logger_file_path(format!("{}/paxos.log", p))
+        }
+        conf
+    }
+}
+
+impl Default for SequencePaxosConfig {
+    fn default() -> Self {
+        Self { buffer_size: BUFFER_SIZE, skip_prepare_use_leader: None, logger: None, logger_file_path: None }
     }
 }

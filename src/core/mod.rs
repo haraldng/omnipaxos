@@ -1,4 +1,4 @@
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod leader_election;
 /// The different messages Omni-Paxos replicas can communicate to each other with.
