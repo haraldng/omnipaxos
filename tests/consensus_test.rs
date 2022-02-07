@@ -60,7 +60,7 @@ fn consensus_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-
+/*
 #[test]
 fn read_test() {
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
@@ -111,7 +111,8 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op =
+        SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -177,7 +178,8 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op =
+        SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -231,7 +233,7 @@ fn read_entries_test() {
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
 }
-
+*/
 fn verify_snapshot(
     read_entries: &[LogEntry<Value, LatestValue>],
     exp_compacted_idx: u64,

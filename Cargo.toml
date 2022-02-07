@@ -11,9 +11,11 @@ slog = "2.7.0"
 slog-term = "2.8.0"
 slog-async = "2.7.0"
 hocon = "0.5.2"
-kompact = "0.11.0"
+tokio = { version = "1", features = ["full"] } # TODO don't use full
+
 
 [dev-dependencies]
+kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"]}
 serial_test = "0.5.1"
 rand = "0.8.4"
 

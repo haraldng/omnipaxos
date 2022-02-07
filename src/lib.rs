@@ -13,7 +13,7 @@
 // #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod core;
+pub mod omnipaxos;
+pub mod runtime;
 /// Holds helpful functions for the user.
 pub mod utils;
-pub mod omnipaxos;
-mod runtime;

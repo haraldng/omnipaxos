@@ -35,6 +35,8 @@ impl TestSystem {
         ble_initial_leader: Option<Ballot>,
         num_threads: usize,
     ) -> Self {
+        todo!()
+        /*
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
         conf.set_config_value(&system::THREADS, num_threads);
@@ -107,6 +109,7 @@ impl TestSystem {
             kompact_system: system,
             ble_paxos_nodes,
         }
+         */
     }
 
     pub fn start_all_nodes(&self) {
@@ -281,8 +284,8 @@ pub mod ble {
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos::core::{
-        leader_election::ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
-        storage::memory_storage::MemoryStorage, util::LogEntry,
+        leader_election::ballot_leader_election::Ballot, messages::Message,
+        sequence_paxos::SequencePaxos, storage::memory_storage::MemoryStorage, util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},

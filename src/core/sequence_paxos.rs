@@ -3,18 +3,20 @@ use super::{
     messages::*,
     storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
-        IndexEntry, LeaderState, LogEntry, PromiseMetaData, SnapshottedEntry, SyncItem,
-        TrimmedEntry, defaults::BUFFER_SIZE
+        defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData,
+        SnapshottedEntry, SyncItem, TrimmedEntry,
     },
 };
-use crate::utils::{
-    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
-    logger::create_logger,
+use crate::{
+    omnipaxos::NodeConfig,
+    utils::{
+        hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
+        logger::create_logger,
+    },
 };
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
-use crate::omnipaxos::NodeConfig;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
@@ -61,8 +63,8 @@ where
         pid: u64,
         peers: Vec<u64>,
         storage: B,
-        config: SequencePaxosConfig
-    ) -> SequencePaxos<T, S, B> {
+        config: SequencePaxosConfig,
+    ) -> Self {
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -90,8 +92,9 @@ where
             }
         };
 
+        let path = config.logger_file_path;
         let l = config.logger.unwrap_or_else(|| {
-            let s = config.logger_file_path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+            let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
             create_logger(s.as_str())
         });
 
@@ -106,7 +109,7 @@ where
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            outgoing: Vec::with_capacity(DEFAULT_BUFFER_SIZE),
+            outgoing: Vec::with_capacity(BUFFER_SIZE),
             logger: l,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
@@ -147,7 +150,7 @@ where
             cfg[PID].as_i64().expect("Failed to load PID") as u64,
             peers,
             storage,
-            config
+            config,
         )
     }
 
@@ -1397,8 +1400,8 @@ enum Role {
 #[allow(missing_docs)]
 #[derive(Debug)]
 pub enum ProposeErr<T>
-    where
-        T: Entry,
+where
+    T: Entry,
 {
     Normal(T),
     Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
@@ -1413,13 +1416,12 @@ pub enum CompactionErr {
     NotAllAccepted(u64),
 }
 
-
 #[derive(Clone, Debug)]
 pub struct SequencePaxosConfig {
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
     logger: Option<Logger>,
-    logger_file_path: Option<String>
+    logger_file_path: Option<String>,
 }
 
 impl SequencePaxosConfig {
@@ -1454,6 +1456,11 @@ impl SequencePaxosConfig {
 
 impl Default for SequencePaxosConfig {
     fn default() -> Self {
-        Self { buffer_size: BUFFER_SIZE, skip_prepare_use_leader: None, logger: None, logger_file_path: None }
+        Self {
+            buffer_size: BUFFER_SIZE,
+            skip_prepare_use_leader: None,
+            logger: None,
+            logger_file_path: None,
+        }
     }
 }
