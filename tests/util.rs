@@ -1,14 +1,16 @@
-use self::{
-    ble::{BallotLeaderComp, BallotLeaderElectionPort},
-    omnireplica::OmniPaxosReplica,
-};
-use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
+/*
 use omnipaxos::core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{memory_storage::MemoryStorage, Entry, Snapshot},
 };
+
+use self::{
+    ble::{BallotLeaderComp, BallotLeaderElectionPort},
+    omnireplica::OmniPaxosReplica,
+};
+use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -426,6 +428,9 @@ pub mod omnireplica {
         }
     }
 }
+*/
+
+use omnipaxos::core::storage::{Entry, Snapshot};
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct Value(pub u64);

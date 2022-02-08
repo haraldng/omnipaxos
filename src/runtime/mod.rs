@@ -1,23 +1,23 @@
-use std::ops::RangeBounds;
 use crate::core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, *},
-    messages::{Message},
+    messages::Message,
     sequence_paxos::*,
     storage::*,
+    util::{defaults::TICK_INTERVAL, LogEntry},
 };
 use std::time::Duration;
 use tokio::{
-    runtime::{Builder, Runtime},
     sync::{mpsc, oneshot, watch},
     time,
 };
-use crate::core::util::LogEntry;
 
 #[derive(Debug)]
-pub(crate) enum SPRequest<T: Entry, S: Snapshot<T>> {
+pub(crate) enum Request<T: Entry, S: Snapshot<T>> {
     Append((T, oneshot::Sender<Result<(), ProposeErr<T>>>)),
+    GetDecidedIdx(oneshot::Sender<u64>),
+    GetLeader(oneshot::Sender<u64>),
     Snapshot(S),
-    // Read(Read<T, S>)
+    // Read(Read<T, S>), // TODO need help with annotated lifetime. Maybe do Arc for now?
 }
 
 /*
@@ -25,19 +25,19 @@ pub(crate) enum SPRequest<T: Entry, S: Snapshot<T>> {
 struct Read<T: Entry, S: Snapshot<T>> {
     from_idx: Option<u64>,
     to_idx: Option<u64>,
-    resp: oneshot::Sender<Option<Vec<LogEntry<T, S>>>>
-}*/
+    // resp: oneshot::Sender<Option<Vec<LogEntry<T, S>>>>
+}
+*/
 
 pub(crate) struct SequencePaxosComp<T, S, B>
 where
-    T: Entry + Send + 'static ,
+    T: Entry + Send + 'static,
     S: Snapshot<T> + Send + 'static,
-    B: Storage<T, S> + Send + 'static
-
+    B: Storage<T, S> + Send + 'static,
 {
     outgoing: mpsc::Sender<Message<T, S>>,
     incoming: mpsc::Receiver<Message<T, S>>,
-    local_requests: mpsc::Receiver<SPRequest<T, S>>,
+    local_requests: mpsc::Receiver<Request<T, S>>,
     ble: watch::Receiver<Ballot>,
     seq_paxos: SequencePaxos<T, S, B>,
     stop: oneshot::Receiver<Stop>,
@@ -45,18 +45,20 @@ where
 
 impl<T, S, B> SequencePaxosComp<T, S, B>
 where
-    T: Entry + Send + 'static ,
+    T: Entry + Send + 'static,
     S: Snapshot<T> + Send + 'static,
-    B: Storage<T, S> + Send + 'static
+    B: Storage<T, S> + Send + 'static,
 {
     pub(crate) fn new(
-        sp: SequencePaxos<T, S, B>,
-        local: mpsc::Receiver<SPRequest<T, S>>,
+        sp_config: SequencePaxosConfig,
+        storage: B,
+        local: mpsc::Receiver<Request<T, S>>,
         incoming: mpsc::Receiver<Message<T, S>>,
         outgoing: mpsc::Sender<Message<T, S>>,
         ble: watch::Receiver<Ballot>,
         stop: oneshot::Receiver<Stop>,
     ) -> Self {
+        let sp = SequencePaxos::with(sp_config, storage);
         Self {
             seq_paxos: sp,
             incoming,
@@ -67,10 +69,22 @@ where
         }
     }
 
-    fn handle_local(&mut self, r: SPRequest<T, S>) {
+    fn handle_local(&mut self, r: Request<T, S>) {
         match r {
-            SPRequest::Append((entry, requestee)) => {
-                requestee.send(self.seq_paxos.append(entry)).expect("Failed to reply");
+            Request::Append((entry, sender)) => {
+                sender
+                    .send(self.seq_paxos.append(entry))
+                    .expect("Failed to reply append request");
+            }
+            Request::GetDecidedIdx(sender) => {
+                sender
+                    .send(self.seq_paxos.get_decided_idx())
+                    .expect("Failed to reply get_decided_idx request");
+            }
+            Request::GetLeader(sender) => {
+                sender
+                    .send(self.seq_paxos.get_current_leader())
+                    .expect("Failed to reply current leader request");
             }
             _ => todo!(),
         }
@@ -91,14 +105,14 @@ where
             }
         }
     }
-    
+
     pub(crate) async fn run(&mut self) {
         let mut interval = time::interval(Duration::from_millis(100)); // TODO
         loop {
             tokio::select! {
                 biased; // TODO
 
-                _ = interval.tick() => {self.send_outgoing_msgs().await; },
+                _ = interval.tick() => { self.send_outgoing_msgs().await; },
                 Ok(_) = self.ble.changed() => {
                     let ballot = *self.ble.borrow();
                     self.handle_leader_change(ballot);
@@ -118,14 +132,17 @@ pub struct SequencePaxosHandle<T: Entry, S: Snapshot<T>> {
 }
 
 impl<T: Entry, S: Snapshot<T>> SequencePaxosHandle<T, S> {
-    pub(crate) fn with(incoming: mpsc::Sender<Message<T, S>>, outgoing: mpsc::Receiver<Message<T, S>>) -> Self {
+    pub(crate) fn with(
+        incoming: mpsc::Sender<Message<T, S>>,
+        outgoing: mpsc::Receiver<Message<T, S>>,
+    ) -> Self {
         Self { incoming, outgoing }
     }
 }
 
 pub(crate) struct InternalSPHandle<T: Entry, S: Snapshot<T>> {
-    pub stop: oneshot::Sender<Stop>,
-    pub local_requests: mpsc::Sender<SPRequest<T, S>>,
+    pub stop: Option<oneshot::Sender<Stop>>, // wrap in option to be able to move it when stopping
+    pub local_requests: mpsc::Sender<Request<T, S>>,
 }
 
 impl<T, S> InternalSPHandle<T, S>
@@ -133,8 +150,14 @@ where
     T: Entry + Send + 'static,
     S: Snapshot<T> + Send + 'static,
 {
-    pub(crate) fn with(stop: oneshot::Sender<Stop>, local_requests: mpsc::Sender<SPRequest<T, S>>,) -> Self {
-        Self { stop, local_requests }
+    pub(crate) fn with(
+        stop: oneshot::Sender<Stop>,
+        local_requests: mpsc::Sender<Request<T, S>>,
+    ) -> Self {
+        Self {
+            stop: Some(stop),
+            local_requests,
+        }
     }
 }
 
@@ -144,18 +167,21 @@ pub struct BLEHandle {
 }
 
 impl BLEHandle {
-    pub(crate) fn with(incoming: mpsc::Sender<BLEMessage>, outgoing: mpsc::Receiver<BLEMessage>) -> Self {
+    pub(crate) fn with(
+        incoming: mpsc::Sender<BLEMessage>,
+        outgoing: mpsc::Receiver<BLEMessage>,
+    ) -> Self {
         Self { incoming, outgoing }
     }
 }
 
 pub(crate) struct InternalBLEHandle {
-    pub stop: oneshot::Sender<Stop>,
+    pub stop: Option<oneshot::Sender<Stop>>, // wrap in option to be able to move it when stopping
 }
 
 impl InternalBLEHandle {
     pub(crate) fn with(stop: oneshot::Sender<Stop>) -> Self {
-        Self { stop }
+        Self { stop: Some(stop) }
     }
 }
 
@@ -169,12 +195,13 @@ pub(crate) struct BLEComp {
 
 impl BLEComp {
     pub(crate) fn new(
-        ble: BallotLeaderElection,
+        ble_conf: BLEConfig,
         leader: watch::Sender<Ballot>,
         incoming: mpsc::Receiver<BLEMessage>,
         outgoing: mpsc::Sender<BLEMessage>,
         stop: oneshot::Receiver<Stop>,
     ) -> Self {
+        let ble = BallotLeaderElection::with(ble_conf);
         Self {
             ble,
             leader,
@@ -201,10 +228,10 @@ impl BLEComp {
             self.leader.send(ballot).expect("Failed to trigger leader");
         }
     }
-    
+
     pub(crate) async fn run(&mut self) {
-        let mut outgoing_interval = time::interval(Duration::from_millis(50)); // TODO
-        let mut tick_interval = time::interval(Duration::from_millis(50)); // TODO
+        let mut outgoing_interval = time::interval(Duration::from_millis(1));
+        let mut tick_interval = time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
                 biased;

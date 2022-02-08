@@ -1,3 +1,4 @@
+/*
 pub mod test_config;
 pub mod util;
 
@@ -44,3 +45,4 @@ fn ble_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
+*/

@@ -1,3 +1,4 @@
+/*
 pub mod test_config;
 pub mod util;
 
@@ -58,3 +59,4 @@ fn forward_proposal_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
+*/

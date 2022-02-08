@@ -1,6 +1,7 @@
 /// Ballot Leader Election algorithm for electing new leaders
 pub mod ballot_leader_election {
     use crate::{
+        core::util::defaults::*,
         omnipaxos::NodeConfig,
         utils::{
             hocon_kv::{HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PID, PRIORITY},
@@ -10,6 +11,7 @@ pub mod ballot_leader_election {
     use hocon::Hocon;
     use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
     use slog::{debug, info, trace, warn, Logger};
+    use std::time::Duration;
 
     /// Used to define an epoch
     #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
@@ -69,86 +71,11 @@ pub mod ballot_leader_election {
         logger: Logger,
     }
 
-    #[derive(Clone, Debug)]
-    pub struct BLEConfig {
-        priority: Option<u64>,
-        hb_delay: u64,
-        initial_leader: Option<Ballot>,
-        initial_delay: Option<u64>,
-        logger: Option<Logger>,
-        logger_file_path: Option<String>,
-    }
-
-    impl BLEConfig {
-        pub fn set_priority(&mut self, priority: u64) {
-            self.priority = Some(priority);
-        }
-
-        pub fn set_hb_delay(&mut self, hb_delay: u64) {
-            self.hb_delay = hb_delay;
-        }
-
-        pub fn set_initial_leader(&mut self, b: Ballot) {
-            self.initial_leader = Some(b);
-        }
-
-        pub fn set_initial_delay(&mut self, initial_delay: u64) {
-            self.initial_delay = Some(initial_delay);
-        }
-
-        pub fn set_logger(&mut self, l: Logger) {
-            self.logger = Some(l);
-        }
-
-        pub fn set_logger_file_path(&mut self, s: String) {
-            self.logger_file_path = Some(s);
-        }
-
-        pub(crate) fn from_node_conf(c: &NodeConfig) -> Self {
-            let mut conf = Self::default();
-            conf.set_hb_delay(c.leader_timeout.as_millis() as u64);
-            if let Some(l) = c.initial_leader {
-                conf.set_initial_leader(l);
-            }
-            if let Some(d) = c.initial_leader_timeout {
-                conf.set_initial_delay(d.as_millis() as u64);
-            }
-            if let Some(prio) = c.priority {
-                conf.set_priority(prio);
-            }
-            if let Some(p) = &c.logger_path {
-                conf.set_logger_file_path(format!("{}/ble.log", p))
-            }
-            conf
-        }
-    }
-
-    impl Default for BLEConfig {
-        fn default() -> Self {
-            Self {
-                priority: None,
-                hb_delay: crate::core::util::defaults::HB_DELAY,
-                initial_leader: None,
-                initial_delay: None,
-                logger: None,
-                logger_file_path: None,
-            }
-        }
-    }
-
     impl BallotLeaderElection {
-        /// Construct a new BallotLeaderComponent
-        /// # Arguments
-        /// * `peers` - Vector that holds all the other replicas.
-        /// * `pid` -  Process identifier used to uniquely identify this instance.
-        /// * `priority` - Custom priority parameter.
-        /// * `hb_delay` -  A fixed delay that is added to the current_delay. It is measured in ticks.
-        /// * `initial_leader` -  Initial leader which will be elected.
-        /// * `initial_delay` -  A factor used in the beginning for a shorter hb_delay.
-        /// * `logger` - Used for logging events of Ballot Leader Election.
-        /// * `log_file_path` - Path where the default logger logs events.
-        #[allow(clippy::too_many_arguments)]
-        pub fn with(pid: u64, peers: Vec<u64>, config: BLEConfig) -> Self {
+        /// Construct a new BallotLeaderElection node
+        pub fn with(config: BLEConfig) -> Self {
+            let pid = config.pid;
+            let peers = config.peers;
             let n = &peers.len() + 1;
             let initial_ballot = match config.initial_leader {
                 Some(leader_ballot) if leader_ballot.pid == pid => leader_ballot,
@@ -187,11 +114,13 @@ pub mod ballot_leader_election {
         /// * `logger` - Used for logging events of Ballot Leader Election.
         pub fn with_hocon(
             cfg: &Hocon,
-            peers: Vec<u64>,
+            peers: Vec<u64>, // TODO load from hocon
             initial_leader: Option<Ballot>,
             logger: Option<Logger>,
         ) -> BallotLeaderElection {
             let mut config = BLEConfig::default();
+            config.set_pid(cfg[PID].as_i64().expect("Failed to load PID") as u64);
+            config.set_peers(peers);
             if let Some(b) = initial_leader {
                 config.set_initial_leader(b);
             }
@@ -212,11 +141,7 @@ pub mod ballot_leader_election {
                     .as_i64()
                     .expect("Failed to load heartbeat delay") as u64,
             );
-            BallotLeaderElection::with(
-                cfg[PID].as_i64().expect("Failed to load PID") as u64,
-                peers,
-                config,
-            )
+            BallotLeaderElection::with(config)
         }
 
         /// Update the custom priority used in the Ballot for this server.
@@ -270,6 +195,7 @@ pub mod ballot_leader_election {
         }
 
         fn check_leader(&mut self) -> Option<Ballot> {
+            self.majority_connected = true;
             let ballots = std::mem::take(&mut self.ballots);
             let top_ballot = ballots
                 .into_iter()
@@ -289,13 +215,15 @@ pub mod ballot_leader_election {
                 // did not get HB from leader
                 self.current_ballot.n = self.leader.unwrap_or_default().n + 1;
                 self.leader = None;
-                self.majority_connected = true;
                 None
             } else if self.leader != Some(top_ballot) {
                 // got a new leader with greater ballot
                 self.leader = Some(top_ballot);
                 self.initial_delay = None;
-                debug!(self.logger, "New Leader elected: {:?}", top_ballot);
+                debug!(
+                    self.logger,
+                    "BLE {}, New Leader elected: {:?}", self.pid, top_ballot
+                );
                 Some(top_ballot)
             } else {
                 None
@@ -361,7 +289,6 @@ pub mod ballot_leader_election {
         }
 
         fn handle_reply(&mut self, rep: HeartbeatReply) {
-            trace!(self.logger, "Heartbeat reply {:?}", rep.ballot);
             if rep.round == self.hb_round {
                 self.ballots.push((rep.ballot, rep.majority_connected));
             } else {
@@ -449,6 +376,106 @@ pub mod ballot_leader_election {
             /// * `msg` -  The message content.
             pub fn with(from: u64, to: u64, msg: HeartbeatMsg) -> Self {
                 BLEMessage { from, to, msg }
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct BLEConfig {
+        /// Process identifier used to uniquely identify this instance.
+        pid: u64,
+        /// Vector that holds all the other replicas.
+        peers: Vec<u64>,
+        /// Custom priority parameter.
+        priority: Option<u64>,
+        /// A fixed delay that is added to the current_delay. It is measured in ticks.
+        hb_delay: u64,
+        /// Initial leader which will be elected.
+        initial_leader: Option<Ballot>,
+        /// Optional initial delay that can be used for a shorter hb_delay when first starting.
+        initial_delay: Option<u64>,
+        /// Custom logger for logging events of Ballot Leader Election.
+        logger: Option<Logger>,
+        /// Path where the default logger logs events.
+        logger_file_path: Option<String>,
+        pub(crate) buffer_size: usize,
+    }
+
+    impl BLEConfig {
+        pub fn set_pid(&mut self, pid: u64) {
+            self.pid = pid;
+        }
+
+        pub fn set_peers(&mut self, peers: Vec<u64>) {
+            self.peers = peers;
+        }
+
+        pub fn set_priority(&mut self, priority: u64) {
+            self.priority = Some(priority);
+        }
+
+        pub fn set_hb_delay(&mut self, hb_delay: u64) {
+            self.hb_delay = hb_delay;
+        }
+
+        pub fn set_initial_leader(&mut self, b: Ballot) {
+            self.initial_leader = Some(b);
+        }
+
+        pub fn set_initial_delay(&mut self, initial_delay: u64) {
+            self.initial_delay = Some(initial_delay);
+        }
+
+        pub fn set_logger(&mut self, l: Logger) {
+            self.logger = Some(l);
+        }
+
+        pub fn set_logger_file_path(&mut self, s: String) {
+            self.logger_file_path = Some(s);
+        }
+
+        pub fn set_buffer_size(&mut self, size: usize) {
+            self.buffer_size = size;
+        }
+
+        pub(crate) fn from_node_conf(c: &NodeConfig) -> Self {
+            let mut conf = Self::default();
+            conf.set_pid(c.pid);
+            conf.set_peers(c.peers.clone());
+            conf.set_hb_delay(Self::duration_to_num_ticks(c.leader_timeout));
+            conf.set_buffer_size(c.buffer_size);
+            if let Some(l) = c.initial_leader {
+                conf.set_initial_leader(l);
+            }
+            if let Some(d) = c.initial_leader_timeout {
+                conf.set_initial_delay(Self::duration_to_num_ticks(d));
+            }
+            if let Some(prio) = c.priority {
+                conf.set_priority(prio);
+            }
+            if let Some(p) = &c.logger_path {
+                conf.set_logger_file_path(format!("{}/ble.log", p))
+            }
+            conf
+        }
+
+        fn duration_to_num_ticks(d: Duration) -> u64 {
+            d.as_millis() as u64 / TICK_INTERVAL.as_millis() as u64
+        }
+    }
+
+    impl Default for BLEConfig {
+        fn default() -> Self {
+            Self {
+                pid: 0,
+                peers: vec![],
+                priority: None,
+                hb_delay: HB_TIMEOUT,
+                initial_leader: None,
+                initial_delay: None,
+                logger: None,
+                logger_file_path: None,
+                buffer_size: BLE_BUFFER_SIZE,
             }
         }
     }

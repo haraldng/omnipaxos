@@ -51,20 +51,10 @@ where
 {
     /*** User functions ***/
     /// Creates a Sequence Paxos replica.
-    /// # Arguments
-    /// * `config_id` - The identifier for the configuration that this Sequence Paxos replica is part of.
-    /// * `pid` - The identifier of this Sequence Paxos replica.
-    /// * `peers` - The `pid`s of the other replicas in the configuration.
-    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of Sequence Paxos.
-    /// * `log_file_path` - Path where the default logger logs events.
-    pub fn with(
-        config_id: u32,
-        pid: u64,
-        peers: Vec<u64>,
-        storage: B,
-        config: SequencePaxosConfig,
-    ) -> Self {
+    pub fn with(config: SequencePaxosConfig, storage: B) -> Self {
+        let pid = config.pid;
+        let peers = config.peers;
+        let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
@@ -130,12 +120,15 @@ where
     pub fn with_hocon(
         self,
         cfg: &Hocon,
-        peers: Vec<u64>,
+        peers: Vec<u64>, // TODO load from Hocon
         storage: B,
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
     ) -> SequencePaxos<T, S, B> {
         let mut config = SequencePaxosConfig::default();
+        config.set_configuration_id(cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32);
+        config.set_pid(cfg[PID].as_i64().expect("Failed to load PID") as u64);
+        config.set_peers(peers);
         if let Some(l) = logger {
             config.set_logger(l);
         }
@@ -145,13 +138,7 @@ where
         if let Some(p) = cfg[LOG_FILE_PATH].as_string() {
             config.set_logger_file_path(p);
         }
-        SequencePaxos::<T, S, B>::with(
-            cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
-            cfg[PID].as_i64().expect("Failed to load PID") as u64,
-            peers,
-            storage,
-            config,
-        )
+        SequencePaxos::<T, S, B>::with(config, storage)
     }
 
     /// Initiates the trim process.
@@ -1418,13 +1405,34 @@ pub enum CompactionErr {
 
 #[derive(Clone, Debug)]
 pub struct SequencePaxosConfig {
-    buffer_size: usize,
+    /// The identifier for the configuration that this Sequence Paxos replica is part of.
+    configuration_id: u32,
+    /// The pid of this node.
+    pid: u64,
+    /// The `pid`s of the other replicas in the configuration.
+    peers: Vec<u64>,
+    pub(crate) buffer_size: usize,
+    ///  Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     skip_prepare_use_leader: Option<Ballot>,
+    /// Custom logger for logging events of Sequence Paxos.
     logger: Option<Logger>,
+    /// Path where the default logger logs events.
     logger_file_path: Option<String>,
 }
 
 impl SequencePaxosConfig {
+    pub fn set_configuration_id(&mut self, configuration_id: u32) {
+        self.configuration_id = configuration_id;
+    }
+
+    pub fn set_pid(&mut self, pid: u64) {
+        self.pid = pid;
+    }
+
+    pub fn set_peers(&mut self, peers: Vec<u64>) {
+        self.peers = peers;
+    }
+
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
     }
@@ -1443,6 +1451,8 @@ impl SequencePaxosConfig {
 
     pub(crate) fn from_node_conf(c: &NodeConfig) -> Self {
         let mut conf = Self::default();
+        conf.set_pid(c.pid);
+        conf.set_peers(c.peers.clone());
         conf.set_buffer_size(c.buffer_size);
         if let Some(l) = c.initial_leader {
             conf.set_skip_prepare_use_leader(l);
@@ -1457,6 +1467,9 @@ impl SequencePaxosConfig {
 impl Default for SequencePaxosConfig {
     fn default() -> Self {
         Self {
+            configuration_id: 0,
+            pid: 0,
+            peers: vec![],
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
             logger: None,

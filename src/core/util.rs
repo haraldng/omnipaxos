@@ -297,6 +297,11 @@ where
 }
 
 pub(crate) mod defaults {
+    use std::time::Duration;
+
     pub(crate) const BUFFER_SIZE: usize = 100000;
-    pub(crate) const HB_DELAY: u64 = 100;
+    pub(crate) const HB_TIMEOUT: u64 = 500;
+    pub(crate) const BLE_BUFFER_SIZE: usize = 100;
+    /// tick() is called every `TICK_INTERVAL` in async runtime
+    pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(10);
 }
