@@ -425,22 +425,14 @@ where
 
     fn create_read_log_entries(&self, from_idx: u64, to_idx: u64) -> Vec<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
-        let entries = self
+        let ents = self
             .storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
-        let decided_suffix_idx = self.storage.get_decided_idx();
-        entries
-            .iter()
-            .enumerate()
-            .map(|(idx, e)| {
-                let log_idx = idx as u64 + compacted_idx;
-                if log_idx > decided_suffix_idx {
-                    LogEntry::Undecided(e)
-                } else {
-                    LogEntry::Decided(e)
-                }
-            })
-            .collect()
+        let decided_suffix_idx = self.storage.get_decided_idx() - compacted_idx;
+        let (decided, undecided) = ents.split_at(decided_suffix_idx as usize);
+        let entries = decided.iter().map(|x| LogEntry::Decided(x));
+        let undecided_ents = undecided.iter().map(|x| LogEntry::Undecided(x));
+        entries.chain(undecided_ents).collect()
     }
 
     /// Handle an incoming message.
@@ -486,11 +478,11 @@ where
     /// # Arguments
     /// * `new_configuration` - A vec with the ids of replicas in the new configuration.
     /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists).
-    pub fn propose_reconfiguration(
-        &mut self,
-        new_configuration: Vec<u64>,
-        metadata: Option<Vec<u8>>,
-    ) -> Result<(), ProposeErr<T>> {
+    pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
+        let ReconfigurationRequest {
+            new_configuration,
+            metadata,
+        } = rc;
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_configuration
@@ -1476,4 +1468,10 @@ impl Default for SequencePaxosConfig {
             logger_file_path: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconfigurationRequest {
+    new_configuration: Vec<u64>,
+    metadata: Option<Vec<u8>>,
 }

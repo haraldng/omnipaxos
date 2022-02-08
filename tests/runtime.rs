@@ -1,7 +1,10 @@
 pub mod util;
 
 use crate::util::{LatestValue, Value};
-use omnipaxos::{core::storage::memory_storage::MemoryStorage, omnipaxos::*};
+use omnipaxos::{
+    core::{storage::memory_storage::MemoryStorage, util::ReadEntry},
+    omnipaxos::*,
+};
 use serial_test::serial;
 use std::{collections::HashMap, ops::RangeInclusive, time::Duration};
 use tokio::runtime::Builder;
@@ -71,6 +74,18 @@ fn runtime_test() {
     std::thread::sleep(Duration::from_millis(1000)); // let it get decided...
     let decided_idx = runtime.block_on(op_handles.get(&1u64).unwrap().get_decided_idx());
     assert_eq!(decided_idx, num_proposals);
+    let entries = runtime
+        .block_on(op_handles.get(&leader).unwrap().read_entries(0..))
+        .expect("Failed to read expected entries");
+    assert_eq!(entries.len(), num_proposals as usize);
+    for (idx, entry) in entries.iter().enumerate() {
+        match entry {
+            ReadEntry::Decided(v) => {
+                assert_eq!(v, &Value(idx as u64))
+            }
+            e => panic!("unexpected read entry: {:?}", e),
+        }
+    }
 }
 
 fn create_node(pid: u64) -> OmniPaxosHandle<EntryType, SnapshotType> {

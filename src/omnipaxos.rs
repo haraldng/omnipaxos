@@ -1,16 +1,19 @@
 use crate::{
     core::{
         leader_election::ballot_leader_election::{BLEConfig, Ballot},
-        sequence_paxos::{ProposeErr, SequencePaxosConfig},
+        sequence_paxos::{CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxosConfig},
         storage::{Entry, Snapshot, Storage},
-        util::defaults::*,
+        util::{defaults::*, ReadEntry},
     },
     runtime::{
-        BLEComp, BLEHandle, InternalBLEHandle, InternalSPHandle, Request, SequencePaxosComp,
-        SequencePaxosHandle, Stop,
+        BLEComp, BLEHandle, InternalBLEHandle, InternalSPHandle, ReadRequest, Request,
+        SequencePaxosComp, SequencePaxosHandle, Stop,
     },
 };
-use std::time::Duration;
+use std::{
+    ops::{Bound, RangeBounds},
+    time::Duration,
+};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, oneshot, watch},
@@ -125,10 +128,12 @@ where
 
     pub async fn append(&self, entry: T) -> Result<(), ProposeErr<T>> {
         let (send_resp, recv_resp) = oneshot::channel();
-        let req = Request::Append((entry, send_resp));
-        if let Err(_) = self.sp_comp.local_requests.send(req).await {
-            todo!()
-        }
+        let req = Request::Append(entry, send_resp);
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
         recv_resp
             .await
             .expect("Sequence Paxos dropped response channel")
@@ -137,9 +142,11 @@ where
     pub async fn get_decided_idx(&self) -> u64 {
         let (send_resp, recv_resp) = oneshot::channel();
         let req = Request::GetDecidedIdx(send_resp);
-        if let Err(_) = self.sp_comp.local_requests.send(req).await {
-            todo!()
-        }
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
         recv_resp
             .await
             .expect("Sequence Paxos dropped response channel")
@@ -148,12 +155,109 @@ where
     pub async fn get_current_leader(&self) -> u64 {
         let (send_resp, recv_resp) = oneshot::channel();
         let req = Request::GetLeader(send_resp);
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn read_entries<R: RangeBounds<u64>>(&self, r: R) -> Option<Vec<ReadEntry<T, S>>> {
+        let (send_resp, recv_resp) = oneshot::channel();
+        let from_idx = match r.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(e) => *e + 1,
+            Bound::Unbounded => 0,
+        };
+        let to_idx = match r.end_bound() {
+            Bound::Included(i) => Some(*i + 1),
+            Bound::Excluded(e) => Some(*e),
+            Bound::Unbounded => None,
+        };
+        let read = ReadRequest::with(from_idx, to_idx, send_resp);
+        let req = Request::Read(read);
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn trim(&self, trim_idx: Option<u64>) -> Result<(), CompactionErr> {
+        let (send_resp, recv_resp) = oneshot::channel();
+        self.sp_comp
+            .local_requests
+            .send(Request::Trim(trim_idx, send_resp))
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn snapshot(
+        &self,
+        snapshot_idx: Option<u64>,
+        local_only: bool,
+    ) -> Result<(), CompactionErr> {
+        let (send_resp, recv_resp) = oneshot::channel();
+        self.sp_comp
+            .local_requests
+            .send(Request::Snapshot(snapshot_idx, local_only, send_resp))
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn get_compacted_idx(&self) -> u64 {
+        let (send_resp, recv_resp) = oneshot::channel();
+        let req = Request::GetCompactedIdx(send_resp);
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<ReadEntry<T, S>>> {
+        let (send_resp, recv_resp) = oneshot::channel();
+        let read = ReadRequest::with(from_idx, None, send_resp);
+        let req = Request::ReadDecidedSuffix(read);
         if let Err(_) = self.sp_comp.local_requests.send(req).await {
             todo!()
         }
         recv_resp
             .await
             .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn reconfigure(&self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
+        let (send_resp, recv_resp) = oneshot::channel();
+        let req = Request::Reconfigure(rc, send_resp);
+        if let Err(_) = self.sp_comp.local_requests.send(req).await {
+            todo!()
+        }
+        recv_resp
+            .await
+            .expect("Sequence Paxos dropped response channel")
+    }
+
+    pub async fn reconnected(&self, pid: u64) {
+        let req = Request::Reconnected(pid);
+        if let Err(_) = self.sp_comp.local_requests.send(req).await {
+            todo!()
+        }
     }
 
     pub fn stop(&mut self, timeout: Duration) {

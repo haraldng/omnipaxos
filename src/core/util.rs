@@ -231,6 +231,41 @@ where
     }
 }
 
+/// Used for reading in the async runtime. Note that every read does a clone.
+#[derive(Debug, Clone)]
+pub enum ReadEntry<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    /// The entry is decided.
+    Decided(T),
+    /// The entry is NOT decided. Might be removed from the log at a later time.
+    Undecided(T),
+    /// The entry has been trimmed.
+    Trimmed(TrimmedEntry),
+    /// The entry has been snapshotted.
+    Snapshotted(SnapshottedEntry<T, S>),
+    /// This Sequence Paxos instance has been stopped for reconfiguration.
+    StopSign(StopSign),
+}
+
+impl<'a, T, S> From<LogEntry<'a, T, S>> for ReadEntry<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    fn from(e: LogEntry<'a, T, S>) -> Self {
+        match e {
+            LogEntry::Decided(t) => Self::Decided(t.clone()),
+            LogEntry::Undecided(t) => Self::Undecided(t.clone()),
+            LogEntry::Trimmed(t) => Self::Trimmed(t),
+            LogEntry::Snapshotted(s) => Self::Snapshotted(s),
+            LogEntry::StopSign(ss) => Self::StopSign(ss),
+        }
+    }
+}
+
 /// The entry read in the log.
 #[derive(Debug, Clone)]
 pub enum LogEntry<'a, T, S>
