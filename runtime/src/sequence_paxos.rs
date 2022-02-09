@@ -1,57 +1,16 @@
-use crate::core::{
-    leader_election::ballot_leader_election::{messages::BLEMessage, *},
+use core::{
+    ballot_leader_election::Ballot,
     messages::Message,
-    sequence_paxos::*,
-    storage::*,
-    util::{defaults::TICK_INTERVAL, ReadEntry},
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig, ProposeErr, CompactionErr, ReconfigurationRequest},
+    storage::{Entry, Snapshot, Storage},
 };
 use std::time::Duration;
+
 use tokio::{
     sync::{mpsc, oneshot, watch},
     time,
 };
-
-#[derive(Debug)]
-pub(crate) enum Request<T: Entry, S: Snapshot<T>> {
-    Append(T, oneshot::Sender<Result<(), ProposeErr<T>>>),
-    GetDecidedIdx(oneshot::Sender<u64>),
-    GetLeader(oneshot::Sender<u64>),
-    Read(ReadRequest<T, S>),
-    Trim(Option<u64>, oneshot::Sender<Result<(), CompactionErr>>),
-    Snapshot(
-        Option<u64>,
-        bool,
-        oneshot::Sender<Result<(), CompactionErr>>,
-    ),
-    GetCompactedIdx(oneshot::Sender<u64>),
-    ReadDecidedSuffix(ReadRequest<T, S>),
-    Reconfigure(
-        ReconfigurationRequest,
-        oneshot::Sender<Result<(), ProposeErr<T>>>,
-    ),
-    Reconnected(u64),
-}
-
-#[derive(Debug)]
-pub(crate) struct ReadRequest<T: Entry, S: Snapshot<T>> {
-    from_idx: u64,
-    to_idx: Option<u64>,
-    sender: oneshot::Sender<Option<Vec<ReadEntry<T, S>>>>,
-}
-
-impl<T: Entry, S: Snapshot<T>> ReadRequest<T, S> {
-    pub(crate) fn with(
-        from_idx: u64,
-        to_idx: Option<u64>,
-        sender: oneshot::Sender<Option<Vec<ReadEntry<T, S>>>>,
-    ) -> Self {
-        Self {
-            from_idx,
-            to_idx,
-            sender,
-        }
-    }
-}
+use crate::util::{ReadEntry, Stop};
 
 pub(crate) struct SequencePaxosComp<T, S, B>
 where
@@ -229,88 +188,45 @@ where
     }
 }
 
-pub struct BLEHandle {
-    pub incoming: mpsc::Sender<BLEMessage>,
-    pub outgoing: mpsc::Receiver<BLEMessage>,
+#[derive(Debug)]
+pub(crate) enum Request<T: Entry, S: Snapshot<T>> {
+    Append(T, oneshot::Sender<Result<(), ProposeErr<T>>>),
+    GetDecidedIdx(oneshot::Sender<u64>),
+    GetLeader(oneshot::Sender<u64>),
+    Read(ReadRequest<T, S>),
+    Trim(Option<u64>, oneshot::Sender<Result<(), CompactionErr>>),
+    Snapshot(
+        Option<u64>,
+        bool,
+        oneshot::Sender<Result<(), CompactionErr>>,
+    ),
+    GetCompactedIdx(oneshot::Sender<u64>),
+    ReadDecidedSuffix(ReadRequest<T, S>),
+    Reconfigure(
+        ReconfigurationRequest,
+        oneshot::Sender<Result<(), ProposeErr<T>>>,
+    ),
+    Reconnected(u64),
 }
 
-impl BLEHandle {
+#[derive(Debug)]
+pub(crate) struct ReadRequest<T: Entry, S: Snapshot<T>> {
+    from_idx: u64,
+    to_idx: Option<u64>,
+    sender: oneshot::Sender<Option<Vec<ReadEntry<T, S>>>>,
+}
+
+impl<T: Entry, S: Snapshot<T>> ReadRequest<T, S> {
     pub(crate) fn with(
-        incoming: mpsc::Sender<BLEMessage>,
-        outgoing: mpsc::Receiver<BLEMessage>,
+        from_idx: u64,
+        to_idx: Option<u64>,
+        sender: oneshot::Sender<Option<Vec<ReadEntry<T, S>>>>,
     ) -> Self {
-        Self { incoming, outgoing }
-    }
-}
-
-pub(crate) struct InternalBLEHandle {
-    pub stop: Option<oneshot::Sender<Stop>>, // wrap in option to be able to move it when stopping
-}
-
-impl InternalBLEHandle {
-    pub(crate) fn with(stop: oneshot::Sender<Stop>) -> Self {
-        Self { stop: Some(stop) }
-    }
-}
-
-pub(crate) struct BLEComp {
-    incoming: mpsc::Receiver<BLEMessage>,
-    outgoing: mpsc::Sender<BLEMessage>,
-    leader: watch::Sender<Ballot>,
-    ble: BallotLeaderElection,
-    stop: oneshot::Receiver<Stop>,
-}
-
-impl BLEComp {
-    pub(crate) fn new(
-        ble_conf: BLEConfig,
-        leader: watch::Sender<Ballot>,
-        incoming: mpsc::Receiver<BLEMessage>,
-        outgoing: mpsc::Sender<BLEMessage>,
-        stop: oneshot::Receiver<Stop>,
-    ) -> Self {
-        let ble = BallotLeaderElection::with(ble_conf);
         Self {
-            ble,
-            leader,
-            incoming,
-            outgoing,
-            stop,
-        }
-    }
-
-    fn handle_incoming(&mut self, msg: BLEMessage) {
-        self.ble.handle(msg);
-    }
-
-    async fn send_outgoing_msgs(&mut self) {
-        for msg in self.ble.get_outgoing_msgs() {
-            if let Err(_) = self.outgoing.send(msg).await {
-                panic!("Outgoing channel dropped");
-            }
-        }
-    }
-
-    fn tick(&mut self) {
-        if let Some(ballot) = self.ble.tick() {
-            self.leader.send(ballot).expect("Failed to trigger leader");
-        }
-    }
-
-    pub(crate) async fn run(&mut self) {
-        let mut outgoing_interval = time::interval(Duration::from_millis(1));
-        let mut tick_interval = time::interval(TICK_INTERVAL);
-        loop {
-            tokio::select! {
-                biased;
-                Some(in_msg) = self.incoming.recv() => { self.handle_incoming(in_msg); },
-                _ = outgoing_interval.tick() => { self.send_outgoing_msgs().await; },
-                _ = tick_interval.tick() => { self.tick(); },
-                _ = &mut self.stop => break,
-                else => {}
-            }
+            from_idx,
+            to_idx,
+            sender,
         }
     }
 }
 
-pub(crate) struct Stop;

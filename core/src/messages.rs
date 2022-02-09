@@ -1,5 +1,5 @@
 use super::{
-    leader_election::ballot_leader_election::Ballot,
+    ballot_leader_election::Ballot,
     storage::{Entry, Snapshot, StopSign},
     util::SyncItem,
 };

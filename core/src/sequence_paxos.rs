@@ -1,5 +1,5 @@
 use super::{
-    leader_election::ballot_leader_election::Ballot,
+    ballot_leader_election::Ballot,
     messages::*,
     storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
@@ -8,7 +8,6 @@ use super::{
     },
 };
 use crate::{
-    omnipaxos::NodeConfig,
     utils::{
         hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
         logger::create_logger,
@@ -1403,7 +1402,7 @@ pub struct SequencePaxosConfig {
     pid: u64,
     /// The `pid`s of the other replicas in the configuration.
     peers: Vec<u64>,
-    pub(crate) buffer_size: usize,
+    buffer_size: usize,
     ///  Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     skip_prepare_use_leader: Option<Ballot>,
     /// Custom logger for logging events of Sequence Paxos.
@@ -1413,46 +1412,56 @@ pub struct SequencePaxosConfig {
 }
 
 impl SequencePaxosConfig {
+    pub fn get_configuration_id(&self) -> u32 {
+        self.configuration_id
+    }
+
     pub fn set_configuration_id(&mut self, configuration_id: u32) {
         self.configuration_id = configuration_id;
     }
 
-    pub fn set_pid(&mut self, pid: u64) {
-        self.pid = pid;
-    }
+    pub fn set_pid(&mut self, pid: u64) { self.pid = pid; }
+
+    pub fn get_pid(&self) -> u64 { self.pid }
 
     pub fn set_peers(&mut self, peers: Vec<u64>) {
         self.peers = peers;
+    }
+
+    pub fn get_peers(&self) -> &[u64] {
+        self.peers.as_slice()
     }
 
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
     }
 
+    pub fn get_buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
     pub fn set_skip_prepare_use_leader(&mut self, b: Ballot) {
         self.skip_prepare_use_leader = Some(b);
+    }
+
+    pub fn get_skip_prepare_use_leader(&self) -> Option<Ballot> {
+        self.skip_prepare_use_leader
     }
 
     pub fn set_logger(&mut self, l: Logger) {
         self.logger = Some(l);
     }
 
+    pub fn get_logger(&self) -> Option<&Logger> {
+        self.logger.as_ref()
+    }
+
     pub fn set_logger_file_path(&mut self, s: String) {
         self.logger_file_path = Some(s);
     }
 
-    pub(crate) fn from_node_conf(c: &NodeConfig) -> Self {
-        let mut conf = Self::default();
-        conf.set_pid(c.pid);
-        conf.set_peers(c.peers.clone());
-        conf.set_buffer_size(c.buffer_size);
-        if let Some(l) = c.initial_leader {
-            conf.set_skip_prepare_use_leader(l);
-        }
-        if let Some(p) = &c.logger_path {
-            conf.set_logger_file_path(format!("{}/paxos.log", p))
-        }
-        conf
+    pub fn get_logger_file_path(&self) -> Option<&String> {
+        self.logger_file_path.as_ref()
     }
 }
 

@@ -1,4 +1,4 @@
-use super::leader_election::ballot_leader_election::Ballot;
+use super::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
 
 /// Type of the entries stored in the log.
@@ -143,8 +143,8 @@ where
 
 #[allow(missing_docs)]
 pub mod memory_storage {
-    use crate::core::{
-        leader_election::ballot_leader_election::Ballot,
+    use crate::{
+        ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
 

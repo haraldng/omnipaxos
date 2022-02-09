@@ -1,15 +1,11 @@
-use crate::{
-    core::{
-        leader_election::ballot_leader_election::{BLEConfig, Ballot},
-        sequence_paxos::{CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxosConfig},
-        storage::{Entry, Snapshot, Storage},
-        util::{defaults::*, ReadEntry},
-    },
-    runtime::{
-        BLEComp, BLEHandle, InternalBLEHandle, InternalSPHandle, ReadRequest, Request,
-        SequencePaxosComp, SequencePaxosHandle, Stop,
-    },
+use crate::util::*;
+use core::{
+    ballot_leader_election::{Ballot, BLEConfig},
+    sequence_paxos::{CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxosConfig},
+    storage::{Entry, Snapshot, Storage},
 };
+
+use crate::{ballot_leader_election::*, sequence_paxos::*};
 use std::{
     ops::{Bound, RangeBounds},
     time::Duration,
@@ -18,6 +14,7 @@ use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, oneshot, watch},
 };
+use crate::util::defaults::*;
 
 pub struct OmniPaxosHandle<T: Entry, S: Snapshot<T>> {
     pub omni_paxos: OmniPaxosNode<T, S>,
@@ -43,8 +40,8 @@ where
     ) -> OmniPaxosHandle<T, S> {
         conf.validate()
             .unwrap_or_else(|e| panic!("Configuration error: {:?}", e));
-        let sp_conf = SequencePaxosConfig::from_node_conf(&conf);
-        let ble_conf = BLEConfig::from_node_conf(&conf);
+        let sp_conf = conf.create_sequence_paxos_config();
+        let ble_conf = conf.create_ble_config();
         let (leader_send, leader_receive) = watch::channel(Ballot::default()); // create leader election watch channel
         let (mut sp_comp, internal_sp_handle, sp_user_handle) =
             Self::create_sequence_paxos(leader_receive, sp_conf, storage);
@@ -84,7 +81,7 @@ where
         SequencePaxosHandle<T, S>,
     ) {
         /* create channels */
-        let buffer_size = sp_conf.buffer_size;
+        let buffer_size = sp_conf.get_buffer_size();
         let (in_sender, in_receiver) = mpsc::channel(buffer_size);
         let (out_sender, out_receiver) = mpsc::channel(buffer_size);
         let (local_sender, local_receiver) = mpsc::channel(buffer_size);
@@ -109,7 +106,7 @@ where
         ble_conf: BLEConfig,
     ) -> (BLEComp, InternalBLEHandle, BLEHandle) {
         /* create channels */
-        let buffer_size = ble_conf.buffer_size;
+        let buffer_size = ble_conf.get_buffer_size();
         let (ble_in_sender, ble_in_receiver) = mpsc::channel(buffer_size);
         let (ble_out_sender, ble_out_receiver) = mpsc::channel(buffer_size);
         let (ble_stop_sender, ble_stop_receiver) = oneshot::channel();
@@ -323,6 +320,41 @@ impl NodeConfig {
 
     pub fn set_logger_path(&mut self, s: String) {
         self.logger_path = Some(s);
+    }
+
+    fn create_sequence_paxos_config(&self) -> SequencePaxosConfig {
+        let mut conf = SequencePaxosConfig::default();
+        conf.set_pid(self.pid);
+        conf.set_peers(self.peers.clone());
+        conf.set_buffer_size(self.buffer_size);
+        if let Some(l) = self.initial_leader {
+            conf.set_skip_prepare_use_leader(l);
+        }
+        if let Some(p) = &self.logger_path {
+            conf.set_logger_file_path(format!("{}/paxos.log", p))
+        }
+        conf
+    }
+
+    fn create_ble_config(&self) -> BLEConfig {
+        let mut conf = BLEConfig::default();
+        conf.set_pid(self.pid);
+        conf.set_peers(self.peers.clone());
+        conf.set_hb_delay(duration_to_num_ticks(self.leader_timeout));
+        conf.set_buffer_size(self.buffer_size);
+        if let Some(l) = self.initial_leader {
+            conf.set_initial_leader(l);
+        }
+        if let Some(d) = self.initial_leader_timeout {
+            conf.set_initial_delay(duration_to_num_ticks(d));
+        }
+        if let Some(prio) = self.priority {
+            conf.set_priority(prio);
+        }
+        if let Some(p) = &self.logger_path {
+            conf.set_logger_file_path(format!("{}/ble.log", p))
+        }
+        conf
     }
 }
 

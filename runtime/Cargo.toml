@@ -1,0 +1,22 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+authors = ["Harald Ng <hng@kth.se>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+core = { path = "../core" }
+tokio = { version = "1", features = ["full"] } # TODO don't use full
+
+[features]
+batch_accept = []
+latest_accepted = []
+latest_decide = []
+continued_leader_reconfiguration = []
+
+default = ["latest_accepted", "latest_decide", "continued_leader_reconfiguration", "batch_accept"]
+
+[profile.release]
+lto = true
