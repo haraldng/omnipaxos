@@ -7,6 +7,6 @@ pub const PRIORITY: &str = "priority";
 /// A fixed delay that is added to the current_delay. It is measured in ticks.
 pub const HB_DELAY: &str = "hb_delay";
 /// A factor used in the beginning for a shorter hb_delay.
-pub const INITIAL_DELAY_FACTOR: &str = "initial_delay";
+pub const INITIAL_DELAY: &str = "initial_delay";
 /// Path where the default logger logs events.
 pub const LOG_FILE_PATH: &str = "log_file_path";

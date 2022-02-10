@@ -1,62 +1,25 @@
-use crate::{
-    leader_election::ballot_leader_election::Ballot,
+use super::{
+    ballot_leader_election::Ballot,
     messages::*,
-    storage::{Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
+    storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
-        LeaderState, LogEntry, LogEntryType, PromiseMetaData, SnapshottedEntry, SyncItem,
-        TrimmedEntry,
+        defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData,
+        SnapshottedEntry, SyncItem, TrimmedEntry,
     },
-    utils::{
-        hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
-        logger::create_logger,
-    },
+};
+use crate::utils::{
+    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
+    logger::create_logger,
 };
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
 
-const BUFFER_SIZE: usize = 100000;
-
-#[derive(PartialEq, Debug)]
-enum Phase {
-    Prepare,
-    FirstAccept,
-    Accept,
-    Recover,
-    None,
-}
-
-#[derive(PartialEq, Debug)]
-enum Role {
-    Follower,
-    Leader,
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[allow(missing_docs)]
-#[derive(Debug)]
-pub enum ProposeErr<T>
-where
-    T: Clone + Debug,
-{
-    Normal(T),
-    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[derive(Copy, Clone, Debug)]
-pub enum CompactionErr {
-    /// Snapshot was called with an index that is not decided yet.
-    UndecidedIndex(u64),
-    /// Trim was called with an index that is not accepted by all servers yet.
-    NotAllAccepted(u64),
-}
-
-/// An Omni-Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
+/// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct OmniPaxos<T, S, B>
+pub struct SequencePaxos<T, S, B>
 where
-    T: Clone + Debug,
+    T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
@@ -73,38 +36,27 @@ where
     logger: Logger,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
+    buffer_size: usize,
     s: PhantomData<S>,
 }
 
-impl<T, S, B> OmniPaxos<T, S, B>
+impl<T, S, B> SequencePaxos<T, S, B>
 where
-    T: Clone + Debug,
+    T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
 {
     /*** User functions ***/
-    /// Creates an Omni-Paxos replica.
-    /// # Arguments
-    /// * `config_id` - The identifier for the configuration that this Omni-Paxos replica is part of.
-    /// * `pid` - The identifier of this Omni-Paxos replica.
-    /// * `peers` - The `pid`s of the other replicas in the configuration.
-    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of OmniPaxos.
-    /// * `log_file_path` - Path where the default logger logs events.
-    pub fn with(
-        config_id: u32,
-        pid: u64,
-        peers: Vec<u64>,
-        storage: B,
-        skip_prepare_use_leader: Option<Ballot>, // skipped prepare phase with the following leader event
-        logger: Option<Logger>,
-        log_file_path: Option<&str>,
-    ) -> OmniPaxos<T, S, B> {
+    /// Creates a Sequence Paxos replica.
+    pub fn with(config: SequencePaxosConfig, storage: B) -> Self {
+        let pid = config.pid;
+        let peers = config.peers;
+        let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, n_leader, lds) = match skip_prepare_use_leader {
+        let (state, leader, n_leader, lds) = match config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -127,18 +79,15 @@ where
             }
         };
 
-        let l = logger.unwrap_or_else(|| {
-            if let Some(p) = log_file_path {
-                create_logger(p)
-            } else {
-                let t = format!("logs/paxos_{}.log", pid);
-                create_logger(log_file_path.unwrap_or_else(|| t.as_str()))
-            }
+        let path = config.logger_file_path;
+        let l = config.logger.unwrap_or_else(|| {
+            let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+            create_logger(s.as_str())
         });
 
         info!(l, "Paxos component pid: {} created!", pid);
 
-        let mut paxos = OmniPaxos {
+        let mut paxos = SequencePaxos {
             storage,
             pid,
             config_id,
@@ -151,41 +100,42 @@ where
             logger: l,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
+            buffer_size: config.buffer_size,
             s: PhantomData,
         };
         paxos.storage.set_promise(n_leader);
         paxos
     }
 
-    /// Creates an Omni-Paxos replica.
+    /// Creates a Sequence Paxos replica.
     /// # Arguments
     /// * `cfg` - Hocon configuration used for paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `storage` - Implementation of a storage used to store the messages.
-    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of OmniPaxos.
+    /// * `skip_prepare_use_leader` - The `Ballot` of the initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `logger` - Used for logging events of Sequence Paxos.
     pub fn with_hocon(
         self,
         cfg: &Hocon,
-        peers: Vec<u64>,
+        peers: Vec<u64>, // TODO load from Hocon
         storage: B,
         skip_prepare_use_leader: Option<Ballot>,
         logger: Option<Logger>,
-    ) -> OmniPaxos<T, S, B> {
-        OmniPaxos::<T, S, B>::with(
-            cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
-            cfg[PID].as_i64().expect("Failed to load PID") as u64,
-            peers,
-            storage,
-            skip_prepare_use_leader,
-            logger,
-            Option::from(
-                cfg[LOG_FILE_PATH]
-                    .as_string()
-                    .expect("Failed to load log file path")
-                    .as_str(),
-            ),
-        )
+    ) -> SequencePaxos<T, S, B> {
+        let mut config = SequencePaxosConfig::default();
+        config.set_configuration_id(cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32);
+        config.set_pid(cfg[PID].as_i64().expect("Failed to load PID") as u64);
+        config.set_peers(peers);
+        if let Some(l) = logger {
+            config.set_logger(l);
+        }
+        if let Some(s) = skip_prepare_use_leader {
+            config.set_skip_prepare_use_leader(s);
+        }
+        if let Some(p) = cfg[LOG_FILE_PATH].as_string() {
+            config.set_logger_file_path(p);
+        }
+        SequencePaxos::<T, S, B>::with(config, storage)
     }
 
     /// Initiates the trim process.
@@ -316,7 +266,7 @@ where
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
     pub fn get_outgoing_msgs(&mut self) -> Vec<Message<T, S>> {
-        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
+        let mut outgoing = Vec::with_capacity(self.buffer_size);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
         {
@@ -391,12 +341,12 @@ where
         } else {
             let log_len = self.storage.get_log_len();
             let from_type = if from_idx < compacted_idx {
-                LogEntryType::Compacted
+                IndexEntry::Compacted
             } else if from_idx - compacted_idx < log_len {
-                LogEntryType::Entry
+                IndexEntry::Entry
             } else if from_idx - compacted_idx == log_len {
                 match self.storage.get_stopsign() {
-                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
                     }
@@ -406,10 +356,10 @@ where
             };
             let to_suffix_idx = to_idx - compacted_idx;
             let to_type = if to_suffix_idx <= log_len {
-                LogEntryType::Entry
+                IndexEntry::Entry
             } else if to_suffix_idx == log_len + 1 {
                 match self.storage.get_stopsign() {
-                    Some(ss) if ss.decided => LogEntryType::StopSign(ss.stopsign),
+                    Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
                     }
@@ -418,15 +368,15 @@ where
                 return None;
             };
             match (from_type, to_type) {
-                (LogEntryType::Entry, LogEntryType::Entry) => {
+                (IndexEntry::Entry, IndexEntry::Entry) => {
                     Some(self.create_read_log_entries(from_idx, to_idx))
                 }
-                (LogEntryType::Entry, LogEntryType::StopSign(ss)) => {
+                (IndexEntry::Entry, IndexEntry::StopSign(ss)) => {
                     let mut entries = self.create_read_log_entries(from_idx, to_idx - 1);
                     entries.push(LogEntry::StopSign(ss));
                     Some(entries)
                 }
-                (LogEntryType::Compacted, LogEntryType::Entry) => {
+                (IndexEntry::Compacted, IndexEntry::Entry) => {
                     let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
                     let compacted = self.create_compacted_entry(compacted_idx);
                     entries.push(compacted);
@@ -434,7 +384,7 @@ where
                     entries.append(&mut e);
                     Some(entries)
                 }
-                (LogEntryType::Compacted, LogEntryType::StopSign(ss)) => {
+                (IndexEntry::Compacted, IndexEntry::StopSign(ss)) => {
                     let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
                     let compacted = self.create_compacted_entry(compacted_idx);
                     entries.push(compacted);
@@ -443,7 +393,7 @@ where
                     entries.push(LogEntry::StopSign(ss));
                     Some(entries)
                 }
-                (LogEntryType::StopSign(ss), LogEntryType::StopSign(_)) => {
+                (IndexEntry::StopSign(ss), IndexEntry::StopSign(_)) => {
                     Some(vec![LogEntry::StopSign(ss)])
                 }
                 e => {
@@ -475,13 +425,13 @@ where
         let entries = self
             .storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
-        let decided_suffix_idx = self.storage.get_decided_idx();
+        let decided_idx = self.storage.get_decided_idx();
         entries
             .iter()
             .enumerate()
             .map(|(idx, e)| {
                 let log_idx = idx as u64 + compacted_idx;
-                if log_idx > decided_suffix_idx {
+                if log_idx > decided_idx {
                     LogEntry::Undecided(e)
                 } else {
                     LogEntry::Decided(e)
@@ -514,12 +464,12 @@ where
         }
     }
 
-    /// Returns whether this Omni-Paxos instance is stopped, i.e. if it has been reconfigured.
+    /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
     pub fn stopped(&self) -> bool {
         self.get_stopsign().is_some()
     }
 
-    /// Propose a normal entry to be replicated.
+    /// Append an entry to the replicated log.
     pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
         if self.stopped() {
             Err(ProposeErr::Normal(entry))
@@ -530,14 +480,11 @@ where
     }
 
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    /// # Arguments
-    /// * `new_configuration` - A vec with the ids of replicas in the new configuration.
-    /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists).
-    pub fn propose_reconfiguration(
-        &mut self,
-        new_configuration: Vec<u64>,
-        metadata: Option<Vec<u8>>,
-    ) -> Result<(), ProposeErr<T>> {
+    pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
+        let ReconfigurationRequest {
+            new_configuration,
+            metadata,
+        } = rc;
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_configuration
@@ -580,6 +527,7 @@ where
         }
     }
 
+    /*
     /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
     pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<T> {
         let ld = self.storage.get_decided_idx();
@@ -593,18 +541,21 @@ where
                 .to_vec()
         }
     }
+    */
 
     /// Returns the currently promised round.
     pub fn get_promise(&self) -> Ballot {
         self.storage.get_promise()
     }
 
+    /*
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
     // TODO with new reconfiguration
-    // pub fn stop_and_get_log(&mut self) -> Arc<L> {
-    //     self.storage.stop_and_get_log()
-    // }
+    pub fn stop_and_get_log(&mut self) -> Arc<L> {
+        self.storage.stop_and_get_log()
+    }
+    */
 
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
@@ -956,7 +907,10 @@ where
     }
 
     fn merge_snapshot(&mut self, compacted_idx: u64, delta: S) {
-        let mut snapshot = self.storage.get_snapshot().unwrap();
+        let mut snapshot = self
+            .storage
+            .get_snapshot()
+            .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
         snapshot.merge(delta);
         self.set_snapshot(compacted_idx, snapshot);
     }
@@ -1413,4 +1367,141 @@ where
             ));
         }
     }
+}
+
+#[derive(PartialEq, Debug)]
+enum Phase {
+    Prepare,
+    FirstAccept,
+    Accept,
+    Recover,
+    None,
+}
+
+#[derive(PartialEq, Debug)]
+enum Role {
+    Follower,
+    Leader,
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[allow(missing_docs)]
+#[derive(Debug)]
+pub enum ProposeErr<T>
+where
+    T: Entry,
+{
+    Normal(T),
+    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[derive(Copy, Clone, Debug)]
+pub enum CompactionErr {
+    /// Snapshot was called with an index that is not decided yet.
+    UndecidedIndex(u64),
+    /// Trim was called with an index that is not accepted by all servers yet.
+    NotAllAccepted(u64),
+}
+
+/// Configuration for `SequencePaxos`.
+/// # Fields
+/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
+/// * `pid`: The unique identifier of this node. Must not be 0.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `logger_file_path`: The path where the default logger logs events.
+#[derive(Clone, Debug)]
+pub struct SequencePaxosConfig {
+    configuration_id: u32,
+    pid: u64,
+    peers: Vec<u64>,
+    buffer_size: usize,
+    skip_prepare_use_leader: Option<Ballot>,
+    logger: Option<Logger>,
+    logger_file_path: Option<String>,
+}
+
+#[allow(missing_docs)]
+impl SequencePaxosConfig {
+    pub fn get_configuration_id(&self) -> u32 {
+        self.configuration_id
+    }
+
+    pub fn set_configuration_id(&mut self, configuration_id: u32) {
+        self.configuration_id = configuration_id;
+    }
+
+    pub fn set_pid(&mut self, pid: u64) {
+        self.pid = pid;
+    }
+
+    pub fn get_pid(&self) -> u64 {
+        self.pid
+    }
+
+    pub fn set_peers(&mut self, peers: Vec<u64>) {
+        self.peers = peers;
+    }
+
+    pub fn get_peers(&self) -> &[u64] {
+        self.peers.as_slice()
+    }
+
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buffer_size = size;
+    }
+
+    pub fn get_buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
+    pub fn set_skip_prepare_use_leader(&mut self, b: Ballot) {
+        self.skip_prepare_use_leader = Some(b);
+    }
+
+    pub fn get_skip_prepare_use_leader(&self) -> Option<Ballot> {
+        self.skip_prepare_use_leader
+    }
+
+    pub fn set_logger(&mut self, l: Logger) {
+        self.logger = Some(l);
+    }
+
+    pub fn get_logger(&self) -> Option<&Logger> {
+        self.logger.as_ref()
+    }
+
+    pub fn set_logger_file_path(&mut self, s: String) {
+        self.logger_file_path = Some(s);
+    }
+
+    pub fn get_logger_file_path(&self) -> Option<&String> {
+        self.logger_file_path.as_ref()
+    }
+}
+
+impl Default for SequencePaxosConfig {
+    fn default() -> Self {
+        Self {
+            configuration_id: 0,
+            pid: 0,
+            peers: vec![],
+            buffer_size: BUFFER_SIZE,
+            skip_prepare_use_leader: None,
+            logger: None,
+            logger_file_path: None,
+        }
+    }
+}
+
+/// Used for proposing reconfiguration of the cluster.
+#[derive(Debug, Clone)]
+pub struct ReconfigurationRequest {
+    /// The id of the servers in the new configuration.
+    new_configuration: Vec<u64>,
+    /// Optional metadata to be decided with the reconfiguration.
+    metadata: Option<Vec<u8>>,
 }

@@ -1,6 +1,7 @@
 pub mod test_config;
 pub mod util;
 
+use crate::util::Value;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::thread;
@@ -17,17 +18,17 @@ const GC_INDEX_INCREMENT: u64 = 10;
 fn gc_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut vec_proposals: Vec<u64> = vec![];
+    let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 0..cfg.num_proposals {
-        let (kprom, kfuture) = promise::<u64>();
-        vec_proposals.push(i);
+        let (kprom, kfuture) = promise::<Value>();
+        vec_proposals.push(Value(i));
         px.on_definition(|x| {
-            x.propose(i);
+            x.propose(Value(i));
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -46,7 +47,7 @@ fn gc_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seq_after: Vec<(&u64, Vec<u64>)> = vec![];
+    let mut seq_after: Vec<(&u64, Vec<Value>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after.push(px.on_definition(|comp| {
             let seq = comp.get_trimmed_suffix();
@@ -72,18 +73,18 @@ fn gc_test() {
 fn double_gc_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
-    let mut vec_proposals: Vec<u64> = vec![];
+    let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 0..cfg.num_proposals {
-        let (kprom, kfuture) = promise::<u64>();
+        let (kprom, kfuture) = promise::<Value>();
 
-        vec_proposals.push(i);
+        vec_proposals.push(Value(i));
         px.on_definition(|x| {
-            x.propose(i);
+            x.propose(Value(i));
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -108,7 +109,7 @@ fn double_gc_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seq_after_double: Vec<(&u64, Vec<u64>)> = vec![];
+    let mut seq_after_double: Vec<(&u64, Vec<Value>)> = vec![];
     for (i, (_, px)) in sys.ble_paxos_nodes() {
         seq_after_double.push(px.on_definition(|comp| {
             let seq = comp.get_trimmed_suffix();
@@ -130,7 +131,7 @@ fn double_gc_test() {
     };
 }
 
-fn check_gc(vec_proposals: Vec<u64>, seq_after: Vec<(&u64, Vec<u64>)>, gc_idx: u64) {
+fn check_gc(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {
     for i in 0..seq_after.len() {
         let (_, after) = seq_after.get(i).expect("After log");
 

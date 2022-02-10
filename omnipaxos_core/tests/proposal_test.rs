@@ -1,8 +1,9 @@
 pub mod test_config;
 pub mod util;
 
+use crate::util::Value;
 use kompact::prelude::{promise, Ask};
-use omnipaxos::leader_election::ballot_leader_election::Ballot;
+use omnipaxos_core::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
 use test_config::TestConfig;
@@ -15,7 +16,7 @@ use util::TestSystem;
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -40,10 +41,10 @@ fn forward_proposal_test() {
 
     let (_, px) = sys.ble_paxos_nodes().get(&proposal_node).unwrap();
 
-    let (kprom_px, kfuture_px) = promise::<u64>();
+    let (kprom_px, kfuture_px) = promise::<Value>();
     px.on_definition(|x| {
         x.add_ask(Ask::new(kprom_px, ()));
-        x.propose(123);
+        x.propose(Value(123));
     });
 
     kfuture_px
