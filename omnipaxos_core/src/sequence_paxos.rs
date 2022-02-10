@@ -907,7 +907,10 @@ where
     }
 
     fn merge_snapshot(&mut self, compacted_idx: u64, delta: S) {
-        let mut snapshot = self.storage.get_snapshot().unwrap();
+        let mut snapshot = self
+            .storage
+            .get_snapshot()
+            .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
         snapshot.merge(delta);
         self.set_snapshot(compacted_idx, snapshot);
     }
