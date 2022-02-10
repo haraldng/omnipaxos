@@ -66,7 +66,7 @@ fn runtime_test() {
         let append_req = runtime.block_on(op_handles.get(&leader).unwrap().append(entry));
         assert!(append_req.is_ok());
     }
-    std::thread::sleep(Duration::from_millis(1000)); // let it get decided...
+    std::thread::sleep(Duration::from_millis(3000)); // let it get decided...
     let decided_idx = runtime.block_on(op_handles.get(&1u64).unwrap().get_decided_idx());
     assert_eq!(decided_idx, num_proposals);
     let entries = runtime
