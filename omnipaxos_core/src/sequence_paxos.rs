@@ -114,7 +114,7 @@ where
     /// * `cfg` - Hocon configuration used for paxos replica.
     /// * `peers` - The `pid`s of the other replicas in the configuration.
     /// * `storage` - Implementation of a storage used to store the messages.
-    /// * `skip_prepare_use_leader` - Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+    /// * `skip_prepare_use_leader` - The `Ballot` of the initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     /// * `logger` - Used for logging events of Sequence Paxos.
     pub fn with_hocon(
         self,
@@ -463,7 +463,7 @@ where
         self.get_stopsign().is_some()
     }
 
-    /// Propose a normal entry to be replicated.
+    /// Append an entry to the replicated log.
     pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
         if self.stopped() {
             Err(ProposeErr::Normal(entry))
@@ -474,9 +474,6 @@ where
     }
 
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    /// # Arguments
-    /// * `new_configuration` - A vec with the ids of replicas in the new configuration.
-    /// * `prio_start_round` - The initial round to be used by the pre-defined leader in the new configuration (if such exists).
     pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
         let ReconfigurationRequest {
             new_configuration,
@@ -524,6 +521,7 @@ where
         }
     }
 
+    /*
     /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
     pub fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<T> {
         let ld = self.storage.get_decided_idx();
@@ -537,18 +535,21 @@ where
                 .to_vec()
         }
     }
+    */
 
     /// Returns the currently promised round.
     pub fn get_promise(&self) -> Ballot {
         self.storage.get_promise()
     }
 
+    /*
     /// Stops this Paxos to write any new entries to the log and returns the final log.
     /// This should only be called **after a reconfiguration has been decided.**
     // TODO with new reconfiguration
-    // pub fn stop_and_get_log(&mut self) -> Arc<L> {
-    //     self.storage.stop_and_get_log()
-    // }
+    pub fn stop_and_get_log(&mut self) -> Arc<L> {
+        self.storage.stop_and_get_log()
+    }
+    */
 
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
@@ -1394,23 +1395,27 @@ pub enum CompactionErr {
     NotAllAccepted(u64),
 }
 
+/// Configuration for `SequencePaxos`.
+/// # Fields
+/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
+/// * `pid`: The unique identifier of this node. Must not be 0.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub struct SequencePaxosConfig {
-    /// The identifier for the configuration that this Sequence Paxos replica is part of.
     configuration_id: u32,
-    /// The pid of this node.
     pid: u64,
-    /// The `pid`s of the other replicas in the configuration.
     peers: Vec<u64>,
     buffer_size: usize,
-    ///  Initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
     skip_prepare_use_leader: Option<Ballot>,
-    /// Custom logger for logging events of Sequence Paxos.
     logger: Option<Logger>,
-    /// Path where the default logger logs events.
     logger_file_path: Option<String>,
 }
 
+#[allow(missing_docs)]
 impl SequencePaxosConfig {
     pub fn get_configuration_id(&self) -> u32 {
         self.configuration_id
@@ -1479,8 +1484,11 @@ impl Default for SequencePaxosConfig {
     }
 }
 
+/// Used for proposing reconfiguration of the cluster.
 #[derive(Debug, Clone)]
 pub struct ReconfigurationRequest {
+    /// The id of the servers in the new configuration.
     new_configuration: Vec<u64>,
+    /// Optional metadata to be decided with the reconfiguration.
     metadata: Option<Vec<u8>>,
 }

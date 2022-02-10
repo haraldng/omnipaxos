@@ -4,7 +4,7 @@ pub mod util;
 
 use crate::util::Value;
 use kompact::prelude::{promise, Ask};
-use omnipaxos::core::leader_election::ballot_leader_election::Ballot;
+use omnipaxos::omnipaxos_core::leader_election::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
 use test_config::TestConfig;

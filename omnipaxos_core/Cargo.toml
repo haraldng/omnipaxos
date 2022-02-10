@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "omnipaxos_core"
 version = "0.1.0"
 authors = ["Harald Ng <hng@kth.se>"]
 edition = "2021"

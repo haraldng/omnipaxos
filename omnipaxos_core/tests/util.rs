@@ -1,5 +1,5 @@
 /*
-use omnipaxos::core::{
+use omnipaxos::omnipaxos_core::{
     leader_election::ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
@@ -285,7 +285,7 @@ pub mod ble {
 
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
-    use omnipaxos::core::{
+    use omnipaxos::omnipaxos_core::{
         leader_election::ballot_leader_election::Ballot, messages::Message,
         sequence_paxos::SequencePaxos, storage::memory_storage::MemoryStorage, util::LogEntry,
     };

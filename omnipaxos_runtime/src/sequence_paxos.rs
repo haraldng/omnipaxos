@@ -1,4 +1,4 @@
-use core::{
+use omnipaxos_core::{
     ballot_leader_election::Ballot,
     messages::Message,
     sequence_paxos::{SequencePaxos, SequencePaxosConfig, ProposeErr, CompactionErr, ReconfigurationRequest},

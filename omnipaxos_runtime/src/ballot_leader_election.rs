@@ -1,5 +1,5 @@
 use std::time::Duration;
-use core::ballot_leader_election::{Ballot, BallotLeaderElection, BLEConfig, messages::BLEMessage};
+use omnipaxos_core::ballot_leader_election::{Ballot, BallotLeaderElection, BLEConfig, messages::BLEMessage};
 use tokio::{
     sync::{mpsc, oneshot, watch},
     time,

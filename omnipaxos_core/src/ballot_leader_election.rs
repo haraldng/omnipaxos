@@ -377,27 +377,31 @@ pub mod messages {
     }
 }
 
+/// Configuration for `BallotLeaderElection`.
+/// # Fields
+/// * `pid`: The unique identifier of this node. Must not be 0.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `priority`: Set custom priority for this node to be elected as the leader.
+/// * `hb_delay`: Timeout for waiting on heartbeat messages. It is measured in number of ticks.
+/// * `initial_leader`: The initial leader of the cluster.
+/// * `initial_timeout`: Optional initial timeout that can be used to elect a leader faster initially.
+/// * `logger`: Custom logger for logging events of Ballot Leader Election.
+/// * `logger_file_path`: The path where the default logger logs events.
+/// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
 pub struct BLEConfig {
-    /// Process identifier used to uniquely identify this instance.
     pid: u64,
-    /// Vector that holds all the other replicas.
     peers: Vec<u64>,
-    /// Custom priority parameter.
     priority: Option<u64>,
-    /// A fixed delay that is added to the current_delay. It is measured in ticks.
     hb_delay: u64,
-    /// Initial leader which will be elected.
     initial_leader: Option<Ballot>,
-    /// Optional initial delay that can be used for a shorter hb_delay when first starting.
     initial_delay: Option<u64>,
-    /// Custom logger for logging events of Ballot Leader Election.
     logger: Option<Logger>,
-    /// Path where the default logger logs events.
     logger_file_path: Option<String>,
-    pub(crate) buffer_size: usize,
+    buffer_size: usize,
 }
 
+#[allow(missing_docs)]
 impl BLEConfig {
     pub fn set_pid(&mut self, pid: u64) {
         self.pid = pid;

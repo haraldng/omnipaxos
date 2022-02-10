@@ -1,11 +1,11 @@
 use std::time::Duration;
-use core::{
+use omnipaxos_core::{
     storage::{Entry, Snapshot, StopSign},
     util::{LogEntry, SnapshottedEntry, TrimmedEntry},
 };
 use crate::util::defaults::TICK_INTERVAL;
 
-/// Used for reading in the async runtime. Note that every read does a clone.
+/// Used for reading in the async omnipaxos_runtime. Note that every read does a clone.
 #[derive(Debug, Clone)]
 pub enum ReadEntry<T, S>
 where
@@ -50,6 +50,6 @@ pub(crate) mod defaults {
     use std::time::Duration;
     pub(crate) const BUFFER_SIZE: usize = 100000;
     pub(crate) const HB_TIMEOUT: u64 = 500;
-    /// tick() is called every `TICK_INTERVAL` in async runtime
+    /// tick() is called every `TICK_INTERVAL` in async omnipaxos_runtime
     pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(10);
 }
