@@ -1,4 +1,3 @@
-/*
 pub mod test_config;
 pub mod util;
 
@@ -19,7 +18,7 @@ const GC_INDEX_INCREMENT: u64 = 10;
 fn gc_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -74,7 +73,7 @@ fn gc_test() {
 fn double_gc_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -140,4 +139,3 @@ fn check_gc(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_id
         assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
     }
 }
-*/

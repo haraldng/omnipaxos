@@ -1,10 +1,12 @@
+use crate::util::defaults::TICK_INTERVAL;
+use omnipaxos_core::ballot_leader_election::{
+    messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection,
+};
 use std::time::Duration;
-use omnipaxos_core::ballot_leader_election::{Ballot, BallotLeaderElection, BLEConfig, messages::BLEMessage};
 use tokio::{
     sync::{mpsc, oneshot, watch},
     time,
 };
-use crate::util::defaults::TICK_INTERVAL;
 
 use crate::util::Stop;
 

@@ -8,7 +8,10 @@ edition = "2021"
 
 [dependencies]
 omnipaxos_core = { path = "../omnipaxos_core" }
-tokio = { version = "1", features = ["full"] } # TODO don't use full
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+serial_test = "0.5.1"
 
 [features]
 batch_accept = []

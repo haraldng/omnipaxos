@@ -407,7 +407,9 @@ impl BLEConfig {
         self.pid = pid;
     }
 
-    pub fn get_pid(&self) -> u64 { self.pid }
+    pub fn get_pid(&self) -> u64 {
+        self.pid
+    }
 
     pub fn set_peers(&mut self, peers: Vec<u64>) {
         self.peers = peers;

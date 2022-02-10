@@ -1,11 +1,15 @@
 use crate::util::*;
 use omnipaxos_core::{
-    ballot_leader_election::{Ballot, BLEConfig},
+    ballot_leader_election::{BLEConfig, Ballot},
     sequence_paxos::{CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxosConfig},
     storage::{Entry, Snapshot, Storage},
 };
 
-use crate::{ballot_leader_election::*, sequence_paxos::*};
+use crate::{ballot_leader_election::*, sequence_paxos::*, util::defaults::*};
+use omnipaxos_core::{
+    storage::StopSign,
+    util::{LogEntry, SnapshottedEntry, TrimmedEntry},
+};
 use std::{
     ops::{Bound, RangeBounds},
     time::Duration,
@@ -14,7 +18,6 @@ use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, oneshot, watch},
 };
-use crate::util::defaults::*;
 
 /// Handle for interacting with the OmniPaxos omnipaxos_runtime.
 pub struct OmniPaxosHandle<T: Entry, S: Snapshot<T>> {
@@ -36,7 +39,6 @@ pub struct OmniPaxosHandle<T: Entry, S: Snapshot<T>> {
 
 /// The local instance of this OmniPaxos node. Used to append and read entries to/from the replicated log.
 pub struct OmniPaxosNode<T: Entry, S: Snapshot<T>> {
-    pid: u64,
     sp_comp: InternalSPHandle<T, S>,
     ble_comp: InternalBLEHandle,
     runtime: Option<Runtime>, // wrapped in Option to be able to move when shutting down.
@@ -76,7 +78,6 @@ where
         runtime.spawn(async move { ble_comp.run().await });
 
         let op = Self {
-            pid: conf.pid,
             sp_comp: internal_sp_handle,
             ble_comp: internal_ble_handle,
             runtime: Some(runtime),
@@ -262,7 +263,11 @@ where
         let (send_resp, recv_resp) = oneshot::channel();
         let read = ReadRequest::with(from_idx, None, send_resp);
         let req = Request::ReadDecidedSuffix(read);
-        self.sp_comp.local_requests.send(req).await.unwrap_or_else(|_| panic!("Failed to send local request"));
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
         recv_resp
             .await
             .expect("Sequence Paxos dropped response channel")
@@ -273,7 +278,11 @@ where
     pub async fn reconfigure(&self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
         let (send_resp, recv_resp) = oneshot::channel();
         let req = Request::Reconfigure(rc, send_resp);
-        self.sp_comp.local_requests.send(req).await.unwrap_or_else(|_| panic!("Failed to send local request"));
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
         recv_resp
             .await
             .expect("Sequence Paxos dropped response channel")
@@ -282,7 +291,11 @@ where
     /// This should be called when the network layer indicates that the node has been reconnected to another node `pid`
     pub async fn reconnected(&self, pid: u64) {
         let req = Request::Reconnected(pid);
-        self.sp_comp.local_requests.send(req).await.unwrap_or_else(|_| panic!("Failed to send local request"));
+        self.sp_comp
+            .local_requests
+            .send(req)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to send local request"));
     }
 
     /// Shut down the omnipaxos_runtime.
@@ -334,7 +347,9 @@ impl NodeConfig {
         self.pid = pid;
     }
 
-    pub fn get_pid(&self) -> u64 { self.pid }
+    pub fn get_pid(&self) -> u64 {
+        self.pid
+    }
 
     pub fn set_peers(&mut self, peers: Vec<u64>) {
         self.peers = peers;
@@ -348,7 +363,9 @@ impl NodeConfig {
         self.leader_timeout = timeout;
     }
 
-    pub fn get_leader_timeout(&self) -> Duration { self.leader_timeout }
+    pub fn get_leader_timeout(&self) -> Duration {
+        self.leader_timeout
+    }
 
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
@@ -370,7 +387,9 @@ impl NodeConfig {
         self.initial_leader_timeout = Some(timeout);
     }
 
-    pub fn get_initial_leader_timeout(&self) -> Option<Duration> { self.initial_leader_timeout }
+    pub fn get_initial_leader_timeout(&self) -> Option<Duration> {
+        self.initial_leader_timeout
+    }
 
     pub fn set_priority(&mut self, priority: u64) {
         self.priority = Some(priority);
@@ -458,4 +477,39 @@ pub enum NodeConfigErr {
     InvalidPid(u64),
     /// `peers` should not include own `pid`.
     InvalidPeers(u64, Vec<u64>),
+}
+
+/// Used for reading from the async omnipaxos runtime.
+#[derive(Debug, Clone)]
+pub enum ReadEntry<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    /// The entry is decided.
+    Decided(T),
+    /// The entry is NOT decided. Might be removed from the log at a later time.
+    Undecided(T),
+    /// The entry has been trimmed.
+    Trimmed(TrimmedEntry),
+    /// The entry has been snapshotted.
+    Snapshotted(SnapshottedEntry<T, S>),
+    /// This Sequence Paxos instance has been stopped for reconfiguration.
+    StopSign(StopSign),
+}
+
+impl<'a, T, S> From<LogEntry<'a, T, S>> for ReadEntry<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    fn from(e: LogEntry<'a, T, S>) -> Self {
+        match e {
+            LogEntry::Decided(t) => Self::Decided(t.clone()),
+            LogEntry::Undecided(t) => Self::Undecided(t.clone()),
+            LogEntry::Trimmed(t) => Self::Trimmed(t),
+            LogEntry::Snapshotted(s) => Self::Snapshotted(s),
+            LogEntry::StopSign(ss) => Self::StopSign(ss),
+        }
+    }
 }

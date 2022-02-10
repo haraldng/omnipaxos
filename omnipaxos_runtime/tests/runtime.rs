@@ -1,10 +1,5 @@
-pub mod util;
-
-use crate::util::{LatestValue, Value};
-use omnipaxos::{
-    core::{storage::memory_storage::MemoryStorage, util::ReadEntry},
-    omnipaxos::*,
-};
+use omnipaxos_core::storage::{memory_storage::MemoryStorage, Entry, Snapshot};
+use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
 use serial_test::serial;
 use std::{collections::HashMap, ops::RangeInclusive, time::Duration};
 use tokio::runtime::Builder;
@@ -15,8 +10,8 @@ type SnapshotType = LatestValue;
 const NUM_NODES: u64 = 3;
 const NODES: RangeInclusive<u64> = 1..=NUM_NODES;
 
-#[serial]
 #[test]
+#[serial]
 fn runtime_test() {
     let runtime = Builder::new_multi_thread()
         .worker_threads(4)
@@ -62,7 +57,7 @@ fn runtime_test() {
         });
     }
 
-    std::thread::sleep(Duration::from_millis(2000));
+    std::thread::sleep(Duration::from_millis(3000));
     let leader = runtime.block_on(op_handles.get(&3u64).unwrap().get_current_leader());
     assert!(leader > 0);
     let num_proposals = 5;
@@ -93,4 +88,30 @@ fn create_node(pid: u64) -> OmniPaxosHandle<EntryType, SnapshotType> {
     node_conf.set_pid(pid);
     node_conf.set_peers(NODES.filter(|x| x != &pid).collect());
     OmniPaxosNode::new(node_conf, MemoryStorage::default())
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+pub struct Value(pub u64);
+
+impl Entry for Value {}
+
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+pub struct LatestValue {
+    value: Value,
+}
+
+impl Snapshot<Value> for LatestValue {
+    fn create(entries: &[Value]) -> Self {
+        Self {
+            value: *entries.last().unwrap_or(&Value(0)),
+        }
+    }
+
+    fn merge(&mut self, delta: Self) {
+        self.value = delta.value;
+    }
+
+    fn snapshottable() -> bool {
+        true
+    }
 }

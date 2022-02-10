@@ -1,11 +1,10 @@
-/*
 pub mod test_config;
 pub mod util;
 
 use crate::util::{LatestValue, Value};
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::omnipaxos_core::{
-    sequence_paxos::SequencePaxos,
+use omnipaxos_core::{
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
     storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
@@ -20,7 +19,7 @@ use util::TestSystem;
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -61,7 +60,7 @@ fn consensus_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-/*
+
 #[test]
 fn read_test() {
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
@@ -78,30 +77,36 @@ fn read_test() {
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
-    let mut op = SequencePaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
+    let mut sp_config = SequencePaxosConfig::default();
+    sp_config.set_pid(1);
+    sp_config.set_peers(vec![1, 2, 3]);
+    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), mem_storage);
 
     // read decided entries
-    let entries = op.read_decided_suffix(0).expect("No decided entries");
+    let entries = seq_paxos
+        .read_decided_suffix(0)
+        .expect("No decided entries");
     let expected_entries = log.get(0..decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
-    op.snapshot(Some(snapshotted_idx), true)
+    seq_paxos
+        .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entry
     let idx = snapshotted_idx;
-    let entry = op.read(idx).expect("No entry");
+    let entry = seq_paxos.read(idx).expect("No entry");
     let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
     verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
 
     // read snapshot
-    let snapshot = op.read(0).expect("No snapshot");
+    let snapshot = seq_paxos.read(0).expect("No snapshot");
     verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
 
     // read none
     let idx = log.len() as u64;
-    let entry = op.read(idx);
+    let entry = seq_paxos.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -112,8 +117,7 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op =
-        SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -140,24 +144,32 @@ fn read_entries_test() {
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
-    let mut op = SequencePaxos::with(1, 1, vec![1, 2, 3], mem_storage, None, None, None);
-    op.snapshot(Some(snapshotted_idx), true)
+    let mut sp_config = SequencePaxosConfig::default();
+    sp_config.set_pid(1);
+    sp_config.set_peers(vec![1, 2, 3]);
+    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), mem_storage);
+    seq_paxos
+        .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entries only
     let from_idx = snapshotted_idx + 1;
-    let entries = op.read_entries(from_idx..=decided_idx).expect("No entries");
+    let entries = seq_paxos
+        .read_entries(from_idx..=decided_idx)
+        .expect("No entries");
     let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
 
     // read snapshot only
-    let entries = op.read_entries(0..snapshotted_idx).expect("No snapshot");
+    let entries = seq_paxos
+        .read_entries(0..snapshotted_idx)
+        .expect("No snapshot");
     verify_snapshot(entries.as_slice(), snapshotted_idx, &exp_snapshot);
 
     // read snapshot + entries
     let from_idx = 3;
     let to_idx = decided_idx;
-    let entries = op
+    let entries = seq_paxos
         .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
@@ -168,7 +180,7 @@ fn read_entries_test() {
     // read none
     let from_idx = 0;
     let to_idx = log.len() as u64;
-    let entries = op.read_entries(from_idx..=to_idx);
+    let entries = seq_paxos.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -179,8 +191,7 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op =
-        SequencePaxos::with(1, 1, vec![1, 2, 3], stopped_storage, None, None, None);
+    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -234,7 +245,7 @@ fn read_entries_test() {
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
 }
-*/
+
 fn verify_snapshot(
     read_entries: &[LogEntry<Value, LatestValue>],
     exp_compacted_idx: u64,
@@ -354,4 +365,3 @@ fn check_uniform_agreement(log_responses: Vec<(&u64, Vec<Value>)>) {
 
     println!("Pass check_uniform_agreement");
 }
-*/

@@ -7,11 +7,9 @@ use super::{
         SnapshottedEntry, SyncItem, TrimmedEntry,
     },
 };
-use crate::{
-    utils::{
-        hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
-        logger::create_logger,
-    },
+use crate::utils::{
+    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
+    logger::create_logger,
 };
 use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
@@ -424,14 +422,22 @@ where
 
     fn create_read_log_entries(&self, from_idx: u64, to_idx: u64) -> Vec<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
-        let ents = self
+        let entries = self
             .storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
-        let decided_suffix_idx = self.storage.get_decided_idx() - compacted_idx;
-        let (decided, undecided) = ents.split_at(decided_suffix_idx as usize);
-        let entries = decided.iter().map(|x| LogEntry::Decided(x));
-        let undecided_ents = undecided.iter().map(|x| LogEntry::Undecided(x));
-        entries.chain(undecided_ents).collect()
+        let decided_idx = self.storage.get_decided_idx();
+        entries
+            .iter()
+            .enumerate()
+            .map(|(idx, e)| {
+                let log_idx = idx as u64 + compacted_idx;
+                if log_idx > decided_idx {
+                    LogEntry::Undecided(e)
+                } else {
+                    LogEntry::Decided(e)
+                }
+            })
+            .collect()
     }
 
     /// Handle an incoming message.
@@ -1425,9 +1431,13 @@ impl SequencePaxosConfig {
         self.configuration_id = configuration_id;
     }
 
-    pub fn set_pid(&mut self, pid: u64) { self.pid = pid; }
+    pub fn set_pid(&mut self, pid: u64) {
+        self.pid = pid;
+    }
 
-    pub fn get_pid(&self) -> u64 { self.pid }
+    pub fn get_pid(&self) -> u64 {
+        self.pid
+    }
 
     pub fn set_peers(&mut self, peers: Vec<u64>) {
         self.peers = peers;

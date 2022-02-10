@@ -1,9 +1,8 @@
-/*
 pub mod test_config;
 pub mod util;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::omnipaxos_core::leader_election::ballot_leader_election::Ballot;
+use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -17,7 +16,7 @@ use util::TestSystem;
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");
 
-    let mut sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, None, None, cfg.num_threads);
+    let mut sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -45,4 +44,3 @@ fn ble_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-*/

@@ -1,16 +1,18 @@
 use omnipaxos_core::{
     ballot_leader_election::Ballot,
     messages::Message,
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig, ProposeErr, CompactionErr, ReconfigurationRequest},
+    sequence_paxos::{
+        CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxos, SequencePaxosConfig,
+    },
     storage::{Entry, Snapshot, Storage},
 };
 use std::time::Duration;
 
+use crate::{omnipaxos::ReadEntry, util::Stop};
 use tokio::{
     sync::{mpsc, oneshot, watch},
     time,
 };
-use crate::util::{ReadEntry, Stop};
 
 pub(crate) struct SequencePaxosComp<T, S, B>
 where
@@ -229,4 +231,3 @@ impl<T: Entry, S: Snapshot<T>> ReadRequest<T, S> {
         }
     }
 }
-
