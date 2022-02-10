@@ -72,7 +72,12 @@ fn runtime_test() {
     let entries = runtime
         .block_on(op_handles.get(&leader).unwrap().read_entries(0..))
         .expect("Failed to read expected entries");
-    assert_eq!(entries.len(), num_proposals as usize, "Unexpected read entries {:?}", entries);
+    assert_eq!(
+        entries.len(),
+        num_proposals as usize,
+        "Unexpected read entries {:?}",
+        entries
+    );
     for (idx, entry) in entries.iter().enumerate() {
         match entry {
             ReadEntry::Decided(v) => {
