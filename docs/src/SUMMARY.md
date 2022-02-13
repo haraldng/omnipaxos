@@ -11,5 +11,6 @@
     - [Reconfiguration](sequencepaxos/reconfiguration.md)
     - [Logging](sequencepaxos/logging.md)
 - [Ballot Leader Election](ble/index.md)
+- [Runtime](runtime/index.md)
 
 [Project Info](project.md)

@@ -42,6 +42,7 @@ impl Snapshot<KeyValue> for KVSnapshot {
     }
 }
 
+#[allow(unused_variables, unused_mut)]
 #[tokio::main]
 async fn main() {
     let _cluster = vec![1, 2, 3];

@@ -15,7 +15,6 @@ let my_pid = 2;
 let my_peers = vec![1, 3];
 
 let mut ble_config = BLEConfig::default();
-ble_config.set_configuration_id(configuration_id);
 ble_config.set_pid(my_pid);
 ble_config.set_peers(my_peers);
 ble_config.set_hb_delay(20);     // a leader timeout of 20 ticks

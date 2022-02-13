@@ -80,7 +80,7 @@ tokio::spawn(async move {
 We leave the logic for receiving messages over the network as ``todo!()``, since this depends on your, the user's, network implementation.
 
 ## Log Interactions
-Using the ``OmniPaxosNode``, we will be able to call the functions of `SequencePaxos` but in an async manner. With the code below, we show how to perform the corresponding functionalities described in the [SequencePaxos](../sequencepaxos) chapter.
+Using the ``OmniPaxosNode``, we will be able to call the functions of `SequencePaxos` but in an async manner. With the code below, we show how to perform the corresponding functionalities described in the [SequencePaxos](../sequencepaxos/index.md) chapter.
 
 ```rust,edition2018,no_run,noplaypen
 let _leader_pid = omni_paxos.get_current_leader().await;

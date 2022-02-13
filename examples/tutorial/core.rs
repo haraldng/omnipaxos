@@ -1,6 +1,5 @@
 use omnipaxos_core::{
-    ballot_leader_election::{messages::BLEMessage, BLEConfig, BallotLeaderElection},
-    messages::Message,
+    ballot_leader_election::{BLEConfig, BallotLeaderElection},
     sequence_paxos::{CompactionErr, ReconfigurationRequest, SequencePaxos, SequencePaxosConfig},
     storage::{memory_storage::MemoryStorage, Snapshot},
     util::LogEntry,
@@ -39,6 +38,7 @@ impl Snapshot<KeyValue> for KVSnapshot {
     }
 }
 
+#[allow(unused_variables, unused_mut)]
 fn main() {
     // configuration with id 1 and the following cluster
     let configuration_id = 1;
@@ -89,7 +89,7 @@ fn main() {
                         // we are in new configuration, start new instance
                         let mut new_sp_conf = SequencePaxosConfig::default();
                         new_sp_conf.set_configuration_id(stopsign.config_id);
-                        let new_storage = MemoryStorage::default();
+                        let new_storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
                         let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
                         todo!()
                     }
@@ -125,7 +125,6 @@ fn main() {
 
     let mut ble_conf = BLEConfig::default();
     let mut ble_config = BLEConfig::default();
-    ble_config.set_configuration_id(configuration_id);
     ble_config.set_pid(my_pid);
     ble_config.set_peers(my_peers);
     ble_config.set_hb_delay(100); // a leader timeout of 100 ticks
@@ -137,5 +136,4 @@ fn main() {
         let receiver = out_msg.to;
         // send out_msg to receiver on network layer
     }
-    todo!()
 }

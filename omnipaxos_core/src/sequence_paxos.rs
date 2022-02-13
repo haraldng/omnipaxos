@@ -888,8 +888,14 @@ where
     fn merge_pending_proposals_with_snapshot(&mut self) {
         if !self.pending_proposals.is_empty() {
             let (compacted_idx, delta) = self.create_pending_proposals_snapshot();
+            let mut snapshot = self
+                .storage
+                .get_snapshot()
+                .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
+            snapshot.merge(delta);
+            self.storage.set_snapshot(snapshot);
             self.storage.set_accepted_round(self.leader_state.n_leader);
-            self.merge_snapshot(compacted_idx, delta);
+            self.storage.set_compacted_idx(compacted_idx);
         }
     }
 
@@ -903,7 +909,6 @@ where
                 if max_promise_meta.n == self.storage.get_accepted_round() {
                     self.storage.append_entries(sfx);
                 } else {
-                    // TODO check all decided/trim index
                     let ld = self.storage.get_decided_idx();
                     self.storage.append_on_prefix(ld, sfx);
                 }
