@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html" class="active"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html" class="active"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -149,67 +149,57 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="ballot-leader-election"><a class="header" href="#ballot-leader-election">Ballot Leader Election</a></h1>
-<p>A unique feature of the Omni-Paxos protocol is guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos. Similar to <code>OmniPaxos</code>, <code>BallotLeaderElection</code> is represented as a Rust struct that should be started on every server in the cluster.</p>
-<p>The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, <code>BallotLeaderElection</code> uses an internal logical clock. It has a <code>tick()</code> function that progresses its logical clock. The expected time that heartbeats should be received in is specified by <code>hb_delay</code> of the <code>BallotLeaderElection</code> constructor:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">BallotLeaderElection::with(
-    peers: Vec&lt;u64&gt;,        // the PEERS of this server. I.e. this should not include `pid`    
-    pid: u64,               // the unique identifier of this server
-    hb_delay: u64,          // the delay that is waited for heartbeat responses from peers. Measured in number of `tick()` calls.
-    priority: Option&lt;u64&gt;,  // custom priority parameter.
-    initial_leader: Option&lt;Ballot&gt;,     // initial leader
-    initial_delay_factor: Option&lt;u64&gt;,  // allows for using a shorter delay when electing the initial leader.
-    logger: Option&lt;Logger&gt;,
-    log_file_path: Option&lt;&amp;str&gt;,
-)
+<p>A unique feature of the Omni-Paxos protocol is guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos. Similar to <code>SequencePaxos</code>, <code>BallotLeaderElection</code> is represented as a Rust struct that should be started on every node in the cluster.</p>
+<p>The BLE protocol is based on exchanging heartbeats that should be received within some expected time. To represent time, <code>BallotLeaderElection</code> uses an internal logical clock. It has a <code>tick()</code> function that progresses its logical clock. The expected time that heartbeats should be received in is specified by <code>hb_delay</code> of <code>BLEConfig</code> constructor:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::ballot_leader_election::{BallotLeaderElection, BLEConfig};
+
+/* As before, we pretend we are node 2 */
+// configuration with id 1 and the following cluster
+let configuration_id = 1;
+let _cluster = vec![1, 2, 3];
+
+// create the replica 2 in this cluster (other replica instances are created similarly with pid 1 and 3 on other servers)
+let my_pid = 2;
+let my_peers = vec![1, 3];
+
+let mut ble_config = BLEConfig::default();
+ble_config.set_configuration_id(configuration_id);
+ble_config.set_pid(my_pid);
+ble_config.set_peers(my_peers);
+ble_config.set_hb_delay(20);     // a leader timeout of 20 ticks
+
+let mut ble = BallotLeaderElection::with(ble_conf);
 </code></pre>
 <blockquote>
-<p><strong>Note</strong> The <code>priority</code> parameter allows user to give desired servers a higher priority to become the leader. This is a best-effort approach upon a leader election or failure.</p>
+<p><strong>Note:</strong> The <code>priority</code> parameter allows user to give desired servers a higher priority to become the leader. This is a best-effort approach upon a leader change.</p>
 </blockquote>
-<p>For instance, we can create a BLE instance with a timeout of 800ms that is ticked every 100ms. The user has to call <code>tick()</code> every 100ms themselves and check if a leader has been elected. Once a leader is elected, <code>tick()</code> will return an instance of the struct <code>Leader&lt;Ballot&gt;</code>. This should be passed to the corresponding local <code>OmniPaxos</code> instance using <code>OmniPaxos::handle_leader()</code>, which will in turn use the <code>Ballot</code> as a round number for log replication.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos::paxos::OmniPaxos;
-use omnipaxos::leader_election::ballot_leader_election::*;
+<p>In this example, we created our <code>BallotLeaderElection</code> with a timeout of 20 ticks. Thus, if we call <code>ble.tick()</code> every 10ms, we will in practice be using a leader timeout of 200ms. Once a leader is elected/changed, <code>tick()</code> will return a <code>Ballot</code>. This should be passed by you, the user, to the corresponding local <code>SequencePaxos</code> instance using <code>handle_leader()</code>:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let seq_paxos: SequencePaxos = ...; // create our node as in Chapter `SequencePaxos`
 
-let _cluster = vec![1, 2, 3];
-let my_pid = 2;
-let my_peers= vec![1, 3];
-
-let hb_delay = 8;                     // 8 ticks delay 
-let initial_delay_factor = Some(2);   // first hb_delay will be 8/2 = 4 ticks i.e. 400ms.
-
-let omni_paxos = OmniPaxos::with(... , my_pid, my_peers, ...); // see `OmniPaxos` section
-
-let ble = BallotLeaderElection::with(
-    my_peers,
-    my_pid,
-    None,
-    hb_delay,
-    None,
-    initial_delay_factor,
-    None,
-    None,
-)
-
-// every 100ms call the following
+// every 10ms call the following
 if let Some(leader) = ble.tick() {
-    omni_paxos.handle_leader(leader);
+    // a new leader is elected, pass it to SequencePaxos.
+    seq_paxos.handle_leader(leader);
 }
+</code></pre>
+<h2 id="communication"><a class="header" href="#communication">Communication</a></h2>
+<p>Incoming and outgoing messages are handled in the same manner as in <code>SequencePaxos</code>. That is, the user, must fetch outgoing messages and send them over the network, and incoming messages must be passed to the <code>BallotLeaderElection</code> struct. </p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// handle incoming message from network layer
+let ble_msg: BLEMessage = ...;    // message to this node e.g. `msg.to = 2`
+ble.handle(ble_msg);
 
+// send outgoing messages. This should be called periodically, e.g. every ms
 for out_msg in ble.get_outgoings_msgs() {
     let receiver = out_msg.to;
     // send out_msg to receiver on network layer
 }
-
-// handle incoming message on network layer
-let msg: BLEMessage = ...;    // message received to this server.
-ble.handle(msg);
 </code></pre>
-<p>As seen in the example, incoming and outgoing messages are handled in the same manner as in <code>OmniPaxos</code>. Furthermore, BLE also has a constructor that uses hocon: <code>with_hocon()</code>. </p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../omnipaxos/logging.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../sequencepaxos/logging.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
@@ -223,7 +213,7 @@ ble.handle(msg);
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../omnipaxos/logging.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../sequencepaxos/logging.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 

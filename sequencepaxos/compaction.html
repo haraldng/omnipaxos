@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Communication - The OmniPaxos Book</title>
+        <title>Compaction - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html" class="active"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html" class="active"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,80 +148,111 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
-<p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user interacts with OmniPaxos and its incoming and outgoing messages. Furthermore, we show how new log entries are proposed and handled when they get decided. </p>
-<h2 id="propose-entries"><a class="header" href="#propose-entries">Propose Entries</a></h2>
-<p>To propose a log entry to be replicated, the <code>OmniPaxos::propose_normal()</code> function is called (we reuse the <code>storage</code> and <code>omni_paxos</code> variables created in earlier <a href="../omnipaxos/index.html">examples</a>):</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let kv = KeyValue { key: String::from(&quot;a&quot;), value: &quot;123&quot; } ;   // log entry as raw bytes
-omni_paxos.propose_normal(kv).expect(&quot;Failed to propose normal proposal&quot;);
-</code></pre>
-<p>Proposals can be pipelined without waiting for preceeding entries to be decided. Furthermore, <code>propose_normal</code> can be called on any server. If the calling server is not the leader, the proposal will be forwarded. </p>
-<h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
-<p>By proposing a log entry, the <code>OmniPaxos</code> instance will produce outgoing messages to its peers. The outgoing messages can be accessed by calling <code>OmniPaxos::get_outgoing_msgs()</code>. These messages then need to be sent to the intended server by the user themselves on the network layer. An incoming message should then be handled with the function <code>OmniPaxos::handle()</code>. Handling the incoming message will change the state and produce outgoing messages of <code>OmniPaxos</code> according to the protocol.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages (this should be called periodically, e.g. every 500ms)
-for out_msg: Message&lt;KeyValue&gt; in omni_paxos.get_outgoings_msgs() {
-    let receiver = out_msg.to;
-    // send out_msg to receiver on network layer
-}
+                        <h1 id="compaction"><a class="header" href="#compaction">Compaction</a></h1>
+<p>As time passes, the replicated log in <code>SequencePaxos</code> will grow large. To avoid letting the log growing infinitely large, we support two ways of compaction that can be initiated by users:</p>
+<h2 id="trim"><a class="header" href="#trim">Trim</a></h2>
+<p>Trimming the log removes all entries up to a certain index. Since the entries are deleted from the log, a trim operation can only be done if <strong>ALL</strong> nodes in the cluster have decided up to that index. Example:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::sequence_paxos::CompactionErr;
 
-// handle incoming message on network layer
-let msg: PaxosMsg:&lt;KeyValue&gt; = ...;    // message received to this server.
-omni_paxos.handle(msg);
-</code></pre>
-<h2 id="decided-entries"><a class="header" href="#decided-entries">Decided Entries</a></h2>
-<p>Once an entry has been appended to the log on a majority of the cluster, it has been <strong>decided</strong>. The decided entries can be fetched via <code>OmniPaxos::get_latest_decided_entries()</code> and are safe to be handled by a higher level application that requires strong consistency.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// handle decided log entries periodically
-for entry in omni_paxos.get_latest_decided_entries() {
-    match entry {
-        Entry::Normal(e) =&gt; {    // handle decided normal log entry
-            // e is of type KeyValue that was proposed.
+// we will try trimming the first 100 entries of the log.
+let trim_idx = Some(100);  // using `None` will use the highest trimmable index
+match seq_paxos.trim(trim_idx) {
+    Ok(_) =&gt; {
+        // later, we can see that the trim succeeded with `seq_paxos.get_compacted_idx()`
+    }
+    Err(e) =&gt; {
+        match e {
+            CompactionErr::NotAllDecided(idx) =&gt; {
+                // Our provided trim index was not decided by all servers yet. All servers have currently only decided up to `idx`.
+                // If desired, users can retry with seq_paxos.trim(Some(idx)) which will then succeed.
+            }
+            ...
         }
-        _ =&gt; { /* see next section about reconfiguration */ }
     }
 }
 </code></pre>
 <blockquote>
-<p><strong>Note</strong> <code>get_latest_decided_entries()</code> returns all the decided elements <strong>since the last time it was called</strong> and is thus intended to be called periodically. To get all decided entries (since the start), use <code>get_decided_entries()</code></p>
+<p><strong>Note:</strong> Make sure your application really does not need the data that will be trimmed anymore. Once it is succeeded, the trimmed entries are lost and cannot be read or recovered.</p>
 </blockquote>
-<h2 id="reconfiguration"><a class="header" href="#reconfiguration">Reconfiguration</a></h2>
-<p>Reconfiguration can be used to add or remove servers from the cluster. To propose a reconfiguration, use <code>OmniPaxos::propose_reconfiguration()</code>:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let new_cluster = vec![1, 2, 4];    // oops replica 3 appears to have crashed... let's replace it with a new replica 4
-omni_paxos.propose_reconfiguration(new_cluster, None).expect(&quot;Failed to propose reconfiguration&quot;);
+<h2 id="snapshot"><a class="header" href="#snapshot">Snapshot</a></h2>
+<p>The disadvantage of trimming is that the data is lost after the trim and it requires all servers to have decided the trim index. If the entries in the log are such that they can be compacted into a snapshot, <code>SequencePaxos</code> supports snapshotting decided entries of the log. For instance, in our kv-store example application, we don’t need to keep every log entry that changes the kv-pairs. Instead, if we want to snapshot the log, it is sufficient to keep the latest value for every key. We implement our snapshot as a struct called <code>KVSnapshot</code> which is just a wrapper for a <code>HashMap</code> that will hold the latest value for every key in the log. To make it work with <code>SequencePaxos</code>, we need to implement the trait <code>Snapshot</code> for <code>KVSnapshot</code>:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::storage::Snapshot;
 
-...
+#[derive(Clone, Debug)]
+pub struct KVSnapshot {
+    snapshotted: HashMap&lt;String, u64&gt;
+}
 
-// handle decided log entries periodically
-for entry in omni_paxos.get_latest_decided_entries() {
-    match entry {
-        Entry::Normal(_) =&gt; { /* See previous section */ }
-    
-        Entry::StopSign(ss) =&gt; {    // handle completed reconfiguration
-            let next_configuration_id = ss.config_id;
-            let next_cluster = ss.nodes;
-            let next_leader = ss.skip_prepare_use_leader;   // if Some(), then the replica instances in the new
-                                                            // configuration should use this in their constructor
+impl Snapshot&lt;KeyValue&gt; for KVSnapshot {
+    fn create(entries: &amp;[KeyValue]) -&gt; Self {
+        let mut snapshotted = HashMap::new();
+        for e in entries {
+            let KeyValue { key, value } = e;
+            snapshotted.insert(key.clone(), *value);
+        }
+        Self { snapshotted }
+    }
+
+    fn merge(&amp;mut self, delta: Self) {
+        for (k, v) in delta.snapshotted {
+            self.snapshotted.insert(k, v);
+        }
+    }
+
+    fn use_snapshots() -&gt; bool {
+        true
+    }
+}
+</code></pre>
+<p>The <code>create_entries()</code> function tells <code>SequencePaxos</code> how to create a snapshot given a slice of entries of our <code>KeyValue</code> type. In our case, we simply want to insert the kv-pair into the hashmap. The <code>merge()</code> function defines how we can merge two snapshots. In our case, we will just insert/update the kv-pairs from the other snapshot. The <code>use_snapshots()</code> function simply tells <code>SequencePaxos</code> if snapshots should be used in the protocol. This is needed for users that does not want to use snapshots.</p>
+<p>With <code>KVSnapshot</code>, we would have instead created our <code>SequencePaxos</code> node as follows:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// ...same as shown before in the `SequencePaxos` chapter.
+let storage = MemoryStorage::&lt;KeyValue, KVSnapshot)&gt;::default();    // use KVSnapshot as type argument instead of ()
+let mut sp = SequencePaxos::with(sp_config, storage);
+</code></pre>
+<p>We can now create snapshots and read snapshots from <code>SequencePaxos</code>. Furthermore, snapshotting allows us to either just do the snapshot locally or request all nodes in the cluster to do it with the boolean parameter <code>local_only</code>.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// we will try snapshotting the first 100 entries of the log.
+let snapshot_idx = Some(100);  // using `None` will use the highest snapshottable index
+let local_only = false; // snapshots will be taken by all nodes.
+match seq_paxos.trim(snapshot_idx, local_only) {
+    Ok(_) =&gt; {
+        // later, we can see that the snapshot succeeded with `seq_paxos.get_compacted_idx()`
+    }
+    Err(e) =&gt; {
+        match e {
+            CompactionErr::UndecidedIndex(idx) =&gt; {
+                // Our provided snapshot index is not decided yet. The currently decided index is `idx`.
+            }
+            ...
         }
     }
 }
 
-</code></pre>
-<p>Upon deciding a <code>StopSign</code>, the user should create a new replica instance with the new configuration id if the corresponding server is in <code>StopSign.nodes</code>. Furthermore, the user should also notify and migrate the log to any new servers joining the cluster. To stop the old instance and get the final log in the old configuration, one can call:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let log: Vec&lt;Entry&lt;KeyValue&gt;&gt; = self.omni_paxos.stop_and_get_sequence();
-// notify about reconfiguration and migrate log to new servers
+// reading a snapshotted entry
+if let Some(e) = seq_paxos.read(20) {
+    match e {
+        LogEntry::Snapshotted(s) =&gt; {
+            // entry at idx 20 is snapshotted since we snapshotted idx 100
+            let snapshotted_idx = s.trimmed_idx;
+            let snapshot: KVSnapshot = s.snapshot;
+            // ...can query the latest value for a key in snapshot
+        }
+        ...
+}
 </code></pre>
 <blockquote>
-<p><strong>Note</strong> The user has to implement the log migration themselves before starting the new <code>OmniPaxos</code> instances.</p>
+<p><strong>Note:</strong> If your <code>Entry</code> type is not snapshottable, simply use <code>()</code> as type argument for <code>Snapshot</code>.</p>
 </blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../omnipaxos/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../sequencepaxos/log.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../omnipaxos/garbage-collection.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../sequencepaxos/reconfiguration.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -231,11 +262,11 @@ for entry in omni_paxos.get_latest_decided_entries() {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../omnipaxos/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../sequencepaxos/log.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../omnipaxos/garbage-collection.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../sequencepaxos/reconfiguration.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

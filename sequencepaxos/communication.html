@@ -3,9 +3,8 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title></title>
-                        <base href="/">
-        
+        <title>Communication - The OmniPaxos Book</title>
+                
 
         <!-- Custom HTML head -->
         
@@ -15,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff" />
 
-                <link rel="icon" href="favicon.svg">
-                        <link rel="shortcut icon" href="favicon.png">
-                <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-                <link rel="stylesheet" href="css/print.css" media="print">
+                <link rel="icon" href="../favicon.svg">
+                        <link rel="shortcut icon" href="../favicon.png">
+                <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+                <link rel="stylesheet" href="../css/print.css" media="print">
         
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-                <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+                <link rel="stylesheet" href="../fonts/fonts.css">
         
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
         
@@ -39,7 +38,7 @@
     <body>
         <!-- Provide site root to javascript -->
         <script type="text/javascript">
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
         </script>
 
@@ -85,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html" class="active"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -117,7 +116,7 @@
                     <h1 class="menu-title">The OmniPaxos Book</h1>
 
                     <div class="right-buttons">
-                                                <a href="print.html" title="Print this book" aria-label="Print this book">
+                                                <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
                                                                         <a href="https://github.com/haraldng/omnipaxos" title="Git repository" aria-label="Git repository">
@@ -149,14 +148,44 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
+<p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user should interact with <code>SequencePaxos</code> and its incoming and outgoing messages.</p>
+<h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
+<p>When a message is received from the network layer intended for our node, we need to handle it in <code>SequencePaxos</code>.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::messages::Message;
+
+// handle incoming message from network layer
+let msg: Message&lt;KeyValue, KVSnapshot&gt; = ...;    // message to this node e.g. `msg.to = 2`
+seq_paxos.handle(msg);
+</code></pre>
+<p>By handling incoming messages and local calls such as <code>append()</code>, our local <code>seq_paxos</code> will produce outgoing messages for its peers. Thus, we must periodically send the outgoing messages on the network layer.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages. This should be called periodically, e.g. every ms
+for out_msg in seq_paxos.get_outgoings_msgs() {
+    let receiver = out_msg.to;
+    // send out_msg to receiver on network layer
+}
+</code></pre>
+<blockquote>
+<p><strong>Note:</strong> The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. Similarly, you have to periodically fetch these outgoing messages from <code>SequencePaxos</code>. </p>
+</blockquote>
+<h2 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h2>
+<p>One of the main advantages of Omni-Paxos is its resilience to partial connectivity. If one node loses connection to another and then reconnects (e.g. after a TCP-session drop), make sure to call <code>reconnected(pid)</code> before handling any incoming messages from that peer.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// network layer notifies of reconnecting to peer with pid = 3
+seq_paxos.reconnected(3);
+...
+</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                                                    <a rel="prev" href="../sequencepaxos/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
                         
+                                                    <a rel="next" href="../sequencepaxos/log.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
                         
                         <div style="clear: both"></div>
                     </nav>
@@ -164,7 +193,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                                    <a rel="prev" href="../sequencepaxos/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
                 
+                                    <a rel="next" href="../sequencepaxos/log.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
                             </nav>
 
         </div>
@@ -177,13 +212,13 @@
         </script>
         
         
-                <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+                <script src="../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../searcher.js" type="text/javascript" charset="utf-8"></script>
         
-        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../book.js" type="text/javascript" charset="utf-8"></script>
 
         <!-- Custom JS scripts -->
         

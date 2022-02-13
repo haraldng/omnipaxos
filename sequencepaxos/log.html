@@ -3,9 +3,8 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title></title>
-                        <base href="/">
-        
+        <title>Reading and Writing - The OmniPaxos Book</title>
+                
 
         <!-- Custom HTML head -->
         
@@ -15,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff" />
 
-                <link rel="icon" href="favicon.svg">
-                        <link rel="shortcut icon" href="favicon.png">
-                <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-                <link rel="stylesheet" href="css/print.css" media="print">
+                <link rel="icon" href="../favicon.svg">
+                        <link rel="shortcut icon" href="../favicon.png">
+                <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+                <link rel="stylesheet" href="../css/print.css" media="print">
         
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-                <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+                <link rel="stylesheet" href="../fonts/fonts.css">
         
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
         
@@ -39,7 +38,7 @@
     <body>
         <!-- Provide site root to javascript -->
         <script type="text/javascript">
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
         </script>
 
@@ -85,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html" class="active"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -117,7 +116,7 @@
                     <h1 class="menu-title">The OmniPaxos Book</h1>
 
                     <div class="right-buttons">
-                                                <a href="print.html" title="Print this book" aria-label="Print this book">
+                                                <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
                                                                         <a href="https://github.com/haraldng/omnipaxos" title="Git repository" aria-label="Git repository">
@@ -149,14 +148,43 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="reading-and-writing"><a class="header" href="#reading-and-writing">Reading and Writing</a></h1>
+<p>We now show how to read and write the replicated log. The replicated log is <em>append-only</em>. To append an entry we call the following:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let write_entry = KeyValue { key: String::from(&quot;a&quot;), value: 123 };
+
+seq_paxos.append(write_entry).expect(&quot;Failed to append&quot;);
+</code></pre>
+<p>This will cause our <code>write_entry</code> to be proposed to get decided in the replicated log. Appends can be pipelined without waiting for preceding entries to be decided. Furthermore, <code>append()</code> can be called on any node. If the calling node is not the leader, the entry will be forwarded. </p>
+<h2 id="reading-the-log"><a class="header" href="#reading-the-log">Reading the Log</a></h2>
+<p>Reads are also handled by calling various functions on <code>SequencePaxos</code>. To read the entry at a specific index <code>idx</code> of the log we call <code>seq_paxos.read_entry(idx)</code>. We can also read a specific range of log entries with <code>seq_paxos.read_entries()</code>. </p>
+<pre><code class="language-rust edition2018 no_run noplaypen">/*** Read a single entry ***/
+let idx = 5;
+let read_entry = seq_paxos.read(idx);
+
+/*** Read a range ***/
+let read_entries = seq_paxos.read_entries(2..5);
+</code></pre>
+<p>The read functions return <code>Option&lt;LogEntry&gt;</code> and <code>Option&lt;Vec&lt;LogEntry&gt;&gt;</code> respectively, where <code>None</code> is returned if the index or range is out of bounds. <code>LogEntry</code> is an enum with the following variants:</p>
+<ul>
+<li><code>Decided(&amp;T)</code>: The entry is decided and guaranteed to not be reverted. It is thus safe to apply a decided entry to the application state. For instance, in our case, it is safe to update our key-value store when we read a <code>Decided(&amp;KeyValue)</code> entry.</li>
+<li><code>Undecided(&amp;T)</code>: The entry is NOT decided and might be removed from the log at a later time. However, it could be useful in applications that allow speculative execution for example.</li>
+<li><code>Trimmed(TrimmedIndex)</code>: We tried to read an index where the entry has already been trimmed. </li>
+<li><code>Snapshotted(SnapshottedEntry&lt;T, S&gt;)</code>: The index we read has already been compacted into a snapshot. We can access the snapshot from the field <code>snapshot</code> in <code>SnapshottedEntry</code>. In our case our this will correspond to <code>KVSnapshot</code> that we defined <a href="../compaction.html">here</a>.</li>
+<li><code>StopSign(StopSign)</code>: This Sequence Paxos instance has been stopped for reconfiguration. This implies that this log will not be appended anymore and one should use the new Sequence Paxos instead for writing.</li>
+</ul>
+<p>It is also possible to only read decided entries or snapshot from a specific index using <code>read_decided_suffix(idx)</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                                                    <a rel="prev" href="../sequencepaxos/communication.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
                         
+                                                    <a rel="next" href="../sequencepaxos/compaction.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
                         
                         <div style="clear: both"></div>
                     </nav>
@@ -164,7 +192,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                                    <a rel="prev" href="../sequencepaxos/communication.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
                 
+                                    <a rel="next" href="../sequencepaxos/compaction.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
                             </nav>
 
         </div>
@@ -177,13 +211,13 @@
         </script>
         
         
-                <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+                <script src="../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../searcher.js" type="text/javascript" charset="utf-8"></script>
         
-        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../book.js" type="text/javascript" charset="utf-8"></script>
 
         <!-- Custom JS scripts -->
         

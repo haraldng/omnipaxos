@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Garbage Collection - The OmniPaxos Book</title>
+        <title>Reconfiguration - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/garbage-collection.html" class="active"><strong aria-hidden="true">2.2.</strong> Garbage Collection</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.3.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.1.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.2.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.3.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html" class="active"><strong aria-hidden="true">2.4.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.5.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,18 +148,52 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="garbage-collection"><a class="header" href="#garbage-collection">Garbage Collection</a></h1>
-<p>OmniPaxos offers a garbage collection feature that can be called to compact the replicated log. The <code>OmniPaxos::garbage_collect()</code> has an argument <code>Option&lt;u64&gt;</code> that specifies up to what index the log should be garbage collected. If <code>None</code>, then the minimum index accepted by ALL servers will be used as the index. The garbage collection is initiated by the leader and only completed if all servers respond that log entries up to that index has already been handled by the user. To determine if the garbage collection succeeded, the user can check the <code>garbage_collected_idx</code> field of <code>OmniPaxos</code>.</p>
+                        <h1 id="reconfiguration"><a class="header" href="#reconfiguration">Reconfiguration</a></h1>
+<p>To change the nodes in the cluster, we must first stop the current Sequence Paxos instance. This is done via the <code>reconfigure()</code> function, which has a <code>ReconfigurationRequest</code> that contains the nodes for the next Sequence Paxos instance and some optional metadata.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// Node 3 seems to have crashed... let's replace it with a new node 4.
+let new_configuration = vec![1, 2, 4];
+let metadata = None;
+let rc = ReconfigurationRequest::with(new_configuration, metadata);
+seq_paxos.reconfigure(rc).expect(&quot;Failed to propose reconfiguration&quot;);
+</code></pre>
+<p>Calling <code>reconfigure()</code> will propose a <code>StopSign</code> entry to be appended. If it gets decided, the log is sealed and prevented from being further appended. From the <code>StopSign</code> entry, all nodes will be able to see the new configuration. When you, the user, read from a node and finds a <code>LogEntry::StopSign</code> in the log, you should start a new <code>SequencePaxos</code> instance at this node if it is also part of the new configuration.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let idx: u64 = ...  // some index we last read from
+    let decided_entries: Option&lt;Vec&lt;LogEntry&lt;KeyValue, KVSnapshot&gt;&gt;&gt; = seq_paxos.read_decided_suffix(idx);
+    if let Some(de) = decided_entries {
+        for d in de {
+            match d {
+                LogEntry::StopSign(stopsign) =&gt; {
+                    let new_configuration = stopsign.nodes;
+                    if new_configuration.contains(&amp;my_pid) {
+                    // we are in new configuration, start new instance
+                        let mut new_sp_conf = SequencePaxosConfig::default();
+                        new_sp_conf.set_configuration_id(stopsign.config_id);
+                        let new_storage = MemoryStorage::default();
+                        let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
+                        
+                        ... // use new_sp
+                    }
+                }
+                _ =&gt; {
+                    todo!()
+                }
+            }
+        }
+    }
+</code></pre>
+<blockquote>
+<p><strong>Note:</strong> New nodes will not see the <code>StopSign</code> since they were not part of the old configuration. The user themselves must notify and start these new nodes. Furthermore,the user must ensure these new nodes have the application state or log up to the stopsign before starting their <code>SequencePaxos</code> instance.</p>
+</blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../omnipaxos/communication.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../sequencepaxos/compaction.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../omnipaxos/logging.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../sequencepaxos/logging.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -169,11 +203,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../omnipaxos/communication.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../sequencepaxos/compaction.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../omnipaxos/logging.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../sequencepaxos/logging.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>
