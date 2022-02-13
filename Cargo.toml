@@ -1,5 +1,9 @@
 [workspace]
 members = [
     "omnipaxos_core",
-    "omnipaxos_runtime"
+    "omnipaxos_runtime",
+    "examples"
 ]
+
+[profile.release]
+lto = true

@@ -243,7 +243,7 @@ where
     /// The entry is NOT decided. Might be removed from the log at a later time.
     Undecided(&'a T),
     /// The entry has been trimmed.
-    Trimmed(TrimmedEntry),
+    Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T, S>),
     /// This Sequence Paxos instance has been stopped for reconfiguration.
@@ -259,25 +259,13 @@ pub(crate) enum IndexEntry {
 }
 
 #[allow(missing_docs)]
-#[derive(Debug, Copy, Clone)]
-pub struct TrimmedEntry {
-    pub trimmed_idx: u64,
-}
-
-impl TrimmedEntry {
-    pub(crate) fn with(trimmed_idx: u64) -> Self {
-        Self { trimmed_idx }
-    }
-}
-
-#[allow(missing_docs)]
 #[derive(Debug, Clone)]
 pub struct SnapshottedEntry<T, S>
 where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub trimmed_idx: u64,
+    pub trimmed_idx: TrimmedIndex,
     pub snapshot: S,
     _p: PhantomData<T>,
 }
@@ -301,3 +289,6 @@ pub(crate) mod defaults {
     pub(crate) const HB_TIMEOUT: u64 = 500;
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
 }
+
+#[allow(missing_docs)]
+pub type TrimmedIndex = u64;

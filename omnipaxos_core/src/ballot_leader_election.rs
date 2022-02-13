@@ -1,8 +1,8 @@
 /// Ballot Leader Election algorithm for electing new leaders
 use crate::{
-    util::defaults::*,
+    util::defaults::{BLE_BUFFER_SIZE as DEFAULT_BUFFER_SIZE, *},
     utils::{
-        hocon_kv::{HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PID, PRIORITY},
+        hocon_kv::{BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PEERS, PID, PRIORITY},
         logger::create_logger,
     },
 };
@@ -101,44 +101,6 @@ impl BallotLeaderElection {
             outgoing: vec![],
             logger: l,
         }
-    }
-
-    /// Construct a new BallotLeaderComponent
-    /// # Arguments
-    /// * `cfg` - Hocon configuration used for ble replica.
-    /// * `peers` - Vector that holds all the other replicas.
-    /// * `initial_leader` -  Initial leader which will be elected.
-    /// * `logger` - Used for logging events of Ballot Leader Election.
-    pub fn with_hocon(
-        cfg: &Hocon,
-        peers: Vec<u64>, // TODO load from hocon
-        initial_leader: Option<Ballot>,
-        logger: Option<Logger>,
-    ) -> BallotLeaderElection {
-        let mut config = BLEConfig::default();
-        config.set_pid(cfg[PID].as_i64().expect("Failed to load PID") as u64);
-        config.set_peers(peers);
-        if let Some(b) = initial_leader {
-            config.set_initial_leader(b);
-        }
-        if let Some(l) = logger {
-            config.set_logger(l);
-        }
-        if let Some(p) = cfg[LOG_FILE_PATH].as_string() {
-            config.set_logger_file_path(p);
-        }
-        if let Some(p) = cfg[PRIORITY].as_i64().map(|p| p as u64) {
-            config.set_priority(p);
-        }
-        if let Some(d) = cfg[INITIAL_DELAY].as_i64().map(|i| i as u64) {
-            config.set_initial_delay(d);
-        }
-        config.set_hb_delay(
-            cfg[HB_DELAY]
-                .as_i64()
-                .expect("Failed to load heartbeat delay") as u64,
-        );
-        BallotLeaderElection::with(config)
     }
 
     /// Update the custom priority used in the Ballot for this server.
@@ -474,6 +436,41 @@ impl BLEConfig {
     pub fn get_buffer_size(&self) -> usize {
         self.buffer_size
     }
+
+    pub fn with_hocon(h: &Hocon) -> Self {
+        let mut config = Self::default();
+        config.set_pid(h[PID].as_i64().expect("Failed to load PID") as u64);
+        match &h[PEERS] {
+            Hocon::Array(v) => {
+                let peers = v
+                    .iter()
+                    .map(|x| x.as_i64().expect("Failed to load pid in Hocon array") as u64)
+                    .collect();
+                config.set_peers(peers);
+            }
+            _ => {
+                unimplemented!("Peers in Hocon should be parsed as array!")
+            }
+        }
+        if let Some(p) = h[LOG_FILE_PATH].as_string() {
+            config.set_logger_file_path(p);
+        }
+        if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
+            config.set_priority(p);
+        }
+        if let Some(d) = h[INITIAL_DELAY].as_i64().map(|i| i as u64) {
+            config.set_initial_delay(d);
+        }
+        if let Some(b) = h[BLE_BUFFER_SIZE].as_i64() {
+            config.set_buffer_size(b as usize);
+        }
+        config.set_hb_delay(
+            h[HB_DELAY]
+                .as_i64()
+                .expect("Failed to load heartbeat delay") as u64,
+        );
+        config
+    }
 }
 
 impl Default for BLEConfig {
@@ -487,7 +484,7 @@ impl Default for BLEConfig {
             initial_delay: None,
             logger: None,
             logger_file_path: None,
-            buffer_size: BLE_BUFFER_SIZE,
+            buffer_size: DEFAULT_BUFFER_SIZE,
         }
     }
 }

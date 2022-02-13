@@ -4,10 +4,12 @@
 [Getting Started](getting-started.md)
 
 - [Introduction](introduction/index.md)
-- [OmniPaxos](omnipaxos/index.md)
-	- [Communication](omnipaxos/communication.md)
-	- [Garbage Collection](omnipaxos/garbage-collection.md)
-	- [Logging](omnipaxos/logging.md)
+- [SequencePaxos](sequencepaxos/index.md)
+    - [Communication](sequencepaxos/communication.md)
+    - [Reading and Writing](sequencepaxos/log.md)
+    - [Compaction](sequencepaxos/compaction.md)
+    - [Reconfiguration](sequencepaxos/reconfiguration.md)
+    - [Logging](sequencepaxos/logging.md)
 - [Ballot Leader Election](ble/index.md)
 
 [Project Info](project.md)

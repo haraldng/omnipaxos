@@ -98,8 +98,6 @@ fn create_node(pid: u64) -> OmniPaxosHandle<EntryType, SnapshotType> {
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct Value(pub u64);
 
-impl Entry for Value {}
-
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {
     value: Value,
@@ -116,7 +114,7 @@ impl Snapshot<Value> for LatestValue {
         self.value = delta.value;
     }
 
-    fn snapshottable() -> bool {
+    fn use_snapshots() -> bool {
         true
     }
 }

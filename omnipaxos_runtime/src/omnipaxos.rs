@@ -8,7 +8,7 @@ use omnipaxos_core::{
 use crate::{ballot_leader_election::*, sequence_paxos::*, util::defaults::*};
 use omnipaxos_core::{
     storage::StopSign,
-    util::{LogEntry, SnapshottedEntry, TrimmedEntry},
+    util::{LogEntry, SnapshottedEntry, TrimmedIndex},
 };
 use std::{
     ops::{Bound, RangeBounds},
@@ -491,7 +491,7 @@ where
     /// The entry is NOT decided. Might be removed from the log at a later time.
     Undecided(T),
     /// The entry has been trimmed.
-    Trimmed(TrimmedEntry),
+    Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T, S>),
     /// This Sequence Paxos instance has been stopped for reconfiguration.

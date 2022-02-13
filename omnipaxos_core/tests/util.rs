@@ -2,7 +2,7 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{memory_storage::MemoryStorage, Entry, Snapshot},
+    storage::{memory_storage::MemoryStorage, Snapshot},
 };
 
 use self::{
@@ -414,8 +414,6 @@ pub mod omnireplica {
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct Value(pub u64);
 
-impl Entry for Value {}
-
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct LatestValue {
     value: Value,
@@ -432,7 +430,7 @@ impl Snapshot<Value> for LatestValue {
         self.value = delta.value;
     }
 
-    fn snapshottable() -> bool {
+    fn use_snapshots() -> bool {
         true
     }
 }

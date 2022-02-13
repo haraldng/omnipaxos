@@ -4,11 +4,11 @@ use super::{
     storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
         defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData,
-        SnapshottedEntry, SyncItem, TrimmedEntry,
+        SnapshottedEntry, SyncItem,
     },
 };
 use crate::utils::{
-    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PID},
+    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZE},
     logger::create_logger,
 };
 use hocon::Hocon;
@@ -17,6 +17,7 @@ use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds,
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
+/// If snapshots are not desired to be used, use `()` for the type parameter `S`.
 pub struct SequencePaxos<T, S, B>
 where
     T: Entry,
@@ -107,37 +108,6 @@ where
         paxos
     }
 
-    /// Creates a Sequence Paxos replica.
-    /// # Arguments
-    /// * `cfg` - Hocon configuration used for paxos replica.
-    /// * `peers` - The `pid`s of the other replicas in the configuration.
-    /// * `storage` - Implementation of a storage used to store the messages.
-    /// * `skip_prepare_use_leader` - The `Ballot` of the initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-    /// * `logger` - Used for logging events of Sequence Paxos.
-    pub fn with_hocon(
-        self,
-        cfg: &Hocon,
-        peers: Vec<u64>, // TODO load from Hocon
-        storage: B,
-        skip_prepare_use_leader: Option<Ballot>,
-        logger: Option<Logger>,
-    ) -> SequencePaxos<T, S, B> {
-        let mut config = SequencePaxosConfig::default();
-        config.set_configuration_id(cfg[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32);
-        config.set_pid(cfg[PID].as_i64().expect("Failed to load PID") as u64);
-        config.set_peers(peers);
-        if let Some(l) = logger {
-            config.set_logger(l);
-        }
-        if let Some(s) = skip_prepare_use_leader {
-            config.set_skip_prepare_use_leader(s);
-        }
-        if let Some(p) = cfg[LOG_FILE_PATH].as_string() {
-            config.set_logger_file_path(p);
-        }
-        SequencePaxos::<T, S, B>::with(config, storage)
-    }
-
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
@@ -166,7 +136,7 @@ where
                 if i <= decided_idx {
                     i
                 } else {
-                    return Err(CompactionErr::UndecidedIndex(i));
+                    return Err(CompactionErr::UndecidedIndex(decided_idx));
                 }
             }
             None => decided_idx,
@@ -214,7 +184,7 @@ where
                         self.storage.get_compacted_idx(),
                         self.leader_state.las
                     );
-                    return Err(CompactionErr::NotAllAccepted(idx));
+                    return Err(CompactionErr::NotAllDecided(*min_all_accepted_idx));
                 }
                 idx
             }
@@ -416,7 +386,7 @@ where
     fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T, S> {
         match self.storage.get_snapshot() {
             Some(s) => LogEntry::Snapshotted(SnapshottedEntry::with(compacted_idx, s)),
-            None => LogEntry::Trimmed(TrimmedEntry::with(compacted_idx)),
+            None => LogEntry::Trimmed(compacted_idx),
         }
     }
 
@@ -970,7 +940,7 @@ where
             }
             SyncItem::None => {
                 // I am the most updated
-                if S::snapshottable() {
+                if Self::use_snapshots() {
                     self.merge_pending_proposals_with_snapshot();
                     self.adopt_pending_stopsign();
                     self.send_accsync_with_snapshot();
@@ -1004,7 +974,7 @@ where
         );
         if prom.n == self.leader_state.n_leader {
             self.leader_state.set_decided_idx(from, Some(prom.ld));
-            let acc_sync = if S::snapshottable() {
+            let acc_sync = if Self::use_snapshots() {
                 let (compacted_idx, snapshot) = if prom.n_accepted
                     == self.leader_state.get_max_promise_meta().n
                     && prom.la < self.leader_state.get_max_promise_meta().la
@@ -1155,7 +1125,7 @@ where
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_log_len();
-            let promise = if S::snapshottable() {
+            let promise = if Self::use_snapshots() {
                 let (compacted_idx, sync_item, stopsign) = if na > prep.n_accepted {
                     let compact_idx = self.storage.get_log_len();
                     let snapshot = self.create_snapshot(compact_idx);
@@ -1367,6 +1337,10 @@ where
             ));
         }
     }
+
+    fn use_snapshots() -> bool {
+        S::use_snapshots()
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -1398,10 +1372,10 @@ where
 /// An error returning the proposal that was failed due to that the current configuration is stopped.
 #[derive(Copy, Clone, Debug)]
 pub enum CompactionErr {
-    /// Snapshot was called with an index that is not decided yet.
+    /// Snapshot was called with an index that is not decided yet. Returns the currently decided index.
     UndecidedIndex(u64),
-    /// Trim was called with an index that is not accepted by all servers yet.
-    NotAllAccepted(u64),
+    /// Trim was called with an index that is not decided by all servers yet. Returns the index decided by ALL servers currently.
+    NotAllDecided(u64),
 }
 
 /// Configuration for `SequencePaxos`.
@@ -1481,6 +1455,32 @@ impl SequencePaxosConfig {
     pub fn get_logger_file_path(&self) -> Option<&String> {
         self.logger_file_path.as_ref()
     }
+
+    pub fn with_hocon(h: &Hocon) -> Self {
+        let mut config = Self::default();
+        config
+            .set_configuration_id(h[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32);
+        config.set_pid(h[PID].as_i64().expect("Failed to load PID") as u64);
+        match &h[PEERS] {
+            Hocon::Array(v) => {
+                let peers = v
+                    .iter()
+                    .map(|x| x.as_i64().expect("Failed to load pid in Hocon array") as u64)
+                    .collect();
+                config.set_peers(peers);
+            }
+            _ => {
+                unimplemented!("Peers in Hocon should be parsed as array!")
+            }
+        }
+        if let Some(p) = h[LOG_FILE_PATH].as_string() {
+            config.set_logger_file_path(p);
+        }
+        if let Some(b) = h[SP_BUFFER_SIZE].as_i64() {
+            config.set_buffer_size(b as usize);
+        }
+        config
+    }
 }
 
 impl Default for SequencePaxosConfig {
@@ -1504,4 +1504,34 @@ pub struct ReconfigurationRequest {
     new_configuration: Vec<u64>,
     /// Optional metadata to be decided with the reconfiguration.
     metadata: Option<Vec<u8>>,
+}
+
+impl ReconfigurationRequest {
+    /// create a `ReconfigurationRequest`.
+    /// # Arguments
+    /// * new_configuration: The pids of the nodes in the new configuration.
+    /// * metadata: Some optional metadata in raw bytes. This could include some auxiliary data for the new configuration to start with.
+    pub fn with(new_configuration: Vec<u64>, metadata: Option<Vec<u8>>) -> Self {
+        Self {
+            new_configuration,
+            metadata,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SequencePaxosConfig;
+    use hocon::HoconLoader;
+
+    #[test]
+    fn hocon_conf_test() {
+        let raw_cfg = HoconLoader::new()
+            .load_file("tests/config/node2.conf")
+            .expect("Failed to load hocon file")
+            .hocon()
+            .unwrap();
+
+        let _ = SequencePaxosConfig::with_hocon(&raw_cfg);
+    }
 }

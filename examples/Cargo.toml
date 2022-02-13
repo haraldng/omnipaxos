@@ -1,0 +1,19 @@
+[package]
+name = "examples"
+version = "0.0.0"
+authors = ["Harald Ng <hng@kth.se>"]
+edition = "2018"
+publish = false
+
+[dev-dependencies]
+omnipaxos_core = { path = "../omnipaxos_core" }
+omnipaxos_runtime = { path = "../omnipaxos_runtime" }
+tokio = { version = "1", features = ["sync", "macros"] }
+
+[[example]]
+name = "core"
+path = "tutorial/core.rs"
+
+[[example]]
+name = "runtime"
+path = "tutorial/runtime.rs"

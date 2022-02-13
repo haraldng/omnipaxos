@@ -4,6 +4,8 @@ use std::{fmt::Debug, marker::PhantomData};
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}
 
+impl<T> Entry for T where T: Clone + Debug {}
+
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
@@ -60,7 +62,7 @@ where
     _Phantom(PhantomData<T>),
 }
 
-/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, simply return `false` in `snapshottable()` and leave the other functions `unimplemented!()`.
+/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, use the unit type `()` as the Snapshot parameter in `SequencePaxos`.
 pub trait Snapshot<T>: Clone
 where
     T: Entry,
@@ -72,7 +74,7 @@ where
     fn merge(&mut self, delta: Self);
 
     /// Whether `T` is snapshottable. If not, simply return `false` and leave the other functions `unimplemented!()`.
-    fn snapshottable() -> bool; // TODO: somehow check if user is using snapshots statically?
+    fn use_snapshots() -> bool;
 
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
@@ -148,8 +150,8 @@ pub mod memory_storage {
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
 
-    /// An in-memory storage implementation for Paxos.
-    #[derive(Clone, Default)]
+    /// An in-memory storage implementation for SequencePaxos.
+    #[derive(Clone)]
     pub struct MemoryStorage<T, S>
     where
         T: Entry,
@@ -258,5 +260,33 @@ pub mod memory_storage {
         fn get_snapshot(&self) -> Option<S> {
             self.snapshot.clone()
         }
+    }
+
+    impl<T: Entry, S: Snapshot<T>> Default for MemoryStorage<T, S> {
+        fn default() -> Self {
+            Self {
+                log: vec![],
+                n_prom: Ballot::default(),
+                acc_round: Ballot::default(),
+                ld: 0,
+                trimmed_idx: 0,
+                snapshot: None,
+                stopsign: None,
+            }
+        }
+    }
+}
+
+impl<T: Entry> Snapshot<T> for () {
+    fn create(_: &[T]) -> Self {
+        unimplemented!()
+    }
+
+    fn merge(&mut self, _: Self) {
+        unimplemented!()
+    }
+
+    fn use_snapshots() -> bool {
+        false
     }
 }
