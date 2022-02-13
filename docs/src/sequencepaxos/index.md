@@ -1,5 +1,4 @@
 # SequencePaxos
-
 Each server in the cluster should have a local instance of the  `SequencePaxos` struct. `SequencePaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `SequencePaxos`.
 
 ## Example: Key-Value store

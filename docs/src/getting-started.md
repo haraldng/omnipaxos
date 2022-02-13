@@ -24,5 +24,14 @@ To do so add the following to your Cargo.toml:
 
 ```toml
 [dependencies]
-omnipaxos = { git = "https://github.com/haraldng/omnipaxos" }
+omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos" }
 ```
+
+or 
+
+```toml
+[dependencies]
+omnipaxos_runtime = { git = "https://github.com/haraldng/omnipaxos" }
+```
+
+Depending on if you want to use just the core structs or the runtime (see [here](./foreword.md)). For the first chapters of this tutorial we will use ``omnipaxos_core``.
