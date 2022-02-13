@@ -170,8 +170,13 @@ The latest version can be found on [crates.io](https://crates.io/crates/omnipaxo
 <!--You can also point cargo to the latest [Github](https://github.com/haraldng/omnipaxos) master version, instead of a release.  -->
 <p>To do so add the following to your Cargo.toml:</p>
 <pre><code class="language-toml">[dependencies]
-omnipaxos = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
+omnipaxos_core = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
 </code></pre>
+<p>or </p>
+<pre><code class="language-toml">[dependencies]
+omnipaxos_runtime = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
+</code></pre>
+<p>Depending on if you want to use just the core structs or the runtime (see <a href="./foreword.html">here</a>). For the first chapters of this tutorial we will use <code>omnipaxos_core</code>.</p>
 
                     </main>
 
