@@ -894,6 +894,7 @@ where
                 .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
             snapshot.merge(delta);
             self.storage.set_snapshot(snapshot);
+            self.storage.trim(self.storage.get_log_len());
             self.storage.set_accepted_round(self.leader_state.n_leader);
             self.storage.set_compacted_idx(compacted_idx);
         }

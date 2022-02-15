@@ -16,14 +16,16 @@ The sources for OmniPaxos can be found on [Github](https://github.com/haraldng/o
 
 All issues and requests related to OmniPaxos should be posted there.
 
+<!---
 ## Bleeding Edge
 
 This tutorial is built off the `master` branch on GitHub and thus tends to be a bit ahead of what is available in a release.
 If you would like to try out new features before they are released, you can add the following to your `Cargo.toml`:
 
 ```toml
-omnipaxos = { git = "https://github.com/haraldng/omnipaxos", branch = "master" }
+omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos", branch = "master" }
 ```
+--->
 
 ### Documentation
 
