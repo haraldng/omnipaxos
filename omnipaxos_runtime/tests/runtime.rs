@@ -1,4 +1,7 @@
-use omnipaxos_core::storage::{memory_storage::MemoryStorage, Entry, Snapshot};
+use omnipaxos_core::{
+    storage::{memory_storage::MemoryStorage, Entry, Snapshot},
+    util::SnapshottedEntry,
+};
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
 use serial_test::serial;
 use std::{collections::HashMap, ops::RangeInclusive, time::Duration};
@@ -72,18 +75,32 @@ fn runtime_test() {
     let entries = runtime
         .block_on(op_handles.get(&leader).unwrap().read_entries(0..))
         .expect("Failed to read expected entries");
-    assert_eq!(
-        entries.len(),
-        num_proposals as usize,
-        "Unexpected read entries {:?}",
-        entries
-    );
-    for (idx, entry) in entries.iter().enumerate() {
-        match entry {
-            ReadEntry::Decided(v) => {
-                assert_eq!(v, &Value(idx as u64))
+
+    if entries.len() == 1 {
+        let snapshot = LatestValue {
+            value: Value(num_proposals - 1),
+        };
+        match entries.first().unwrap() {
+            ReadEntry::Snapshotted(s) => {
+                assert_eq!(s.trimmed_idx, num_proposals);
+                assert_eq!(s.snapshot, snapshot);
             }
-            e => panic!("unexpected read entry: {:?}", e),
+            e => panic!("Unexpected read entry: {:?}. Expected SnapshottedEntry", e),
+        }
+    } else {
+        assert_eq!(
+            entries.len(),
+            num_proposals as usize,
+            "Unexpected read entries {:?}",
+            entries
+        );
+        for (idx, entry) in entries.iter().enumerate() {
+            match entry {
+                ReadEntry::Decided(v) => {
+                    assert_eq!(v, &Value(idx as u64))
+                }
+                e => panic!("unexpected read entry: {:?}", e),
+            }
         }
     }
 }

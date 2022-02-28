@@ -872,7 +872,9 @@ where
     fn set_snapshot(&mut self, compacted_idx: u64, snapshot: S) {
         // TODO use and_then
         self.storage.set_snapshot(snapshot);
-        self.storage.trim(compacted_idx - self.get_compacted_idx());
+        if compacted_idx > 0 {
+            self.storage.trim(compacted_idx - self.get_compacted_idx());
+        }
         self.storage.set_compacted_idx(compacted_idx);
     }
 
@@ -893,10 +895,8 @@ where
                 .get_snapshot()
                 .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
             snapshot.merge(delta);
-            self.storage.set_snapshot(snapshot);
-            self.storage.trim(self.storage.get_log_len());
+            self.set_snapshot(compacted_idx, snapshot);
             self.storage.set_accepted_round(self.leader_state.n_leader);
-            self.storage.set_compacted_idx(compacted_idx);
         }
     }
 
@@ -925,10 +925,7 @@ where
             SyncItem::Snapshot(s) => {
                 match s {
                     SnapshotType::Complete(c) => {
-                        // TODO chain together these calls using Result and and_then
-                        self.storage
-                            .set_compacted_idx(self.leader_state.get_max_promise_meta().la);
-                        self.storage.set_snapshot(c);
+                        self.set_snapshot(self.leader_state.get_max_promise_meta().la, c);
                     }
                     SnapshotType::Delta(d) => {
                         self.merge_snapshot(self.leader_state.get_max_promise_meta().la, d);
@@ -1201,9 +1198,7 @@ where
                 SyncItem::Snapshot(s) => {
                     match s {
                         SnapshotType::Complete(c) => {
-                            // TODO use and_then
-                            self.storage.set_snapshot(c);
-                            self.storage.set_compacted_idx(accsync.sync_idx);
+                            self.set_snapshot(accsync.sync_idx, c);
                         }
                         SnapshotType::Delta(d) => {
                             self.merge_snapshot(accsync.sync_idx, d);
