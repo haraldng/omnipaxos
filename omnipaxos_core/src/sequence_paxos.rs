@@ -141,8 +141,10 @@ where
             }
             None => decided_idx,
         };
-        let snapshot = self.create_snapshot(idx);
-        self.set_snapshot(idx, snapshot);
+        if idx > self.get_compacted_idx() {
+            let snapshot = self.create_snapshot(idx);
+            self.set_snapshot(idx, snapshot);
+        }
         if !local_only {
             // since it is decided, it is ok even for a follower to send this
             for pid in &self.peers {
@@ -869,13 +871,30 @@ where
         }
     }
 
-    fn set_snapshot(&mut self, compacted_idx: u64, snapshot: S) {
-        // TODO use and_then
-        self.storage.set_snapshot(snapshot);
-        if compacted_idx > 0 {
-            self.storage.trim(compacted_idx - self.get_compacted_idx());
+    fn set_snapshot(&mut self, compact_idx: u64, snapshot: S) {
+        let compacted_len = self.get_compacted_idx();
+        if compact_idx > compacted_len {
+            let idx = compact_idx - compacted_len;
+            let log_len = self.storage.get_log_len();
+            if log_len >= idx {
+                // need to check log_len as a node could be lagging in the log but receive a snapshot with higher index.
+                self.storage.trim(idx);
+            } else if log_len < idx {
+                self.storage.trim(log_len)
+            }
+            self.storage.set_snapshot(snapshot);
+            self.storage.set_compacted_idx(compact_idx);
+        } else if compact_idx == 0 {
+            self.storage.set_snapshot(snapshot);
+            self.storage.set_compacted_idx(compact_idx);
+        } else {
+            warn!(
+                self.logger,
+                "Tried to set snapshot at index: {} but current compacted index is: {}",
+                compact_idx,
+                compacted_len
+            );
         }
-        self.storage.set_compacted_idx(compacted_idx);
     }
 
     fn merge_snapshot(&mut self, compacted_idx: u64, delta: S) {
@@ -988,7 +1007,7 @@ where
                     let snapshot = SnapshotType::Delta(S::create(entries));
                     (compacted_idx, snapshot)
                 } else {
-                    let compact_idx = self.storage.get_log_len();
+                    let compact_idx = self.storage.get_log_len() + self.get_compacted_idx();
                     let snapshot = self.create_snapshot(compact_idx);
                     (compact_idx, SnapshotType::Complete(snapshot))
                 };

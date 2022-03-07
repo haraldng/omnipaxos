@@ -251,7 +251,12 @@ fn verify_snapshot(
     exp_compacted_idx: u64,
     exp_snapshot: &LatestValue,
 ) {
-    assert_eq!(read_entries.len(), 1);
+    assert_eq!(
+        read_entries.len(),
+        1,
+        "Expected only snapshot, got: {:?}",
+        read_entries
+    );
     match read_entries.first().unwrap() {
         LogEntry::Snapshotted(s) => {
             assert_eq!(s.trimmed_idx, exp_compacted_idx);
