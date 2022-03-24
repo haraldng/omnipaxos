@@ -4,6 +4,7 @@ use super::{
     storage::{Entry, Snapshot, SnapshotType, StopSign},
 };
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
@@ -52,8 +53,8 @@ where
 {
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
-    pub las: Vec<u64>,
-    pub lds: Vec<Option<u64>>,
+    pub las: Vec<u64>,// length of longest accepted sequence per acceptor
+    pub lds: Vec<Option<u64>>,// length of longest known decided sequence per acceptor
     pub lc: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
     pub max_promise: SyncItem<T, S>,
@@ -210,7 +211,7 @@ where
 
 /// Item used for log synchronization in the Prepare phase.
 #[allow(missing_docs)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SyncItem<T, S>
 where
     T: Entry,

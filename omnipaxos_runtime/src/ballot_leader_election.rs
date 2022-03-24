@@ -61,11 +61,13 @@ impl BLEComp {
     }
 
     fn handle_incoming(&mut self, msg: BLEMessage) {
+        //println!("receive message : {:?}",msg);
         self.ble.handle(msg);
     }
 
     async fn send_outgoing_msgs(&mut self) {
         for msg in self.ble.get_outgoing_msgs() {
+            //println!("try to send {:?}", msg);
             if let Err(_) = self.outgoing.send(msg).await {
                 panic!("Outgoing channel dropped");
             }
@@ -73,6 +75,7 @@ impl BLEComp {
     }
 
     fn tick(&mut self) {
+        //if not None
         if let Some(ballot) = self.ble.tick() {
             self.leader.send(ballot).expect("Failed to trigger leader");
         }
@@ -83,10 +86,18 @@ impl BLEComp {
         let mut tick_interval = time::interval(TICK_INTERVAL);
         loop {
             tokio::select! {
-                biased;
-                Some(in_msg) = self.incoming.recv() => { self.handle_incoming(in_msg); },
-                _ = outgoing_interval.tick() => { self.send_outgoing_msgs().await; },
-                _ = tick_interval.tick() => { self.tick(); },
+                //control polling order
+                //biased;
+                _ = outgoing_interval.tick() => {
+                    self.send_outgoing_msgs().await; 
+                },
+                Some(in_msg) = self.incoming.recv() => {
+                    //println!("receive message : {:?}",in_msg);
+                    self.handle_incoming(in_msg); 
+                },
+                _ = tick_interval.tick() => { 
+                    self.tick(); 
+                },
                 _ = &mut self.stop => break,
                 else => {}
             }

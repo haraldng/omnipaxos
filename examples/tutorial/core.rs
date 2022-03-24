@@ -53,7 +53,8 @@ fn main() {
     sp_config.set_pid(my_pid);
     sp_config.set_peers(my_peers.clone());
 
-    let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
+    //let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
+    let storage = MemoryStorage::<KeyValue, ()>::default();
 
     let mut seq_paxos = SequencePaxos::with(sp_config, storage);
     let write_entry = KeyValue {
@@ -69,6 +70,7 @@ fn main() {
      */
 
     /* Reconfiguration */
+    /*
     // Node 3 seems to have crashed... let's replace it with node 4.
     let new_configuration = vec![1, 2, 4];
     let metadata = None;
@@ -78,8 +80,12 @@ fn main() {
         .expect("Failed to propose reconfiguration");
 
     let idx: u64 = 0; // some index we have read already
-    let decided_entries: Option<Vec<LogEntry<KeyValue, KVSnapshot>>> =
+    // let decided_entries: Option<Vec<LogEntry<KeyValue, KVSnapshot>>> =
+    //     seq_paxos.read_decided_suffix(idx);
+    let decided_entries: Option<Vec<LogEntry<KeyValue, ()>>> =
         seq_paxos.read_decided_suffix(idx);
+
+    //如果de有值
     if let Some(de) = decided_entries {
         for d in de {
             match d {
@@ -97,7 +103,8 @@ fn main() {
                 LogEntry::Snapshotted(s) => {
                     // read an entry that is snapshotted
                     let snapshotted_idx = s.trimmed_idx;
-                    let snapshot: KVSnapshot = s.snapshot;
+                    //let snapshot: KVSnapshot = s.snapshot;
+                    let snapshot: () = s.snapshot;
                     // ...can query the latest value for a key in snapshot
                 }
                 _ => {
@@ -106,7 +113,7 @@ fn main() {
             }
         }
     }
-
+    */
     match seq_paxos.trim(Some(100)) {
         Ok(_) => {
             // later, we can see that the trim succeeded with `seq_paxos.get_compacted_idx()`
@@ -122,7 +129,7 @@ fn main() {
             }
         }
     }
-
+    
     let mut ble_conf = BLEConfig::default();
     let mut ble_config = BLEConfig::default();
     ble_config.set_pid(my_pid);
@@ -136,4 +143,5 @@ fn main() {
         let receiver = out_msg.to;
         // send out_msg to receiver on network layer
     }
+    
 }

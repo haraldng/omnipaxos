@@ -1,22 +1,55 @@
 use std::collections::HashMap;
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt};
+use tokio::io::{BufReader};
+use tokio::net::{TcpStream, TcpListener};
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 
-use omnipaxos_core::ballot_leader_election::messages::BLEMessage;
+use omnipaxos_core::ballot_leader_election::messages::{BLEMessage};
+
 // use std::sync::mpsc::Sender;
 use omnipaxos_core::{
     messages::Message,
-    sequence_paxos::ReconfigurationRequest,
     storage::{memory_storage::MemoryStorage, Snapshot},
 };
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
+////
+use serde::{Deserialize, Serialize};
+use structopt::StructOpt;
 
-#[derive(Clone, Debug)]
+
+/// An wrap structure for network message between different nodes
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Package {
+    pub types: Types,
+    pub msg: Msg,
+}
+
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Types {
+    BLE,
+    SP,
+}
+
+/// An enum for all the different Network message types.
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Msg {
+
+    BLE(BLEMessage),
+    SP(Message<KeyValue, KVSnapshot>),
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KVSnapshot {
     snapshotted: HashMap<String, u64>,
 }
@@ -42,18 +75,27 @@ impl Snapshot<KeyValue> for KVSnapshot {
     }
 }
 
+#[derive(Debug, StructOpt, Serialize, Deserialize)]
+struct Node {
+
+    #[structopt(long)]
+    id: u64,
+    
+    #[structopt(long)]
+    peers: Vec<u64>,
+
+}
+
 #[allow(unused_variables, unused_mut)]
 #[tokio::main]
 async fn main() {
-    let _cluster = vec![1, 2, 3];
-
-    // create the replica 2 in this cluster (other replica instances are created similarly with pid 1 and 3 on other servers)
-    let my_pid = 2;
-    let my_peers = vec![1, 3];
+    //parse parameters form cmd
+    let node = Node::from_args();
 
     let mut node_conf = NodeConfig::default();
-    node_conf.set_pid(my_pid);
-    node_conf.set_peers(my_peers);
+    node_conf.set_pid(node.id);
+    node_conf.set_peers(node.peers);
+    //println!("node_conf : {:?}", node_conf);
 
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
     let mut op: OmniPaxosHandle<KeyValue, KVSnapshot> = OmniPaxosNode::new(node_conf, storage);
@@ -64,85 +106,144 @@ async fn main() {
         ble_handle,
     } = op;
 
+    //These channels are extracted for interacting with sequence-paxos conponent and BLE conponent
     let mut sp_in: mpsc::Sender<Message<KeyValue, KVSnapshot>> = seq_paxos_handle.incoming;
     let mut sp_out: mpsc::Receiver<Message<KeyValue, KVSnapshot>> = seq_paxos_handle.outgoing;
-
     let mut ble_in: mpsc::Sender<BLEMessage> = ble_handle.incoming;
     let mut ble_out: mpsc::Receiver<BLEMessage> = ble_handle.outgoing;
 
+    // Bind own port for listening heartbeat
+    let mut addr = "127.0.0.1:808".to_string();
+    addr += &node.id.to_string();
+    let addr: SocketAddr = addr.parse().unwrap();
+    //println!("my ip and port: {:?}", addr);
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    //send different Package received from network to different handle thread
+    let (mut sp_sender, mut sp_rec) = mpsc::channel::<String>(24);
+    let (mut ble_sender, mut ble_rec) = mpsc::channel::<String>(24);
+
+    // spawn thread to wait for any outgoing messages produced by SequencePaxos
     tokio::spawn(async move {
-        // spawn thread to wait for any outgoing messages produced by SequencePaxos
         while let Some(message) = sp_out.recv().await {
-            let receiver = message.to;
+            //sprintln!("SP message: {:?} is received from SequencePaxos", message);
+            //get destination
+            let mut addr = "127.0.0.1:".to_string();
+            let port = 8080 + message.to;
+            addr += &port.to_string();
+            let addr: SocketAddr = addr.parse().unwrap();
+
+            //wrap messages
+            let wrapped_msg = Package{
+                types: Types::SP,
+                msg: Msg::SP(message),
+            };
+
+            //serialization
+            let serialized = serde_json::to_string(&wrapped_msg).unwrap();
+
             // send Sequence Paxos message over network to the receiver
+            let mut tcp_stream = TcpStream::connect(addr).await.unwrap();
+            let (_, mut w) = tcp_stream.split();
+            w.write_all(serialized.as_bytes()).await.unwrap();
         }
     });
 
+    // spawn thread to wait for any outgoing messages produced by BallotLeaderElection
     tokio::spawn(async move {
-        // spawn thread to wait for any outgoing messages produced by BallotLeaderElection
         while let Some(message) = ble_out.recv().await {
-            let receiver = message.to;
+            //println!("BLE message: {:?} is received from BallotLeaderElection", message);
+            //get destination
+            let mut addr = "127.0.0.1:".to_string();
+            let port = 8080 + message.to;
+            addr += &port.to_string();
+            let addr: SocketAddr = addr.parse().unwrap();
+
+            //wrap messages
+            let wrapped_msg = Package{
+                types: Types::BLE,
+                msg: Msg::BLE(message),
+            };
+            //serialization
+            let serialized = serde_json::to_string(&wrapped_msg).unwrap();
+
             // send BLE message over network to the receiver
+            let mut tcp_stream = TcpStream::connect(addr).await.unwrap();
+            let (_, mut w) = tcp_stream.split();
+            w.write_all(serialized.as_bytes()).await.unwrap();
         }
     });
 
+    // spawn thread to wait for any incoming Sequence Paxos messages from the network layer
     tokio::spawn(async move {
-        // spawn thread to wait for any incoming Sequence Paxos messages from the network layer
         loop {
-            // pass message to SequencePaxos
-            let sp_msg = todo!(); // received message from network layer;
-            sp_in
-                .send(sp_msg)
-                .await
-                .expect("Failed to pass message to SequencePaxos");
+            //pass message to SequencePaxos
+            match sp_rec.recv().await {
+                Some(msg) => {
+                    //println!("SP message: {} is received from network layer", msg);
+                    let sp_msg: Message<KeyValue, KVSnapshot> = serde_json::from_str(&msg).unwrap();
+                    sp_in
+                        .send(sp_msg)
+                        .await
+                        .expect("Failed to pass message to SequencePaxos");
+                }
+                None => {} 
+            }
         }
     });
 
+    // spawn thread to wait for any incoming BLE messages from the network layer
     tokio::spawn(async move {
-        // spawn thread to wait for any incoming BLE messages from the network layer
         loop {
             // pass message to BLE
-            let ble_msg = todo!(); // received message from network layer;
-            ble_in
-                .send(ble_msg)
-                .await
-                .expect("Failed to pass message to BallotLeaderElection");
+            match ble_rec.recv().await {
+                Some(msg) => {
+                    //println!("BLE message: {} is received from network layer", msg);
+                    let deserialized: BLEMessage = serde_json::from_str(&msg).unwrap();
+                    ble_in
+                        .send(deserialized)
+                        .await
+                        .expect("Failed to pass message to BallotLeaderElection");
+                }
+                None => {} 
+            }
         }
     });
 
-    let _leader_pid = omni_paxos.get_current_leader().await;
+    loop {
+        let (mut socket, addr) = listener.accept().await.unwrap();
+        //println!("{} connected", &addr);
+        let sp_sender = sp_sender.clone();
+        let ble_sender = ble_sender.clone();
 
-    let write_entry = KeyValue {
-        key: String::from("a"),
-        value: 123,
-    };
-    omni_paxos
-        .append(write_entry)
-        .await
-        .expect("Failed to append log");
-
-    let _entries: Vec<ReadEntry<KeyValue, KVSnapshot>> = omni_paxos
-        .read_entries(10..)
-        .await
-        .expect("Failed to read entries");
-    let _decided_entries: Vec<ReadEntry<KeyValue, KVSnapshot>> = omni_paxos
-        .read_decided_suffix(0)
-        .await
-        .expect("Failed to read decided suffix");
-
-    let local_only = true;
-    omni_paxos
-        .snapshot(Some(100), local_only)
-        .await
-        .expect("Failed to snapshot");
-
-    /* Reconfiguration */
-    // Node 3 seems to have crashed... let's replace it with node 4.
-    let new_configuration = vec![1, 2, 4];
-    let metadata = None;
-    let rc = ReconfigurationRequest::with(new_configuration, metadata);
-    omni_paxos
-        .reconfigure(rc)
-        .await
-        .expect("Failed to propose reconfiguration");
+        tokio::spawn(async move {
+            let (r, _) = socket.split();
+            let mut reader = BufReader::new(r);
+            let mut buf = String::new();
+            loop {
+                let bytes_read = reader.read_line(&mut buf).await.unwrap();
+                //EOF
+                if bytes_read == 0{
+                    break;
+                }
+                //println!("receive string: {}", buf);
+                let deserialized: Package = serde_json::from_str(&buf).unwrap();
+                //println!("deserialized: {:?}", deserialized);
+                //send to corresponding thread
+                match deserialized.types{
+                    Types::SP => {
+                        //serialization
+                        let serialization = serde_json::to_string(&deserialized.msg).unwrap();
+                        sp_sender.send(serialization).await.expect("Failed to pass message to SP thread");
+                    }
+                    Types::BLE => {
+                        //serialization
+                        let serialization = serde_json::to_string(&deserialized.msg).unwrap();
+                        ble_sender.send(serialization).await.expect("Failed to pass message to BLE thread");
+                    }
+                }
+                buf.clear();
+            }
+        });
+    }
 }

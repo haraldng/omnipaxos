@@ -104,6 +104,7 @@ where
         let (out_sender, out_receiver) = mpsc::channel(buffer_size);
         let (local_sender, local_receiver) = mpsc::channel(buffer_size);
         let (stop_sender, stop_receiver) = oneshot::channel();
+        
 
         let sp_comp = SequencePaxosComp::new(
             sp_conf,
@@ -129,6 +130,7 @@ where
         let (ble_out_sender, ble_out_receiver) = mpsc::channel(buffer_size);
         let (ble_stop_sender, ble_stop_receiver) = oneshot::channel();
 
+        /* create BLEComp */
         let ble_comp = BLEComp::new(
             ble_conf,
             ble_send,

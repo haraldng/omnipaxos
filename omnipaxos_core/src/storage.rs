@@ -1,9 +1,11 @@
 use super::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
+use serde::{Deserialize, Serialize};
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}
 
+///为一个实现了Clone和Debug trait的数据类型Timpl Entry trait?
 impl<T> Entry for T where T: Clone + Debug {}
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -22,7 +24,7 @@ impl StopSignEntry {
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StopSign {
     /// The identifier for the new configuration.
     pub config_id: u32,
@@ -51,7 +53,7 @@ impl PartialEq for StopSign {
 
 /// Snapshot type. A `Complete` snapshot contains all snapshotted data while `Delta` has snapshotted changes since an earlier snapshot.
 #[allow(missing_docs)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SnapshotType<T, S>
 where
     T: Entry,
@@ -158,6 +160,7 @@ pub mod memory_storage {
         S: Snapshot<T>,
     {
         /// Vector which contains all the logged entries in-memory.
+        /// 这是一个储存了类型为Entry的Vector
         log: Vec<T>,
         /// Last promised round.
         n_prom: Ballot,
@@ -168,8 +171,10 @@ pub mod memory_storage {
         /// Garbage collected index.
         trimmed_idx: u64,
         /// Stored snapshot
+        /// Option所以可有可无
         snapshot: Option<S>,
         /// Stored StopSign
+        /// Option所以可有可无
         stopsign: Option<StopSignEntry>,
     }
 
@@ -261,7 +266,7 @@ pub mod memory_storage {
             self.snapshot.clone()
         }
     }
-
+    ///当类型实现了Default trait之后，在初始化时，可以部分初始化，其余部分使用Default::default()
     impl<T: Entry, S: Snapshot<T>> Default for MemoryStorage<T, S> {
         fn default() -> Self {
             Self {

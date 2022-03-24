@@ -9,9 +9,10 @@ use crate::{
 use hocon::Hocon;
 use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 use slog::{debug, info, trace, warn, Logger};
+use serde::{Deserialize, Serialize};
 
 /// Used to define an epoch
-#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
+#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct Ballot {
     /// Ballot number
     pub n: u32,
@@ -75,12 +76,17 @@ impl BallotLeaderElection {
         let peers = config.peers;
         let n = &peers.len() + 1;
         let initial_ballot = match config.initial_leader {
+            //config.initial_leader is not None
+            //将这个leader_ballot设为我们自己的ballot
             Some(leader_ballot) if leader_ballot.pid == pid => leader_ballot,
+            //config.initial_leader None
+            //创建一个我们自己的ballot
             _ => Ballot::with(0, config.priority.unwrap_or_default(), pid),
         };
         let path = config.logger_file_path;
         let l = config.logger.unwrap_or_else(|| {
             let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+            //这里就是创建一个logger,之后可以往terminal或者log文件中输出东西！
             create_logger(s.as_str())
         });
         let hb_delay = config.hb_delay;
@@ -91,6 +97,7 @@ impl BallotLeaderElection {
             peers,
             hb_round: 0,
             ballots: Vec::with_capacity(n),
+            //还记得之前我们处理的initial_ballot吗？
             current_ballot: initial_ballot,
             majority_connected: true,
             leader: config.initial_leader,
@@ -135,6 +142,9 @@ impl BallotLeaderElection {
     /// # Arguments
     /// * `m` - the message to be handled.
     pub fn handle(&mut self, m: BLEMessage) {
+        // println!("from : {:?}",m.from);
+        // println!("to : {:?}",m.to);
+        // println!("msg : {:?}",m.msg);
         match m.msg {
             HeartbeatMsg::Request(req) => self.handle_request(m.from, req),
             HeartbeatMsg::Reply(rep) => self.handle_reply(rep),
@@ -172,14 +182,17 @@ impl BallotLeaderElection {
 
         if top_ballot < self.leader.unwrap_or_default() {
             // did not get HB from leader
+            //使自己的n比原来leader的n大1,使自己能够参与竞选
             self.current_ballot.n = self.leader.unwrap_or_default().n + 1;
+            //没有找出leader
             self.leader = None;
+            //返回None
             None
         } else if self.leader != Some(top_ballot) {
             // got a new leader with greater ballot
             self.leader = Some(top_ballot);
             self.initial_delay = None;
-            debug!(
+            info!(
                 self.logger,
                 "BLE {}, New Leader elected: {:?}", self.pid, top_ballot
             );
@@ -204,23 +217,27 @@ impl BallotLeaderElection {
             let hb_request = HeartbeatRequest::with(self.hb_round);
 
             self.outgoing.push(BLEMessage::with(
-                *peer,
                 self.pid,
+                *peer,
                 HeartbeatMsg::Request(hb_request),
             ));
         }
     }
-
+    //心跳
     fn hb_timeout(&mut self) -> Option<Ballot> {
+        println!("Heartbeat timeout round: {}", self.hb_round);
         trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
+        //如果现在还能数量收到大于majority的心跳包
         let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
             debug!(
                 self.logger,
                 "Received a majority of heartbeats {:?}", self.ballots
             );
+            //进行check_leader前把自己也放进去
             self.ballots
                 .push((self.current_ballot, self.majority_connected));
             self.check_leader()
+        //如果不能收到数量大于majority的心跳包了
         } else {
             warn!(
                 self.logger,
@@ -236,10 +253,14 @@ impl BallotLeaderElection {
     }
 
     fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
+        //println!("Heartbeat request from {}", from);
         trace!(self.logger, "Heartbeat request from {}", from);
         let hb_reply =
             HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
-
+        
+    
+        //println!("HeartbeatReply :  {:?}", hb_reply);   
+        
         self.outgoing.push(BLEMessage::with(
             self.pid,
             from,
@@ -265,17 +286,19 @@ impl BallotLeaderElection {
 /// The different messages BLE uses to communicate with other replicas.
 pub mod messages {
     use crate::ballot_leader_election::Ballot;
+    use serde::{Deserialize, Serialize};
 
     /// An enum for all the different BLE message types.
     #[allow(missing_docs)]
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub enum HeartbeatMsg {
+        ///HeartbeatRequest类型的
         Request(HeartbeatRequest),
         Reply(HeartbeatReply),
     }
 
     /// Requests a reply from all the other replicas.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct HeartbeatRequest {
         /// Number of the current round.
         pub round: u32,
@@ -291,7 +314,7 @@ pub mod messages {
     }
 
     /// Replies
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct HeartbeatReply {
         /// Number of the current round.
         pub round: u32,
@@ -317,7 +340,7 @@ pub mod messages {
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct BLEMessage {
         /// Sender of `msg`.
         pub from: u64,

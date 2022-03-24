@@ -57,6 +57,7 @@ where
     fn handle_local(&mut self, r: Request<T, S>) {
         match r {
             Request::Append(entry, sender) => {
+                //println!("{:?}", entry);
                 sender
                     .send(self.seq_paxos.append(entry))
                     .expect("Failed to reply append request");
@@ -139,15 +140,19 @@ where
         let mut interval = time::interval(Duration::from_millis(100)); // TODO
         loop {
             tokio::select! {
-                biased; // TODO
-
+                //biased; // TODO
+                //周期性的发送outgoing massages
                 _ = interval.tick() => { self.send_outgoing_msgs().await; },
+                //wait for a change notification
                 Ok(_) = self.ble.changed() => {
+                    //return the most recently sent value
                     let ballot = *self.ble.borrow();
                     self.handle_leader_change(ballot);
                 },
                 Some(in_msg) = self.incoming.recv() => { self.handle_incoming(in_msg); },
-                Some(local) = self.local_requests.recv() => { self.handle_local(local); },
+                Some(local) = self.local_requests.recv() => { 
+                    self.handle_local(local); 
+                },
                 _ = &mut self.stop => { break; },
                 else => { }
             }

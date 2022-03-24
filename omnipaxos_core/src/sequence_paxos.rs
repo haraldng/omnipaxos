@@ -57,6 +57,7 @@ where
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
+        //reconfiguration的时候可以跳过prepare phase
         let (state, leader, n_leader, lds) = match config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
@@ -75,7 +76,11 @@ where
             }
             None => {
                 let state = (Role::Follower, Phase::None);
+                //state: (Follower, None)
+                //println!("state: {:?}", Ballot::default());
                 let lds = None;
+                //返回state, leader的pid, Ballot, lds 
+                //default : Ballot { n: 0, priority: 0, pid: 0 }
                 (state, 0, Ballot::default(), lds)
             }
         };
@@ -635,6 +640,7 @@ where
             let msg = Message::with(self.pid, self.leader, pf);
             self.outgoing.push(msg);
         } else {
+            println!("----no leader!");
             self.pending_proposals.append(&mut entries);
         }
     }
