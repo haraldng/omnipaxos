@@ -21,3 +21,7 @@ path = "tutorial/core.rs"
 [[example]]
 name = "runtime"
 path = "tutorial/runtime.rs"
+
+[[example]]
+name = "client"
+path = "tutorial/client.rs"

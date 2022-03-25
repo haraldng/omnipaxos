@@ -1,105 +1,19 @@
-use std::collections::HashMap;
-use tokio::io::{AsyncWriteExt, AsyncBufReadExt};
-use tokio::io::{BufReader};
-use tokio::net::{TcpStream, TcpListener};
 use std::net::SocketAddr;
+
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::net::{TcpStream, TcpListener};
 use tokio::sync::mpsc;
 
-use omnipaxos_core::ballot_leader_election::messages::{BLEMessage};
-
-// use std::sync::mpsc::Sender;
 use omnipaxos_core::{
+    ballot_leader_election::messages::{BLEMessage},
     messages::Message,
-    storage::{memory_storage::MemoryStorage, Snapshot},
-};
+    storage::{memory_storage::MemoryStorage, Snapshot},};
+
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
-////
-use serde::{Deserialize, Serialize};
+
+mod messages;
+use crate::messages::*;
 use structopt::StructOpt;
-
-
-/// An wrap structure for network message between different nodes
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Package {
-    pub types: Types,
-    pub msg: Msg,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Types {
-    BLE,
-    SP,
-    CMD,
-}
-
-/// An enum for all the different Network message types.
-#[allow(missing_docs)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Msg {
-
-    BLE(BLEMessage),
-    SP(Message<KeyValue, KVSnapshot>),
-    CMD(CMDMessage),
-}
-
-#[allow(missing_docs)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CMDMessage {
-    pub operation: Operaiton,
-    pub msg: KeyValue,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Operaiton {
-
-    Read(String),
-    Write(String),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KeyValue {
-    pub key: String,
-    pub value: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct KVSnapshot {
-    snapshotted: HashMap<String, u64>,
-}
-
-impl Snapshot<KeyValue> for KVSnapshot {
-    fn create(entries: &[KeyValue]) -> Self {
-        let mut snapshotted = HashMap::new();
-        for e in entries {
-            let KeyValue { key, value } = e;
-            snapshotted.insert(key.clone(), *value);
-        }
-        Self { snapshotted }
-    }
-
-    fn merge(&mut self, delta: Self) {
-        for (k, v) in delta.snapshotted {
-            self.snapshotted.insert(k, v);
-        }
-    }
-
-    fn use_snapshots() -> bool {
-        true
-    }
-}
-
-#[derive(Debug, StructOpt, Serialize, Deserialize)]
-struct Node {
-
-    #[structopt(long)]
-    id: u64,
-    
-    #[structopt(long)]
-    peers: Vec<u64>,
-
-}
 
 const CLIENT: &str = "127.0.0.1:8000";
 
@@ -132,8 +46,9 @@ async fn main() {
     let mut ble_out: mpsc::Receiver<BLEMessage> = ble_handle.outgoing;
 
     // Bind own port for listening heartbeat
-    let mut addr = "127.0.0.1:808".to_string();
-    addr += &node.id.to_string();
+    let mut addr = "127.0.0.1:".to_string();
+    let port = 8080 + node.id;
+    addr += &port.to_string();
     let addr: SocketAddr = addr.parse().unwrap();
     //println!("my ip and port: {:?}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -243,6 +158,11 @@ async fn main() {
                 Some(msg) => {
                     println!("CMD message: {} is received from network layer", msg);
                     //let deserialized: CMDMessage = serde_json::from_str(&msg).unwrap();
+
+                    if let Ok(mut tcp_stream) = TcpStream::connect(CLIENT).await{
+                        let (_, mut w) = tcp_stream.split();
+                        //w.write_all(serialized.as_bytes()).await.unwrap();
+                    }
                     
                 }
                 None => {} 
