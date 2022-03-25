@@ -6,8 +6,8 @@ edition = "2018"
 publish = false
 
 [dev-dependencies]
-omnipaxos_core = { path = "../omnipaxos_core" }
-omnipaxos_runtime = { path = "../omnipaxos_runtime" }
+omnipaxos_core = { git = "https://github.com/PeteCui/omnipaxos" }
+omnipaxos_runtime = { git = "https://github.com/PeteCui/omnipaxos" }
 tokio = { version = "1", features = ["sync", "macros"] }
 bytes = "1"
 structopt = "0.3"

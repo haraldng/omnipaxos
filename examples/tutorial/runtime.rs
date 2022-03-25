@@ -25,11 +25,11 @@ pub struct Package {
     pub msg: Msg,
 }
 
-#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Types {
     BLE,
     SP,
+    CMD,
 }
 
 /// An enum for all the different Network message types.
@@ -40,8 +40,23 @@ pub enum Msg {
 
     BLE(BLEMessage),
     SP(Message<KeyValue, KVSnapshot>),
+    CMD(CMDMessage),
 }
 
+#[allow(missing_docs)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CMDMessage {
+    pub operation: Operaiton,
+    pub msg: KeyValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Operaiton {
+
+    Read(String),
+    Write(String),
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyValue {
@@ -86,9 +101,13 @@ struct Node {
 
 }
 
+const CLIENT: &str = "127.0.0.1:8000";
+
 #[allow(unused_variables, unused_mut)]
 #[tokio::main]
 async fn main() {
+    //configuration
+    
     //parse parameters form cmd
     let node = Node::from_args();
 
@@ -122,7 +141,10 @@ async fn main() {
     //send different Package received from network to different handle thread
     let (mut sp_sender, mut sp_rec) = mpsc::channel::<String>(24);
     let (mut ble_sender, mut ble_rec) = mpsc::channel::<String>(24);
+    let (mut cmd_sender, mut cmd_rec) = mpsc::channel::<String>(24);
 
+    //boot threads
+    
     // spawn thread to wait for any outgoing messages produced by SequencePaxos
     tokio::spawn(async move {
         while let Some(message) = sp_out.recv().await {
@@ -143,9 +165,11 @@ async fn main() {
             let serialized = serde_json::to_string(&wrapped_msg).unwrap();
 
             // send Sequence Paxos message over network to the receiver
-            let mut tcp_stream = TcpStream::connect(addr).await.unwrap();
-            let (_, mut w) = tcp_stream.split();
-            w.write_all(serialized.as_bytes()).await.unwrap();
+            if let Ok(mut tcp_stream) = TcpStream::connect(addr).await{
+                let (_, mut w) = tcp_stream.split();
+                w.write_all(serialized.as_bytes()).await.unwrap();
+            }
+            
         }
     });
 
@@ -168,13 +192,14 @@ async fn main() {
             let serialized = serde_json::to_string(&wrapped_msg).unwrap();
 
             // send BLE message over network to the receiver
-            let mut tcp_stream = TcpStream::connect(addr).await.unwrap();
-            let (_, mut w) = tcp_stream.split();
-            w.write_all(serialized.as_bytes()).await.unwrap();
+            if let Ok(mut tcp_stream) = TcpStream::connect(addr).await{
+                let (_, mut w) = tcp_stream.split();
+                w.write_all(serialized.as_bytes()).await.unwrap();
+            }
         }
     });
 
-    // spawn thread to wait for any incoming Sequence Paxos messages from the network layer
+    // spawn thread to handle incoming Sequence Paxos messages from the network layer
     tokio::spawn(async move {
         loop {
             //pass message to SequencePaxos
@@ -192,7 +217,7 @@ async fn main() {
         }
     });
 
-    // spawn thread to wait for any incoming BLE messages from the network layer
+    // spawn thread to handle incoming BLE messages from the network layer
     tokio::spawn(async move {
         loop {
             // pass message to BLE
@@ -210,11 +235,28 @@ async fn main() {
         }
     });
 
+    // spawn thread to handle incoming CMD messages from the network layer
+    tokio::spawn(async move {
+        loop {
+            // pass message to CMD
+            match cmd_rec.recv().await {
+                Some(msg) => {
+                    println!("CMD message: {} is received from network layer", msg);
+                    //let deserialized: CMDMessage = serde_json::from_str(&msg).unwrap();
+                    
+                }
+                None => {} 
+            }
+        }
+    });
+    
+    // listen to the incoming network message and distribute them into different handle threads
     loop {
         let (mut socket, addr) = listener.accept().await.unwrap();
         //println!("{} connected", &addr);
         let sp_sender = sp_sender.clone();
         let ble_sender = ble_sender.clone();
+        let cmd_sender = cmd_sender.clone();
 
         tokio::spawn(async move {
             let (r, _) = socket.split();
@@ -240,6 +282,11 @@ async fn main() {
                         //serialization
                         let serialization = serde_json::to_string(&deserialized.msg).unwrap();
                         ble_sender.send(serialization).await.expect("Failed to pass message to BLE thread");
+                    }
+                    Types::CMD =>{
+                        //serialization
+                        let serialization = serde_json::to_string(&deserialized.msg).unwrap();
+                        cmd_sender.send(serialization).await.expect("Failed to pass message to CMD thread");
                     }
                 }
                 buf.clear();
