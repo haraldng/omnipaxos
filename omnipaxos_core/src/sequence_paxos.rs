@@ -305,6 +305,7 @@ where
             Bound::Included(i) => *i + 1,
             Bound::Excluded(e) => *e,
             Bound::Unbounded => {
+                //gc log length + current log length
                 let idx = self.storage.get_compacted_idx() + self.storage.get_log_len();
                 match self.storage.get_stopsign() {
                     Some(ss) if ss.decided => idx + 1,
@@ -313,10 +314,12 @@ where
             }
         };
         let compacted_idx = self.get_compacted_idx();
+        //如果要读到的index < compacted_idx, 返回一个单个的LogEntry
         if to_idx < compacted_idx {
             Some(vec![self.create_compacted_entry(compacted_idx)])
         } else {
             let log_len = self.storage.get_log_len();
+            //如果from index < compacted_idx
             let from_type = if from_idx < compacted_idx {
                 IndexEntry::Compacted
             } else if from_idx - compacted_idx < log_len {
@@ -1065,6 +1068,8 @@ where
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state.set_accepted_idx(from, accepted.la);
+            println!("accepted.la: {}", accepted.la);
+            println!("self.leader_state.get_chosen_idx: {}", self.leader_state.get_chosen_idx());
             if accepted.la > self.leader_state.get_chosen_idx()
                 && self.leader_state.is_chosen(accepted.la)
             {

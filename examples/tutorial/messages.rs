@@ -40,10 +40,10 @@ pub(crate) struct CMDMessage {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
 pub(crate) enum Operaiton {
     Read,
     Write,
+    Snap,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ pub(crate) struct KeyValue {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct KVSnapshot {
-    snapshotted: HashMap<String, u64>,
+    pub snapshotted: HashMap<String, u64>,
 }
 
 impl Snapshot<KeyValue> for KVSnapshot {

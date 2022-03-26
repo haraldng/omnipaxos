@@ -1,5 +1,7 @@
+use std::fmt::Write;
 use std::net::SocketAddr;
 
+use omnipaxos_core::storage;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::net::{TcpStream, TcpListener};
 use tokio::sync::mpsc;
@@ -9,7 +11,7 @@ use omnipaxos_core::{
     messages::Message,
     storage::{memory_storage::MemoryStorage, Snapshot},};
 
-use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
+use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry,ReadEntry::Decided, ReadEntry::Snapshotted};
 
 mod messages;
 use crate::messages::*;
@@ -21,7 +23,6 @@ const CLIENT: &str = "127.0.0.1:8000";
 #[tokio::main]
 async fn main() {
     //configuration
-    
     //parse parameters form cmd
     let node = Node::from_args();
 
@@ -63,7 +64,9 @@ async fn main() {
     // spawn thread to wait for any outgoing messages produced by SequencePaxos
     tokio::spawn(async move {
         while let Some(message) = sp_out.recv().await {
-            //sprintln!("SP message: {:?} is received from SequencePaxos", message);
+            println!(" ");
+            println!("SP message: {:?} is received from SequencePaxos", message);
+            println!(" ");
             //get destination
             let mut addr = "127.0.0.1:".to_string();
             let port = 8080 + message.to;
@@ -122,6 +125,11 @@ async fn main() {
                 Some(msg) => {
                     //println!("SP message: {} is received from network layer", msg);
                     let sp_msg: Message<KeyValue, KVSnapshot> = serde_json::from_str(&msg).unwrap();
+
+                    println!(" ");
+                    println!("SP message: {:?} is received from Network", sp_msg);
+                    println!(" ");
+
                     sp_in
                         .send(sp_msg)
                         .await
@@ -156,9 +164,54 @@ async fn main() {
             // pass message to CMD
             match cmd_rec.recv().await {
                 Some(msg) => {
-                    println!("CMD message: {} is received from network layer", msg);
-                    //let deserialized: CMDMessage = serde_json::from_str(&msg).unwrap();
+                    //sprintln!("CMD message: {} is received from network layer", msg);
+                    let deserialized: CMDMessage = serde_json::from_str(&msg).unwrap();
+                    match deserialized.operation{
+                        Operaiton::Read =>{
+                            //get the key
+                            let key = deserialized.kv.key;
+                            if let Some(entries) = omni_paxos.read_entries(0..).await{
+                                if let Some(v) = fetch_value(&key, entries.to_vec()).await{
+                                    let mut prefix = "This value is :".to_string();
+                                    let mut value = v.to_string();
+                                    prefix += &value;
+                                    feedback_to_client(&prefix).await;
+                                }else {
+                                    feedback_to_client("The value is none").await;
+                                }
+                            }else {
+                                //println!("This key does not exist");
+                                feedback_to_client("The value is none").await;
+                            }             
+                        }
 
+                        Operaiton::Write =>{
+                            //get the key value
+                            let write_entry = deserialized.kv;
+                            //append
+                            if let Ok(_)= omni_paxos
+                                .append(write_entry)
+                                .await{
+                                    feedback_to_client("Successfully to append log").await;
+                                }else{
+                                    feedback_to_client("Failed to append log").await;
+                                }
+                        }
+                        Operaiton::Snap =>{
+                            //something will cause omni paxos wrong
+                            if omni_paxos.get_compacted_idx().await == omni_paxos.get_decided_idx().await{
+                                feedback_to_client("Successfully to snapshot").await;
+                                break;
+                            }
+                            if let Ok(_) = omni_paxos
+                                .snapshot(None, false)
+                                .await{
+                                    feedback_to_client("Successfully to snapshot").await;
+                                }else{
+                                    feedback_to_client("Failed to snapshot").await;
+                                }
+                        }
+                    }
                     if let Ok(mut tcp_stream) = TcpStream::connect(CLIENT).await{
                         let (_, mut w) = tcp_stream.split();
                         //w.write_all(serialized.as_bytes()).await.unwrap();
@@ -173,7 +226,6 @@ async fn main() {
     // listen to the incoming network message and distribute them into different handle threads
     loop {
         let (mut socket, addr) = listener.accept().await.unwrap();
-        //println!("{} connected", &addr);
         let sp_sender = sp_sender.clone();
         let ble_sender = ble_sender.clone();
         let cmd_sender = cmd_sender.clone();
@@ -213,4 +265,49 @@ async fn main() {
             }
         });
     }
+}
+
+//feedback to the client
+async fn feedback_to_client(str: &str){
+    //println!("res: {}", str);
+    if let Ok(mut tcp_stream) = TcpStream::connect(CLIENT).await{
+        let (_, mut w) = tcp_stream.split();
+        w.write_all(str.as_bytes()).await.unwrap();
+    }else {
+        println!("Network failure");
+    }
+}
+
+//fetch value by key
+async fn fetch_value(key: &str, vec: Vec<ReadEntry<KeyValue, KVSnapshot>>) -> Option<u64>{
+    print!("vec {:?}", vec);
+    let mut index = vec.len()-1;
+    let mut value = None;
+    let vec = vec.clone();
+    loop {
+        match vec.get(index).unwrap(){
+            Decided(kv)=> {
+                println!("Now kv {:?}", kv);
+                if kv.key == key {
+                    value = Some(kv.value);
+                    break;
+                }
+            }
+            Snapshotted(snapshotted_entry)=>{
+                let hashmap = snapshotted_entry.snapshot.snapshotted.clone();
+                println!("Now snapshot {:?}", hashmap);
+                if let Some(v) = hashmap.get(key){
+                    value = Some(*v);
+                }
+            }
+            _=>{
+                
+            }
+        }
+        if index == 0 || value!=None{
+            break;
+        }
+        index-=1;
+    }
+    value
 }

@@ -225,7 +225,7 @@ impl BallotLeaderElection {
     }
     //心跳
     fn hb_timeout(&mut self) -> Option<Ballot> {
-        println!("Heartbeat timeout round: {}", self.hb_round);
+        //println!("Heartbeat timeout round: {}", self.hb_round);
         trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
         //如果现在还能数量收到大于majority的心跳包
         let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
@@ -272,6 +272,8 @@ impl BallotLeaderElection {
         if rep.round == self.hb_round {
             self.ballots.push((rep.ballot, rep.majority_connected));
         } else {
+            println!("rep.round: {}", rep.round);
+            println!("self.hb_round: {}", self.hb_round);
             warn!(
                 self.logger,
                 "Got late response, round {}, current delay {}, ballot {:?}",
