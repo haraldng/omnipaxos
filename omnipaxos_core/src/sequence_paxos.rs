@@ -263,9 +263,9 @@ where
         } else {
             let suffix_idx = idx - compacted_idx;
             let log_len = self.storage.get_log_len();
-            if suffix_idx >= log_len {
+            if suffix_idx > log_len {
                 match self.storage.get_stopsign() {
-                    Some(ss) if ss.decided && suffix_idx == log_len => {
+                    Some(ss) if ss.decided => {
                         Some(LogEntry::StopSign(ss.stopsign))
                     }
                     _ => None,
