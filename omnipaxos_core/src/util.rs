@@ -58,7 +58,6 @@ where
     pub max_promise_meta: PromiseMetaData,
     pub max_promise: SyncItem<T, S>,
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
-    pub latest_decide_meta: Vec<Option<(Ballot, usize)>>,
     pub accepted_stopsign: Vec<bool>,
     pub max_pid: usize,
     pub majority: usize,
@@ -84,7 +83,6 @@ where
             max_promise_meta: PromiseMetaData::default(),
             max_promise: SyncItem::None,
             batch_accept_meta: vec![None; max_pid],
-            latest_decide_meta: vec![None; max_pid],
             accepted_stopsign: vec![false; max_pid],
             max_pid,
             majority,
@@ -140,10 +138,6 @@ where
         self.batch_accept_meta = vec![None; self.max_pid];
     }
 
-    pub fn reset_latest_decided_meta(&mut self) {
-        self.latest_decide_meta = vec![None; self.max_pid];
-    }
-
     pub fn set_chosen_idx(&mut self, idx: u64) {
         self.lc = idx;
     }
@@ -166,24 +160,12 @@ where
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn set_latest_decide_meta(&mut self, pid: u64, idx: Option<usize>) {
-        let meta = idx.map(|x| (self.n_leader, x));
-        self.latest_decide_meta[Self::pid_to_idx(pid)] = meta;
-    }
-
     pub fn set_accepted_idx(&mut self, pid: u64, idx: u64) {
         self.las[Self::pid_to_idx(pid)] = idx;
     }
 
     pub fn get_batch_accept_meta(&self, pid: u64) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
-            .get(Self::pid_to_idx(pid))
-            .unwrap()
-            .as_ref()
-            .copied()
-    }
-    pub fn get_latest_decide_meta(&self, pid: u64) -> Option<(Ballot, usize)> {
-        self.latest_decide_meta
             .get(Self::pid_to_idx(pid))
             .unwrap()
             .as_ref()

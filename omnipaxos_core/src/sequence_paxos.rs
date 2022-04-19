@@ -244,10 +244,6 @@ where
         {
             self.leader_state.reset_batch_accept_meta();
         }
-        #[cfg(feature = "latest_decide")]
-        {
-            self.leader_state.reset_latest_decided_meta();
-        }
         #[cfg(feature = "latest_accepted")]
         {
             self.latest_accepted_meta = None;
@@ -485,15 +481,22 @@ where
                 (Role::Leader, Phase::Accept) => {
                     if !self.stopped() {
                         let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
-                        self.storage
-                            .set_stopsign(StopSignEntry::with(ss.clone(), false));
-                        self.leader_state.set_accepted_stopsign(self.pid);
+                        self.accept_stopsign(ss.clone());
                         self.send_accept_stopsign(ss);
                     } else {
                         return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
                 }
-                (Role::Leader, Phase::FirstAccept) => todo!("Remove entry from first accept"),
+                (Role::Leader, Phase::FirstAccept) => {
+                    if !self.stopped() {
+                        self.send_first_accept();
+                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                        self.accept_stopsign(ss.clone());
+                        self.send_accept_stopsign(ss);
+                    } else {
+                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                    }
+                }
                 _ => {
                     let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                     self.forward_stopsign(ss);
@@ -508,6 +511,13 @@ where
         for pid in self.leader_state.get_promised_followers() {
             self.outgoing
                 .push(Message::with(self.pid, pid, acc_ss.clone()));
+        }
+    }
+
+    fn accept_stopsign(&mut self, ss: StopSign) {
+        self.storage.set_stopsign(StopSignEntry::with(ss, false));
+        if self.state.0 == Role::Leader {
+            self.leader_state.set_accepted_stopsign(self.pid);
         }
     }
 
@@ -557,7 +567,10 @@ where
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.send_accept(entry),
-            (Role::Leader, Phase::FirstAccept) => self.send_first_accept(entry),
+            (Role::Leader, Phase::FirstAccept) => {
+                self.send_first_accept();
+                self.send_accept(entry);
+            }
             _ => self.forward_proposals(vec![entry]),
         }
     }
@@ -612,10 +625,6 @@ where
             #[cfg(feature = "batch_accept")]
             {
                 self.leader_state.set_batch_accept_meta(from, None);
-            }
-            #[cfg(feature = "latest_decide")]
-            {
-                self.leader_state.set_latest_decide_meta(from, None);
             }
             let ld = self.storage.get_decided_idx();
             let n_accepted = self.storage.get_accepted_round();
@@ -689,9 +698,8 @@ where
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.send_batch_accept(entries),
                 (Role::Leader, Phase::FirstAccept) => {
-                    let rest = entries.split_off(1);
-                    self.send_first_accept(entries.pop().unwrap());
-                    self.send_batch_accept(rest);
+                    self.send_first_accept();
+                    self.send_batch_accept(entries);
                 }
                 _ => self.forward_proposals(entries),
             }
@@ -708,15 +716,16 @@ where
                 }
                 (Role::Leader, Phase::Accept) => self.send_accept_stopsign(ss),
                 (Role::Leader, Phase::FirstAccept) => {
-                    todo!()
+                    self.send_first_accept();
+                    self.send_accept_stopsign(ss);
                 }
                 _ => self.forward_stopsign(ss),
             }
         }
     }
 
-    fn send_first_accept(&mut self, entry: T) {
-        let f = FirstAccept::with(self.leader_state.n_leader, vec![entry.clone()]);
+    fn send_first_accept(&mut self) {
+        let f = FirstAccept::with(self.leader_state.n_leader);
         for pid in self.leader_state.get_promised_followers() {
             self.outgoing.push(Message::with(
                 self.pid,
@@ -724,12 +733,24 @@ where
                 PaxosMsg::FirstAccept(f.clone()),
             ));
         }
-        let la = self.storage.append_entry(entry);
-        self.leader_state.set_accepted_idx(self.pid, la);
         self.state.1 = Phase::Accept;
     }
 
+    fn send_accept_and_cache(&mut self, to: u64, entries: Vec<T>) {
+        let acc = AcceptDecide::with(
+            self.leader_state.n_leader,
+            self.leader_state.get_chosen_idx(),
+            entries,
+        );
+        let cache_idx = self.outgoing.len();
+        self.outgoing
+            .push(Message::with(self.pid, to, PaxosMsg::AcceptDecide(acc)));
+        self.leader_state.set_batch_accept_meta(to, Some(cache_idx));
+    }
+
     fn send_accept(&mut self, entry: T) {
+        let la = self.storage.append_entry(entry.clone());
+        self.leader_state.set_accepted_idx(self.pid, la);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 match self.leader_state.get_batch_accept_meta(pid) {
@@ -737,30 +758,10 @@ where
                         let Message { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
                         match msg {
                             PaxosMsg::AcceptDecide(a) => a.entries.push(entry.clone()),
-                            PaxosMsg::FirstAccept(f) => f.entries.push(entry.clone()),
-                            _ => panic!("Not Accept or AcceptSync when batching"),
+                            _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
                         }
                     }
-                    _ => {
-                        let acc = AcceptDecide::with(
-                            self.leader_state.n_leader,
-                            self.leader_state.get_chosen_idx(),
-                            vec![entry.clone()],
-                        );
-                        let cache_idx = self.outgoing.len();
-                        self.outgoing.push(Message::with(
-                            self.pid,
-                            pid,
-                            PaxosMsg::AcceptDecide(acc),
-                        ));
-                        self.leader_state
-                            .set_batch_accept_meta(pid, Some(cache_idx));
-                        #[cfg(feature = "latest_decide")]
-                        {
-                            self.leader_state
-                                .set_latest_decide_meta(pid, Some(cache_idx));
-                        }
-                    }
+                    _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
                 }
             } else {
                 let acc = AcceptDecide::with(
@@ -772,11 +773,11 @@ where
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
             }
         }
-        let la = self.storage.append_entry(entry);
-        self.leader_state.set_accepted_idx(self.pid, la);
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
+        let la = self.storage.append_entries(entries.clone());
+        self.leader_state.set_accepted_idx(self.pid, la);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 match self.leader_state.get_batch_accept_meta(pid) {
@@ -784,30 +785,10 @@ where
                         let Message { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
                         match msg {
                             PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
-                            PaxosMsg::FirstAccept(f) => f.entries.append(entries.clone().as_mut()),
-                            _ => panic!("Not Accept or AcceptSync when batching"),
+                            _ => self.send_accept_and_cache(pid, entries.clone()),
                         }
                     }
-                    _ => {
-                        let acc = AcceptDecide::with(
-                            self.leader_state.n_leader,
-                            self.leader_state.get_chosen_idx(),
-                            entries.clone(),
-                        );
-                        let cache_idx = self.outgoing.len();
-                        self.outgoing.push(Message::with(
-                            self.pid,
-                            pid,
-                            PaxosMsg::AcceptDecide(acc),
-                        ));
-                        self.leader_state
-                            .set_batch_accept_meta(pid, Some(cache_idx));
-                        #[cfg(feature = "latest_decide")]
-                        {
-                            self.leader_state
-                                .set_latest_decide_meta(pid, Some(cache_idx));
-                        }
-                    }
+                    _ => self.send_accept_and_cache(pid, entries.clone()),
                 }
             } else {
                 let acc = AcceptDecide::with(
@@ -819,8 +800,6 @@ where
                     .push(Message::with(self.pid, pid, PaxosMsg::AcceptDecide(acc)));
             }
         }
-        let la = self.storage.append_entries(entries);
-        self.leader_state.set_accepted_idx(self.pid, la);
     }
 
     fn create_pending_proposals_snapshot(&mut self) -> (u64, S) {
@@ -899,8 +878,7 @@ where
 
     fn adopt_pending_stopsign(&mut self) {
         if let Some(ss) = self.pending_stopsign.take() {
-            self.storage.set_stopsign(StopSignEntry::with(ss, false));
-            self.leader_state.set_accepted_stopsign(self.pid);
+            self.accept_stopsign(ss);
         }
     }
 
@@ -975,8 +953,7 @@ where
                     self.storage.append_on_prefix(ld, sfx);
                 }
                 if let Some(ss) = max_stopsign {
-                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
-                    self.leader_state.set_accepted_stopsign(self.pid);
+                    self.accept_stopsign(ss);
                 } else {
                     self.append_pending_proposals();
                     self.adopt_pending_stopsign();
@@ -994,8 +971,7 @@ where
                     _ => unimplemented!(),
                 }
                 if let Some(ss) = max_stopsign {
-                    self.storage.set_stopsign(StopSignEntry::with(ss, false));
-                    self.leader_state.set_accepted_stopsign(self.pid);
+                    self.accept_stopsign(ss);
                 } else {
                     self.merge_pending_proposals_with_snapshot();
                     self.adopt_pending_stopsign();
@@ -1109,29 +1085,26 @@ where
                     self.leader_state.n_leader,
                     self.leader_state.get_chosen_idx(),
                 );
-                if cfg!(feature = "latest_decide") {
-                    let promised_followers = self.leader_state.get_promised_followers();
-                    for pid in promised_followers {
-                        match self.leader_state.get_latest_decide_meta(pid) {
-                            Some((n, outgoing_dec_idx)) if n == self.leader_state.n_leader => {
+                for pid in self.leader_state.get_promised_followers() {
+                    if cfg!(feature = "batch_accept") {
+                        match self.leader_state.get_batch_accept_meta(pid) {
+                            Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
                                 let Message { msg, .. } =
-                                    self.outgoing.get_mut(outgoing_dec_idx).unwrap();
+                                    self.outgoing.get_mut(outgoing_idx).unwrap();
                                 match msg {
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.ld = self.leader_state.get_chosen_idx()
                                     }
-                                    PaxosMsg::Decide(d) => {
-                                        d.ld = self.leader_state.get_chosen_idx()
-                                    }
                                     _ => {
-                                        panic!("Cached Message<T> in outgoing was not Decide")
+                                        self.outgoing.push(Message::with(
+                                            self.pid,
+                                            pid,
+                                            PaxosMsg::Decide(d),
+                                        ));
                                     }
                                 }
                             }
                             _ => {
-                                let cache_dec_idx = self.outgoing.len();
-                                self.leader_state
-                                    .set_latest_decide_meta(pid, Some(cache_dec_idx));
                                 self.outgoing.push(Message::with(
                                     self.pid,
                                     pid,
@@ -1139,9 +1112,7 @@ where
                                 ));
                             }
                         }
-                    }
-                } else {
-                    for pid in self.leader_state.get_promised_followers() {
+                    } else {
                         self.outgoing
                             .push(Message::with(self.pid, pid, PaxosMsg::Decide(d)));
                     }
@@ -1291,10 +1262,10 @@ where
                             stopsign: _my_ss,
                         } = ss_entry;
                         if !has_decided {
-                            self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                            self.accept_stopsign(ss);
                         }
                     } else {
-                        self.storage.set_stopsign(StopSignEntry::with(ss, false));
+                        self.accept_stopsign(ss);
                     }
                     let a = AcceptedStopSign::with(accsync.n);
                     self.outgoing.push(Message::with(
@@ -1315,12 +1286,10 @@ where
         }
     }
 
-    fn handle_firstaccept(&mut self, f: FirstAccept<T>) {
+    fn handle_firstaccept(&mut self, f: FirstAccept) {
         debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
-            let entries = f.entries;
             self.storage.set_accepted_round(f.n);
-            self.accept_entries(f.n, entries);
             self.state.1 = Phase::Accept;
             self.forward_pending_proposals();
         }
@@ -1339,8 +1308,7 @@ where
 
     fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
         if self.storage.get_promise() == acc_ss.n && self.state == (Role::Follower, Phase::Accept) {
-            self.storage
-                .set_stopsign(StopSignEntry::with(acc_ss.ss, false));
+            self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign::with(acc_ss.n);
             self.outgoing.push(Message::with(
                 self.pid,
@@ -1363,7 +1331,7 @@ where
                 .get_stopsign()
                 .expect("No stopsign found when deciding!");
             ss.decided = true;
-            self.storage.set_stopsign(ss);
+            self.storage.set_stopsign(ss); // need to set it again now with the modified decided flag
             self.storage.set_decided_idx(self.storage.get_log_len() + 1);
         }
     }
