@@ -436,8 +436,18 @@ where
         }
     }
 
+    /// Returns whether this Sequence Paxos has been reconfigured
+    pub fn is_reconfigured(&self) -> Option<StopSign> {
+        match self.storage.get_stopsign() {
+            Some(ss) if ss.decided => {
+                Some(ss.stopsign)
+            },
+            _ => None,
+        }
+    }
+
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    pub fn stopped(&self) -> bool {
+    fn stopped(&self) -> bool {
         self.get_stopsign().is_some()
     }
 
