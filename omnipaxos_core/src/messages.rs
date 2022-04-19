@@ -273,6 +273,7 @@ where
     AcceptStopSign(AcceptStopSign),
     AcceptedStopSign(AcceptedStopSign),
     DecideStopSign(DecideStopSign),
+    ForwardStopSign(StopSign),
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.

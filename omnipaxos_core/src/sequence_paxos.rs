@@ -433,15 +433,14 @@ where
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
             PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
+            PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
         }
     }
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub fn is_reconfigured(&self) -> Option<StopSign> {
         match self.storage.get_stopsign() {
-            Some(ss) if ss.decided => {
-                Some(ss.stopsign)
-            },
+            Some(ss) if ss.decided => Some(ss.stopsign),
             _ => None,
         }
     }
@@ -495,7 +494,10 @@ where
                     }
                 }
                 (Role::Leader, Phase::FirstAccept) => todo!("Remove entry from first accept"),
-                _ => todo!("forward stopsign"),
+                _ => {
+                    let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    self.forward_stopsign(ss);
+                }
             }
             Ok(())
         }
@@ -649,6 +651,19 @@ where
         }
     }
 
+    fn forward_stopsign(&mut self, ss: StopSign) {
+        if self.leader > 0 && self.leader != self.pid {
+            trace!(self.logger, "Forwarding StopSign to Leader {}", self.leader);
+            let fs = PaxosMsg::ForwardStopSign(ss);
+            let msg = Message::with(self.pid, self.leader, fs);
+            self.outgoing.push(msg);
+        } else {
+            if self.pending_stopsign.as_mut().is_none() {
+                self.pending_stopsign = Some(ss);
+            }
+        }
+    }
+
     fn handle_forwarded_compaction(&mut self, c: Compaction) {
         trace!(
             self.logger,
@@ -679,6 +694,23 @@ where
                     self.send_batch_accept(rest);
                 }
                 _ => self.forward_proposals(entries),
+            }
+        }
+    }
+
+    fn handle_forwarded_stopsign(&mut self, ss: StopSign) {
+        if !self.stopped() {
+            match self.state {
+                (Role::Leader, Phase::Prepare) => {
+                    if self.pending_stopsign.as_mut().is_none() {
+                        self.pending_stopsign = Some(ss);
+                    }
+                }
+                (Role::Leader, Phase::Accept) => self.send_accept_stopsign(ss),
+                (Role::Leader, Phase::FirstAccept) => {
+                    todo!()
+                }
+                _ => self.forward_stopsign(ss),
             }
         }
     }
