@@ -15,7 +15,7 @@ const GC_INDEX_INCREMENT: u64 = 10;
 /// if the first [`gc_index`] are removed.
 #[test]
 #[serial]
-fn gc_test() {
+fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
     let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
@@ -24,11 +24,11 @@ fn gc_test() {
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 0..cfg.num_proposals {
+    for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
-            x.propose(Value(i));
+            x.paxos.append(Value(i)).expect("Failed to append");
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -42,7 +42,7 @@ fn gc_test() {
     }
 
     px.on_definition(|x| {
-        x.trim(Some(cfg.gc_idx));
+        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
@@ -55,7 +55,7 @@ fn gc_test() {
         }));
     }
 
-    check_gc(vec_proposals, seq_after, cfg.gc_idx);
+    check_trim(vec_proposals, seq_after, cfg.gc_idx);
 
     println!("Pass gc");
 
@@ -70,7 +70,7 @@ fn gc_test() {
 /// if the first [`gc_index`] + an increment are removed.
 #[test]
 #[serial]
-fn double_gc_test() {
+fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
     let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
@@ -79,12 +79,12 @@ fn double_gc_test() {
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 0..cfg.num_proposals {
+    for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
 
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
-            x.propose(Value(i));
+            x.paxos.append(Value(i)).expect("Failed to append");
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -98,13 +98,15 @@ fn double_gc_test() {
     }
 
     px.on_definition(|x| {
-        x.trim(Some(cfg.gc_idx));
+        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
 
     px.on_definition(|x| {
-        x.trim(Some(cfg.gc_idx + GC_INDEX_INCREMENT));
+        x.paxos
+            .trim(Some(cfg.gc_idx + GC_INDEX_INCREMENT))
+            .expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
@@ -117,7 +119,7 @@ fn double_gc_test() {
         }));
     }
 
-    check_gc(
+    check_trim(
         vec_proposals,
         seq_after_double,
         cfg.gc_idx + GC_INDEX_INCREMENT,
@@ -131,7 +133,7 @@ fn double_gc_test() {
     };
 }
 
-fn check_gc(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {
+fn check_trim(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {
     for i in 0..seq_after.len() {
         let (_, after) = seq_after.get(i).expect("After log");
 

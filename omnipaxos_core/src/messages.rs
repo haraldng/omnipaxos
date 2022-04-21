@@ -120,23 +120,15 @@ where
 
 /// The first accept message sent. Only used by a pre-elected leader after reconfiguration.
 #[derive(Clone, Debug)]
-pub struct FirstAccept<T>
-where
-    T: Entry,
-{
+pub struct FirstAccept {
     /// The current round.
     pub n: Ballot,
-    /// Entries to be replicated.
-    pub entries: Vec<T>,
 }
 
-impl<T> FirstAccept<T>
-where
-    T: Entry,
-{
+impl FirstAccept {
     /// Creates a [`FirstAccept`] message.
-    pub fn with(n: Ballot, entries: Vec<T>) -> Self {
-        FirstAccept { n, entries }
+    pub fn with(n: Ballot) -> Self {
+        FirstAccept { n }
     }
 }
 
@@ -262,7 +254,7 @@ where
     Prepare(Prepare),
     Promise(Promise<T, S>),
     AcceptSync(AcceptSync<T, S>),
-    FirstAccept(FirstAccept<T>),
+    FirstAccept(FirstAccept),
     AcceptDecide(AcceptDecide<T>),
     Accepted(Accepted),
     Decide(Decide),
@@ -273,6 +265,7 @@ where
     AcceptStopSign(AcceptStopSign),
     AcceptedStopSign(AcceptedStopSign),
     DecideStopSign(DecideStopSign),
+    ForwardStopSign(StopSign),
 }
 
 /// A struct for a Paxos message that also includes sender and receiver.
