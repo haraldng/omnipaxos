@@ -29,7 +29,7 @@ fn consensus_test() {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
-            x.propose(Value(i));
+            x.paxos.append(Value(i)).expect("Failed to append");
             x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);

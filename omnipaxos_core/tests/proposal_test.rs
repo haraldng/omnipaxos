@@ -44,7 +44,7 @@ fn forward_proposal_test() {
     let (kprom_px, kfuture_px) = promise::<Value>();
     px.on_definition(|x| {
         x.add_ask(Ask::new(kprom_px, ()));
-        x.propose(Value(123));
+        x.paxos.append(Value(123)).expect("Failed to append");
     });
 
     kfuture_px

@@ -282,7 +282,7 @@ pub mod omnireplica {
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        pub paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -362,14 +362,6 @@ pub mod omnireplica {
             self.peers = peers;
         }
 
-        pub fn propose(&mut self, data: Value) {
-            self.paxos.append(data).expect("Failed to propose!");
-        }
-
-        pub fn trim(&mut self, index: Option<u64>) {
-            self.paxos.trim(index).expect("Failed to trim!");
-        }
-
         fn answer_future(&mut self) {
             if !self.ask_vector.is_empty() {
                 if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
@@ -380,6 +372,12 @@ pub mod omnireplica {
                                 .pop_front()
                                 .unwrap()
                                 .reply(*i)
+                                .expect("Failed to reply promise!"),
+                            LogEntry::Snapshotted(s) => self
+                                .ask_vector
+                                .pop_front()
+                                .unwrap()
+                                .reply(s.snapshot.value)
                                 .expect("Failed to reply promise!"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
