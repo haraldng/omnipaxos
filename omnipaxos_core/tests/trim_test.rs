@@ -24,7 +24,7 @@ fn trim_test() {
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 0..cfg.num_proposals {
+    for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
@@ -79,7 +79,7 @@ fn double_trim_test() {
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 0..cfg.num_proposals {
+    for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
 
         vec_proposals.push(Value(i));

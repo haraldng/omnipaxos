@@ -714,9 +714,15 @@ where
                         self.pending_stopsign = Some(ss);
                     }
                 }
-                (Role::Leader, Phase::Accept) => self.send_accept_stopsign(ss),
+                (Role::Leader, Phase::Accept) => {
+                    if self.pending_stopsign.is_none() {
+                        self.accept_stopsign(ss.clone());
+                        self.send_accept_stopsign(ss);
+                    }
+                }
                 (Role::Leader, Phase::FirstAccept) => {
                     self.send_first_accept();
+                    self.accept_stopsign(ss.clone());
                     self.send_accept_stopsign(ss);
                 }
                 _ => self.forward_stopsign(ss),

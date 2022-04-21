@@ -10,13 +10,16 @@ use self::{
     omnireplica::SequencePaxosComponent,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos_core::{ballot_leader_election::BLEConfig, sequence_paxos::SequencePaxosConfig};
+use omnipaxos_core::{
+    ballot_leader_election::BLEConfig, sequence_paxos::SequencePaxosConfig, storage::StopSign,
+};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(100);
+pub const SS_METADATA: u8 = 255;
 
 pub struct TestSystem {
     pub kompact_system: KompactSystem,
@@ -379,6 +382,12 @@ pub mod omnireplica {
                                 .unwrap()
                                 .reply(s.snapshot.value)
                                 .expect("Failed to reply promise!"),
+                            LogEntry::StopSign(ss) => self
+                                .ask_vector
+                                .pop_front()
+                                .unwrap()
+                                .reply(stopsign_meta_to_value(&ss))
+                                .expect("Failed to reply stopsign promise"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
                     }
@@ -431,4 +440,14 @@ impl Snapshot<Value> for LatestValue {
     fn use_snapshots() -> bool {
         true
     }
+}
+
+fn stopsign_meta_to_value(ss: &StopSign) -> Value {
+    let v = ss
+        .metadata
+        .as_ref()
+        .expect("StopSign Metadata was None")
+        .first()
+        .expect("Empty metadata");
+    Value(*v as u64)
 }
