@@ -1,9 +1,21 @@
-[workspace]
-members = [
-    "omnipaxos_core",
-    "omnipaxos_runtime",
-    "examples"
-]
+[package]
+name = "omnipaxos"
+version = "0.1.0"
+authors = ["Harald Ng <hng@kth.se>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[features]
+batch_accept = []
+latest_accepted = []
+latest_decide = []
+max_accsync = []
+continued_leader_reconfiguration = []
+
+default = ["latest_accepted", "latest_decide", "max_accsync", "continued_leader_reconfiguration"]
 
 [profile.release]
 lto = true

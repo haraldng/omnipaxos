@@ -2,7 +2,6 @@ Please make sure these boxes are checked, before submitting a new PR.
 
 - [ ] You ran `rustfmt` on the code base before submitting (on latest nightly with rustfmt support)
 - [ ] You reference which issue is being closed in the PR text (if applicable)
-- [ ] You updated the OmniPaxos book (if applicable)
 
 ## Issues
 
