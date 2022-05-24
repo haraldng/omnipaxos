@@ -18,7 +18,7 @@ use std::{collections::HashMap, str, sync::Arc, time::Duration};
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
-const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(100);
+const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
 
 pub struct TestSystem {

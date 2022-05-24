@@ -134,9 +134,7 @@ fn double_trim_test() {
 }
 
 fn check_trim(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {
-    for i in 0..seq_after.len() {
-        let (_, after) = seq_after.get(i).expect("After log");
-
+    for (_, after) in seq_after {
         assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
         assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
     }
