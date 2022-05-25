@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /// The identifier for the configuration that this Omni-Paxos replica is part of.
 pub const CONFIG_ID: &str = "config_id";
 /// The identifier of this replica.

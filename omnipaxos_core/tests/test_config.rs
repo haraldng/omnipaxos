@@ -1,6 +1,10 @@
-use hocon::{Error, Hocon, HoconLoader};
+#[cfg(feature = "hocon_config")]
 use std::time::Duration;
 
+#[cfg(feature = "hocon_config")]
+use hocon::{Error, Hocon, HoconLoader};
+
+#[cfg(feature = "hocon_config")]
 pub struct TestConfig {
     pub wait_timeout: Duration,
     pub num_threads: usize,
@@ -11,6 +15,7 @@ pub struct TestConfig {
     pub gc_idx: u64,
 }
 
+#[cfg(feature = "hocon_config")]
 impl TestConfig {
     pub fn load(name: &str) -> Result<TestConfig, Error> {
         let raw_cfg = HoconLoader::new()

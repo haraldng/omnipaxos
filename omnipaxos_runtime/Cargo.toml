@@ -5,7 +5,7 @@ authors = ["Harald Ng <hng@kth.se>"]
 edition = "2018"
 
 [dependencies]
-omnipaxos_core = { path = "../omnipaxos_core" }
+omnipaxos_core = { path = "../omnipaxos_core", default-features = true, features = ["logging", "hocon_config"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]

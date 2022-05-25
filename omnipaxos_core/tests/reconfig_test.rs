@@ -1,13 +1,20 @@
 pub mod test_config;
 pub mod util;
 
+#[cfg(feature = "hocon_config")]
 use crate::util::{Value, SS_METADATA};
+#[cfg(feature = "hocon_config")]
 use kompact::prelude::{promise, Ask, FutureCollection};
+#[cfg(feature = "hocon_config")]
 use omnipaxos_core::sequence_paxos::ReconfigurationRequest;
+#[cfg(feature = "hocon_config")]
 use serial_test::serial;
+#[cfg(feature = "hocon_config")]
 use test_config::TestConfig;
+#[cfg(feature = "hocon_config")]
 use util::TestSystem;
 
+#[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
 #[serial]

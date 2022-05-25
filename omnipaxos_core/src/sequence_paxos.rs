@@ -7,11 +7,13 @@ use super::{
         SnapshottedEntry, SyncItem,
     },
 };
-use crate::utils::{
-    hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZE},
-    logger::create_logger,
-};
+#[cfg(feature = "hocon_config")]
+use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZE};
+#[cfg(feature = "logging")]
+use crate::utils::logger::create_logger;
+#[cfg(feature = "hocon_config")]
 use hocon::Hocon;
+#[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
 
@@ -33,12 +35,12 @@ where
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
     outgoing: Vec<Message<T, S>>,
-    /// Logger used to output the status of the component.
-    logger: Logger,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     buffer_size: usize,
     s: PhantomData<S>,
+    #[cfg(feature = "logging")]
+    logger: Logger,
 }
 
 impl<T, S, B> SequencePaxos<T, S, B>
@@ -57,7 +59,7 @@ where
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, n_leader, lds) = match config.skip_prepare_use_leader {
+        let (state, leader, n_leader, lds) = match &config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -71,7 +73,7 @@ where
                     (Role::Follower, None)
                 };
                 let state = (role, Phase::FirstAccept);
-                (state, l.pid, l, lds)
+                (state, l.pid, *l, lds)
             }
             None => {
                 let state = (Role::Follower, Phase::None);
@@ -79,14 +81,6 @@ where
                 (state, 0, Ballot::default(), lds)
             }
         };
-
-        let path = config.logger_file_path;
-        let l = config.logger.unwrap_or_else(|| {
-            let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-            create_logger(s.as_str())
-        });
-
-        info!(l, "Paxos component pid: {} created!", pid);
 
         let mut paxos = SequencePaxos {
             storage,
@@ -98,13 +92,24 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            logger: l,
             leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             buffer_size: config.buffer_size,
             s: PhantomData,
+            #[cfg(feature = "logging")]
+            logger: {
+                let path = config.logger_file_path;
+                config.logger.unwrap_or_else(|| {
+                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                })
+            },
         };
         paxos.storage.set_promise(n_leader);
+        #[cfg(feature = "logging")]
+        {
+            info!(paxos.logger, "Paxos component pid: {} created!", pid);
+        }
         paxos
     }
 
@@ -179,6 +184,7 @@ where
         let compact_idx = match index {
             Some(idx) => {
                 if (min_all_accepted_idx < &idx) || (idx < self.storage.get_compacted_idx()) {
+                    #[cfg(feature = "logging")]
                     warn!(
                         self.logger,
                         "Invalid trim index: {:?}, compacted_idx: {}, las: {:?}",
@@ -191,6 +197,7 @@ where
                 idx
             }
             None => {
+                #[cfg(feature = "logging")]
                 trace!(
                     self.logger,
                     "No trim index provided, using min_las_index: {:?}",
@@ -220,6 +227,7 @@ where
                 self.set_snapshot(idx, s);
             }
             _ => {
+                #[cfg(feature = "logging")]
                 warn!(
                     self.logger,
                     "Received invalid Compaction: {:?}, decided_idx: {}, compacted_idx: {}",
@@ -462,6 +470,7 @@ where
             new_configuration,
             metadata,
         } = rc;
+        #[cfg(feature = "logging")]
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_configuration
@@ -582,6 +591,7 @@ where
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
     pub fn handle_leader(&mut self, n: Ballot) {
+        #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
         let leader_pid = n.pid;
         if n <= self.leader_state.n_leader || n <= self.storage.get_promise() {
@@ -619,6 +629,7 @@ where
     }
 
     fn handle_preparereq(&mut self, from: u64) {
+        #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
             self.leader_state.set_decided_idx(from, None);
@@ -637,6 +648,7 @@ where
 
     fn forward_compaction(&mut self, c: Compaction) {
         if self.leader > 0 && self.leader != self.pid {
+            #[cfg(feature = "logging")]
             trace!(
                 self.logger,
                 "Forwarding Compaction request to Leader {}, {:?}",
@@ -651,6 +663,7 @@ where
 
     fn forward_proposals(&mut self, mut entries: Vec<T>) {
         if self.leader > 0 && self.leader != self.pid {
+            #[cfg(feature = "logging")]
             trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = Message::with(self.pid, self.leader, pf);
@@ -662,6 +675,7 @@ where
 
     fn forward_stopsign(&mut self, ss: StopSign) {
         if self.leader > 0 && self.leader != self.pid {
+            #[cfg(feature = "logging")]
             trace!(self.logger, "Forwarding StopSign to Leader {}", self.leader);
             let fs = PaxosMsg::ForwardStopSign(ss);
             let msg = Message::with(self.pid, self.leader, fs);
@@ -674,6 +688,7 @@ where
     }
 
     fn handle_forwarded_compaction(&mut self, c: Compaction) {
+        #[cfg(feature = "logging")]
         trace!(
             self.logger,
             "Incoming Forwarded Compaction Request: {:?}",
@@ -683,8 +698,6 @@ where
             (Role::Leader, _) => {
                 if let Compaction::Trim(idx) = c {
                     let _ = self.trim_prepare(idx);
-                } else {
-                    warn!(self.logger, "Got unexpected forwarded {:?}", c);
                 }
             }
             _ => self.forward_compaction(c),
@@ -692,7 +705,6 @@ where
     }
 
     fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
-        trace!(self.logger, "Incoming Forwarded Proposal");
         if !self.stopped() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
@@ -742,16 +754,17 @@ where
         self.state.1 = Phase::Accept;
     }
 
+    #[cfg(feature = "batch_accept")]
     fn send_accept_and_cache(&mut self, to: u64, entries: Vec<T>) {
         let acc = AcceptDecide::with(
             self.leader_state.n_leader,
             self.leader_state.get_chosen_idx(),
             entries,
         );
-        let cache_idx = self.outgoing.len();
         self.outgoing
             .push(Message::with(self.pid, to, PaxosMsg::AcceptDecide(acc)));
-        self.leader_state.set_batch_accept_meta(to, Some(cache_idx));
+        self.leader_state
+            .set_batch_accept_meta(to, Some(self.outgoing.len() - 1));
     }
 
     fn send_accept(&mut self, entry: T) {
@@ -759,6 +772,7 @@ where
         self.leader_state.set_accepted_idx(self.pid, la);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
+                #[cfg(feature = "batch_accept")]
                 match self.leader_state.get_batch_accept_meta(pid) {
                     Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
                         let Message { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
@@ -786,6 +800,7 @@ where
         self.leader_state.set_accepted_idx(self.pid, la);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
+                #[cfg(feature = "batch_accept")]
                 match self.leader_state.get_batch_accept_meta(pid) {
                     Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
                         let Message { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
@@ -913,13 +928,6 @@ where
         } else if compact_idx == 0 {
             self.storage.set_snapshot(snapshot);
             self.storage.set_compacted_idx(compact_idx);
-        } else {
-            warn!(
-                self.logger,
-                "Tried to set snapshot at index: {} but current compacted index is: {}",
-                compact_idx,
-                compacted_len
-            );
         }
     }
 
@@ -1000,6 +1008,7 @@ where
     }
 
     fn handle_promise_prepare(&mut self, prom: Promise<T, S>, from: u64) {
+        #[cfg(feature = "logging")]
         debug!(
             self.logger,
             "Handling promise from {} in Prepare phase", from
@@ -1013,11 +1022,14 @@ where
     }
 
     fn handle_promise_accept(&mut self, prom: Promise<T, S>, from: u64) {
-        let (r, p) = &self.state;
-        debug!(
-            self.logger,
-            "Self role {:?}, phase {:?}. Incoming message Promise Accept from {}", r, p, from
-        );
+        #[cfg(feature = "logging")]
+        {
+            let (r, p) = &self.state;
+            debug!(
+                self.logger,
+                "Self role {:?}, phase {:?}. Incoming message Promise Accept from {}", r, p, from
+            );
+        }
         if prom.n == self.leader_state.n_leader {
             self.leader_state.set_decided_idx(from, Some(prom.ld));
             let acc_sync = if Self::use_snapshots() {
@@ -1074,6 +1086,7 @@ where
     }
 
     fn handle_accepted(&mut self, accepted: Accepted, from: u64) {
+        #[cfg(feature = "logging")]
         trace!(
             self.logger,
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
@@ -1093,6 +1106,7 @@ where
                 );
                 for pid in self.leader_state.get_promised_followers() {
                     if cfg!(feature = "batch_accept") {
+                        #[cfg(feature = "batch_accept")]
                         match self.leader_state.get_batch_accept_meta(pid) {
                             Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
                                 let Message { msg, .. } =
@@ -1293,6 +1307,7 @@ where
     }
 
     fn handle_firstaccept(&mut self, f: FirstAccept) {
+        #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             self.storage.set_accepted_round(f.n);
@@ -1430,8 +1445,9 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
-    logger: Option<Logger>,
     logger_file_path: Option<String>,
+    #[cfg(feature = "logging")]
+    logger: Option<Logger>,
 }
 
 #[allow(missing_docs)]
@@ -1476,10 +1492,12 @@ impl SequencePaxosConfig {
         self.skip_prepare_use_leader
     }
 
+    #[cfg(feature = "logging")]
     pub fn set_logger(&mut self, l: Logger) {
         self.logger = Some(l);
     }
 
+    #[cfg(feature = "logging")]
     pub fn get_logger(&self) -> Option<&Logger> {
         self.logger.as_ref()
     }
@@ -1492,6 +1510,7 @@ impl SequencePaxosConfig {
         self.logger_file_path.as_ref()
     }
 
+    #[cfg(feature = "hocon_config")]
     pub fn with_hocon(h: &Hocon) -> Self {
         let mut config = Self::default();
         config
@@ -1527,8 +1546,9 @@ impl Default for SequencePaxosConfig {
             peers: vec![],
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
-            logger: None,
             logger_file_path: None,
+            #[cfg(feature = "logging")]
+            logger: None,
         }
     }
 }

@@ -1,13 +1,15 @@
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::{
-    util::defaults::{BLE_BUFFER_SIZE as DEFAULT_BUFFER_SIZE, *},
-    utils::{
-        hocon_kv::{BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PEERS, PID, PRIORITY},
-        logger::create_logger,
-    },
+use crate::util::defaults::{BLE_BUFFER_SIZE as DEFAULT_BUFFER_SIZE, *};
+#[cfg(feature = "hocon_config")]
+use crate::utils::hocon_kv::{
+    BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PEERS, PID, PRIORITY,
 };
+#[cfg(feature = "logging")]
+use crate::utils::logger::create_logger;
+#[cfg(feature = "hocon_config")]
 use hocon::Hocon;
 use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
+#[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 
 /// Used to define an epoch
@@ -65,6 +67,7 @@ pub struct BallotLeaderElection {
     /// Vector which holds all the outgoing messages of the BLE instance.
     outgoing: Vec<BLEMessage>,
     /// Logger used to output the status of the component.
+    #[cfg(feature = "logging")]
     logger: Logger,
 }
 
@@ -74,18 +77,12 @@ impl BallotLeaderElection {
         let pid = config.pid;
         let peers = config.peers;
         let n = &peers.len() + 1;
-        let initial_ballot = match config.initial_leader {
-            Some(leader_ballot) if leader_ballot.pid == pid => leader_ballot,
+        let initial_ballot = match &config.initial_leader {
+            Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
             _ => Ballot::with(0, config.priority.unwrap_or_default(), pid),
         };
-        let path = config.logger_file_path;
-        let l = config.logger.unwrap_or_else(|| {
-            let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-            create_logger(s.as_str())
-        });
         let hb_delay = config.hb_delay;
-        info!(l, "Ballot Leader Election component pid: {} created!", pid);
-        BallotLeaderElection {
+        let ble = BallotLeaderElection {
             pid,
             majority: n / 2 + 1, // +1 because peers is exclusive ourselves
             peers,
@@ -99,8 +96,23 @@ impl BallotLeaderElection {
             initial_delay: config.initial_delay,
             ticks_elapsed: 0,
             outgoing: vec![],
-            logger: l,
+            #[cfg(feature = "logging")]
+            logger: {
+                let path = config.logger_file_path;
+                config.logger.unwrap_or_else(|| {
+                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                })
+            },
+        };
+        #[cfg(feature = "logging")]
+        {
+            info!(
+                ble.logger,
+                "Ballot Leader Election component pid: {} created!", pid
+            );
         }
+        ble
     }
 
     /// Update the custom priority used in the Ballot for this server.
@@ -179,6 +191,7 @@ impl BallotLeaderElection {
             // got a new leader with greater ballot
             self.leader = Some(top_ballot);
             self.initial_delay = None;
+            #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "BLE {}, New Leader elected: {:?}", self.pid, top_ballot
@@ -192,6 +205,7 @@ impl BallotLeaderElection {
     /// Initiates a new heartbeat round.
     pub fn new_hb_round(&mut self) {
         self.hb_round += 1;
+        #[cfg(feature = "logging")]
         trace!(
             self.logger,
             "Initiate new heartbeat round: {}",
@@ -212,31 +226,32 @@ impl BallotLeaderElection {
     }
 
     fn hb_timeout(&mut self) -> Option<Ballot> {
-        trace!(self.logger, "Heartbeat timeout round: {}", self.hb_round);
         let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
+            #[cfg(feature = "logging")]
             debug!(
                 self.logger,
-                "Received a majority of heartbeats {:?}", self.ballots
+                "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
             self.ballots
                 .push((self.current_ballot, self.majority_connected));
             self.check_leader()
         } else {
+            #[cfg(feature = "logging")]
             warn!(
                 self.logger,
-                "Did not receive a majority of heartbeats {:?}", self.ballots
+                "Did not receive a majority of heartbeats, round: {}, {:?}",
+                self.hb_round,
+                self.ballots
             );
             self.ballots.clear();
             self.majority_connected = false;
             None
         };
         self.new_hb_round();
-
         result
     }
 
     fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
-        trace!(self.logger, "Heartbeat request from {}", from);
         let hb_reply =
             HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
 
@@ -251,6 +266,7 @@ impl BallotLeaderElection {
         if rep.round == self.hb_round {
             self.ballots.push((rep.ballot, rep.majority_connected));
         } else {
+            #[cfg(feature = "logging")]
             warn!(
                 self.logger,
                 "Got late response, round {}, current delay {}, ballot {:?}",
@@ -358,9 +374,11 @@ pub struct BLEConfig {
     hb_delay: u64,
     initial_leader: Option<Ballot>,
     initial_delay: Option<u64>,
-    logger: Option<Logger>,
-    logger_file_path: Option<String>,
     buffer_size: usize,
+    #[cfg(feature = "logging")]
+    logger: Option<Logger>,
+    #[cfg(feature = "logging")]
+    logger_file_path: Option<String>,
 }
 
 #[allow(missing_docs)]
@@ -413,18 +431,22 @@ impl BLEConfig {
         self.initial_delay
     }
 
+    #[cfg(feature = "logging")]
     pub fn set_logger(&mut self, l: Logger) {
         self.logger = Some(l);
     }
 
+    #[cfg(feature = "logging")]
     pub fn get_logger(&self) -> Option<&Logger> {
         self.logger.as_ref()
     }
 
+    #[cfg(feature = "logging")]
     pub fn set_logger_file_path(&mut self, s: String) {
         self.logger_file_path = Some(s);
     }
 
+    #[cfg(feature = "logging")]
     pub fn get_logger_file_path(&self) -> Option<&String> {
         self.logger_file_path.as_ref()
     }
@@ -437,6 +459,7 @@ impl BLEConfig {
         self.buffer_size
     }
 
+    #[cfg(feature = "hocon_config")]
     pub fn with_hocon(h: &Hocon) -> Self {
         let mut config = Self::default();
         config.set_pid(h[PID].as_i64().expect("Failed to load PID") as u64);
@@ -452,6 +475,7 @@ impl BLEConfig {
                 unimplemented!("Peers in Hocon should be parsed as array!")
             }
         }
+        #[cfg(feature = "logging")]
         if let Some(p) = h[LOG_FILE_PATH].as_string() {
             config.set_logger_file_path(p);
         }
@@ -482,9 +506,11 @@ impl Default for BLEConfig {
             hb_delay: HB_TIMEOUT,
             initial_leader: None,
             initial_delay: None,
-            logger: None,
-            logger_file_path: None,
             buffer_size: DEFAULT_BUFFER_SIZE,
+            #[cfg(feature = "logging")]
+            logger: None,
+            #[cfg(feature = "logging")]
+            logger_file_path: None,
         }
     }
 }

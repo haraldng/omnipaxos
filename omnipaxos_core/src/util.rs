@@ -57,6 +57,7 @@ where
     pub lc: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
     pub max_promise: SyncItem<T, S>,
+    #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
     pub max_pid: usize,
@@ -82,6 +83,7 @@ where
             lc: 0,
             max_promise_meta: PromiseMetaData::default(),
             max_promise: SyncItem::None,
+            #[cfg(feature = "batch_accept")]
             batch_accept_meta: vec![None; max_pid],
             accepted_stopsign: vec![false; max_pid],
             max_pid,
@@ -134,6 +136,7 @@ where
             .expect("Should be all initialised to 0!")
     }
 
+    #[cfg(feature = "batch_accept")]
     pub fn reset_batch_accept_meta(&mut self) {
         self.batch_accept_meta = vec![None; self.max_pid];
     }
@@ -155,6 +158,7 @@ where
             .collect()
     }
 
+    #[cfg(feature = "batch_accept")]
     pub fn set_batch_accept_meta(&mut self, pid: u64, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
@@ -164,6 +168,7 @@ where
         self.las[Self::pid_to_idx(pid)] = idx;
     }
 
+    #[cfg(feature = "batch_accept")]
     pub fn get_batch_accept_meta(&self, pid: u64) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
             .get(Self::pid_to_idx(pid))
