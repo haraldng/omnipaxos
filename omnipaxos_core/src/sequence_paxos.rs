@@ -81,6 +81,7 @@ where
                 (state, 0, Ballot::default(), lds)
             }
         };
+        // todo: something with rocksdbstorage here
 
         let mut paxos = SequencePaxos {
             storage,

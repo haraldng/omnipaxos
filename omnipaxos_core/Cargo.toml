@@ -11,11 +11,15 @@ slog = { version = "2.7.0", optional = true }
 slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 hocon = { version = "0.9.0", optional = true }
+commitlog = { version = "0.1", optional = false }
+rocksdb = { version = "0.18.0", optional = false }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"]}
 serial_test = "0.5.1"
 rand = "0.8.4"
+commitlog = "0.1"
+rocksdb = "0.18.0"
 
 [features]
 batch_accept = []

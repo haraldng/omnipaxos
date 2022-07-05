@@ -143,6 +143,154 @@ where
     fn get_snapshot(&self) -> Option<S>;
 }
 
+
+pub mod persistent_storage {
+    use commitlog::*;
+    use rocksdb::{DB, Options};
+    use crate::{
+        ballot_leader_election::Ballot,
+        storage::{Entry, Snapshot, StopSignEntry, Storage},
+    };
+
+    pub struct PersistentStorage<T, S>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+    {
+        /// struct for accessing local RocksDB
+        db: DB,
+        /// a disk-based commit log for entries
+        log: CommitLog,
+
+        // todo: REPLACE with rocksDB storage
+        /// Vector which contains all the logged entries in-memory.
+        old_log: Vec<T>,
+        /// Garbage collected index.
+        trimmed_idx: u64,
+        /// Stored snapshot
+        snapshot: Option<S>,
+        /// Stored StopSign
+        stopsign: Option<StopSignEntry>,
+    }
+
+    impl<T: Entry, S: Snapshot<T>> Default for PersistentStorage<T, S> {
+        fn default() -> Self {
+            // initialize a commit log for entries
+            let opts = LogOptions::new("log");
+            let mut log = CommitLog::new(opts).unwrap();
+
+            // create a DB and its path
+            let path = "../rocksDB";
+            let db = DB::open_default(path).unwrap();
+        
+            // Test that the rocksdb is working
+            db.put(b"my key", b"my value").unwrap();
+
+            // return the struct
+            Self {
+                db: db,
+                log: log,
+                old_log: vec![],
+                trimmed_idx: 0,
+                snapshot: None,
+                stopsign: None,
+            }
+        }
+    }
+
+    impl<T, S> Storage<T, S> for PersistentStorage<T, S>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+    {
+        fn append_entry(&mut self, entry: T) -> u64 {
+            self.log.append_msg(entry).unwrap(); 
+            self.log.last_offset() + 1
+        }
+
+        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+            let mut e = entries;
+            self.log.append(e).unwrap(); 
+            self.log.last_offset() + 1
+        }
+
+        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+            self.log.truncate(from_idx + 1 as usize);
+            self.log.append_entries(entries);
+            self.log.last_offset() + 1
+        }
+
+        fn get_entries(&self, from: u64, to: u64) -> &[T] {
+            self.log.read(from, to).unwrap_or(&[]);
+        }
+
+        fn get_log_len(&self) -> u64 {
+            self.log.last_offset() + 1;
+        }
+
+        fn get_suffix(&self, from: u64) -> &[T] {
+            self.log.read(from as usize, ReadLimit::default()).unwrap() 
+        }
+
+        /// Last promised round.
+        fn get_promise(&self) -> Ballot {
+            self.db.get("n_prom")
+        }
+
+        fn set_promise(&mut self, n_prom: Ballot) {
+            self.db.put(b"n_prom", n_prom).unwrap();
+        }
+
+        /// Length of the decided log.
+        fn get_decided_idx(&self) -> u64 {
+            self.db.get(b"ld")
+        }
+
+        fn set_decided_idx(&mut self, ld: u64) {
+            self.db.put(b"ld", ld).unwrap();
+        }
+
+        /// Last accepted round.
+        fn get_accepted_round(&self) -> Ballot {
+            self.db.get(b"acc_round")
+        }
+
+        fn set_accepted_round(&mut self, na: Ballot) {
+            self.db.put(b"acc_round", na).unwrap();
+        } 
+
+        //todo: check later with harald
+        fn set_stopsign(&mut self, s: StopSignEntry) {
+            self.stopsign = Some(s);
+        }
+
+        fn get_stopsign(&self) -> Option<StopSignEntry> {
+            self.stopsign.clone()
+        }
+
+        fn trim(&mut self, trimmed_idx: u64) {
+            self.log.drain(0..trimmed_idx as usize);
+        }
+
+        fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+            self.trimmed_idx = trimmed_idx;
+        }
+
+        fn get_compacted_idx(&self) -> u64 {
+            self.trimmed_idx
+        }
+
+        fn set_snapshot(&mut self, snapshot: S) {
+            self.snapshot = Some(snapshot);
+        }
+
+        fn get_snapshot(&self) -> Option<S> {
+            self.snapshot.clone()
+        }
+    }
+}
+
+
 #[allow(missing_docs)]
 pub mod memory_storage {
     use crate::{
