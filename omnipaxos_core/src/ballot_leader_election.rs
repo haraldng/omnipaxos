@@ -34,6 +34,13 @@ impl Ballot {
     }
 }
 
+// todo: new implement for ballot
+impl<T> AsRef<T> for Ballot {
+    fn as_ref(&self) -> &T {
+        todo!()
+    }
+}
+
 /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.

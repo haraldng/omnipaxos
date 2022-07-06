@@ -143,16 +143,17 @@ where
     fn get_snapshot(&self) -> Option<S>;
 }
 
-
+#[allow(missing_docs)]
 pub mod persistent_storage {
-    use commitlog::*;
-    use rocksdb::{DB, Options};
+    use commitlog::{*, message::MessageSet};
+    use rocksdb::{DB, Options, Error};
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
 
-    pub struct PersistentStorage<T, S>
+    #[derive(Debug)]
+    pub struct PersistentState<T, S>
     where
         T: Entry,
         S: Snapshot<T>,
@@ -160,11 +161,10 @@ pub mod persistent_storage {
         /// struct for accessing local RocksDB
         db: DB,
         /// a disk-based commit log for entries
-        log: CommitLog,
+        //c_log: CommitLog,
 
-        // todo: REPLACE with rocksDB storage
         /// Vector which contains all the logged entries in-memory.
-        old_log: Vec<T>,
+        log: Vec<T>,
         /// Garbage collected index.
         trimmed_idx: u64,
         /// Stored snapshot
@@ -173,24 +173,24 @@ pub mod persistent_storage {
         stopsign: Option<StopSignEntry>,
     }
 
-    impl<T: Entry, S: Snapshot<T>> Default for PersistentStorage<T, S> {
+    impl<T: Entry, S: Snapshot<T>> Default for PersistentState<T, S> {
         fn default() -> Self {
             // initialize a commit log for entries
-            let opts = LogOptions::new("log");
-            let mut log = CommitLog::new(opts).unwrap();
+            // let opts = LogOptions::new("log");
+            // let mut c_log = CommitLog::new(opts).unwrap();
 
             // create a DB and its path
             let path = "../rocksDB";
             let db = DB::open_default(path).unwrap();
         
             // Test that the rocksdb is working
-            db.put(b"my key", b"my value").unwrap();
+            // db.put(b"my key", b"my value").unwrap();
 
             // return the struct
             Self {
                 db: db,
-                log: log,
-                old_log: vec![],
+                //c_log: c_log,
+                log: vec![],
                 trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
@@ -198,65 +198,115 @@ pub mod persistent_storage {
         }
     }
 
-    impl<T, S> Storage<T, S> for PersistentStorage<T, S>
+    impl<T, S> Storage<T, S> for PersistentState<T, S>
     where
         T: Entry,
         S: Snapshot<T>,
     {
+        // todo: redo all 3 append get/set later
         fn append_entry(&mut self, entry: T) -> u64 {
-            self.log.append_msg(entry).unwrap(); 
-            self.log.last_offset() + 1
+            self.log.push(entry);
+            self.get_log_len()
+            
+            // let offset = self.log.append_msg(entry);
+            // match offset.unwrap()  {
+            //     X => X + 1,
+            //     AppendError => 0
+            // }
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             let mut e = entries;
-            self.log.append(e).unwrap(); 
-            self.log.last_offset() + 1
+            self.log.append(&mut e);
+            self.get_log_len()
+            
+            // for mut e in &entries {
+            //     self.log.append_msg(&mut e);
+            // }
+            // match self.log.last_offset() {
+            //     Some(X) => X + 1,
+            //     None => 0
+            // }
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            self.log.truncate(from_idx + 1 as usize);
-            self.log.append_entries(entries);
-            self.log.last_offset() + 1
+            self.log.truncate(from_idx as usize);
+            self.append_entries(entries)
         }
 
+        // todo: how to convert from buf to Vec<T>
         fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            self.log.read(from, to).unwrap_or(&[]);
+            self.log.get(from as usize..to as usize).unwrap_or(&[])
+
+            //let buffer = self.log.read(from, ReadLimit::max_bytes(to as usize)).unwrap();
+            //let entries = vec![];
+            // for b in buffer.iter() {
+            //     entries.push(b.payload())
+            // }
         }
 
         fn get_log_len(&self) -> u64 {
-            self.log.last_offset() + 1;
+            self.log.len() as u64
+
+            // match self.log.last_offset() {
+            //     Some(X) => X + 1,
+            //     None => 0
+            // }
         }
 
         fn get_suffix(&self, from: u64) -> &[T] {
-            self.log.read(from as usize, ReadLimit::default()).unwrap() 
+            match self.log.get(from as usize..) {
+                Some(s) => s,
+                None => &[],
+            }
+            
+            //let buff = self.log.read(from, ReadLimit::default()).unwrap();
+            // let v = vec![];
+            // let i = buff.iter();
         }
 
         /// Last promised round.
         fn get_promise(&self) -> Ballot {
-            self.db.get("n_prom")
+            match self.db.get("n_prom") {
+                Ok(Some(X)) => Ballot::with(X[0].into(), X[1].into(), X[2].into()),
+                Ok(None) => Ballot::default(),
+                Err(e) => todo!()
+            }
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
-            self.db.put(b"n_prom", n_prom).unwrap();
+            //let ballot:&T = ;
+            let ballot: &(T) = std::convert::AsRef::as_ref(&n_prom);
+            self.db.put("n_prom", ballot);
+
+            //std::convert::AsRef<[u8]> + std::convert::AsRef<[String]>
         }
 
         /// Length of the decided log.
         fn get_decided_idx(&self) -> u64 {
-            self.db.get(b"ld")
+            match self.db.get("ld") {
+                Ok(Some(X)) => X[0] as u64,
+                Ok(None) => 0,
+                Err(e) => todo!()
+            }
         }
 
         fn set_decided_idx(&mut self, ld: u64) {
-            self.db.put(b"ld", ld).unwrap();
+            self.db.put("ld", ld.to_string());
         }
 
         /// Last accepted round.
         fn get_accepted_round(&self) -> Ballot {
-            self.db.get(b"acc_round")
+            match self.db.get("acc_round") {
+                Ok(Some(X)) => Ballot::with(X[0].into(), X[1].into(), X[2].into()),
+                Ok(None) => Ballot::default(),
+                Err(e) => todo!()
+            }
         }
 
         fn set_accepted_round(&mut self, na: Ballot) {
-            self.db.put(b"acc_round", na).unwrap();
+            let ballot:&T = std::convert::AsRef::as_ref(&na);
+            self.db.put("n_prom", ballot);
         } 
 
         //todo: check later with harald

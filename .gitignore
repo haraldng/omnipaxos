@@ -1,5 +1,6 @@
 /docs/book/*
 /target
+/log
 Cargo.lock
 
 # IntelliJ

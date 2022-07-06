@@ -1,7 +1,7 @@
 use omnipaxos_core::{
     ballot_leader_election::{BLEConfig, BallotLeaderElection},
     sequence_paxos::{CompactionErr, ReconfigurationRequest, SequencePaxos, SequencePaxosConfig},
-    storage::{memory_storage::MemoryStorage, Snapshot, persistent_storage::PersistentStorage},
+    storage::{memory_storage::MemoryStorage, Snapshot, persistent_storage::PersistentState},
     util::LogEntry,
 };
 use std::collections::HashMap;
@@ -51,10 +51,10 @@ fn main() {
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_configuration_id(configuration_id);
     sp_config.set_pid(my_pid);
-    sp_config.set_peers(my_peers.clone());
+    sp_config.set_peers(my_peers.clone()); 
 
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
-    let persistent_storage = PersistentStorage::<KeyValue, KVSnapshot>::default();
+    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::default();
 
     let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
     let write_entry = KeyValue {
