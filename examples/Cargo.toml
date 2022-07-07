@@ -9,6 +9,7 @@ publish = false
 omnipaxos_core = { path = "../omnipaxos_core" }
 omnipaxos_runtime = { path = "../omnipaxos_runtime" }
 tokio = { version = "1", features = ["sync", "macros"] }
+rocksdb = "0.18.0"
 
 [[example]]
 name = "core"

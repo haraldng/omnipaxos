@@ -2,7 +2,7 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    storage::{memory_storage::MemoryStorage, Snapshot, persistent_storage::PersistentState},
 };
 
 use self::{
@@ -73,7 +73,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(
                     sp_config,
-                    MemoryStorage::default(),
+                    PersistentState::with(pid as u32),
                 ))
             });
 
@@ -272,12 +272,21 @@ pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos_core::{
         ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
-        storage::memory_storage::MemoryStorage, util::LogEntry,
+        storage::memory_storage::MemoryStorage, storage::persistent_storage::PersistentState, util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
         time::Duration,
     };
+
+    // pub enum StorageType<T,S>
+    // where
+    // T: Entry,
+    // S: Snapshot<T>,
+    // {
+    //     MemoryStorage(T,S),
+    //     PersistentState(T,S)
+    // }
 
     #[derive(ComponentDefinition)]
     pub struct SequencePaxosComponent {
@@ -285,7 +294,7 @@ pub mod omnireplica {
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        pub paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        pub paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -315,7 +324,7 @@ pub mod omnireplica {
 
     impl SequencePaxosComponent {
         pub fn with(
-            paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+            paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),

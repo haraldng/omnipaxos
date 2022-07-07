@@ -5,6 +5,7 @@ use omnipaxos_core::{
     util::LogEntry,
 };
 use std::collections::HashMap;
+use rocksdb::{DB, Options, Error};
 
 #[derive(Clone, Debug)]
 pub struct KeyValue {
@@ -54,12 +55,22 @@ fn main() {
     sp_config.set_peers(my_peers.clone()); 
 
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
-    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::default();
+    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with(1);
 
     let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
     let write_entry = KeyValue {
         key: String::from("a"),
         value: 123,
+    };
+    seq_paxos.append(write_entry).expect("Failed to append");
+    let write_entry = KeyValue {
+        key: String::from("b"),
+        value: 4,
+    };
+    seq_paxos.append(write_entry).expect("Failed to append");
+    let write_entry = KeyValue {
+        key: String::from("c"),
+        value: 6,
     };
     seq_paxos.append(write_entry).expect("Failed to append");
 
@@ -90,7 +101,7 @@ fn main() {
                         // we are in new configuration, start new instance
                         let mut new_sp_conf = SequencePaxosConfig::default();
                         new_sp_conf.set_configuration_id(stopsign.config_id);
-                        let new_storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
+                        let new_storage = PersistentState::<KeyValue, KVSnapshot>::with(2);
                         let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
                         todo!()
                     }
@@ -137,4 +148,6 @@ fn main() {
         let receiver = out_msg.to;
         // send out_msg to receiver on network layer
     }
+
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }

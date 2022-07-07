@@ -1,6 +1,5 @@
 use super::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
-
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}
 
@@ -145,8 +144,9 @@ where
 
 #[allow(missing_docs)]
 pub mod persistent_storage {
-    use commitlog::{*, message::MessageSet};
-    use rocksdb::{DB, Options, Error};
+    //use commitlog::{*, message::MessageSet};
+    use rocksdb::{DB, Options, Error, DBWithThreadMode};
+    use std::process;
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
@@ -159,12 +159,16 @@ pub mod persistent_storage {
         S: Snapshot<T>,
     {
         /// struct for accessing local RocksDB
-        db: DB,
         /// a disk-based commit log for entries
-        //c_log: CommitLog,
-
+        db: DB,
         /// Vector which contains all the logged entries in-memory.
         log: Vec<T>,
+        /// Last promised round.
+        n_prom: Ballot,
+        /// Last accepted round.
+        acc_round: Ballot,
+        /// Length of the decided log.
+        ld: u64,
         /// Garbage collected index.
         trimmed_idx: u64,
         /// Stored snapshot
@@ -173,24 +177,32 @@ pub mod persistent_storage {
         stopsign: Option<StopSignEntry>,
     }
 
-    impl<T: Entry, S: Snapshot<T>> Default for PersistentState<T, S> {
-        fn default() -> Self {
+    impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
+        pub fn with(replica_id: u32) -> Self {
             // initialize a commit log for entries
             // let opts = LogOptions::new("log");
             // let mut c_log = CommitLog::new(opts).unwrap();
 
-            // create a DB and its path
-            let path = "../rocksDB";
-            let db = DB::open_default(path).unwrap();
-        
-            // Test that the rocksdb is working
-            // db.put(b"my key", b"my value").unwrap();
+            // create a path and options for DB
+            let path = "rocksDB/".to_owned() + &replica_id.to_string();
+            //let lru = rocksdb::Cache::new_lru_cache(1200 as usize).unwrap();
+            let mut opts = Options::default();
+            //opts.increase_parallelism(2);
+            opts.set_max_write_buffer_number(16);
+            opts.create_if_missing(true);
+            //opts.set_row_cache(&lru);
+
+            // create DB
+            let db = DB::open(&opts, path).unwrap();
+            //db.put(b"my key", 1.to_string()).unwrap();
 
             // return the struct
             Self {
                 db: db,
-                //c_log: c_log,
                 log: vec![],
+                n_prom: Ballot::default(),
+                acc_round: Ballot::default(),
+                ld: 0,
                 trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
@@ -267,46 +279,60 @@ pub mod persistent_storage {
 
         /// Last promised round.
         fn get_promise(&self) -> Ballot {
-            match self.db.get("n_prom") {
-                Ok(Some(X)) => Ballot::with(X[0].into(), X[1].into(), X[2].into()),
-                Ok(None) => Ballot::default(),
-                Err(e) => todo!()
-            }
+            // match self.db.get("n_prom") {
+            //     Ok(Some(x)) => Ballot::with(x[0].into(), x[1].into(), x[2].into()),
+            //     Ok(None) => Ballot::default(),
+            //     Err(_e) => todo!()
+            // };
+            self.n_prom
+            
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
-            //let ballot:&T = ;
-            let ballot: &(T) = std::convert::AsRef::as_ref(&n_prom);
-            self.db.put("n_prom", ballot);
-
-            //std::convert::AsRef<[u8]> + std::convert::AsRef<[String]>
+            self.n_prom = n_prom;
+            // let promise_n = n_prom.n.to_string();
+            // let promise_pid = n_prom.pid.to_string();
+            // let promise_priority = n_prom.priority.to_string();
+            // #[warn(unused_must_use)]
+            // self.db.put("n_prom_n", promise_n).unwrap();
+            // self.db.put("n_prom_pid", promise_pid).unwrap();
+            // self.db.put("n_prom_priority", promise_priority).unwrap();
         }
 
         /// Length of the decided log.
         fn get_decided_idx(&self) -> u64 {
-            match self.db.get("ld") {
-                Ok(Some(X)) => X[0] as u64,
-                Ok(None) => 0,
-                Err(e) => todo!()
-            }
+            // match self.db.get("ld") {
+            //     Ok(Some(x)) => x[0] as u64,
+            //     Ok(None) => 0,
+            //     Err(_e) => todo!()
+            // }
+            self.ld
         }
 
         fn set_decided_idx(&mut self, ld: u64) {
-            self.db.put("ld", ld.to_string());
+            self.ld = ld;
+            // self.db.put("ld", ld.to_string()).unwrap();
         }
 
         /// Last accepted round.
         fn get_accepted_round(&self) -> Ballot {
-            match self.db.get("acc_round") {
-                Ok(Some(X)) => Ballot::with(X[0].into(), X[1].into(), X[2].into()),
-                Ok(None) => Ballot::default(),
-                Err(e) => todo!()
-            }
+            // match self.db.get("acc_round") {
+            //     Ok(Some(x)) => Ballot::with(x[0].into(), x[1].into(), x[2].into()),
+            //     Ok(None) => Ballot::default(),
+            //     Err(_e) => todo!()
+            // }
+            self.acc_round
         }
 
         fn set_accepted_round(&mut self, na: Ballot) {
-            let ballot:&T = std::convert::AsRef::as_ref(&na);
-            self.db.put("n_prom", ballot);
+            self.acc_round = na;
+
+            // let na_n = na.n.to_string();
+            // let na_pid = na.pid.to_string();
+            // let na_priority = na.priority.to_string();
+            // self.db.put("na_n", na_n).unwrap();
+            // self.db.put("na_pid", na_pid).unwrap();
+            // self.db.put("na_priority", na_priority).unwrap();
         } 
 
         //todo: check later with harald

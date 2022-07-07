@@ -7,6 +7,7 @@ use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;
 use util::TestSystem;
+use rocksdb::{DB, Options};
 
 const GC_INDEX_INCREMENT: u64 = 10;
 
@@ -63,6 +64,8 @@ fn trim_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 /// Test double Garbage Collection.
@@ -131,6 +134,8 @@ fn double_trim_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 fn check_trim(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {

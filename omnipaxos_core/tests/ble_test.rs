@@ -3,6 +3,7 @@ pub mod util;
 
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
+use rocksdb::{DB, Options};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -43,4 +44,6 @@ fn ble_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
