@@ -1,8 +1,9 @@
 use omnipaxos_core::{
-    storage::{memory_storage::MemoryStorage, Entry, Snapshot},
+    storage::{Entry, Snapshot},
     util::SnapshottedEntry,
 };
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
+use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use serial_test::serial;
 use std::{collections::HashMap, ops::RangeInclusive, time::Duration};
 use tokio::runtime::Builder;

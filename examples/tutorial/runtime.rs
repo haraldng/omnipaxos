@@ -6,8 +6,9 @@ use omnipaxos_core::ballot_leader_election::messages::BLEMessage;
 use omnipaxos_core::{
     messages::Message,
     sequence_paxos::ReconfigurationRequest,
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    storage::{Snapshot},
 };
+use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
 
 #[derive(Clone, Debug)]

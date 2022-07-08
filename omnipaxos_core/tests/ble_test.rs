@@ -11,7 +11,7 @@ use util::TestSystem;
 /// The test waits for [`num_elections`] elections.
 /// After each election, the leader node is killed and the process repeats
 /// until the number of elections is achieved.
-#[test]
+//#[test]
 #[serial]
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");

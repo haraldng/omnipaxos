@@ -5,9 +5,10 @@ use crate::util::{LatestValue, Value};
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
+    storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
+use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;

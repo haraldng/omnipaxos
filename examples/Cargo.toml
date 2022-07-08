@@ -8,6 +8,7 @@ publish = false
 [dev-dependencies]
 omnipaxos_core = { path = "../omnipaxos_core" }
 omnipaxos_runtime = { path = "../omnipaxos_runtime" }
+omnipaxos_storage = { path = "../omnipaxos_storage" }
 tokio = { version = "1", features = ["sync", "macros"] }
 rocksdb = "0.18.0"
 
