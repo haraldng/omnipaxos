@@ -73,7 +73,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(
                     sp_config,
-                    PersistentState::with(pid as u32),
+                    MemoryStorage::default(),
                 ))
             });
 
@@ -279,22 +279,13 @@ pub mod omnireplica {
         time::Duration,
     };
 
-    // pub enum StorageType<T,S>
-    // where
-    // T: Entry,
-    // S: Snapshot<T>,
-    // {
-    //     MemoryStorage(T,S),
-    //     PersistentState(T,S)
-    // }
-
     #[derive(ComponentDefinition)]
     pub struct SequencePaxosComponent {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        pub paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
+        pub paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -324,7 +315,7 @@ pub mod omnireplica {
 
     impl SequencePaxosComponent {
         pub fn with(
-            paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
+            paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),

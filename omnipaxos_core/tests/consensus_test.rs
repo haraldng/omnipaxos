@@ -8,7 +8,6 @@ use omnipaxos_core::{
     storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
-use rocksdb::{DB, Options};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -61,7 +60,6 @@ fn consensus_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 #[test]
@@ -129,8 +127,7 @@ fn read_test() {
     let idx = log_len;
     let stopsign = stopped_op.read(idx).expect("No StopSign");
     verify_stopsign(&[stopsign], &ss);
-
-    let _ = DB::destroy(&Options::default(), "rocksDB");
+    
 }
 
 #[test]
@@ -250,7 +247,6 @@ fn read_entries_test() {
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 fn verify_snapshot(

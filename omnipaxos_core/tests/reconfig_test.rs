@@ -14,8 +14,6 @@ use test_config::TestConfig;
 #[cfg(feature = "hocon_config")]
 use util::TestSystem;
 
-use rocksdb::{DB, Options};
-
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
@@ -89,5 +87,4 @@ fn reconfig_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }

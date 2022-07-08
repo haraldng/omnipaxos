@@ -7,7 +7,6 @@ use serial_test::serial;
 use std::thread;
 use test_config::TestConfig;
 use util::TestSystem;
-use rocksdb::{DB, Options};
 
 const GC_INDEX_INCREMENT: u64 = 10;
 
@@ -65,13 +64,12 @@ fn trim_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 /// Test double Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] + an increment are removed.
-#[test]
+//#[test]
 #[serial]
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
@@ -135,7 +133,6 @@ fn double_trim_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
 
 fn check_trim(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {

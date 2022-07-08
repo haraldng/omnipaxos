@@ -194,7 +194,7 @@ pub mod persistent_storage {
 
             // create DB
             let db = DB::open(&opts, path).unwrap();
-            //db.put(b"my key", 1.to_string()).unwrap();
+            db.put(b"my key", 1.to_string()).unwrap();
 
             // return the struct
             Self {
@@ -279,39 +279,39 @@ pub mod persistent_storage {
 
         /// Last promised round.
         fn get_promise(&self) -> Ballot {
-            // match self.db.get("n_prom") {
-            //     Ok(Some(x)) => Ballot::with(x[0].into(), x[1].into(), x[2].into()),
-            //     Ok(None) => Ballot::default(),
-            //     Err(_e) => todo!()
-            // };
-            self.n_prom
+            match self.db.get(b"n_prom") {
+                Ok(Some(x)) => Ballot::with(x[0].into(), x[1].into(), x[2].into()),
+                Ok(None) => Ballot::default(),
+                Err(_e) => todo!()
+            }
+            //self.n_prom
             
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
-            self.n_prom = n_prom;
-            // let promise_n = n_prom.n.to_string();
-            // let promise_pid = n_prom.pid.to_string();
-            // let promise_priority = n_prom.priority.to_string();
-            // #[warn(unused_must_use)]
-            // self.db.put("n_prom_n", promise_n).unwrap();
-            // self.db.put("n_prom_pid", promise_pid).unwrap();
-            // self.db.put("n_prom_priority", promise_priority).unwrap();
+            //self.n_prom = n_prom;
+            let promise_n = n_prom.n.to_string();
+            let promise_pid = n_prom.pid.to_string();
+            let promise_priority = n_prom.priority.to_string();
+            #[warn(unused_must_use)]
+            self.db.put(b"n_prom_n", promise_n).unwrap();
+            self.db.put(b"n_prom_pid", promise_pid).unwrap();
+            self.db.put(b"n_prom_priority", promise_priority).unwrap();
         }
 
         /// Length of the decided log.
         fn get_decided_idx(&self) -> u64 {
-            // match self.db.get("ld") {
-            //     Ok(Some(x)) => x[0] as u64,
-            //     Ok(None) => 0,
-            //     Err(_e) => todo!()
-            // }
-            self.ld
+            match self.db.get(b"ld") {
+                Ok(Some(x)) => x[0] as u64,
+                Ok(None) => 0,
+                Err(_e) => todo!()
+            }
+            //self.ld
         }
 
         fn set_decided_idx(&mut self, ld: u64) {
-            self.ld = ld;
-            // self.db.put("ld", ld.to_string()).unwrap();
+            //self.ld = ld;
+            self.db.put(b"ld", ld.to_string()).unwrap();
         }
 
         /// Last accepted round.

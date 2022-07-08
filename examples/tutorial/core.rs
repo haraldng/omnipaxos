@@ -54,23 +54,14 @@ fn main() {
     sp_config.set_pid(my_pid);
     sp_config.set_peers(my_peers.clone()); 
 
+    //todo: hardcoded test for memory and persistent storage, remove later
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
     let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with(1);
 
-    let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
+    let mut seq_paxos = SequencePaxos::with(sp_config, storage);
     let write_entry = KeyValue {
         key: String::from("a"),
         value: 123,
-    };
-    seq_paxos.append(write_entry).expect("Failed to append");
-    let write_entry = KeyValue {
-        key: String::from("b"),
-        value: 4,
-    };
-    seq_paxos.append(write_entry).expect("Failed to append");
-    let write_entry = KeyValue {
-        key: String::from("c"),
-        value: 6,
     };
     seq_paxos.append(write_entry).expect("Failed to append");
 
@@ -149,5 +140,5 @@ fn main() {
         // send out_msg to receiver on network layer
     }
 
-    let _ = DB::destroy(&Options::default(), "rocksDB");
+    //let _ = DB::destroy(&Options::default(), "rocksDB");
 }
