@@ -8,7 +8,7 @@ use omnipaxos_core::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
-use omnipaxos_storage::memory::memory_storage::MemoryStorage;
+use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentState};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -75,7 +75,7 @@ fn read_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut mem_storage = MemoryStorage::<Value, LatestValue>::default();
+    let mut mem_storage = PersistentState::<Value, LatestValue>::with("read_test");
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
@@ -112,7 +112,7 @@ fn read_test() {
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
+    let mut stopped_storage = PersistentState::<Value, LatestValue>::with("read_test_ss");
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -143,7 +143,7 @@ fn read_entries_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut mem_storage = MemoryStorage::<Value, LatestValue>::default();
+    let mut mem_storage = PersistentState::<Value, LatestValue>::with("read_entries_test");
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
 
@@ -187,7 +187,7 @@ fn read_entries_test() {
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
+    let mut stopped_storage = PersistentState::<Value, LatestValue>::with("read_entries_test_ss");
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());

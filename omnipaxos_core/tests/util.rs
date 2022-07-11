@@ -74,7 +74,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(
                     sp_config,
-                    PersistentState::with(pid),
+                    PersistentState::with(&pid.to_string()),
                 ))
             });
 

@@ -5,8 +5,9 @@ use omnipaxos_core::{
     util::LogEntry,
 };
 use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentState};
+use rocksdb::{DB, Options};
 use std::collections::HashMap;
-use rocksdb::{DB, Options, Error};
+//use rocksdb::{DB, Options, Error};
 
 #[derive(Clone, Debug)]
 pub struct KeyValue {
@@ -57,7 +58,7 @@ fn main() {
 
     //todo: hardcoded test for memory and persistent storage, remove later
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
-    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with(1);
+    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with("core");
 
     let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
     let write_entry = KeyValue {
@@ -93,7 +94,7 @@ fn main() {
                         // we are in new configuration, start new instance
                         let mut new_sp_conf = SequencePaxosConfig::default();
                         new_sp_conf.set_configuration_id(stopsign.config_id);
-                        let new_storage = PersistentState::<KeyValue, KVSnapshot>::with(my_pid);
+                        let new_storage = PersistentState::<KeyValue, KVSnapshot>::with("2");
                         let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
                         todo!()
                     }
@@ -141,5 +142,5 @@ fn main() {
         // send out_msg to receiver on network layer
     }
 
-    //let _ = DB::destroy(&Options::default(), "rocksDB");
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }

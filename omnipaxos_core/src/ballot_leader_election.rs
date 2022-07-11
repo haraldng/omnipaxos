@@ -11,6 +11,7 @@ use hocon::Hocon;
 use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
+use zerocopy::{AsBytes, FromBytes};
 
 /// Used to define an epoch
 #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
@@ -34,6 +35,67 @@ impl Ballot {
     }
 }
 
+// unsafe impl FromBytes for Ballot {
+//     fn only_derive_is_allowed_to_implement_this_trait()
+//     where
+//         Self: Sized {
+//         todo!()
+//     }
+// }
+
+// unsafe impl AsBytes for Ballot {
+//     fn as_bytes(&self) -> &[u8] {
+//         unsafe {
+//             // NOTE: This function does not have a Self: Sized bound.
+//             // size_of_val works for unsized values too.
+//             let len = std::mem::size_of_val(self);
+//             core::slice::from_raw_parts(self as *const Self as *const u8, len)
+//         }
+//     }
+
+//     fn as_bytes_mut(&mut self) -> &mut [u8]
+//     where
+//         Self: zerocopy::FromBytes,
+//     {
+//         unsafe {
+//             // NOTE: This function does not have a Self: Sized bound.
+//             // size_of_val works for unsized values too.
+//             let len = std::mem::size_of_val(self);
+//             core::slice::from_raw_parts_mut(self as *mut Self as *mut u8, len)
+//         }
+//     }
+
+//     fn write_to<B: zerocopy::ByteSliceMut>(&self, mut bytes: B) -> Option<()> {
+//         if bytes.len() != std::mem::size_of_val(self) {
+//             return None;
+//         }
+
+//         bytes.copy_from_slice(self.as_bytes());
+//         Some(())
+//     }
+
+//     fn write_to_prefix<B: zerocopy::ByteSliceMut>(&self, mut bytes: B) -> Option<()> {
+//         let size = std::mem::size_of_val(self);
+//         if bytes.len() < size {
+//             return None;
+//         }
+
+//         bytes[..size].copy_from_slice(self.as_bytes());
+//         Some(())
+//     }
+
+//     fn write_to_suffix<B: zerocopy::ByteSliceMut>(&self, mut bytes: B) -> Option<()> {
+//         let start = bytes.len().checked_sub(std::mem::size_of_val(self))?;
+//         bytes[start..].copy_from_slice(self.as_bytes());
+//         Some(())
+//     }
+
+//     fn only_derive_is_allowed_to_implement_this_trait()
+//     where
+//         Self: Sized {
+//         todo!()
+//     }
+// }
 
 /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
