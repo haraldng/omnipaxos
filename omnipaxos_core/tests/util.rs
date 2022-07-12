@@ -15,6 +15,7 @@ use omnipaxos_core::{
     ballot_leader_election::BLEConfig, sequence_paxos::SequencePaxosConfig, storage::StopSign,
 };
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
+use zerocopy::{AsBytes, FromBytes};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -421,7 +422,8 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+#[repr(packed)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, FromBytes, AsBytes)]
 pub struct Value(pub u64);
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]

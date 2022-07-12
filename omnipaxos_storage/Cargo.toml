@@ -13,7 +13,6 @@ zerocopy = { version = "0.6.1", optional = false }
 [dev-dependencies]
 commitlog = "0.1"
 rocksdb = "0.18.0"
-zerocopy = "0.6.1"
 
 [features]
 # batch_accept = []

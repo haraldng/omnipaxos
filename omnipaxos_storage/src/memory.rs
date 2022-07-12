@@ -83,11 +83,10 @@ where
 
 #[allow(missing_docs)]
 pub mod persistent_storage {
-    use std::array;
+    use std::{convert::TryInto, vec};
 
     use commitlog::{
-        message::{Message, MessageBuf, MessageSet, MessageSetMut},
-        *,
+        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit, ReadError,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -172,48 +171,64 @@ pub mod persistent_storage {
     {
         // todo: redo all 3 append get/set later - DONE
         fn append_entry(&mut self, entry: T) -> u64 {
-            // self.log.push(entry);
-            // self.get_log_len()
+            self.log.push(entry);
+            self.get_log_len()
 
-            let entry_bytes = AsBytes::as_bytes(&entry);
-            let offset = self.c_log.append_msg(entry_bytes);
-            match offset {
-                AppendError => 0,
-                x => x.unwrap() + 1,
-            }
+            // let entry_bytes = AsBytes::as_bytes(&entry);
+            // let offset = self.c_log.append_msg(entry_bytes);
+            // match offset {
+            //     AppendError => 0,
+            //     x => x.unwrap() + 1,
+            // }
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            // let mut e = entries;
-            // self.log.append(&mut e);
-            // self.get_log_len()
+            let mut e = entries;
+            self.log.append(&mut e);
+            self.get_log_len()
 
-            for e in entries {
-                self.append_entry(e);
-            }
-            self.c_log.next_offset()
+            // for e in entries {
+            //     self.append_entry(e);
+            // }
+            // self.c_log.next_offset()
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            // self.log.truncate(from_idx as usize);
-            // self.append_entries(entries)
-            
-            let _ = self.c_log.truncate(from_idx);
+            self.log.truncate(from_idx as usize);
             self.append_entries(entries)
+            
+            // let _ = self.c_log.truncate(from_idx);
+            // self.append_entries(entries)
         }
 
         // todo: adapt to new commitlog
         fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            //self.log.get(from as usize..to as usize).unwrap_or(&[])
+            self.log.get(from as usize..to as usize).unwrap_or(&[])
 
-            let buffer = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap();
-            let entries: &mut [T] = &mut [];
 
-            for (idx, msg) in buffer.iter().enumerate() {
-                let temp = FromBytes::read_from(msg.payload()).unwrap();
-                entries[idx] = temp;
-            }
-            entries 
+            // let temp: Vec<T> = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap_or(MessageBuf::default()).iter()
+            // .map(|msg| {FromBytes::read_from(msg.payload()).unwrap()}).collect()
+            
+
+            //new stable
+            // let buffer = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap_or(MessageBuf::default()); 
+            // let mut entries = vec![];
+            
+            // for (idx, msg) in buffer.iter().enumerate() {
+            //         let temp = FromBytes::read_from(msg.payload()).unwrap();
+            //         entries.push(temp);
+            //     }
+            
+            // let entries: &[T] = entries;
+            // entries
+            
+            //old
+            // let entries: &mut [T] = &mut [];
+            // for (idx, msg) in buffer.iter().enumerate() {
+            //     let temp = FromBytes::read_from(msg.payload()).unwrap();
+            //     entries[idx] = temp;
+            // }
+            
         }
 
         fn get_log_len(&self) -> u64 {

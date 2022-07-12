@@ -7,25 +7,28 @@ use omnipaxos_core::{
 use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentState};
 use rocksdb::{DB, Options};
 use std::collections::HashMap;
-//use rocksdb::{DB, Options, Error};
+use zerocopy::{AsBytes, FromBytes};
 
-#[derive(Clone, Debug)]
+#[repr(packed)]
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes)]
 pub struct KeyValue {
-    pub key: String,
+    pub key: u64,
     pub value: u64,
 }
 
 #[derive(Clone, Debug)]
 pub struct KVSnapshot {
-    snapshotted: HashMap<String, u64>,
+    snapshotted: HashMap<u64, u64>,
 }
 
 impl Snapshot<KeyValue> for KVSnapshot {
     fn create(entries: &[KeyValue]) -> Self {
         let mut snapshotted = HashMap::new();
         for e in entries {
-            let KeyValue { key, value } = e;
-            snapshotted.insert(key.clone(), *value);
+            let key_temp = e.key;
+            let value_temp = e.value;
+            //let KeyValue { key, value } = e;
+            snapshotted.insert(key_temp, value_temp);
         }
         Self { snapshotted }
     }
@@ -62,7 +65,7 @@ fn main() {
 
     let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
     let write_entry = KeyValue {
-        key: String::from("a"),
+        key: 1, //String::from("a")
         value: 123,
     };
     seq_paxos.append(write_entry).expect("Failed to append");

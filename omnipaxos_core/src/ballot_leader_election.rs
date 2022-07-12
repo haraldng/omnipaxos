@@ -14,7 +14,8 @@ use slog::{debug, info, trace, warn, Logger};
 use zerocopy::{AsBytes, FromBytes};
 
 /// Used to define an epoch
-#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
+#[repr(packed)]
+#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq, FromBytes, AsBytes)]
 pub struct Ballot {
     /// Ballot number
     pub n: u32,
