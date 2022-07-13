@@ -128,7 +128,7 @@ fn read_test() {
     let idx = log_len;
     let stopsign = stopped_op.read(idx).expect("No StopSign");
     verify_stopsign(&[stopsign], &ss);
-    
+        
 }
 
 #[test]
@@ -305,8 +305,8 @@ fn verify_entries(
     for (idx, entry) in read_entries.iter().enumerate() {
         let log_idx = idx as u64 + offset;
         match entry {
-            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(**i, exp_entries[idx]),
-            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(**i, exp_entries[idx]),
+            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]), //todo removed *
+            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]), //todo removed *
             e => panic!(
                 "{}",
                 format!(

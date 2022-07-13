@@ -109,13 +109,13 @@ where
     fn get_accepted_round(&self) -> Ballot;
 
     /// Returns the entries in the log in the index interval of [from, to)
-    fn get_entries(&self, from: u64, to: u64) -> &[T];
+    fn get_entries(&self, from: u64, to: u64) -> Vec<T>;
 
     /// Returns the current length of the log.
     fn get_log_len(&self) -> u64;
 
     /// Returns the suffix of entries in the log from index `from`.
-    fn get_suffix(&self, from: u64) -> &[T];
+    fn get_suffix(&self, from: u64) -> Vec<T>;
 
     /// Returns the round that has been promised.
     fn get_promise(&self) -> Ballot;

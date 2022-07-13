@@ -1,7 +1,7 @@
-use omnipaxos_core::ballot_leader_election::Ballot;
+//use omnipaxos_core::ballot_leader_election::Ballot;
+// use zerocopy::{AsBytes, FromBytes};
 
 use std::{fmt::Debug, marker::PhantomData};
-use zerocopy::{AsBytes, FromBytes};
 /// Type of the entries stored in the log.
 
 pub trait Entry: Clone + Debug {}
@@ -83,10 +83,8 @@ where
 
 #[allow(missing_docs)]
 pub mod persistent_storage {
-    use std::{convert::TryInto, vec};
-
     use commitlog::{
-        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit, ReadError,
+        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -109,7 +107,7 @@ pub mod persistent_storage {
         path: String,
 
         //todo: replace varaibles with above storage
-        /// Vector which contains all the logged entries in-memory.
+        // /// Vector which contains all the logged entries in-memory.
         log: Vec<T>,
         // /// Last promised round.
         // n_prom: Ballot,
@@ -133,16 +131,15 @@ pub mod persistent_storage {
 
             // create a path and options for DB
             let path = "rocksDB/".to_string() + &replica_id.to_string();
-            //let lru = rocksdb::Cache::new_lru_cache(1200 as usize).unwrap();
             let mut opts = Options::default();
+            //let lru = rocksdb::Cache::new_lru_cache(1200 as usize).unwrap();
+            //opts.set_row_cache(&lru);
             opts.increase_parallelism(2);
             opts.set_max_write_buffer_number(16);
             opts.create_if_missing(true);
-            //opts.set_row_cache(&lru);
 
             // create DB
             let db = DB::open(&opts, &path).unwrap();
-            //db.put(b"my key", 1.to_string()).unwrap();
 
             // return the struct
             Self {
@@ -159,8 +156,10 @@ pub mod persistent_storage {
             }
         }
 
-        pub fn close_db(&self) {
+        // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
+        pub fn close_db(&mut self) {
             let _ = DB::destroy(&Options::default(), &self.path);
+            self.c_log.flush();
         }
     }
 
@@ -169,60 +168,68 @@ pub mod persistent_storage {
         T: Entry + zerocopy::AsBytes + zerocopy::FromBytes,
         S: Snapshot<T>,
     {
-        // todo: redo all 3 append get/set later - DONE
         fn append_entry(&mut self, entry: T) -> u64 {
-            self.log.push(entry);
-            self.get_log_len()
-
-            // let entry_bytes = AsBytes::as_bytes(&entry);
-            // let offset = self.c_log.append_msg(entry_bytes);
-            // match offset {
-            //     AppendError => 0,
-            //     x => x.unwrap() + 1,
-            // }
+            // self.log.push(entry);
+            // self.get_log_len()
+            println!("entry from append_entry {:?}", entry);
+            let entry_bytes = AsBytes::as_bytes(&entry);
+            let offset = self.c_log.append_msg(entry_bytes);
+            match offset {
+                Err(_e) => 0,
+                Ok(x) => {
+                    println!("offset from append_entry {:?}", x);
+                    x
+                },
+            }
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            let mut e = entries;
-            self.log.append(&mut e);
-            self.get_log_len()
+            // let mut e = entries;
+            // self.log.append(&mut e);
+            // self.get_log_len()
+            println!("append_Entries!");
 
-            // for e in entries {
-            //     self.append_entry(e);
-            // }
-            // self.c_log.next_offset()
+            for e in entries {
+                self.append_entry(e);
+            }
+            self.c_log.next_offset()
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            self.log.truncate(from_idx as usize);
-            self.append_entries(entries)
-            
-            // let _ = self.c_log.truncate(from_idx);
+            // self.log.truncate(from_idx as usize);
             // self.append_entries(entries)
+            println!("append_on_prefix!");
+
+            let _ = self.c_log.truncate(from_idx);
+            let offset = self.append_entries(entries);
+            offset
         }
 
-        // todo: adapt to new commitlog
-        fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            self.log.get(from as usize..to as usize).unwrap_or(&[])
+        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+            //self.log.get(from as usize..to as usize).unwrap_or(&[])
 
+            // let res = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap_or(MessageBuf::default()).iter()
+            // .map(|msg| {FromBytes::read_from(msg.payload()).unwrap()}).collect();
+            // println!("result from get_entries {:?}", res);
+            // res
+           
 
-            // let temp: Vec<T> = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap_or(MessageBuf::default()).iter()
-            // .map(|msg| {FromBytes::read_from(msg.payload()).unwrap()}).collect()
-            
+            //another, longer variant
+            println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
+            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); 
+            let testread = ReadLimit::max_bytes(to as usize);
+            println!("READLIMIT to: {:?}", testread);
+            println!("BUFFER: {:?}", testread);
 
-            //new stable
-            // let buffer = self.c_log.read(from, ReadLimit::max_bytes(to as usize)).unwrap_or(MessageBuf::default()); 
-            // let mut entries = vec![];
+            let mut entries = vec![];
+            for msg in buffer.iter() {
+                    let temp = FromBytes::read_from(msg.payload()).unwrap();
+                    entries.push(temp);
+            }
+            println!("res from get_entries {:?}", entries);
+            entries
             
-            // for (idx, msg) in buffer.iter().enumerate() {
-            //         let temp = FromBytes::read_from(msg.payload()).unwrap();
-            //         entries.push(temp);
-            //     }
-            
-            // let entries: &[T] = entries;
-            // entries
-            
-            //old
+            //old - did not work becuase arrray is fixed
             // let entries: &mut [T] = &mut [];
             // for (idx, msg) in buffer.iter().enumerate() {
             //     let temp = FromBytes::read_from(msg.payload()).unwrap();
@@ -234,15 +241,20 @@ pub mod persistent_storage {
         fn get_log_len(&self) -> u64 {
             //self.log.len() as u64
 
-            self.c_log.next_offset()
+            let res = self.c_log.next_offset();
+            println!("log_len from get_log_len {:?}", res);
+            res
         }
 
-        fn get_suffix(&self, from: u64) -> &[T] {
-            // let buff = self.c_log.read(from, ReadLimit::default()).unwrap();
-            // let entries = &[];
-
+        fn get_suffix(&self, from: u64) -> Vec<T> {
             let max: u64 = self.get_log_len();
+            println!("get_suffix!");
             self.get_entries(from, max)
+
+            // match self.log.get(from as usize..) {
+            //     Some(s) => s,
+            //     None => &[],
+            // }
         }
 
         /// Last promised round.
@@ -402,18 +414,18 @@ pub mod memory_storage {
             self.acc_round
         }
 
-        fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            self.log.get(from as usize..to as usize).unwrap_or(&[])
+        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+            self.log.get(from as usize..to as usize).unwrap_or(&[]).to_vec() // todo vec temp
         }
 
         fn get_log_len(&self) -> u64 {
             self.log.len() as u64
         }
 
-        fn get_suffix(&self, from: u64) -> &[T] {
+        fn get_suffix(&self, from: u64) -> Vec<T> {
             match self.log.get(from as usize..) {
-                Some(s) => s,
-                None => &[],
+                Some(s) => s.to_vec(),
+                None => vec![],
             }
         }
 

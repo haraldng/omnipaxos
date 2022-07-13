@@ -346,7 +346,7 @@ pub mod omnireplica {
                 };
                 ents.iter()
                     .map(|x| match x {
-                        LogEntry::Decided(i) => **i,
+                        LogEntry::Decided(i) => *i, //todo removed *
                         err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                     })
                     .collect()
@@ -378,7 +378,7 @@ pub mod omnireplica {
                                 .ask_vector
                                 .pop_front()
                                 .unwrap()
-                                .reply(*i)
+                                .reply(i) //todo removed *
                                 .expect("Failed to reply promise!"),
                             LogEntry::Snapshotted(s) => self
                                 .ask_vector

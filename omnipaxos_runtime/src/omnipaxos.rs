@@ -498,12 +498,12 @@ where
     StopSign(StopSign),
 }
 
-impl<'a, T, S> From<LogEntry<'a, T, S>> for ReadEntry<T, S>
+impl<T, S> From<LogEntry<T, S>> for ReadEntry<T, S> // todo removed lifetime lere
 where
     T: Entry,
     S: Snapshot<T>,
 {
-    fn from(e: LogEntry<'a, T, S>) -> Self {
+    fn from(e: LogEntry<T, S>) -> Self {
         match e {
             LogEntry::Decided(t) => Self::Decided(t.clone()),
             LogEntry::Undecided(t) => Self::Undecided(t.clone()),
