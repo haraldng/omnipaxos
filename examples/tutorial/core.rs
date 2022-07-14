@@ -63,7 +63,7 @@ fn main() {
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
     let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with("core");
 
-    let mut seq_paxos = SequencePaxos::with(sp_config, storage);
+    let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
     let write_entry = KeyValue {
         key: 1, //String::from("a")
         value: 123,
@@ -97,7 +97,7 @@ fn main() {
                         // we are in new configuration, start new instance
                         let mut new_sp_conf = SequencePaxosConfig::default();
                         new_sp_conf.set_configuration_id(stopsign.config_id);
-                        let new_storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
+                        let new_storage = PersistentState::<KeyValue, KVSnapshot>::with("new_core");
                         let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
                         todo!()
                     }
@@ -145,5 +145,5 @@ fn main() {
         // send out_msg to receiver on network layer
     }
 
-    //let _ = DB::destroy(&Options::default(), "rocksDB");
+    let _ = DB::destroy(&Options::default(), "rocksDB");
 }
