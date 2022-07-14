@@ -84,7 +84,7 @@ where
 #[allow(missing_docs)]
 pub mod persistent_storage {
     use commitlog::{
-        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit,
+        message::{MessageSet, MessageBuf, Message}, CommitLog, LogOptions, ReadLimit,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -92,6 +92,7 @@ pub mod persistent_storage {
     };
     use rocksdb::{Options, DB};
     use zerocopy::{AsBytes, FromBytes};
+    use std::fs;
 
     //#[derive(Debug)]
     pub struct PersistentState<T, S>
@@ -126,7 +127,7 @@ pub mod persistent_storage {
     impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
         pub fn with(replica_id: &str) -> Self {
             // initialize a commit log for entries
-            let opts = LogOptions::new("commitlog");
+            let opts = LogOptions::new("commitlog/".to_string() + &replica_id.to_string());
             let c_log = CommitLog::new(opts).unwrap();
 
             // create a path and options for DB
@@ -156,11 +157,7 @@ pub mod persistent_storage {
             }
         }
 
-        // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
-        pub fn close_db(&mut self) {
-            let _ = DB::destroy(&Options::default(), &self.path);
-            self.c_log.flush();
-        }
+        
     }
 
     impl<T, S> Storage<T, S> for PersistentState<T, S>
@@ -168,43 +165,56 @@ pub mod persistent_storage {
         T: Entry + zerocopy::AsBytes + zerocopy::FromBytes,
         S: Snapshot<T>,
     {
+        // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
+        fn close_db(&self) {
+            let _ = DB::destroy(&Options::default(), &self.path);
+            fs::remove_dir("commitlog").expect("CANNOT REMOVE COMMITLOG");
+            print!("REMOVED COMMITLOG")
+        }
+
+        // works correctly
         fn append_entry(&mut self, entry: T) -> u64 {
             // self.log.push(entry);
             // self.get_log_len()
-            println!("entry from append_entry {:?}", entry);
+            
+            //println!("entry from append_entry {:?}", entry);
+            //println!("offset before append {:?}", self.get_log_len());
             let entry_bytes = AsBytes::as_bytes(&entry);
             let offset = self.c_log.append_msg(entry_bytes);
             match offset {
                 Err(_e) => 0,
                 Ok(x) => {
-                    println!("offset from append_entry {:?}", x);
+                    //println!("offset after append {:?}", x);
                     x
                 },
             }
         }
 
+        // works correctly
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             // let mut e = entries;
             // self.log.append(&mut e);
             // self.get_log_len()
-            println!("append_Entries!");
 
+            println!("append_entries!");
             for e in entries {
                 self.append_entry(e);
             }
             self.c_log.next_offset()
         }
 
+        //todo unsure if correct
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
             // self.log.truncate(from_idx as usize);
             // self.append_entries(entries)
-            println!("append_on_prefix!");
 
-            let _ = self.c_log.truncate(from_idx);
+            println!("append_on_prefix!"); 
+            let _ = self.c_log.truncate(from_idx-1); 
             let offset = self.append_entries(entries);
             offset
         }
 
+        // works correct
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
             //self.log.get(from as usize..to as usize).unwrap_or(&[])
 
@@ -213,42 +223,35 @@ pub mod persistent_storage {
             // println!("result from get_entries {:?}", res);
             // res
            
-
             //another, longer variant
-            println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
-            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); 
-            let testread = ReadLimit::max_bytes(to as usize);
-            println!("READLIMIT to: {:?}", testread);
-            println!("BUFFER: {:?}", testread);
-
+            //println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
+            //let exclude_to: usize = (to-1) as usize;
+            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo 32 is the magic number
+            //let testread = ReadLimit::max_bytes(to as usize);
+            //println!("READLIMIT to: {:?}", testread);
             let mut entries = vec![];
-            for msg in buffer.iter() {
-                    let temp = FromBytes::read_from(msg.payload()).unwrap();
-                    entries.push(temp);
+            for (idx, msg) in buffer.iter().enumerate() {
+                if idx >= to as usize{ break }
+                let temp = FromBytes::read_from(msg.payload()).unwrap();
+                entries.push(temp);       
             }
-            println!("res from get_entries {:?}", entries);
-            entries
-            
-            //old - did not work becuase arrray is fixed
-            // let entries: &mut [T] = &mut [];
-            // for (idx, msg) in buffer.iter().enumerate() {
-            //     let temp = FromBytes::read_from(msg.payload()).unwrap();
-            //     entries[idx] = temp;
-            // }
-            
+            //println!("res from get_entries {:?}", entries);
+            entries   
         }
 
+        // works correctly
         fn get_log_len(&self) -> u64 {
             //self.log.len() as u64
 
             let res = self.c_log.next_offset();
-            println!("log_len from get_log_len {:?}", res);
+            println!("get_log_len: {:?}", res);
             res
         }
 
+        // WORKS
         fn get_suffix(&self, from: u64) -> Vec<T> {
-            let max: u64 = self.get_log_len();
             println!("get_suffix!");
+            let max: u64 = self.get_log_len();
             self.get_entries(from, max)
 
             // match self.log.get(from as usize..) {
@@ -323,22 +326,45 @@ pub mod persistent_storage {
 
         //todo adjust to the current type of log
         fn trim(&mut self, trimmed_idx: u64) {
-            self.log.drain(0..trimmed_idx as usize);
+            //self.log.drain(0..trimmed_idx as usize);
+
+            println!("trim!");
+            let len = self.c_log.next_offset();
+            let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, len);
+
+            println!("amount entries that should be in trimmed log {:?}", len - trimmed_idx);
+            println!("the trimmed log {:?}", trimmed_log);
+
+            //old spagetti code
+            println!("length before truncate {:?}", self.c_log.next_offset());
+            self.c_log.truncate(0);
+            println!("length after truncate {:?}", self.c_log.next_offset());
+            println!("the trimmed log {:?}", trimmed_log);
+
+            self.append_entries(trimmed_log);
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+            //println!("set_compacted_idx!, {}", trimmed_idx);
+
             self.trimmed_idx = trimmed_idx;
         }
 
         fn get_compacted_idx(&self) -> u64 {
+            //println!("get_compacted_idx!, {}", self.trimmed_idx);
+
             self.trimmed_idx
         }
 
         fn set_snapshot(&mut self, snapshot: S) {
+            //println!("set_snapshot!");
+
             self.snapshot = Some(snapshot);
         }
 
         fn get_snapshot(&self) -> Option<S> {
+            //println!("get_snapshot!");
+
             self.snapshot.clone()
         }
     }
@@ -378,6 +404,8 @@ pub mod memory_storage {
         T: Entry,
         S: Snapshot<T>,
     {
+        fn close_db(&self) {}
+
         fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
             self.get_log_len()

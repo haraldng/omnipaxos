@@ -114,7 +114,10 @@ where
     }
 
     /// todo: a temporary flush fn which flushes the commitlog
-    /// 
+    pub fn clean_db(&self) {
+        self.storage.close_db();
+    }
+
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
