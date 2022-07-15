@@ -144,6 +144,4 @@ fn main() {
         let receiver = out_msg.to;
         // send out_msg to receiver on network layer
     }
-
-    let _ = DB::destroy(&Options::default(), "rocksDB");
 }

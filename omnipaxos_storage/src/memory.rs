@@ -84,7 +84,7 @@ where
 #[allow(missing_docs)]
 pub mod persistent_storage {
     use commitlog::{
-        message::{MessageSet, MessageBuf, Message}, CommitLog, LogOptions, ReadLimit,
+        message::{MessageSet}, CommitLog, LogOptions, ReadLimit,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -92,7 +92,6 @@ pub mod persistent_storage {
     };
     use rocksdb::{Options, DB};
     use zerocopy::{AsBytes, FromBytes};
-    use std::fs;
 
     //#[derive(Debug)]
     pub struct PersistentState<T, S>
@@ -165,12 +164,12 @@ pub mod persistent_storage {
         T: Entry + zerocopy::AsBytes + zerocopy::FromBytes,
         S: Snapshot<T>,
     {
-        // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
-        fn close_db(&self) {
-            let _ = DB::destroy(&Options::default(), &self.path);
-            fs::remove_dir("commitlog").expect("CANNOT REMOVE COMMITLOG");
-            print!("REMOVED COMMITLOG")
-        }
+        // // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
+        // fn close_db(&self) {
+        //     let _ = DB::destroy(&Options::default(), &self.path);
+        //     fs::remove_dir("commitlog").expect("CANNOT REMOVE COMMITLOG");
+        //     print!("REMOVED COMMITLOG")
+        // }
 
         // works correctly
         fn append_entry(&mut self, entry: T) -> u64 {
@@ -404,7 +403,7 @@ pub mod memory_storage {
         T: Entry,
         S: Snapshot<T>,
     {
-        fn close_db(&self) {}
+        // fn close_db(&self) {}
 
         fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
