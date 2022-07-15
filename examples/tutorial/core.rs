@@ -5,7 +5,6 @@ use omnipaxos_core::{
     util::LogEntry,
 };
 use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentState};
-use rocksdb::{DB, Options};
 use std::collections::HashMap;
 use zerocopy::{AsBytes, FromBytes};
 
