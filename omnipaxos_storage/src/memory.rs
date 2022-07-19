@@ -4,16 +4,20 @@
 /// a slice of bytes before and de-serialized when read from the log. 
 #[allow(missing_docs)]
 pub mod persistent_storage {
+    use std::marker::PhantomData;
+
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
     use commitlog::{
-        message::{MessageSet}, CommitLog, LogOptions, ReadLimit,
+        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit,
     };
-    use rocksdb::{Options, DB};
+    use rocksdb::{Options, DB, DBCompressionType};
     use zerocopy::{AsBytes, FromBytes};
 
+    const COMMITLOG: &str = "commitlog/";
+    const ROCKSDB: &str = "rocksDB/";
     //#[derive(Debug)]
     pub struct PersistentState<T, S>
     where
@@ -22,6 +26,8 @@ pub mod persistent_storage {
     {
         /// a disk-based commit log for entries
         c_log: CommitLog,
+        /// Path to commitlog
+        c_log_path: String,
         /// a struct for accessing local RocksDB database
         db: DB,
         /// Garbage collected index.
@@ -30,37 +36,45 @@ pub mod persistent_storage {
         snapshot: Option<S>,
         /// Stored StopSign
         stopsign: Option<StopSignEntry>,
-
-        //todo: remain until T is removed
-        // /// Vector which contains all the logged entries in-memory.
-        log: Vec<T>,
+        /// A placeholder for the T: Entry
+        marker: PhantomData<T>
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
         pub fn with(replica_id: &str) -> Self {
-            // initialize a commit log for entries
-            let c_opts = LogOptions::new("commitlog/".to_string() + &replica_id.to_string());
+
+            // initialize a commitlog for entries
+            let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
+            let c_opts = LogOptions::new(&c_path);
+            // set options to decrease load
             let c_log = CommitLog::new(c_opts).unwrap();
 
-            // create a path and options for DB
-            let path = "rocksDB/".to_string() + &replica_id.to_string();
-            let mut db_opts = Options::default();
-            let lru = rocksdb::Cache::new_lru_cache(1200 as usize).unwrap();
-           
-            // setting options for DB
-            db_opts.set_row_cache(&lru);
-            db_opts.increase_parallelism(2);
-            db_opts.set_max_write_buffer_number(16);
-            db_opts.create_if_missing(true);
+            // insert dummy element onto index 0, only [1 ... n] will be used in the log
+            //c_log.append_msg(AsBytes::as_bytes("dummy".as_bytes()));
 
-            let db = DB::open(&db_opts, &path).unwrap();
+            // create a path and options for DB
+            let db_path = ROCKSDB.to_string() + &replica_id.to_string();
+            let mut db_opts = Options::default();
+            db_opts.increase_parallelism(4);                    // Set the amount threads for rocksDB
+            db_opts.create_if_missing(true);                    // Creates an database if its missing
+            
+            // optimize the memory usage
+            db_opts.set_max_write_buffer_number(1);        // Max buffers for writing
+            db_opts.set_write_buffer_size(0);
+            db_opts.set_db_write_buffer_size(0);
+            db_opts.set_compression_type(DBCompressionType::Zstd);
+            //db_opts.set_row_cache(&lru);                      // Set cache for tale-level rows
+            //let lru = rocksdb::Cache::new_lru_cache(1200 as usize).unwrap();
+
+            let db = DB::open(&db_opts, &db_path).unwrap();
             Self {
                 c_log: c_log,
+                c_log_path: c_path,
                 db: db,
-                log: vec![],
                 trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
+                marker: PhantomData::default()
             }
         }
     }
@@ -89,18 +103,20 @@ pub mod persistent_storage {
             }
         }
 
-        // todo: perhaps replace with Commitlog::append, read more about MessageSetMut
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             println!("append entries!");
-            for e in entries {
-                self.append_entry(e);
+            let mut buf: MessageBuf = MessageBuf::default();
+            for entry in entries {
+                let entry_bytes = AsBytes::as_bytes(&entry);
+                let _ = buf.push(entry_bytes);
             }
-            self.c_log.next_offset()
+            let offsets = self.c_log.append(&mut buf).unwrap();
+            offsets.first() + offsets.len() as u64                              // returns the last offset appended in commitlog
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
             println!("append on prefix!"); 
-            let _ = self.c_log.truncate(from_idx-1); // truncate removes entries from 'from_idx'
+            let _ = self.c_log.truncate(from_idx);                    // truncate removes entries excluding 'from_idx' so subtract by 1
             let offset = self.append_entries(entries);
             offset
         }
@@ -111,15 +127,15 @@ pub mod persistent_storage {
             // println!("result from get_entries {:?}", res);
             // res
            
-            //println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
-            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo 32 is the magic number
+            println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
+            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo: 32 is the magic number
             let mut entries = vec![];
             for (idx, msg) in buffer.iter().enumerate() {
-                if idx >= to as usize{ break }
-                let entry = FromBytes::read_from(msg.payload()).unwrap();
-                entries.push(entry);       
+ 		println!("index! {:?}", idx);
+                if (idx as u64 + from) >= to { break }                                                          // check that the amount entres are equal 'to'
+                entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
-            //println!("res from get_entries {:?}", entries);
+            println!("res from get_entries {:?}", entries);
             entries   
         }
 
@@ -138,11 +154,9 @@ pub mod persistent_storage {
         /// Last promised round.
         fn get_promise(&self) -> Ballot {
             match self.db.get(b"n_prom") {
-                Ok(Some(value)) => {
-                    let mut prom_bytes = value;
-                    let prom_bytes: &mut [u8] = &mut prom_bytes;
-                    let res: Ballot = FromBytes::read_from(prom_bytes).unwrap();
-                    res
+                Ok(Some(mut value)) => {
+                    let prom_bytes: &mut [u8] = &mut value;
+                    FromBytes::read_from(prom_bytes).unwrap()
                 }
                 Ok(None) => Ballot::default(), 
                 Err(_e) => Ballot::default(),
@@ -159,8 +173,7 @@ pub mod persistent_storage {
             match self.db.get(b"ld") {
                 Ok(Some(value)) => {
                     let ld_bytes: &[u8] = &value;
-                    let res: u64 = FromBytes::read_from(ld_bytes).unwrap();
-                    res
+                    FromBytes::read_from(ld_bytes).unwrap()
                 }
                 Ok(None) => 0,
                 Err(_e) => todo!(),
@@ -175,11 +188,9 @@ pub mod persistent_storage {
         /// Last accepted round.
         fn get_accepted_round(&self) -> Ballot {
             match self.db.get(b"acc_round") {
-                Ok(Some(value)) => {
-                    let mut acc_bytes = value;
-                    let acc_bytes: &mut [u8] = &mut acc_bytes;
-                    let res: Ballot = FromBytes::read_from(acc_bytes).unwrap();
-                    res
+                Ok(Some(mut value)) => {
+                    let acc_bytes: &mut [u8] = &mut value;
+                    FromBytes::read_from(acc_bytes).unwrap()
                 }
                 Ok(None) => Ballot::default(), 
                 Err(_e) => Ballot::default(),
@@ -202,15 +213,24 @@ pub mod persistent_storage {
         // TODO: solve the bug with truncate not removing the first element in commitlog
         fn trim(&mut self, trimmed_idx: u64) {
             println!("trim!");
+            
+            // get the part that should remain
             let len = self.c_log.next_offset();
             let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, len);
-
             println!("amount entries that should be in trimmed log {:?}", len - trimmed_idx);
             println!("the trimmed log {:?}", trimmed_log);
             println!("length before truncate {:?}", self.c_log.next_offset());
-            let _ = self.c_log.truncate(0);
-            println!("length after truncate {:?}", self.c_log.next_offset());
+
+            // remove old log
+            let _ = std::fs::remove_dir_all(&self.c_log_path);
+
+            //create new, insert the log into it
+            let c_opts = LogOptions::new(&self.c_log_path);
+            self.c_log = CommitLog::new(c_opts).unwrap();
+            println!("length after truncate {:?}", self.get_log_len());    
             self.append_entries(trimmed_log);
+
+            // let _ = self.c_log.truncate(0);
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
@@ -238,7 +258,6 @@ pub mod memory_storage {
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
-
     /// An in-memory storage implementation for SequencePaxos.
     #[derive(Clone)]
     pub struct MemoryStorage<T, S>

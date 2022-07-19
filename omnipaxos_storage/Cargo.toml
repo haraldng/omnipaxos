@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 omnipaxos_core = { path = "../omnipaxos_core" }
-commitlog = { version = "0.1", optional = false }
+commitlog = { version = "0.2.0", optional = false }
 rocksdb = { version = "0.18.0", optional = false }
 zerocopy = { version = "0.6.1", optional = false }
 

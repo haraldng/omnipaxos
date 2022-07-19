@@ -13,7 +13,7 @@ const GC_INDEX_INCREMENT: u64 = 10;
 /// Test Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] are removed.
-//#[test]
+#[test]
 #[serial]
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
@@ -69,7 +69,7 @@ fn trim_test() {
 /// Test double Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] + an increment are removed.
-//#[test]
+#[test]
 #[serial]
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");

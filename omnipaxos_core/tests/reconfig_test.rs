@@ -16,7 +16,7 @@ use util::TestSystem;
 
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
-//#[test]
+#[test]
 #[serial]
 fn reconfig_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");

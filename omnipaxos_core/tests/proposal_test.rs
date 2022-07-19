@@ -11,7 +11,7 @@ use util::TestSystem;
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
-//#[test]
+#[test]
 #[serial]
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
