@@ -131,7 +131,7 @@ pub mod persistent_storage {
             let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo: 32 is the magic number
             let mut entries = vec![];
             for (idx, msg) in buffer.iter().enumerate() {
- 		println!("index! {:?}", idx);
+ 		//println!("index! {:?}", idx);
                 if (idx as u64 + from) >= to { break }                                                          // check that the amount entres are equal 'to'
                 entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
@@ -141,7 +141,7 @@ pub mod persistent_storage {
 
         fn get_log_len(&self) -> u64 {
             let res = self.c_log.next_offset();
-            println!("log length: {:?}", res);
+            //println!("log length: {:?}", res);
             res
         }
 
