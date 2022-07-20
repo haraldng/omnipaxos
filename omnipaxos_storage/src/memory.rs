@@ -43,17 +43,21 @@ pub mod persistent_storage {
     impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
         pub fn with(replica_id: &str) -> Self {
 
-            // initialize a commitlog for entries
             let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
+            let db_path = ROCKSDB.to_string() + &replica_id.to_string();
+
+            // todo: a temporary solution, makes sure tests start with empty db and log
+            let _ = std::fs::remove_dir_all(&c_path);
+            let _ = std::fs::remove_dir_all(&db_path);
+
+            // initialize a commitlog for entries
             let c_opts = LogOptions::new(&c_path);
-            // set options to decrease load
             let c_log = CommitLog::new(c_opts).unwrap();
 
-            // insert dummy element onto index 0, only [1 ... n] will be used in the log
+            // todo: perhaps insert dummy element onto index 0, only use indexes [1 ... n]
             //c_log.append_msg(AsBytes::as_bytes("dummy".as_bytes()));
 
             // create a path and options for DB
-            let db_path = ROCKSDB.to_string() + &replica_id.to_string();
             let mut db_opts = Options::default();
             db_opts.increase_parallelism(4);                    // Set the amount threads for rocksDB
             db_opts.create_if_missing(true);                    // Creates an database if its missing
@@ -94,12 +98,11 @@ pub mod persistent_storage {
         fn append_entry(&mut self, entry: T) -> u64 {
             println!("append entry! {:?}", entry);
             let entry_bytes = AsBytes::as_bytes(&entry);
-            let offset = self.c_log.append_msg(entry_bytes);
-            match offset {
-                Err(_e) => 0,
+            match self.c_log.append_msg(entry_bytes) {
                 Ok(x) => {
                     x
                 },
+                Err(_e) => 0,  
             }
         }
 
@@ -107,18 +110,16 @@ pub mod persistent_storage {
             println!("append entries!");
             let mut buf: MessageBuf = MessageBuf::default();
             for entry in entries {
-                let entry_bytes = AsBytes::as_bytes(&entry);
-                let _ = buf.push(entry_bytes);
+                let _ = buf.push(AsBytes::as_bytes(&entry));
             }
             let offsets = self.c_log.append(&mut buf).unwrap();
-            offsets.first() + offsets.len() as u64                              // returns the last offset appended in commitlog
+            offsets.first() + offsets.len() as u64                             // returns the last offset appended in commitlog
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
             println!("append on prefix!"); 
             let _ = self.c_log.truncate(from_idx);                    // truncate removes entries excluding 'from_idx' so subtract by 1
-            let offset = self.append_entries(entries);
-            offset
+            self.append_entries(entries)
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
@@ -131,7 +132,7 @@ pub mod persistent_storage {
             let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo: 32 is the magic number
             let mut entries = vec![];
             for (idx, msg) in buffer.iter().enumerate() {
- 		//println!("index! {:?}", idx);
+ 		        //println!("index! {:?}", idx);
                 if (idx as u64 + from) >= to { break }                                                          // check that the amount entres are equal 'to'
                 entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
@@ -212,14 +213,15 @@ pub mod persistent_storage {
 
         // TODO: solve the bug with truncate not removing the first element in commitlog
         fn trim(&mut self, trimmed_idx: u64) {
-            println!("trim!");
+            println!("TRIM!");
             
-            // get the part that should remain
-            let len = self.c_log.next_offset();
-            let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, len);
-            println!("amount entries that should be in trimmed log {:?}", len - trimmed_idx);
-            println!("the trimmed log {:?}", trimmed_log);
+            // get the entire log, drain it until trimmed_idx
+            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset());
             println!("length before truncate {:?}", self.c_log.next_offset());
+            println!("the trimmed log before drain {:?}", trimmed_log);
+            trimmed_log.drain(0..trimmed_idx as usize);
+            println!("the trimmed log after drain {:?}", trimmed_log);
+
 
             // remove old log
             let _ = std::fs::remove_dir_all(&self.c_log_path);
@@ -227,10 +229,12 @@ pub mod persistent_storage {
             //create new, insert the log into it
             let c_opts = LogOptions::new(&self.c_log_path);
             self.c_log = CommitLog::new(c_opts).unwrap();
-            println!("length after truncate {:?}", self.get_log_len());    
             self.append_entries(trimmed_log);
+            println!("length after truncate {:?}", self.get_log_len());    
 
+            // leftover
             // let _ = self.c_log.truncate(0);
+            // println!("amount entries that should be in trimmed log {:?}", len - trimmed_idx);
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
