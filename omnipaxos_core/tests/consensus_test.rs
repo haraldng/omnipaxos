@@ -161,7 +161,6 @@ fn read_entries_test() {
         .read_entries(from_idx..=decided_idx)
         .expect("No entries");
     let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
-    println!("FROM AND DECIDED: {}, {}", from_idx, decided_idx);
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
 
     // read snapshot only

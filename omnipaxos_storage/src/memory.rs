@@ -1,11 +1,10 @@
 
 /// An persistent storage implementation, lets sequencepaxos write the log
-/// and variables (promised, accepted) to disk. Every log entry is serialized into
-/// a slice of bytes before and de-serialized when read from the log. 
+/// and variables (promised, accepted) to disk. Log entries are serialized 
+/// and de-serialized into slice of bytes when read or written from the log. 
 #[allow(missing_docs)]
 pub mod persistent_storage {
     use std::marker::PhantomData;
-
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
@@ -26,7 +25,7 @@ pub mod persistent_storage {
     {
         /// a disk-based commit log for entries
         c_log: CommitLog,
-        /// Path to commitlog
+        /// Todo: Path to commitlog, remove when commitlog is no longer deleted here
         c_log_path: String,
         /// a struct for accessing local RocksDB database
         db: DB,
@@ -43,10 +42,11 @@ pub mod persistent_storage {
     impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
         pub fn with(replica_id: &str) -> Self {
 
+            // paths to commitlog and rocksDB store
             let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
             let db_path = ROCKSDB.to_string() + &replica_id.to_string();
 
-            // todo: a temporary solution, makes sure tests start with empty db and log
+            // todo: a temporary solution, makes sure tests start with empty db and log, move later to tests!
             let _ = std::fs::remove_dir_all(&c_path);
             let _ = std::fs::remove_dir_all(&db_path);
 
@@ -61,8 +61,6 @@ pub mod persistent_storage {
             let mut db_opts = Options::default();
             db_opts.increase_parallelism(4);                    // Set the amount threads for rocksDB
             db_opts.create_if_missing(true);                    // Creates an database if its missing
-            
-            // optimize the memory usage
             db_opts.set_max_write_buffer_number(1);        // Max buffers for writing
             db_opts.set_write_buffer_size(0);
             db_opts.set_db_write_buffer_size(0);
@@ -88,15 +86,9 @@ pub mod persistent_storage {
         T: Entry + zerocopy::AsBytes + zerocopy::FromBytes,
         S: Snapshot<T>,
     {
-        // // Todo: a function for destroying the database in the given path, also flushes the commitlog. 
-        // fn close_db(&self) {
-        //     let _ = DB::destroy(&Options::default(), &self.path);
-        //     fs::remove_dir("commitlog").expect("CANNOT REMOVE COMMITLOG");
-        //     print!("REMOVED COMMITLOG")
-        // }
 
         fn append_entry(&mut self, entry: T) -> u64 {
-            println!("append entry! {:?}", entry);
+            //println!("append entry! {:?}", entry);
             let entry_bytes = AsBytes::as_bytes(&entry);
             match self.c_log.append_msg(entry_bytes) {
                 Ok(x) => {
@@ -107,17 +99,17 @@ pub mod persistent_storage {
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            println!("append entries!");
+            //println!("append entries!");
             let mut buf: MessageBuf = MessageBuf::default();
             for entry in entries {
                 let _ = buf.push(AsBytes::as_bytes(&entry));
             }
-            let offsets = self.c_log.append(&mut buf).unwrap();
-            offsets.first() + offsets.len() as u64                             // returns the last offset appended in commitlog
+            self.c_log.append(&mut buf).unwrap();
+            self.get_log_len()                       
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            println!("append on prefix!"); 
+            //println!("append on prefix!"); 
             let _ = self.c_log.truncate(from_idx);                    // truncate removes entries excluding 'from_idx' so subtract by 1
             self.append_entries(entries)
         }
@@ -128,31 +120,28 @@ pub mod persistent_storage {
             // println!("result from get_entries {:?}", res);
             // res
            
-            println!("get_entries FROM and TO: {:?} -> {:?} ", from, to);
-            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); //todo: 32 is the magic number
+            //println!("get_entries from: {:?} -> to: {:?} ", from, to);
+            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap(); // todo: 32 is the magic number
             let mut entries = vec![];
             for (idx, msg) in buffer.iter().enumerate() {
- 		        //println!("index! {:?}", idx);
-                if (idx as u64 + from) >= to { break }                                                          // check that the amount entres are equal 'to'
+                if (idx as u64 + from) >= to { break }                                                  // todo: find a clener solution                                               // check that the amount entres are equal 'to'
                 entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
-            println!("res from get_entries {:?}", entries);
+            //println!("res from get_entries {:?}", entries);
             entries   
         }
 
         fn get_log_len(&self) -> u64 {
-            let res = self.c_log.next_offset();
+            self.c_log.next_offset()
             //println!("log length: {:?}", res);
-            res
+            //res
         }
 
         fn get_suffix(&self, from: u64) -> Vec<T> {
-            println!("get suffix!");
-            let max: u64 = self.get_log_len();
-            self.get_entries(from, max)
+            //println!("get suffix!");
+            self.get_entries(from, self.get_log_len())
         }
 
-        /// Last promised round.
         fn get_promise(&self) -> Ballot {
             match self.db.get(b"n_prom") {
                 Ok(Some(mut value)) => {
@@ -169,7 +158,6 @@ pub mod persistent_storage {
             self.db.put(b"n_prom", prom_bytes).unwrap()
         }
 
-        /// Length of the decided log.
         fn get_decided_idx(&self) -> u64 {
             match self.db.get(b"ld") {
                 Ok(Some(value)) => {
@@ -186,7 +174,6 @@ pub mod persistent_storage {
             self.db.put(b"ld", ld_bytes).unwrap();
         }
 
-        /// Last accepted round.
         fn get_accepted_round(&self) -> Ballot {
             match self.db.get(b"acc_round") {
                 Ok(Some(mut value)) => {
@@ -211,26 +198,22 @@ pub mod persistent_storage {
             self.stopsign.clone()
         }
 
-        // TODO: solve the bug with truncate not removing the first element in commitlog
         fn trim(&mut self, trimmed_idx: u64) {
-            println!("TRIM!");
+            //println!("TRIM!");
             
-            // get the entire log, drain it until trimmed_idx
-            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset());
-            println!("length before truncate {:?}", self.c_log.next_offset());
-            println!("the trimmed log before drain {:?}", trimmed_log);
+            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset());    // get the entire log, drain it until trimmed_idx
+
+            // println!("length before truncate {:?}", self.c_log.next_offset());
+            // println!("the trimmed log before drain {:?}", trimmed_log);
             trimmed_log.drain(0..trimmed_idx as usize);
-            println!("the trimmed log after drain {:?}", trimmed_log);
+            // println!("the trimmed log after drain {:?}", trimmed_log);
 
+            let _ = std::fs::remove_dir_all(&self.c_log_path);                              // remove old log
 
-            // remove old log
-            let _ = std::fs::remove_dir_all(&self.c_log_path);
-
-            //create new, insert the log into it
-            let c_opts = LogOptions::new(&self.c_log_path);
+            let c_opts = LogOptions::new(&self.c_log_path);             // create new, insert the log into it
             self.c_log = CommitLog::new(c_opts).unwrap();
             self.append_entries(trimmed_log);
-            println!("length after truncate {:?}", self.get_log_len());    
+            //println!("length after truncate {:?}", self.get_log_len());    
 
             // leftover
             // let _ = self.c_log.truncate(0);
@@ -290,8 +273,6 @@ pub mod memory_storage {
         T: Entry,
         S: Snapshot<T>,
     {
-        // fn close_db(&self) {}
-
         fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
             self.get_log_len()
