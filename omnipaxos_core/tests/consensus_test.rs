@@ -20,7 +20,7 @@ use util::TestSystem;
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads, &cfg.storage_type);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 

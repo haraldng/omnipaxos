@@ -18,7 +18,7 @@ const GC_INDEX_INCREMENT: u64 = 10;
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads, &cfg.storage_type);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -74,7 +74,7 @@ fn trim_test() {
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads, &cfg.storage_type);
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 

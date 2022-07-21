@@ -2,7 +2,7 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{Snapshot},
+    storage::{Snapshot, Entry, Storage},
 };
 use omnipaxos_storage::memory::{persistent_storage::PersistentState, memory_storage::MemoryStorage};
 
@@ -34,8 +34,26 @@ pub struct TestSystem {
     >,
 }
 
+pub enum StorageType<T,S>
+where  
+    T: Entry,
+    S: Snapshot<T>
+{
+    PS(PersistentState<T,S>),
+    MS(MemoryStorage<T,S>)
+}
+
+pub fn set_storage_type<T: Entry, S:Snapshot<T>>(storage_type: &str, pid: u64) -> StorageType<Value, LatestValue> {
+    if storage_type.eq("PersistentState") {
+        StorageType::PS(PersistentState::with(&pid.to_string()))
+    }
+    else {
+        StorageType::MS(MemoryStorage::default())
+    }
+}
+
 impl TestSystem {
-    pub fn with(num_nodes: usize, ble_hb_delay: u64, num_threads: usize) -> Self {
+    pub fn with(num_nodes: usize, ble_hb_delay: u64, num_threads: usize, storage_type: &str) -> Self {
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
         conf.set_config_value(&system::THREADS, num_threads);
@@ -72,11 +90,14 @@ impl TestSystem {
             let mut sp_config = SequencePaxosConfig::default();
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
+
+            // let storage = match set_storage_type(&storage_type, pid) {
+            //     StorageType::PS(persist_s) => persist_s,
+            //     StorageType::MS(mem_s) => mem_s,
+            // };
+            
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                SequencePaxosComponent::with(SequencePaxos::with(
-                    sp_config,
-                    PersistentState::with(&pid.to_string()),
-                ))
+                SequencePaxosComponent::with(SequencePaxos::with(sp_config, PersistentState::with(&pid.to_string())))
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
@@ -161,6 +182,7 @@ impl TestSystem {
         };
     }
 }
+
 
 pub mod ble {
     use super::*;

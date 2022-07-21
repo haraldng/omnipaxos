@@ -83,10 +83,7 @@ pub trait Storage<T, S>
 where
     T: Entry,
     S: Snapshot<T>,
-{
-    // #[allow(missing_docs)]
-    // fn close_db(&self);
-    
+{ 
     /// Appends an entry to the end of the log and returns the log length.
     fn append_entry(&mut self, entry: T) -> u64;
 

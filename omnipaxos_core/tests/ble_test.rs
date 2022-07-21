@@ -16,7 +16,7 @@ use util::TestSystem;
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");
 
-    let mut sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let mut sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads, &cfg.storage_type);
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 

@@ -279,9 +279,9 @@ where
                     // TODO
                     Some(data) => {
                         if idx < self.storage.get_decided_idx() {
-                            Some(LogEntry::Decided(data.clone())) //todo added clone
+                            Some(LogEntry::Decided(data.clone()))
                         } else {
-                            Some(LogEntry::Undecided(data.clone())) //todo added clone
+                            Some(LogEntry::Undecided(data.clone()))
                         }
                     }
                     None => None,
@@ -403,7 +403,7 @@ where
         self
             .storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
-            .into_iter()        // todo: was iter() before
+            .into_iter()
             .enumerate()
             .map(|(idx, e)| {
                 let log_idx = idx as u64 + compacted_idx;
@@ -1161,7 +1161,7 @@ where
         let entries = self
             .storage
             .get_entries(0, compact_idx - self.storage.get_compacted_idx());
-        let delta = S::create(entries.as_slice()); //todo: added as_slice()
+        let delta = S::create(entries.as_slice());
         match self.storage.get_snapshot() {
             Some(mut s) => {
                 s.merge(delta);
@@ -1190,7 +1190,7 @@ where
                     )
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self.storage.get_suffix(prep.la);
-                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice())); //todo added as_slice()
+                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
                     let compacted_idx = self.storage.get_compacted_idx() + la;
                     (
                         compacted_idx,

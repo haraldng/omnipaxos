@@ -220,7 +220,7 @@ where
 
 /// The entry read in the log.
 #[derive(Debug, Clone)]
-pub enum LogEntry<T, S> // todo removed 'a from LogEntry
+pub enum LogEntry<T, S>
 where
     T: Entry,
     S: Snapshot<T>,
