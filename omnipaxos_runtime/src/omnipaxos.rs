@@ -498,7 +498,8 @@ where
     StopSign(StopSign),
 }
 
-impl<T, S> From<LogEntry<T, S>> for ReadEntry<T, S> // todo removed lifetime lere
+impl<T, S> From<LogEntry<T, S>> for ReadEntry<T, S>
+// todo removed lifetime lere
 where
     T: Entry,
     S: Snapshot<T>,

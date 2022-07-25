@@ -8,7 +8,9 @@ use omnipaxos_core::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
-use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentState};
+use omnipaxos_storage::memory::{
+    memory_storage::MemoryStorage, persistent_storage::PersistentState,
+};
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
@@ -20,7 +22,12 @@ use util::TestSystem;
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads, &cfg.storage_type);
+    let sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        &cfg.storage_type,
+    );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -60,7 +67,6 @@ fn consensus_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
 }
 
 #[test]
@@ -128,7 +134,6 @@ fn read_test() {
     let idx = log_len;
     let stopsign = stopped_op.read(idx).expect("No StopSign");
     verify_stopsign(&[stopsign], &ss);
-        
 }
 
 #[test]
@@ -247,7 +252,6 @@ fn read_entries_test() {
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
-
 }
 
 fn verify_snapshot(

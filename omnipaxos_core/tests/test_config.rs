@@ -33,7 +33,9 @@ impl TestConfig {
             num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
             num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
             gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
-            storage_type: cfg["storage_type"].as_string().unwrap_or("MemoryStorage".to_string())
+            storage_type: cfg["storage_type"]
+                .as_string()
+                .unwrap_or("MemoryStorage".to_string()),
         })
     }
 }
