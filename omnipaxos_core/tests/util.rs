@@ -2,13 +2,13 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{Snapshot, Entry, Storage},
+    storage::Snapshot,
 };
-use omnipaxos_storage::memory::{persistent_storage::PersistentState, memory_storage::MemoryStorage};
 
 use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
+    storage_type::StorageType,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
@@ -34,26 +34,188 @@ pub struct TestSystem {
     >,
 }
 
-pub enum StorageType<T,S>
-where  
-    T: Entry,
-    S: Snapshot<T>
-{
-    PS(PersistentState<T,S>),
-    MS(MemoryStorage<T,S>)
-}
+pub mod storage_type {
+    use omnipaxos_core::{
+        ballot_leader_election::Ballot,
+        storage::{Entry, Snapshot, Storage},
+    };
+    use omnipaxos_storage::memory::{
+        memory_storage::MemoryStorage, persistent_storage::PersistentState,
+    };
+    use zerocopy::{AsBytes, FromBytes};
 
-pub fn set_storage_type<T: Entry, S:Snapshot<T>>(storage_type: &str, pid: u64) -> StorageType<Value, LatestValue> {
-    if storage_type.eq("PersistentState") {
-        StorageType::PS(PersistentState::with(&pid.to_string()))
+    /// An enum for switching between the storage types 'Persistent' and 'Memory'
+    /// The storage type can be set at 'storage_type' in config/test.conf with the two
+    /// values 'Persistent' or 'Memory'
+    pub enum StorageType<T, S>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+    {
+        PS(PersistentState<T, S>),
+        MS(MemoryStorage<T, S>),
     }
-    else {
-        StorageType::MS(MemoryStorage::default())
+
+    impl<T, S> StorageType<T, S>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+    {
+        pub fn with(storage_type: &str, pid: u64) -> Self {
+            match storage_type {
+                "Persistent" => StorageType::PS(PersistentState::with(&pid.to_string())), // Persistent storage
+                _ => StorageType::MS(MemoryStorage::default()), // Memory storage (default)
+            }
+        }
+    }
+
+    impl<T, S> Storage<T, S> for StorageType<T, S>
+    where
+        T: Entry + AsBytes + FromBytes,
+        S: Snapshot<T>,
+    {
+        fn append_entry(&mut self, entry: T) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.append_entry(entry),
+                StorageType::MS(mem_s) => mem_s.append_entry(entry),
+            }
+        }
+
+        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.append_entries(entries),
+                StorageType::MS(mem_s) => mem_s.append_entries(entries),
+            }
+        }
+
+        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.append_on_prefix(from_idx, entries),
+                StorageType::MS(mem_s) => mem_s.append_on_prefix(from_idx, entries),
+            }
+        }
+
+        fn set_promise(&mut self, n_prom: Ballot) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_promise(n_prom),
+                StorageType::MS(mem_s) => mem_s.set_promise(n_prom),
+            }
+        }
+
+        fn set_decided_idx(&mut self, ld: u64) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_decided_idx(ld),
+                StorageType::MS(mem_s) => mem_s.set_decided_idx(ld),
+            }
+        }
+
+        fn get_decided_idx(&self) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_decided_idx(),
+                StorageType::MS(mem_s) => mem_s.get_decided_idx(),
+            }
+        }
+
+        fn set_accepted_round(&mut self, na: Ballot) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_accepted_round(na),
+                StorageType::MS(mem_s) => mem_s.set_accepted_round(na),
+            }
+        }
+
+        fn get_accepted_round(&self) -> Ballot {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_accepted_round(),
+                StorageType::MS(mem_s) => mem_s.get_accepted_round(),
+            }
+        }
+
+        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_entries(from, to),
+                StorageType::MS(mem_s) => mem_s.get_entries(from, to),
+            }
+        }
+
+        fn get_log_len(&self) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_log_len(),
+                StorageType::MS(mem_s) => mem_s.get_log_len(),
+            }
+        }
+
+        fn get_suffix(&self, from: u64) -> Vec<T> {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_suffix(from),
+                StorageType::MS(mem_s) => mem_s.get_suffix(from),
+            }
+        }
+
+        fn get_promise(&self) -> Ballot {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_promise(),
+                StorageType::MS(mem_s) => mem_s.get_promise(),
+            }
+        }
+
+        fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_stopsign(s),
+                StorageType::MS(mem_s) => mem_s.set_stopsign(s),
+            }
+        }
+
+        fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_stopsign(),
+                StorageType::MS(mem_s) => mem_s.get_stopsign(),
+            }
+        }
+
+        fn trim(&mut self, idx: u64) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.trim(idx),
+                StorageType::MS(mem_s) => mem_s.trim(idx),
+            }
+        }
+
+        fn set_compacted_idx(&mut self, idx: u64) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_compacted_idx(idx),
+                StorageType::MS(mem_s) => mem_s.set_compacted_idx(idx),
+            }
+        }
+
+        fn get_compacted_idx(&self) -> u64 {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_compacted_idx(),
+                StorageType::MS(mem_s) => mem_s.get_compacted_idx(),
+            }
+        }
+
+        fn set_snapshot(&mut self, snapshot: S) {
+            match self {
+                StorageType::PS(persist_s) => persist_s.set_snapshot(snapshot),
+                StorageType::MS(mem_s) => mem_s.set_snapshot(snapshot),
+            }
+        }
+
+        fn get_snapshot(&self) -> Option<S> {
+            match self {
+                StorageType::PS(persist_s) => persist_s.get_snapshot(),
+                StorageType::MS(mem_s) => mem_s.get_snapshot(),
+            }
+        }
     }
 }
 
 impl TestSystem {
-    pub fn with(num_nodes: usize, ble_hb_delay: u64, num_threads: usize, storage_type: &str) -> Self {
+    pub fn with(
+        num_nodes: usize,
+        ble_hb_delay: u64,
+        num_threads: usize,
+        storage_type: &str,
+    ) -> Self {
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
         conf.set_config_value(&system::THREADS, num_threads);
@@ -91,13 +253,10 @@ impl TestSystem {
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
 
-            // let storage = match set_storage_type(&storage_type, pid) {
-            //     StorageType::PS(persist_s) => persist_s,
-            //     StorageType::MS(mem_s) => mem_s,
-            // };
-            
+            let storage: StorageType<Value, LatestValue> = StorageType::with(&storage_type, pid);
+
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                SequencePaxosComponent::with(SequencePaxos::with(sp_config, PersistentState::with(&pid.to_string())))
+                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
@@ -182,7 +341,6 @@ impl TestSystem {
         };
     }
 }
-
 
 pub mod ble {
     use super::*;
@@ -295,10 +453,8 @@ pub mod ble {
 pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos_core::{
-        ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos, util::LogEntry,
-    };
-    use omnipaxos_storage::{
-        memory::memory_storage::MemoryStorage, memory::persistent_storage::PersistentState
+        ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
+        util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
@@ -311,7 +467,7 @@ pub mod omnireplica {
         ble_port: RequiredPort<BallotLeaderElectionPort>,
         peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        pub paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
+        pub paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -341,7 +497,7 @@ pub mod omnireplica {
 
     impl SequencePaxosComponent {
         pub fn with(
-            paxos: SequencePaxos<Value, LatestValue, PersistentState<Value, LatestValue>>,
+            paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -448,7 +604,8 @@ pub mod omnireplica {
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, FromBytes, AsBytes)]
 pub struct Value(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+#[repr(packed)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, FromBytes, AsBytes)]
 pub struct LatestValue {
     value: Value,
 }
@@ -478,5 +635,3 @@ fn stopsign_meta_to_value(ss: &StopSign) -> Value {
         .expect("Empty metadata");
     Value(*v as u64)
 }
-
-

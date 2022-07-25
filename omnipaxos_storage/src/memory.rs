@@ -1,22 +1,22 @@
-
-/// An persistent storage implementation, lets sequence paxos write the log
-/// and variables (e.g. promised, accepted) to disk. Log entries are serialized 
-/// and de-serialized into slice of bytes when read or written from the log. 
 #[allow(missing_docs)]
 pub mod persistent_storage {
-    use std::marker::PhantomData;
+    use commitlog::{
+        message::{MessageBuf, MessageSet},
+        CommitLog, LogOptions, ReadLimit,
+    };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSignEntry, Storage},
     };
-    use commitlog::{
-        message::{MessageSet, MessageBuf}, CommitLog, LogOptions, ReadLimit,
-    };
     use rocksdb::{Options, DB};
+    use std::marker::PhantomData;
     use zerocopy::{AsBytes, FromBytes};
     const COMMITLOG: &str = "commitlog/";
     const ROCKSDB: &str = "rocksDB/";
 
+    /// A persistent storage implementation, lets sequence paxos write the log
+    /// and variables (e.g. promised, accepted) to disk. Log entries are serialized
+    /// and de-serialized into slice of bytes when read or written from the log.
     //#[derive(Debug)]
     pub struct PersistentState<T, S>
     where
@@ -36,7 +36,7 @@ pub mod persistent_storage {
         /// Stored StopSign
         stopsign: Option<StopSignEntry>,
         /// A placeholder for the T: Entry
-        marker: PhantomData<T>
+        marker: PhantomData<T>,
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
@@ -49,70 +49,92 @@ pub mod persistent_storage {
             let _ = std::fs::remove_dir_all(&c_path);
             let _ = std::fs::remove_dir_all(&db_path);
 
-            // Initialize a commitlog for entries, 
-            let mut c_opts = LogOptions::new(&c_path);
-	        c_opts.segment_max_bytes(0x10000);			            // 64 kB for each segment (entry)
-	        c_opts.index_max_items(10000);			                // Max 10,000 log entries in the commitlog
-	        let c_log = CommitLog::new(c_opts).unwrap();
+            // get options
+            let (c_opts, db_opts) = PersistentState::<T, S>::optimize_storage(&c_path);
 
-            // rocksDB
-            let mut db_opts = Options::default();
-            db_opts.increase_parallelism(4);                        // Set the amount threads for rocksDB compaction and flushing
-            db_opts.create_if_missing(true);                        // Creates an database if its missing in the path
+            // Initialize commitlog for entries and rocksDB
+            let c_log = CommitLog::new(c_opts).unwrap();
             let db = DB::open(&db_opts, &db_path).unwrap();
-           
-	     Self {
+
+            Self {
                 c_log: c_log,
                 c_log_path: c_path,
                 db: db,
                 trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
-                marker: PhantomData::default()
+                marker: PhantomData::default(),
             }
+        }
+
+        // Create path and options for DB
+        pub fn optimize_storage(c_path: &str) -> (LogOptions, Options) {
+            let mut c_opts = LogOptions::new(&c_path);
+            c_opts.segment_max_bytes(0x10000); // 64 kB for each segment (entry)
+            c_opts.index_max_items(5000); // Max 10,000 log entries in the commitlog
+            c_opts.message_max_bytes(64000); // Max 64 kilobytes for each message
+
+            let mut db_opts = Options::default();
+            db_opts.set_write_buffer_size(0); // Set amount data to build up in single memtable before converting to on-disk file
+            db_opts.set_db_write_buffer_size(0); // Set total amount of data to build up in all memtables before writing to disk
+            db_opts.set_compression_type(rocksdb::DBCompressionType::Lz4); // set compression type
+            db_opts.set_max_write_buffer_number(1); // Max buffers for writing in memory
+            db_opts.set_max_write_buffer_size_to_maintain(0); // max size of write buffers to maintain in memory
+            db_opts.set_use_direct_reads(true); // data read from disk will not be cache or buffered
+            db_opts.set_use_direct_io_for_flush_and_compaction(true); // data flushed or compacted will not be cached or buffered
+            db_opts.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
+            db_opts.create_if_missing(true); // Creates an database if its missing in the path
+
+            (c_opts, db_opts)
         }
     }
 
     impl<T, S> Storage<T, S> for PersistentState<T, S>
     where
-        T: Entry + zerocopy::AsBytes + zerocopy::FromBytes,
+        T: Entry + AsBytes + FromBytes,
         S: Snapshot<T>,
     {
-
         fn append_entry(&mut self, entry: T) -> u64 {
             //println!("append entry {:?}", entry);
             let entry_bytes = AsBytes::as_bytes(&entry);
             match self.c_log.append_msg(entry_bytes) {
-                Ok(x) => {x},
-                Err(_e) => 0,  
+                Ok(x) => x,
+                Err(_e) => 0,
             }
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             //println!("append entries!");
             let mut buf: MessageBuf = MessageBuf::default();
-            for entry in entries { let _ = buf.push(AsBytes::as_bytes(&entry)); }
+            for entry in entries {
+                let _ = buf.push(AsBytes::as_bytes(&entry));
+            }
             self.c_log.append(&mut buf).unwrap();
-            self.get_log_len()                       
+            self.get_log_len()
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            //println!("append on prefix!"); 
-            let _ = self.c_log.truncate(from_idx);                    
+            //println!("append on prefix!");
+            let _ = self.c_log.truncate(from_idx);
             self.append_entries(entries)
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
             println!("get_entries from: {:?} -> to: {:?} ", from, to);
-            let buffer = self.c_log.read(from, ReadLimit::default()).unwrap_or(MessageBuf::default()); 
+            let buffer = self
+                .c_log
+                .read(from, ReadLimit::default())
+                .unwrap_or(MessageBuf::default());
             let mut entries = vec![];
-	    let zero_idx_to = to-from;
+            let zero_idx_to = to - from;
             for (idx, msg) in buffer.iter().enumerate() {
-             	if (idx as u64) >= zero_idx_to { break }
-		entries.push(FromBytes::read_from(msg.payload()).unwrap());
+                if (idx as u64) >= zero_idx_to {
+                    break;
+                }
+                entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
             println!("res from get_entries {:?}", entries);
-            entries        
+            entries
         }
 
         fn get_log_len(&self) -> u64 {
@@ -132,7 +154,7 @@ pub mod persistent_storage {
                     let prom_bytes: &mut [u8] = &mut value;
                     FromBytes::read_from(prom_bytes).unwrap()
                 }
-                Ok(None) => Ballot::default(), 
+                Ok(None) => Ballot::default(),
                 Err(_e) => Ballot::default(),
             }
         }
@@ -164,7 +186,7 @@ pub mod persistent_storage {
                     let acc_bytes: &mut [u8] = &mut value;
                     FromBytes::read_from(acc_bytes).unwrap()
                 }
-                Ok(None) => Ballot::default(), 
+                Ok(None) => Ballot::default(),
                 Err(_e) => Ballot::default(),
             }
         }
@@ -184,16 +206,16 @@ pub mod persistent_storage {
 
         fn trim(&mut self, trimmed_idx: u64) {
             //println!("TRIM!");
-            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset());    // get the entire log, drain it until trimmed_idx
-            // println!("the trimmed log before drain {:?}", trimmed_log);
+            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset()); // get the entire log, drain it until trimmed_idx
+                                                                                         // println!("the trimmed log before drain {:?}", trimmed_log);
             trimmed_log.drain(0..trimmed_idx as usize);
             // println!("the trimmed log after drain {:?}", trimmed_log);
-            let _ = std::fs::remove_dir_all(&self.c_log_path);                              // remove old log
+            let _ = std::fs::remove_dir_all(&self.c_log_path); // remove old log
 
-            let c_opts = LogOptions::new(&self.c_log_path);             // create new, insert the log into it
+            let c_opts = LogOptions::new(&self.c_log_path); // create new, insert the log into it
             self.c_log = CommitLog::new(c_opts).unwrap();
             self.append_entries(trimmed_log);
-            //println!("length after truncate {:?}", self.get_log_len());    
+            //println!("length after truncate {:?}", self.get_log_len());
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
@@ -286,7 +308,10 @@ pub mod memory_storage {
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            self.log.get(from as usize..to as usize).unwrap_or(&[]).to_vec()
+            self.log
+                .get(from as usize..to as usize)
+                .unwrap_or(&[])
+                .to_vec()
         }
 
         fn get_log_len(&self) -> u64 {

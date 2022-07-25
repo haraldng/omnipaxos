@@ -400,8 +400,7 @@ where
         let compacted_idx = self.get_compacted_idx();
         let decided_idx = self.storage.get_decided_idx();
 
-        self
-            .storage
+        self.storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
             .into_iter()
             .enumerate()
@@ -412,7 +411,8 @@ where
                 } else {
                     LogEntry::Decided(e)
                 }
-            }).collect()
+            })
+            .collect()
     }
 
     /// Handle an incoming message.
@@ -1038,8 +1038,8 @@ where
                 {
                     let compacted_idx =
                         self.storage.get_compacted_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
-                    let entries = self.storage.get_suffix(prom.la); 
-                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice())); // Todo: added as_slice()
+                    let entries = self.storage.get_suffix(prom.la);
+                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
                     (compacted_idx, snapshot)
                 } else {
                     let compact_idx = self.storage.get_log_len() + self.get_compacted_idx();
