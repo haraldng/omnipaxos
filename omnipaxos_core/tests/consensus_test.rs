@@ -12,6 +12,7 @@ use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
+use util::storage_type::StorageType;
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -78,7 +79,7 @@ fn read_test() {
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
 
     let exp_snapshot = LatestValue::create(snapshotted);
-
+    
     let mut mem_storage = MemoryStorage::<Value, LatestValue>::default();
     mem_storage.append_entries(log.clone());
     mem_storage.set_decided_idx(decided_idx);
