@@ -17,7 +17,7 @@ pub mod persistent_storage {
     /// A persistent storage implementation, lets sequence paxos write the log
     /// and variables (e.g. promised, accepted) to disk. Log entries are serialized
     /// and de-serialized into slice of bytes when read or written from the log.
-    //#[derive(Debug)]
+    //#[derive(Debug)] // todo: should commitlog impelmetn Debug?
     pub struct PersistentState<T, S>
     where
         T: Entry,
@@ -95,7 +95,6 @@ pub mod persistent_storage {
         S: Snapshot<T>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {
-            //println!("append entry {:?}", entry);
             let entry_bytes = AsBytes::as_bytes(&entry);
             match self.c_log.append_msg(entry_bytes) {
                 Ok(x) => x,
@@ -104,7 +103,6 @@ pub mod persistent_storage {
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            //println!("append entries!");
             let mut buf: MessageBuf = MessageBuf::default();
             for entry in entries {
                 let _ = buf.push(AsBytes::as_bytes(&entry));
@@ -114,13 +112,11 @@ pub mod persistent_storage {
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            //println!("append on prefix!");
             let _ = self.c_log.truncate(from_idx);
             self.append_entries(entries)
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            println!("get_entries from: {:?} -> to: {:?} ", from, to);
             let buffer = self
                 .c_log
                 .read(from, ReadLimit::default())
@@ -133,27 +129,20 @@ pub mod persistent_storage {
                 }
                 entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
-            println!("res from get_entries {:?}", entries);
             entries
         }
 
         fn get_log_len(&self) -> u64 {
             self.c_log.next_offset()
-            //println!("log length: {:?}", res);
-            //res
         }
 
         fn get_suffix(&self, from: u64) -> Vec<T> {
-            //println!("get suffix!");
             self.get_entries(from, self.get_log_len())
         }
 
         fn get_promise(&self) -> Ballot {
             match self.db.get(b"n_prom") {
-                Ok(Some(mut value)) => {
-                    let prom_bytes: &mut [u8] = &mut value;
-                    FromBytes::read_from(prom_bytes).unwrap()
-                }
+                Ok(Some(prom_bytes)) => FromBytes::read_from(&prom_bytes as &[u8]).unwrap(),
                 Ok(None) => Ballot::default(),
                 Err(_e) => Ballot::default(),
             }
@@ -166,10 +155,7 @@ pub mod persistent_storage {
 
         fn get_decided_idx(&self) -> u64 {
             match self.db.get(b"ld") {
-                Ok(Some(value)) => {
-                    let ld_bytes: &[u8] = &value;
-                    FromBytes::read_from(ld_bytes).unwrap()
-                }
+                Ok(Some(ld_bytes)) => FromBytes::read_from(&ld_bytes as &[u8]).unwrap(),
                 Ok(None) => 0,
                 Err(_e) => 0,
             }
@@ -182,10 +168,7 @@ pub mod persistent_storage {
 
         fn get_accepted_round(&self) -> Ballot {
             match self.db.get(b"acc_round") {
-                Ok(Some(mut value)) => {
-                    let acc_bytes: &mut [u8] = &mut value;
-                    FromBytes::read_from(acc_bytes).unwrap()
-                }
+                Ok(Some(acc_bytes)) => FromBytes::read_from(&acc_bytes as &[u8]).unwrap(),
                 Ok(None) => Ballot::default(),
                 Err(_e) => Ballot::default(),
             }
@@ -205,26 +188,20 @@ pub mod persistent_storage {
         }
 
         fn trim(&mut self, trimmed_idx: u64) {
-            //println!("TRIM!");
             let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset()); // get the entire log, drain it until trimmed_idx
                                                                                          // println!("the trimmed log before drain {:?}", trimmed_log);
             trimmed_log.drain(0..trimmed_idx as usize);
-            // println!("the trimmed log after drain {:?}", trimmed_log);
             let _ = std::fs::remove_dir_all(&self.c_log_path); // remove old log
-
             let c_opts = LogOptions::new(&self.c_log_path); // create new, insert the log into it
             self.c_log = CommitLog::new(c_opts).unwrap();
             self.append_entries(trimmed_log);
-            //println!("length after truncate {:?}", self.get_log_len());
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
-            //println!("set_compacted_idx!, {}", trimmed_idx);
             self.trimmed_idx = trimmed_idx;
         }
 
         fn get_compacted_idx(&self) -> u64 {
-            //println!("get_compacted_idx!, {}", self.trimmed_idx);
             self.trimmed_idx
         }
 

@@ -1,7 +1,4 @@
-use omnipaxos_core::{
-    storage::{Entry, Snapshot},
-    util::SnapshottedEntry,
-};
+use omnipaxos_core::storage::Snapshot;
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
 use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use serial_test::serial;

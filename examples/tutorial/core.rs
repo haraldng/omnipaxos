@@ -4,9 +4,7 @@ use omnipaxos_core::{
     storage::Snapshot,
     util::LogEntry,
 };
-use omnipaxos_storage::memory::{
-    memory_storage::MemoryStorage, persistent_storage::PersistentState,
-};
+use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use std::collections::HashMap;
 use zerocopy::{AsBytes, FromBytes};
 
@@ -57,15 +55,10 @@ fn main() {
     sp_config.set_pid(my_pid);
     sp_config.set_peers(my_peers.clone());
 
-    //todo: hardcoded test for memory and persistent storage, remove later
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
-    let persistent_storage = PersistentState::<KeyValue, KVSnapshot>::with("core");
 
-    let mut seq_paxos = SequencePaxos::with(sp_config, persistent_storage);
-    let write_entry = KeyValue {
-        key: 1, //String::from("a")
-        value: 123,
-    };
+    let mut seq_paxos = SequencePaxos::with(sp_config, storage);
+    let write_entry = KeyValue { key: 1, value: 123 };
     seq_paxos.append(write_entry).expect("Failed to append");
 
     /* Fail-recovery */
@@ -95,7 +88,7 @@ fn main() {
                         // we are in new configuration, start new instance
                         let mut new_sp_conf = SequencePaxosConfig::default();
                         new_sp_conf.set_configuration_id(stopsign.config_id);
-                        let new_storage = PersistentState::<KeyValue, KVSnapshot>::with("new_core");
+                        let new_storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
                         let mut new_sp = SequencePaxos::with(new_sp_conf, new_storage);
                         todo!()
                     }
