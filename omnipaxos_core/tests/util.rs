@@ -30,7 +30,7 @@ pub struct TestSystem {
 }
 
 use omnipaxos_core::{storage::{Entry, Storage},};
-use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentStorage};
+use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::{PersistentStorage, PersistentStorageConfig}};
 /// An enum for switching between the storage types 'Persistent' and 'Memory'
 /// The storage type can be set at 'storage_type' in config/test.conf with the two
 /// values 'Persistent' or 'Memory'
@@ -48,9 +48,9 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub fn with(storage_type: &str, pid: u64) -> Self {
+    pub fn with(storage_type: &str, id: &str) -> Self {
         match storage_type {
-            "Persistent" => StorageType::Persistent(PersistentStorage::with(&pid.to_string())), // Persistent storage
+            "Persistent" => StorageType::Persistent(PersistentStorage::with(id)), // Persistent storage
             "Memory" => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
             _ => panic!()
         }
@@ -241,7 +241,7 @@ impl TestSystem {
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
 
-            let storage: StorageType<Value, LatestValue> = StorageType::with(&storage_type, pid);
+            let storage: StorageType<Value, LatestValue> = StorageType::with(&storage_type, &pid.to_string());
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
@@ -306,6 +306,11 @@ impl TestSystem {
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("ReplicaComp replica never died!");
     }
+
+    // pub fn clear_storage(storage_config: PersistentStorageConfig) {
+    //     let _ = std::fs::remove_dir_all(storage_config.log_path.unwrap_or("commitlog".to_string()));
+    //     let _ = std::fs::remove_dir_all(storage_config.rocksdb_path.unwrap_or("rocksDB".to_string()));
+    // }
 
     pub fn ble_paxos_nodes(
         &self,

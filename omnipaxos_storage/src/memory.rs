@@ -2,7 +2,7 @@
 pub mod persistent_storage {
     use commitlog::{
         message::{MessageBuf, MessageSet},
-        CommitLog, LogOptions, ReadLimit,
+        CommitLog, LogOptions, ReadLimit, OffsetRange, AppendError, Offset,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -14,20 +14,42 @@ pub mod persistent_storage {
     const COMMITLOG: &str = "commitlog/";
     const ROCKSDB: &str = "rocksDB/";
 
+    // Configuration for `PersistentStorage`.
+    /// # Fields
+    /// * `clog_path`: The path to the directory of the commit log
+    /// * `rocksdb_path`: The path to the rocksDB key-value store
+    /// * `log_config`: Configuration of the 'commitlog'
+    pub struct PersistentStorageConfig {
+        pub log_path: Option<String>,
+        log_config: LogOptions,
+        pub rocksdb_path: Option<String>,
+        rocksdb_config: Options,
+    }
+
+    impl Default for PersistentStorageConfig {
+        fn default() -> Self {
+            Self {
+                log_path: Some(COMMITLOG.to_string()),
+                log_config: LogOptions::new(&COMMITLOG.to_string()),
+                rocksdb_path: Some(ROCKSDB.to_string()),
+                rocksdb_config: Options::default()
+            }
+        }
+    }
+
     /// A persistent storage implementation, lets sequence paxos write the log
     /// and variables (e.g. promised, accepted) to disk. Log entries are serialized
     /// and de-serialized into slice of bytes when read or written from the log.
-    //#[derive(Debug)] // todo: should commitlog impelmetn Debug?
     pub struct PersistentStorage<T, S>
     where
         T: Entry,
         S: Snapshot<T>,
     {
-        /// a disk-based commit log for entries
+        /// disk-based commit log for entries
         c_log: CommitLog,
-        /// path to commitlog, remove when commitlog is no longer deleted here
+        /// the path to the directory containing a commitlog
         c_log_path: String,
-        /// a struct for accessing local RocksDB database
+        /// local RocksDB key-value store
         db: DB,
         /// Garbage collected index.
         trimmed_idx: u64,
@@ -36,7 +58,7 @@ pub mod persistent_storage {
         /// Stored StopSign
         stopsign: Option<StopSignEntry>,
         /// A placeholder for the T: Entry
-        marker: PhantomData<T>,
+        t: PhantomData<T>,
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
@@ -63,7 +85,7 @@ pub mod persistent_storage {
                 trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
-                marker: PhantomData::default(),
+                t: PhantomData::default(),
             }
         }
 
@@ -98,17 +120,23 @@ pub mod persistent_storage {
             let entry_bytes = AsBytes::as_bytes(&entry);
             match self.c_log.append_msg(entry_bytes) {
                 Ok(x) => x,
-                Err(_e) => 0,
+                Err(_e) => panic!(),
             }
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
             let mut buf: MessageBuf = MessageBuf::default();
             for entry in entries {
-                let _ = buf.push(AsBytes::as_bytes(&entry));
+                match buf.push(AsBytes::as_bytes(&entry)) {
+                    Ok(()) => (),
+                    Err(_) => panic!()
+                }
             }
-            self.c_log.append(&mut buf).unwrap();
-            self.get_log_len()
+            
+            match self.c_log.append(&mut buf) {
+                Ok(_offset) => self.get_log_len(),
+                Err(_) => panic!()
+            }
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
@@ -117,17 +145,15 @@ pub mod persistent_storage {
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            let buffer = self
-                .c_log
-                .read(from, ReadLimit::default())
-                .unwrap_or(MessageBuf::default());
-            let mut entries = vec![];
-            let zero_idx_to = to - from;
-            for (idx, msg) in buffer.iter().enumerate() {
-                if (idx as u64) >= zero_idx_to {
-                    break;
-                }
-                entries.push(FromBytes::read_from(msg.payload()).unwrap());
+            let buffer = match self.c_log.read(from, ReadLimit::default()) {
+                Ok(buf) => buf,
+                Err(_) => panic!()
+            };
+            let mut entries = Vec::<T>::with_capacity((to - from) as usize);
+            let mut iter = buffer.iter(); 
+            for _ in from..to { 
+                let msg = iter.next().unwrap();
+                entries.push(FromBytes::read_from(msg.payload()).unwrap()); 
             }
             entries
         }
@@ -144,7 +170,7 @@ pub mod persistent_storage {
             match self.db.get(b"n_prom") {
                 Ok(Some(prom_bytes)) => FromBytes::read_from(&prom_bytes as &[u8]).unwrap(),
                 Ok(None) => Ballot::default(),
-                Err(_e) => Ballot::default(),
+                Err(_e) => panic!(),
             }
         }
 
@@ -157,7 +183,7 @@ pub mod persistent_storage {
             match self.db.get(b"ld") {
                 Ok(Some(ld_bytes)) => FromBytes::read_from(&ld_bytes as &[u8]).unwrap(),
                 Ok(None) => 0,
-                Err(_e) => 0,
+                Err(_e) => panic!(),
             }
         }
 
@@ -170,7 +196,7 @@ pub mod persistent_storage {
             match self.db.get(b"acc_round") {
                 Ok(Some(acc_bytes)) => FromBytes::read_from(&acc_bytes as &[u8]).unwrap(),
                 Ok(None) => Ballot::default(),
-                Err(_e) => Ballot::default(),
+                Err(_e) => panic!(),
             }
         }
 
@@ -187,13 +213,18 @@ pub mod persistent_storage {
             self.stopsign.clone()
         }
 
+        // TODO: A way to trim the comitlog without deleting and recreating the log
         fn trim(&mut self, trimmed_idx: u64) {
             let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset()); // get the entire log, drain it until trimmed_idx
                                                                                          // println!("the trimmed log before drain {:?}", trimmed_log);
             trimmed_log.drain(0..trimmed_idx as usize);
+
             let _ = std::fs::remove_dir_all(&self.c_log_path); // remove old log
+
             let c_opts = LogOptions::new(&self.c_log_path); // create new, insert the log into it
+            
             self.c_log = CommitLog::new(c_opts).unwrap();
+
             self.append_entries(trimmed_log);
         }
 
