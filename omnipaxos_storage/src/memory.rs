@@ -18,7 +18,7 @@ pub mod persistent_storage {
     /// and variables (e.g. promised, accepted) to disk. Log entries are serialized
     /// and de-serialized into slice of bytes when read or written from the log.
     //#[derive(Debug)] // todo: should commitlog impelmetn Debug?
-    pub struct PersistentState<T, S>
+    pub struct PersistentStorage<T, S>
     where
         T: Entry,
         S: Snapshot<T>,
@@ -39,7 +39,7 @@ pub mod persistent_storage {
         marker: PhantomData<T>,
     }
 
-    impl<T: Entry, S: Snapshot<T>> PersistentState<T, S> {
+    impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
         pub fn with(replica_id: &str) -> Self {
             // Paths to commitlog and rocksDB store
             let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
@@ -50,7 +50,7 @@ pub mod persistent_storage {
             let _ = std::fs::remove_dir_all(&db_path);
 
             // get options
-            let (c_opts, db_opts) = PersistentState::<T, S>::optimize_storage(&c_path);
+            let (c_opts, db_opts) = PersistentStorage::<T, S>::optimize_storage(&c_path);
 
             // Initialize commitlog for entries and rocksDB
             let c_log = CommitLog::new(c_opts).unwrap();
@@ -89,7 +89,7 @@ pub mod persistent_storage {
         }
     }
 
-    impl<T, S> Storage<T, S> for PersistentState<T, S>
+    impl<T, S> Storage<T, S> for PersistentStorage<T, S>
     where
         T: Entry + AsBytes + FromBytes,
         S: Snapshot<T>,

@@ -6,25 +6,24 @@ use omnipaxos_core::{
 };
 use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use std::collections::HashMap;
-use zerocopy::{AsBytes, FromBytes};
 
-#[repr(packed)]
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes)]
+#[derive(Clone, Debug)]
 pub struct KeyValue {
-    pub key: u64,
+    pub key: String,
     pub value: u64,
 }
 
 #[derive(Clone, Debug)]
 pub struct KVSnapshot {
-    snapshotted: HashMap<u64, u64>,
+    snapshotted: HashMap<String, u64>,
 }
 
 impl Snapshot<KeyValue> for KVSnapshot {
     fn create(entries: &[KeyValue]) -> Self {
         let mut snapshotted = HashMap::new();
         for e in entries {
-            snapshotted.insert(e.key, e.value);
+            let (key, val) = (e.key.to_owned(), e.value);
+            snapshotted.insert(key, val);
         }
         Self { snapshotted }
     }
@@ -58,7 +57,7 @@ fn main() {
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
 
     let mut seq_paxos = SequencePaxos::with(sp_config, storage);
-    let write_entry = KeyValue { key: 1, value: 123 };
+    let write_entry = KeyValue { key: "a".to_string(), value: 123 };
     seq_paxos.append(write_entry).expect("Failed to append");
 
     /* Fail-recovery */

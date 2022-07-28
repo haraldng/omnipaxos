@@ -35,7 +35,7 @@ impl TestConfig {
             gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
             storage_type: cfg["storage_type"]
                 .as_string()
-                .unwrap_or("Memory".to_string()),
+                .unwrap_or("Memory".to_string())   
         })
     }
 }

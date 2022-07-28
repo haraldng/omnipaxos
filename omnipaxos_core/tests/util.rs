@@ -1,19 +1,14 @@
 use omnipaxos_core::{
-    ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
+    ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection, BLEConfig},
     messages::Message,
-    sequence_paxos::SequencePaxos,
-    storage::Snapshot,
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+    storage::{Snapshot, StopSign},
 };
-
 use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
-    storage_type::StorageType,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos_core::{
-    ballot_leader_election::BLEConfig, sequence_paxos::SequencePaxosConfig, storage::StopSign,
-};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 use zerocopy::{AsBytes, FromBytes};
 
@@ -34,180 +29,173 @@ pub struct TestSystem {
     >,
 }
 
-pub mod storage_type {
-    use omnipaxos_core::{
-        ballot_leader_election::Ballot,
-        storage::{Entry, Snapshot, Storage},
-    };
-    use omnipaxos_storage::memory::{
-        memory_storage::MemoryStorage, persistent_storage::PersistentState,
-    };
-    use zerocopy::{AsBytes, FromBytes};
+use omnipaxos_core::{storage::{Entry, Storage},};
+use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::PersistentStorage};
+/// An enum for switching between the storage types 'Persistent' and 'Memory'
+/// The storage type can be set at 'storage_type' in config/test.conf with the two
+/// values 'Persistent' or 'Memory'
+pub enum StorageType<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    Persistent(PersistentStorage<T, S>),
+    Memory(MemoryStorage<T, S>),
+}
 
-    /// An enum for switching between the storage types 'Persistent' and 'Memory'
-    /// The storage type can be set at 'storage_type' in config/test.conf with the two
-    /// values 'Persistent' or 'Memory'
-    pub enum StorageType<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        PS(PersistentState<T, S>),
-        MS(MemoryStorage<T, S>),
-    }
-
-    impl<T, S> StorageType<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        pub fn with(storage_type: &str, pid: u64) -> Self {
-            match storage_type {
-                "Persistent" => StorageType::PS(PersistentState::with(&pid.to_string())), // Persistent storage
-                _ => StorageType::MS(MemoryStorage::default()), // Memory storage (default)
-            }
-        }
-    }
-
-    impl<T, S> Storage<T, S> for StorageType<T, S>
-    where
-        T: Entry + AsBytes + FromBytes,
-        S: Snapshot<T>,
-    {
-        fn append_entry(&mut self, entry: T) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.append_entry(entry),
-                StorageType::MS(mem_s) => mem_s.append_entry(entry),
-            }
-        }
-
-        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.append_entries(entries),
-                StorageType::MS(mem_s) => mem_s.append_entries(entries),
-            }
-        }
-
-        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.append_on_prefix(from_idx, entries),
-                StorageType::MS(mem_s) => mem_s.append_on_prefix(from_idx, entries),
-            }
-        }
-
-        fn set_promise(&mut self, n_prom: Ballot) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_promise(n_prom),
-                StorageType::MS(mem_s) => mem_s.set_promise(n_prom),
-            }
-        }
-
-        fn set_decided_idx(&mut self, ld: u64) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_decided_idx(ld),
-                StorageType::MS(mem_s) => mem_s.set_decided_idx(ld),
-            }
-        }
-
-        fn get_decided_idx(&self) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_decided_idx(),
-                StorageType::MS(mem_s) => mem_s.get_decided_idx(),
-            }
-        }
-
-        fn set_accepted_round(&mut self, na: Ballot) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_accepted_round(na),
-                StorageType::MS(mem_s) => mem_s.set_accepted_round(na),
-            }
-        }
-
-        fn get_accepted_round(&self) -> Ballot {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_accepted_round(),
-                StorageType::MS(mem_s) => mem_s.get_accepted_round(),
-            }
-        }
-
-        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_entries(from, to),
-                StorageType::MS(mem_s) => mem_s.get_entries(from, to),
-            }
-        }
-
-        fn get_log_len(&self) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_log_len(),
-                StorageType::MS(mem_s) => mem_s.get_log_len(),
-            }
-        }
-
-        fn get_suffix(&self, from: u64) -> Vec<T> {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_suffix(from),
-                StorageType::MS(mem_s) => mem_s.get_suffix(from),
-            }
-        }
-
-        fn get_promise(&self) -> Ballot {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_promise(),
-                StorageType::MS(mem_s) => mem_s.get_promise(),
-            }
-        }
-
-        fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_stopsign(s),
-                StorageType::MS(mem_s) => mem_s.set_stopsign(s),
-            }
-        }
-
-        fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_stopsign(),
-                StorageType::MS(mem_s) => mem_s.get_stopsign(),
-            }
-        }
-
-        fn trim(&mut self, idx: u64) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.trim(idx),
-                StorageType::MS(mem_s) => mem_s.trim(idx),
-            }
-        }
-
-        fn set_compacted_idx(&mut self, idx: u64) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_compacted_idx(idx),
-                StorageType::MS(mem_s) => mem_s.set_compacted_idx(idx),
-            }
-        }
-
-        fn get_compacted_idx(&self) -> u64 {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_compacted_idx(),
-                StorageType::MS(mem_s) => mem_s.get_compacted_idx(),
-            }
-        }
-
-        fn set_snapshot(&mut self, snapshot: S) {
-            match self {
-                StorageType::PS(persist_s) => persist_s.set_snapshot(snapshot),
-                StorageType::MS(mem_s) => mem_s.set_snapshot(snapshot),
-            }
-        }
-
-        fn get_snapshot(&self) -> Option<S> {
-            match self {
-                StorageType::PS(persist_s) => persist_s.get_snapshot(),
-                StorageType::MS(mem_s) => mem_s.get_snapshot(),
-            }
+impl<T, S> StorageType<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    pub fn with(storage_type: &str, pid: u64) -> Self {
+        match storage_type {
+            "Persistent" => StorageType::Persistent(PersistentStorage::with(&pid.to_string())), // Persistent storage
+            "Memory" => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
+            _ => panic!()
         }
     }
 }
+
+impl<T, S> Storage<T, S> for StorageType<T, S>
+where
+    T: Entry + AsBytes + FromBytes,
+    S: Snapshot<T>,
+{
+    fn append_entry(&mut self, entry: T) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
+            StorageType::Memory(mem_s) => mem_s.append_entry(entry),
+        }
+    }
+
+    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
+            StorageType::Memory(mem_s) => mem_s.append_entries(entries),
+        }
+    }
+
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
+            StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
+        }
+    }
+
+    fn set_promise(&mut self, n_prom: Ballot) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
+            StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
+        }
+    }
+
+    fn set_decided_idx(&mut self, ld: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
+            StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
+        }
+    }
+
+    fn get_decided_idx(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
+            StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
+        }
+    }
+
+    fn set_accepted_round(&mut self, na: Ballot) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
+            StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
+        }
+    }
+
+    fn get_accepted_round(&self) -> Ballot {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
+            StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
+        }
+    }
+
+    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
+            StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
+        }
+    }
+
+    fn get_log_len(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_log_len(),
+            StorageType::Memory(mem_s) => mem_s.get_log_len(),
+        }
+    }
+
+    fn get_suffix(&self, from: u64) -> Vec<T> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
+            StorageType::Memory(mem_s) => mem_s.get_suffix(from),
+        }
+    }
+
+    fn get_promise(&self) -> Ballot {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_promise(),
+            StorageType::Memory(mem_s) => mem_s.get_promise(),
+        }
+    }
+
+    fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
+            StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
+        }
+    }
+
+    fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
+            StorageType::Memory(mem_s) => mem_s.get_stopsign(),
+        }
+    }
+
+    fn trim(&mut self, idx: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.trim(idx),
+            StorageType::Memory(mem_s) => mem_s.trim(idx),
+        }
+    }
+
+    fn set_compacted_idx(&mut self, idx: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
+            StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
+        }
+    }
+
+    fn get_compacted_idx(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
+            StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
+        }
+    }
+
+    fn set_snapshot(&mut self, snapshot: S) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
+            StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
+        }
+    }
+
+    fn get_snapshot(&self) -> Option<S> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
+            StorageType::Memory(mem_s) => mem_s.get_snapshot(),
+        }
+    }
+}
+
 
 impl TestSystem {
     pub fn with(

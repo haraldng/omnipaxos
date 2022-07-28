@@ -12,7 +12,6 @@ use omnipaxos_storage::memory::memory_storage::MemoryStorage;
 use serial_test::serial;
 use test_config::TestConfig;
 use util::TestSystem;
-use util::storage_type::StorageType;
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
