@@ -215,16 +215,11 @@ pub mod persistent_storage {
 
         // TODO: A way to trim the comitlog without deleting and recreating the log
         fn trim(&mut self, trimmed_idx: u64) {
-            let mut trimmed_log: Vec<T> = self.get_entries(0, self.c_log.next_offset()); // get the entire log, drain it until trimmed_idx
-                                                                                         // println!("the trimmed log before drain {:?}", trimmed_log);
-            trimmed_log.drain(0..trimmed_idx as usize);
-
+            let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.c_log.next_offset()); // get the entire log, drain it until trimmed_idx
             let _ = std::fs::remove_dir_all(&self.c_log_path); // remove old log
 
             let c_opts = LogOptions::new(&self.c_log_path); // create new, insert the log into it
-            
             self.c_log = CommitLog::new(c_opts).unwrap();
-
             self.append_entries(trimmed_log);
         }
 
