@@ -1,8 +1,12 @@
+
 #[cfg(feature = "hocon_config")]
 use std::time::Duration;
 
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
+
+#[cfg(feature = "hocon_config")]
+use super::util::StorageTypeSelector;
 
 #[cfg(feature = "hocon_config")]
 pub struct TestConfig {
@@ -13,7 +17,7 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
-    pub storage_type: String,
+    pub storage_type: StorageTypeSelector,
 }
 
 #[cfg(feature = "hocon_config")]
@@ -33,9 +37,9 @@ impl TestConfig {
             num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
             num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
             gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
-            storage_type: cfg["storage_type"]
+            storage_type: StorageTypeSelector::select_type(&cfg["storage_type"]
                 .as_string()
-                .unwrap_or("Memory".to_string())   
+                .unwrap_or("Memory".to_string()))
         })
     }
 }

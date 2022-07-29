@@ -2,7 +2,7 @@
 pub mod persistent_storage {
     use commitlog::{
         message::{MessageBuf, MessageSet},
-        CommitLog, LogOptions, ReadLimit, OffsetRange, AppendError, Offset,
+        CommitLog, LogOptions, ReadLimit,
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
@@ -67,9 +67,9 @@ pub mod persistent_storage {
             let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
             let db_path = ROCKSDB.to_string() + &replica_id.to_string();
 
-            // todo: a temporary solution, makes sure tests start with empty db and log, move later to tests!
-            let _ = std::fs::remove_dir_all(&c_path);
-            let _ = std::fs::remove_dir_all(&db_path);
+            // Check if storage already exists on the paths
+            std::fs::metadata(&c_path).expect_err("commitlog already exists in path");
+            std::fs::metadata(&db_path).expect_err("rocksDB store already exists in path");
 
             // get options
             let (c_opts, db_opts) = PersistentStorage::<T, S>::optimize_storage(&c_path);
@@ -224,11 +224,16 @@ pub mod persistent_storage {
         }
 
         fn set_compacted_idx(&mut self, trimmed_idx: u64) {
-            self.trimmed_idx = trimmed_idx;
+            let trim_bytes = AsBytes::as_bytes(&trimmed_idx);
+            self.db.put(b"trim_idx", trim_bytes).unwrap();
         }
 
         fn get_compacted_idx(&self) -> u64 {
-            self.trimmed_idx
+            match self.db.get(b"trim_idx") {
+                Ok(Some(trim_bytes)) => FromBytes::read_from(&trim_bytes as &[u8]).unwrap(),
+                Ok(None) => 0,
+                Err(_e) => panic!(),
+            }        
         }
 
         fn set_snapshot(&mut self, snapshot: S) {

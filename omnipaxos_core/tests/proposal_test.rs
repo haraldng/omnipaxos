@@ -1,13 +1,10 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
-use crate::util::Value;
+use utils::{test_config::TestConfig, util::{StorageTypeSelector, Value, TestSystem, clear_storage}};
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
-use test_config::TestConfig;
-use util::TestSystem;
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
@@ -20,7 +17,7 @@ fn forward_proposal_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        &cfg.storage_type,
+        cfg.storage_type,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -62,4 +59,9 @@ fn forward_proposal_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+    
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }

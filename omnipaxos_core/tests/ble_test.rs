@@ -1,11 +1,9 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
+use utils::{test_config::TestConfig, util::{TestSystem, StorageTypeSelector, clear_storage}};
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
-use test_config::TestConfig;
-use util::TestSystem;
 
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.
@@ -20,7 +18,7 @@ fn ble_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        &cfg.storage_type,
+        cfg.storage_type,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -48,4 +46,9 @@ fn ble_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+    
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }

@@ -1,8 +1,7 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
 #[cfg(feature = "hocon_config")]
-use crate::util::{Value, SS_METADATA};
+use utils::util::{Value, SS_METADATA};
 #[cfg(feature = "hocon_config")]
 use kompact::prelude::{promise, Ask, FutureCollection};
 #[cfg(feature = "hocon_config")]
@@ -10,9 +9,9 @@ use omnipaxos_core::sequence_paxos::ReconfigurationRequest;
 #[cfg(feature = "hocon_config")]
 use serial_test::serial;
 #[cfg(feature = "hocon_config")]
-use test_config::TestConfig;
+use utils::test_config::TestConfig;
 #[cfg(feature = "hocon_config")]
-use util::TestSystem;
+use utils::util::{StorageTypeSelector, TestSystem, clear_storage};
 
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
@@ -25,7 +24,7 @@ fn reconfig_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        &cfg.storage_type,
+        cfg.storage_type,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -91,4 +90,9 @@ fn reconfig_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }

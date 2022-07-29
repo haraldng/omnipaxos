@@ -1,7 +1,6 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
-use crate::util::{LatestValue, Value};
+use utils::{test_config::TestConfig, util::{StorageTypeSelector, LatestValue, Value, TestSystem, StorageType, clear_storage}};
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
@@ -9,9 +8,6 @@ use omnipaxos_core::{
     util::LogEntry,
 };
 use serial_test::serial;
-use test_config::TestConfig;
-use util::TestSystem;
-use util::StorageType;
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -24,7 +20,7 @@ fn consensus_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        &cfg.storage_type,
+        cfg.storage_type,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -65,6 +61,11 @@ fn consensus_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
+
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }
 
 #[test]
@@ -81,7 +82,7 @@ fn read_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
     
-    let mut storage = StorageType::<Value, LatestValue>::with(&cfg.storage_type, &"read_test".to_string());
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &"read_test".to_string());
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -118,7 +119,7 @@ fn read_test() {
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = StorageType::<Value, LatestValue>::with(&cfg.storage_type, &"ss_read_test".to_string());
+    let mut stopped_storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &"ss_read_test".to_string());
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -134,6 +135,11 @@ fn read_test() {
     let idx = log_len;
     let stopsign = stopped_op.read(idx).expect("No StopSign");
     verify_stopsign(&[stopsign], &ss);
+
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }
 
 #[test]
@@ -150,7 +156,7 @@ fn read_entries_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut storage = StorageType::<Value, LatestValue>::with(&cfg.storage_type, &"read_entries_test".to_string());
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &"read_entries_test".to_string());
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -194,7 +200,7 @@ fn read_entries_test() {
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = StorageType::<Value, LatestValue>::with(&cfg.storage_type, &"ss_read_entries_test".to_string());
+    let mut stopped_storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &"ss_read_entries_test".to_string());
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -254,6 +260,11 @@ fn read_entries_test() {
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
+
+    match cfg.storage_type {
+        StorageTypeSelector::Persistent() => clear_storage(),
+        StorageTypeSelector::Memory() => (),
+    }
 }
 
 fn verify_snapshot(

@@ -2,8 +2,9 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection, BLEConfig},
     messages::Message,
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{Snapshot, StopSign},
+    storage::{Snapshot, StopSign, Entry, Storage},
 };
+use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::{PersistentStorage, PersistentStorageConfig}};
 use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
@@ -17,6 +18,8 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
+const COMMITLOG: &str = "commitlog/";
+const ROCKSDB: &str = "rocksDB/";
 
 pub struct TestSystem {
     pub kompact_system: KompactSystem,
@@ -29,11 +32,27 @@ pub struct TestSystem {
     >,
 }
 
-use omnipaxos_core::{storage::{Entry, Storage},};
-use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::{PersistentStorage, PersistentStorageConfig}};
-/// An enum for switching between the storage types 'Persistent' and 'Memory'
-/// The storage type can be set at 'storage_type' in config/test.conf with the two
-/// values 'Persistent' or 'Memory'
+/// An enum for selecting between the 'Persistent' and 'Memory' storage types
+/// The type can be set in config/test.conf at 'storage_type
+#[derive(Clone,Copy)]
+pub enum StorageTypeSelector {
+    Persistent(),
+    Memory(),
+}
+
+impl StorageTypeSelector {
+    pub fn select_type(storage_type: &str) -> Self {
+        match storage_type {
+            "Persistent" => StorageTypeSelector::Persistent(),
+            "Memory" => StorageTypeSelector::Memory(),
+            _ => panic!()
+        }
+    }
+}
+
+/// An enum which can either be aN 'PersistentStorage' or
+/// 'MemoryStorage' struct, the type depends on the 
+/// 'StorageTypeSelector' enum
 pub enum StorageType<T, S>
 where
     T: Entry,
@@ -48,11 +67,10 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub fn with(storage_type: &str, id: &str) -> Self {
+    pub fn with(storage_type: StorageTypeSelector, id: &str) -> Self {
         match storage_type {
-            "Persistent" => StorageType::Persistent(PersistentStorage::with(id)), // Persistent storage
-            "Memory" => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
-            _ => panic!()
+            StorageTypeSelector::Persistent() => StorageType::Persistent(PersistentStorage::with(id)), // Persistent storage
+            StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
         }
     }
 }
@@ -196,13 +214,12 @@ where
     }
 }
 
-
 impl TestSystem {
     pub fn with(
         num_nodes: usize,
         ble_hb_delay: u64,
         num_threads: usize,
-        storage_type: &str,
+        storage_type: StorageTypeSelector,
     ) -> Self {
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
@@ -241,7 +258,7 @@ impl TestSystem {
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
 
-            let storage: StorageType<Value, LatestValue> = StorageType::with(&storage_type, &pid.to_string());
+            let storage: StorageType<Value, LatestValue> = StorageType::with(storage_type, &pid.to_string());
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
@@ -306,11 +323,6 @@ impl TestSystem {
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("ReplicaComp replica never died!");
     }
-
-    // pub fn clear_storage(storage_config: PersistentStorageConfig) {
-    //     let _ = std::fs::remove_dir_all(storage_config.log_path.unwrap_or("commitlog".to_string()));
-    //     let _ = std::fs::remove_dir_all(storage_config.rocksdb_path.unwrap_or("rocksDB".to_string()));
-    // }
 
     pub fn ble_paxos_nodes(
         &self,
@@ -627,4 +639,9 @@ fn stopsign_meta_to_value(ss: &StopSign) -> Value {
         .first()
         .expect("Empty metadata");
     Value(*v as u64)
+}
+
+pub fn clear_storage() {
+    let _ = std::fs::remove_dir_all(COMMITLOG.to_string());
+    let _ = std::fs::remove_dir_all(ROCKSDB.to_string());
 }
