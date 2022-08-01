@@ -1,3 +1,14 @@
+use zerocopy::{FromBytes, AsBytes};
+
+/// Stores some of the contents of a 
+/// StopSignEntry in an rocksDB storage
+#[repr(packed)]
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes)]
+pub struct StopSignStorage {
+    pub decided: u8,
+    pub config_id: u32
+}
+
 #[allow(missing_docs)]
 pub mod persistent_storage {
     use commitlog::{
@@ -6,11 +17,14 @@ pub mod persistent_storage {
     };
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
-        storage::{Entry, Snapshot, StopSignEntry, Storage},
+        storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
     };
     use rocksdb::{Options, DB};
     use std::marker::PhantomData;
     use zerocopy::{AsBytes, FromBytes};
+
+    use super::StopSignStorage;
+
     const COMMITLOG: &str = "commitlog/";
     const ROCKSDB: &str = "rocksDB/";
 
@@ -20,19 +34,70 @@ pub mod persistent_storage {
     /// * `rocksdb_path`: The path to the rocksDB key-value store
     /// * `log_config`: Configuration of the 'commitlog'
     pub struct PersistentStorageConfig {
-        pub log_path: Option<String>,
-        log_config: LogOptions,
-        pub rocksdb_path: Option<String>,
-        rocksdb_config: Options,
+        log_path: Option<String>,
+        log_seg_max_bytes: usize,
+        log_index_max_bytes: usize,
+        log_entry_max_bytes: usize,
+        rocksdb_path: Option<String>,
+        rocksdb_options: Options,
+    }
+
+    impl PersistentStorageConfig {
+        // every single getter and setter
+        pub fn get_commitlog_path(&self) -> Option<&String> {
+            self.log_path.as_ref()
+        }
+
+        pub fn set_commitlog_path(mut self, path: String) {
+            self.log_path = Some(path);
+        }
+
+        pub fn get_rocksdb_path(&self) -> Option<&String> {
+            self.rocksdb_path.as_ref()
+        }
+
+        pub fn set_rocksdb_path(mut self, path: String) {
+            self.rocksdb_path = Some(path);
+        }
+
+        // todo: see if it works
+        // pub fn get_commitlog_options(&self) -> LogOptions {
+        //     self.log_options.clone()
+        // }
+
+        // pub fn set_commitlog_options(mut self, log_opts: LogOptions) {
+        //     self.log_options = log_opts;
+        // }
+
+        pub fn get_rocksdb_options(&self) -> Options {
+            self.rocksdb_options.clone()
+        }
+
+        pub fn set_rocksdb_options(mut self, rocksdb_opts: Options) {
+            self.rocksdb_options = rocksdb_opts;
+        }
     }
 
     impl Default for PersistentStorageConfig {
         fn default() -> Self {
+            let mut db_opts = Options::default();
+            db_opts.set_write_buffer_size(0); // Set amount data to build up in single memtable before converting to on-disk file
+            db_opts.set_db_write_buffer_size(0); // Set total amount of data to build up in all memtables before writing to disk
+            db_opts.set_compression_type(rocksdb::DBCompressionType::Lz4); // set compression type
+            db_opts.set_max_write_buffer_number(1); // Max buffers for writing in memory
+            db_opts.set_max_write_buffer_size_to_maintain(0); // max size of write buffers to maintain in memory
+            db_opts.set_use_direct_reads(true); // data read from disk will not be cache or buffered
+            db_opts.set_use_direct_io_for_flush_and_compaction(true); // data flushed or compacted will not be cached or buffered
+            db_opts.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
+            db_opts.create_if_missing(true); // Creates an database if its missing in the path
+
             Self {
                 log_path: Some(COMMITLOG.to_string()),
-                log_config: LogOptions::new(&COMMITLOG.to_string()),
+                log_seg_max_bytes: 0x10000, // 64 kB for each segment (entry)
+                log_index_max_bytes: 5000,  // Max 10,000 log entries in the commitlog
+                log_entry_max_bytes: 64000, // Max 64 kilobytes for each message
                 rocksdb_path: Some(ROCKSDB.to_string()),
-                rocksdb_config: Options::default()
+                rocksdb_options: db_opts,
             }
         }
     }
@@ -51,8 +116,6 @@ pub mod persistent_storage {
         c_log_path: String,
         /// local RocksDB key-value store
         db: DB,
-        /// Garbage collected index.
-        trimmed_idx: u64,
         /// Stored snapshot
         snapshot: Option<S>,
         /// Stored StopSign
@@ -62,52 +125,33 @@ pub mod persistent_storage {
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
-        pub fn with(replica_id: &str) -> Self {
+        pub fn with(storage_config: PersistentStorageConfig, replica_id: &str) -> Self {
             // Paths to commitlog and rocksDB store
-            let c_path: String = COMMITLOG.to_string() + &replica_id.to_string();
-            let db_path = ROCKSDB.to_string() + &replica_id.to_string();
+            let c_path: String = storage_config.log_path.unwrap() + &replica_id.to_string();
+            let db_path = storage_config.rocksdb_path.unwrap() + &replica_id.to_string();
 
             // Check if storage already exists on the paths
             std::fs::metadata(&c_path).expect_err("commitlog already exists in path");
             std::fs::metadata(&db_path).expect_err("rocksDB store already exists in path");
 
-            // get options
-            let (c_opts, db_opts) = PersistentStorage::<T, S>::optimize_storage(&c_path);
+            // set options
+            let mut c_opts = LogOptions::new(&c_path);
+            c_opts.segment_max_bytes(storage_config.log_seg_max_bytes);
+            c_opts.index_max_items(storage_config.log_index_max_bytes);
+            c_opts.message_max_bytes(storage_config.log_entry_max_bytes);
 
             // Initialize commitlog for entries and rocksDB
             let c_log = CommitLog::new(c_opts).unwrap();
-            let db = DB::open(&db_opts, &db_path).unwrap();
+            let db = DB::open(&storage_config.rocksdb_options, &db_path).unwrap();
 
             Self {
                 c_log: c_log,
                 c_log_path: c_path,
                 db: db,
-                trimmed_idx: 0,
                 snapshot: None,
                 stopsign: None,
                 t: PhantomData::default(),
             }
-        }
-
-        // Create path and options for DB
-        pub fn optimize_storage(c_path: &str) -> (LogOptions, Options) {
-            let mut c_opts = LogOptions::new(&c_path);
-            c_opts.segment_max_bytes(0x10000); // 64 kB for each segment (entry)
-            c_opts.index_max_items(5000); // Max 10,000 log entries in the commitlog
-            c_opts.message_max_bytes(64000); // Max 64 kilobytes for each message
-
-            let mut db_opts = Options::default();
-            db_opts.set_write_buffer_size(0); // Set amount data to build up in single memtable before converting to on-disk file
-            db_opts.set_db_write_buffer_size(0); // Set total amount of data to build up in all memtables before writing to disk
-            db_opts.set_compression_type(rocksdb::DBCompressionType::Lz4); // set compression type
-            db_opts.set_max_write_buffer_number(1); // Max buffers for writing in memory
-            db_opts.set_max_write_buffer_size_to_maintain(0); // max size of write buffers to maintain in memory
-            db_opts.set_use_direct_reads(true); // data read from disk will not be cache or buffered
-            db_opts.set_use_direct_io_for_flush_and_compaction(true); // data flushed or compacted will not be cached or buffered
-            db_opts.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
-            db_opts.create_if_missing(true); // Creates an database if its missing in the path
-
-            (c_opts, db_opts)
         }
     }
 
@@ -129,13 +173,13 @@ pub mod persistent_storage {
             for entry in entries {
                 match buf.push(AsBytes::as_bytes(&entry)) {
                     Ok(()) => (),
-                    Err(_) => panic!()
+                    Err(_) => panic!(),
                 }
             }
-            
+
             match self.c_log.append(&mut buf) {
                 Ok(_offset) => self.get_log_len(),
-                Err(_) => panic!()
+                Err(_) => panic!(),
             }
         }
 
@@ -147,13 +191,13 @@ pub mod persistent_storage {
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
             let buffer = match self.c_log.read(from, ReadLimit::default()) {
                 Ok(buf) => buf,
-                Err(_) => panic!()
+                Err(_) => panic!(),
             };
             let mut entries = Vec::<T>::with_capacity((to - from) as usize);
-            let mut iter = buffer.iter(); 
-            for _ in from..to { 
+            let mut iter = buffer.iter();
+            for _ in from..to {
                 let msg = iter.next().unwrap();
-                entries.push(FromBytes::read_from(msg.payload()).unwrap()); 
+                entries.push(FromBytes::read_from(msg.payload()).unwrap());
             }
             entries
         }
@@ -205,12 +249,63 @@ pub mod persistent_storage {
             self.db.put(b"n_prom", acc_bytes).unwrap();
         }
 
-        fn set_stopsign(&mut self, s: StopSignEntry) {
-            self.stopsign = Some(s);
+        fn get_compacted_idx(&self) -> u64 {
+            match self.db.get(b"trim_idx") {
+                Ok(Some(trim_bytes)) => FromBytes::read_from(&trim_bytes as &[u8]).unwrap(),
+                Ok(None) => 0,
+                Err(_e) => panic!(),
+            }
+        }
+
+        fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+            let trim_bytes = AsBytes::as_bytes(&trimmed_idx);
+            self.db.put(b"trim_idx", trim_bytes).unwrap();
         }
 
         fn get_stopsign(&self) -> Option<StopSignEntry> {
             self.stopsign.clone()
+            // let ss_storage = match self.db.get(b"ss_storage") {
+            //     Ok(Some(storage_bytes)) => FromBytes::read_from(&storage_bytes as &[u8]).unwrap(),
+            //     Ok(None) => StopSignStorage { decided: 0, config_id: 0 },
+            //     Err(_e) => panic!(),
+            // };
+            // let ss_nodes= match self.db.get(b"ss_nodes") {
+            //     Ok(Some(nodes_bytes)) => FromBytes::read_from(&nodes_bytes as &[u8]).unwrap(),
+            //     Ok(None) => panic!(), // todo figure out
+            //     Err(_e) => panic!(),
+            // };
+            // let ss_meta = match self.db.get(b"ss_storage") {
+            //     Ok(Some(storage_bytes)) => FromBytes::read_from(&storage_bytes as &[u8]).unwrap(),
+            //     Ok(None) => panic!(), 
+            //     Err(_e) => panic!(),
+            // };
+
+            // let mut ss_nodes: Vec<u64> = ss_nodes as
+        }
+
+        fn set_stopsign(&mut self, s: StopSignEntry) {
+            self.stopsign = Some(s);
+            // let ss_storage: StopSignStorage = StopSignStorage { 
+            //     decided: s.decided as u8, 
+            //     config_id: s.stopsign.config_id 
+            // };
+            // let ss_storage = AsBytes::as_bytes(&ss_storage);
+            // let ss_nodes = AsBytes::as_bytes(&s.stopsign.nodes as &[u64]);
+            // let binding = s.stopsign.metadata.unwrap();
+            // let ss_meta =  AsBytes::as_bytes(&binding as &[u8]);
+            
+            // self.db.put(b"ss_storage", ss_storage).unwrap();
+            // self.db.put(b"ss_nodes", ss_nodes).unwrap();
+            // self.db.put(b"ss_meta", ss_meta).unwrap();
+        }
+
+
+        fn get_snapshot(&self) -> Option<S> {
+            self.snapshot.clone()
+        }
+
+        fn set_snapshot(&mut self, snapshot: S) {
+            self.snapshot = Some(snapshot);
         }
 
         // TODO: A way to trim the comitlog without deleting and recreating the log
@@ -221,27 +316,6 @@ pub mod persistent_storage {
             let c_opts = LogOptions::new(&self.c_log_path); // create new, insert the log into it
             self.c_log = CommitLog::new(c_opts).unwrap();
             self.append_entries(trimmed_log);
-        }
-
-        fn set_compacted_idx(&mut self, trimmed_idx: u64) {
-            let trim_bytes = AsBytes::as_bytes(&trimmed_idx);
-            self.db.put(b"trim_idx", trim_bytes).unwrap();
-        }
-
-        fn get_compacted_idx(&self) -> u64 {
-            match self.db.get(b"trim_idx") {
-                Ok(Some(trim_bytes)) => FromBytes::read_from(&trim_bytes as &[u8]).unwrap(),
-                Ok(None) => 0,
-                Err(_e) => panic!(),
-            }        
-        }
-
-        fn set_snapshot(&mut self, snapshot: S) {
-            self.snapshot = Some(snapshot);
-        }
-
-        fn get_snapshot(&self) -> Option<S> {
-            self.snapshot.clone()
         }
     }
 }

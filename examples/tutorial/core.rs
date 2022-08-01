@@ -57,7 +57,10 @@ fn main() {
     let storage = MemoryStorage::<KeyValue, KVSnapshot>::default();
 
     let mut seq_paxos = SequencePaxos::with(sp_config, storage);
-    let write_entry = KeyValue { key: "a".to_string(), value: 123 };
+    let write_entry = KeyValue {
+        key: "a".to_string(),
+        value: 123,
+    };
     seq_paxos.append(write_entry).expect("Failed to append");
 
     /* Fail-recovery */

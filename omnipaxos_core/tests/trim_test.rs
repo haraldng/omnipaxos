@@ -1,9 +1,12 @@
 pub mod utils;
 
-use utils::{test_config::TestConfig, util::{StorageTypeSelector, Value, TestSystem, clear_storage}};
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::thread;
+use utils::{
+    test_config::TestConfig,
+    util::{clear_storage, StorageTypeSelector, TestSystem, Value},
+};
 
 const GC_INDEX_INCREMENT: u64 = 10;
 

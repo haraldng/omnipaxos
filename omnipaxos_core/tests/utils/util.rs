@@ -1,15 +1,18 @@
-use omnipaxos_core::{
-    ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection, BLEConfig},
-    messages::Message,
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{Snapshot, StopSign, Entry, Storage},
-};
-use omnipaxos_storage::memory::{memory_storage::MemoryStorage, persistent_storage::{PersistentStorage, PersistentStorageConfig}};
 use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
 };
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
+use omnipaxos_core::{
+    ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
+    messages::Message,
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+    storage::{Entry, Snapshot, StopSign, Storage},
+};
+use omnipaxos_storage::memory::{
+    memory_storage::MemoryStorage,
+    persistent_storage::{PersistentStorage, PersistentStorageConfig},
+};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 use zerocopy::{AsBytes, FromBytes};
 
@@ -34,24 +37,24 @@ pub struct TestSystem {
 
 /// An enum for selecting between the 'Persistent' and 'Memory' storage types
 /// The type can be set in config/test.conf at 'storage_type
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 pub enum StorageTypeSelector {
     Persistent(),
     Memory(),
 }
 
 impl StorageTypeSelector {
-    pub fn select_type(storage_type: &str) -> Self {
+    pub fn with(storage_type: &str) -> Self {
         match storage_type {
             "Persistent" => StorageTypeSelector::Persistent(),
             "Memory" => StorageTypeSelector::Memory(),
-            _ => panic!()
+            _ => panic!(),
         }
     }
 }
 
 /// An enum which can either be aN 'PersistentStorage' or
-/// 'MemoryStorage' struct, the type depends on the 
+/// 'MemoryStorage' struct, the type depends on the
 /// 'StorageTypeSelector' enum
 pub enum StorageType<T, S>
 where
@@ -69,7 +72,10 @@ where
 {
     pub fn with(storage_type: StorageTypeSelector, id: &str) -> Self {
         match storage_type {
-            StorageTypeSelector::Persistent() => StorageType::Persistent(PersistentStorage::with(id)), // Persistent storage
+            StorageTypeSelector::Persistent() => StorageType::Persistent(PersistentStorage::with(
+                PersistentStorageConfig::default(),
+                id,
+            )), // Persistent storage
             StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
         }
     }
@@ -258,7 +264,8 @@ impl TestSystem {
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
 
-            let storage: StorageType<Value, LatestValue> = StorageType::with(storage_type, &pid.to_string());
+            let storage: StorageType<Value, LatestValue> =
+                StorageType::with(storage_type, &pid.to_string());
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))

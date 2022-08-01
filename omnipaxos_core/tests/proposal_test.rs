@@ -1,10 +1,13 @@
 pub mod utils;
 
-use utils::{test_config::TestConfig, util::{StorageTypeSelector, Value, TestSystem, clear_storage}};
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
+use utils::{
+    test_config::TestConfig,
+    util::{clear_storage, StorageTypeSelector, TestSystem, Value},
+};
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
@@ -59,7 +62,7 @@ fn forward_proposal_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-    
+
     match cfg.storage_type {
         StorageTypeSelector::Persistent() => clear_storage(),
         StorageTypeSelector::Memory() => (),
