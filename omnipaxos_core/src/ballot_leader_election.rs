@@ -11,11 +11,9 @@ use hocon::Hocon;
 use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
-use zerocopy::{AsBytes, FromBytes};
-
 /// Used to define an epoch
 #[repr(packed)]
-#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq, FromBytes, AsBytes)]
+#[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
 pub struct Ballot {
     /// Ballot number
     pub n: u32,

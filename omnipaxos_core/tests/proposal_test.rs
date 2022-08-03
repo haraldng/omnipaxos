@@ -6,7 +6,7 @@ use rand::Rng;
 use serial_test::serial;
 use utils::{
     test_config::TestConfig,
-    util::{clear_storage, StorageTypeSelector, TestSystem, Value},
+    util::{TestSystem, Value},
 };
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
@@ -62,9 +62,4 @@ fn forward_proposal_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }

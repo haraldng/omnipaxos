@@ -3,10 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
-use utils::{
-    test_config::TestConfig,
-    util::{clear_storage, StorageTypeSelector, TestSystem},
-};
+use utils::{test_config::TestConfig, util::TestSystem};
 
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.
@@ -49,9 +46,4 @@ fn ble_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }

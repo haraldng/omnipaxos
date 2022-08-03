@@ -9,7 +9,7 @@ use omnipaxos_core::{
 use serial_test::serial;
 use utils::{
     test_config::TestConfig,
-    util::{clear_storage, LatestValue, StorageType, StorageTypeSelector, TestSystem, Value},
+    util::{LatestValue, StorageType, TestSystem, Value},
 };
 
 /// Verifies the 3 properties that the Paxos algorithm offers
@@ -64,14 +64,10 @@ fn consensus_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
 
 #[test]
+#[serial]
 fn read_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
@@ -140,14 +136,10 @@ fn read_test() {
     let idx = log_len;
     let stopsign = stopped_op.read(idx).expect("No StopSign");
     verify_stopsign(&[stopsign], &ss);
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
 
 #[test]
+#[serial]
 fn read_entries_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
@@ -269,11 +261,6 @@ fn read_entries_test() {
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
 
 fn verify_snapshot(

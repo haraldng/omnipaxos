@@ -13,8 +13,8 @@ use omnipaxos_storage::memory::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
-use zerocopy::{AsBytes, FromBytes};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -75,16 +75,16 @@ where
             StorageTypeSelector::Persistent() => StorageType::Persistent(PersistentStorage::with(
                 PersistentStorageConfig::default(),
                 id,
-            )), // Persistent storage
-            StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()), // Memory storage (default)
+            )),
+            StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()),
         }
     }
 }
 
 impl<T, S> Storage<T, S> for StorageType<T, S>
 where
-    T: Entry + AsBytes + FromBytes,
-    S: Snapshot<T>,
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
+    S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> u64 {
         match self {
@@ -612,12 +612,10 @@ pub mod omnireplica {
     }
 }
 
-#[repr(packed)]
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, FromBytes, AsBytes)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct Value(pub u64);
 
-#[repr(packed)]
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, FromBytes, AsBytes)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct LatestValue {
     value: Value,
 }

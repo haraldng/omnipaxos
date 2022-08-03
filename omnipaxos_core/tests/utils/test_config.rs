@@ -4,6 +4,7 @@ use std::time::Duration;
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
 
+use super::util::clear_storage;
 #[cfg(feature = "hocon_config")]
 use super::util::StorageTypeSelector;
 
@@ -42,5 +43,11 @@ impl TestConfig {
                     .unwrap_or("Memory".to_string()),
             ),
         })
+    }
+}
+
+impl Drop for TestConfig {
+    fn drop(&mut self) {
+        clear_storage();
     }
 }

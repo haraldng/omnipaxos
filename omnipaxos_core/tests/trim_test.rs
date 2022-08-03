@@ -68,11 +68,6 @@ fn trim_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
 
 /// Test double Garbage Collection.

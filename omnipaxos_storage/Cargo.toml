@@ -9,6 +9,8 @@ omnipaxos_core = { path = "../omnipaxos_core" }
 commitlog = { version = "0.2.0", optional = false }
 rocksdb = { version = "0.18.0", optional = false }
 zerocopy = { version = "0.6.1", optional = false }
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.2.1"
 
 [dev-dependencies]
 

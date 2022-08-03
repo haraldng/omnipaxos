@@ -9,7 +9,7 @@ use serial_test::serial;
 #[cfg(feature = "hocon_config")]
 use utils::test_config::TestConfig;
 #[cfg(feature = "hocon_config")]
-use utils::util::{clear_storage, StorageTypeSelector, TestSystem};
+use utils::util::TestSystem;
 #[cfg(feature = "hocon_config")]
 use utils::util::{Value, SS_METADATA};
 
@@ -90,9 +90,4 @@ fn reconfig_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
