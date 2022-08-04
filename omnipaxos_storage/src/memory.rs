@@ -19,6 +19,9 @@ pub mod persistent_storage {
     const STOPSIGN: &[u8] = &[5];
     const SNAPSHOT: &[u8] = &[6];
 
+    /// Structs that can be serialized or deserialized from bytes
+    /// Each struct represents a certain type in 'omnipaxos_core' 
+    /// that must be serialised before storing the data.
     #[repr(packed)]
     #[derive(Clone, Copy, AsBytes, FromBytes)]
     pub struct BallotStorage {
@@ -368,7 +371,6 @@ pub mod persistent_storage {
         fn trim(&mut self, trimmed_idx: u64) {
             let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.c_log.next_offset()); // get the log entries from 'trimmed_idx' to latest
             let _ = std::fs::remove_dir_all(&self.c_path); // remove old log
-
             let c_opts = LogOptions::new(&self.c_path); // create new commitlog, insert the log into it
             self.c_log = CommitLog::new(c_opts).unwrap();
             self.append_entries(trimmed_log);
