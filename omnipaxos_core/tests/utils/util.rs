@@ -2,6 +2,7 @@ use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
 };
+use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
@@ -13,6 +14,7 @@ use omnipaxos_storage::memory::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
+use rocksdb::Options;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
@@ -70,12 +72,20 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub fn with(storage_type: StorageTypeSelector, id: &str) -> Self {
+    pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
         match storage_type {
-            StorageTypeSelector::Persistent() => StorageType::Persistent(PersistentStorage::with(
-                PersistentStorageConfig::default(),
-                id,
-            )),
+            StorageTypeSelector::Persistent() =>  {  
+                let my_logpath = COMMITLOG.to_string() + &path.to_string();
+                let my_rockspath = ROCKSDB.to_string() + &path.to_string();
+                let my_logopts = LogOptions::new(&my_logpath);
+                let mut my_rocksopts = Options::default();
+                my_rocksopts.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
+                my_rocksopts.create_if_missing(true); // Creates an database if its missing in the path
+                let persist_conf = PersistentStorageConfig::with(
+                    my_logpath, my_logopts, my_rockspath, my_rocksopts
+                );
+                StorageType::Persistent(PersistentStorage::with(persist_conf))
+            } ,
             StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()),
         }
     }

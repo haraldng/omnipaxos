@@ -78,75 +78,65 @@ pub mod persistent_storage {
     /// * `rocksdb_path`: The path to the rocksDB key-value store
     /// * `log_config`: Configuration of the 'commitlog'
     pub struct PersistentStorageConfig {
-        log_path: Option<String>,
-        log_seg_max_bytes: usize,
-        log_index_max_bytes: usize,
-        log_entry_max_bytes: usize,
+        commitlog_path: Option<String>,
+        commitlog_options: LogOptions,
         rocksdb_path: Option<String>,
         rocksdb_options: Options,
     }
 
     impl PersistentStorageConfig {
         pub fn get_commitlog_path(&self) -> Option<&String> {
-            self.log_path.as_ref()
+            self.commitlog_path.as_ref()
         }
 
-        pub fn set_commitlog_path(mut self, path: String) {
-            self.log_path = Some(path);
+        pub fn set_commitlog_path(&mut self, path: String) {
+            self.commitlog_path = Some(path);
         }
 
         pub fn get_rocksdb_path(&self) -> Option<&String> {
             self.rocksdb_path.as_ref()
         }
 
-        pub fn set_rocksdb_path(mut self, path: String) {
+        pub fn set_rocksdb_path(&mut self, path: String) {
             self.rocksdb_path = Some(path);
         }
 
-        pub fn get_entry_max_bytes(&self) -> usize {
-            self.log_entry_max_bytes
+        pub fn get_commitlog_options(&self) -> LogOptions {
+            self.commitlog_options.clone()
         }
 
-        pub fn set_entry_max_bytes(mut self, entry_bytes: usize) {
-            self.log_entry_max_bytes = entry_bytes;
-        }
-
-        pub fn get_index_max_bytes(&self) -> usize {
-            self.log_index_max_bytes
-        }
-
-        pub fn set_index_max_bytes(mut self, index_bytes: usize) {
-            self.log_index_max_bytes = index_bytes;
-        }
-
-        pub fn get_segment_max_bytes(&self) -> usize {
-            self.log_seg_max_bytes
-        }
-
-        pub fn set_segment_max_bytes(mut self, segment_bytes: usize) {
-            self.log_seg_max_bytes = segment_bytes;
+        pub fn set_commitlog_options(&mut self, commitlog_opts: LogOptions) {
+            self.commitlog_options = commitlog_opts;
         }
 
         pub fn get_rocksdb_options(&self) -> Options {
             self.rocksdb_options.clone()
         }
 
-        pub fn set_rocksdb_options(mut self, rocksdb_opts: Options) {
+        pub fn set_rocksdb_options(&mut self, rocksdb_opts: Options) {
             self.rocksdb_options = rocksdb_opts;
+        }
+
+        pub fn with(log_path: String, commitlog_options: LogOptions, rocksdb_path: String, rocksdb_options: Options) -> Self {
+            Self {
+                commitlog_path: Some(log_path),
+                commitlog_options,
+                rocksdb_path: Some(rocksdb_path),
+                rocksdb_options,
+            }
         }
     }
 
     impl Default for PersistentStorageConfig {
         fn default() -> Self {
+            let commitlog_options = LogOptions::new(COMMITLOG);
             let mut rocksdb_options = Options::default();
             rocksdb_options.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
             rocksdb_options.create_if_missing(true); // Creates an database if its missing in the path
 
             Self {
-                log_path: Some(COMMITLOG.to_string()),
-                log_seg_max_bytes: 0x10000, // 64 kB for each segment (entry)
-                log_index_max_bytes: 5000,  // Max 10,000 log entries in the commitlog
-                log_entry_max_bytes: 64000, // Max 64 kilobytes for each message
+                commitlog_path: Some(COMMITLOG.to_string()),
+                commitlog_options,
                 rocksdb_path: Some(ROCKSDB.to_string()),
                 rocksdb_options,
             }
@@ -174,23 +164,17 @@ pub mod persistent_storage {
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
-        pub fn with(storage_config: PersistentStorageConfig, replica_id: &str) -> Self {
+        pub fn with(storage_config: PersistentStorageConfig) -> Self {
             // Paths to commitlog and rocksDB store
-            let c_path: String = storage_config.log_path.unwrap() + replica_id;
-            let db_path = storage_config.rocksdb_path.unwrap() + replica_id;
+            let c_path: String = storage_config.commitlog_path.unwrap();
+            let db_path = storage_config.rocksdb_path.unwrap();
 
             // Check if storage already exists on the paths
             std::fs::metadata(&c_path).expect_err("commitlog already exists in path");
             std::fs::metadata(&db_path).expect_err("rocksDB store already exists in path");
 
-            // set options
-            let mut c_opts = LogOptions::new(&c_path);
-            c_opts.segment_max_bytes(storage_config.log_seg_max_bytes);
-            c_opts.index_max_items(storage_config.log_index_max_bytes);
-            c_opts.message_max_bytes(storage_config.log_entry_max_bytes);
-
             // Initialize commitlog for entries and rocksDB
-            let c_log = CommitLog::new(c_opts).unwrap();
+            let c_log = CommitLog::new(storage_config.commitlog_options).unwrap();
             let db = DB::open(&storage_config.rocksdb_options, &db_path).unwrap();
 
             Self {

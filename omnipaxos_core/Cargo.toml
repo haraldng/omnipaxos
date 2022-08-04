@@ -17,6 +17,8 @@ serial_test = "0.5.1"
 rand = "0.8.4"
 omnipaxos_storage = { path = "../omnipaxos_storage"} 
 serde = { version = "1.0", features = ["derive"] }
+commitlog = { version = "0.2.0", optional = false }
+rocksdb = { version = "0.18.0", optional = false }
 
 [features]
 batch_accept = []
