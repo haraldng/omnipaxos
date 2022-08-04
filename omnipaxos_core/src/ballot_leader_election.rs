@@ -12,7 +12,6 @@ use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 /// Used to define an epoch
-#[repr(packed)]
 #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
 pub struct Ballot {
     /// Ballot number

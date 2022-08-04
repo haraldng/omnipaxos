@@ -18,7 +18,7 @@ use utils::util::{Value, SS_METADATA};
 #[test]
 #[serial]
 fn reconfig_test() {
-    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
     let sys = TestSystem::with(
         cfg.num_nodes,

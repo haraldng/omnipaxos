@@ -1,9 +1,6 @@
 #[allow(missing_docs)]
 pub mod persistent_storage {
-    use commitlog::{
-        message::{MessageBuf, MessageSet},
-        CommitLog, LogOptions, ReadLimit,
-    };
+    use commitlog::{message::MessageSet, CommitLog, LogOptions, ReadLimit};
     use omnipaxos_core::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
@@ -104,7 +101,7 @@ pub mod persistent_storage {
         }
 
         pub fn get_entry_max_bytes(&self) -> usize {
-            self.log_entry_max_bytes.clone()
+            self.log_entry_max_bytes
         }
 
         pub fn set_entry_max_bytes(mut self, entry_bytes: usize) {
@@ -112,7 +109,7 @@ pub mod persistent_storage {
         }
 
         pub fn get_index_max_bytes(&self) -> usize {
-            self.log_index_max_bytes.clone()
+            self.log_index_max_bytes
         }
 
         pub fn set_index_max_bytes(mut self, index_bytes: usize) {
@@ -120,7 +117,7 @@ pub mod persistent_storage {
         }
 
         pub fn get_segment_max_bytes(&self) -> usize {
-            self.log_seg_max_bytes.clone()
+            self.log_seg_max_bytes
         }
 
         pub fn set_segment_max_bytes(mut self, segment_bytes: usize) {
@@ -134,8 +131,6 @@ pub mod persistent_storage {
         pub fn set_rocksdb_options(mut self, rocksdb_opts: Options) {
             self.rocksdb_options = rocksdb_opts;
         }
-
-        pub fn with() {}
     }
 
     impl Default for PersistentStorageConfig {
@@ -172,7 +167,7 @@ pub mod persistent_storage {
         /// A placeholder for the T: Entry
         t: PhantomData<T>,
         /// A placeholder for the S: Snapshot<T>
-        s: PhantomData<S>
+        s: PhantomData<S>,
     }
 
     impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
@@ -226,7 +221,9 @@ pub mod persistent_storage {
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            let _ = self.c_log.truncate(from_idx);
+            self.c_log
+                .truncate(from_idx)
+                .expect("Failed to truncate commitlog");
             self.append_entries(entries)
         }
 
@@ -253,19 +250,22 @@ pub mod persistent_storage {
         }
 
         fn get_promise(&self) -> Ballot {
-            let b_store: BallotStorage = match self.db.get(NPROM) {
-                Ok(Some(prom_bytes)) => FromBytes::read_from(prom_bytes.as_slice()).unwrap(),
-                Ok(None) => BallotStorage {
+            match self.db.get(NPROM) {
+                Ok(Some(prom_bytes)) => {
+                    let b_store: BallotStorage =
+                        FromBytes::read_from(prom_bytes.as_slice()).unwrap();
+                    Ballot {
+                        n: b_store.n,
+                        priority: b_store.priority,
+                        pid: b_store.pid,
+                    }
+                }
+                Ok(None) => Ballot {
                     n: 0,
                     priority: 0,
                     pid: 0,
                 },
                 Err(_e) => panic!(),
-            };
-            Ballot {
-                n: b_store.n,
-                priority: b_store.priority,
-                pid: b_store.pid,
             }
         }
 
@@ -289,19 +289,22 @@ pub mod persistent_storage {
         }
 
         fn get_accepted_round(&self) -> Ballot {
-            let b_store: BallotStorage = match self.db.get(ACC) {
-                Ok(Some(prom_bytes)) => FromBytes::read_from(prom_bytes.as_slice()).unwrap(),
-                Ok(None) => BallotStorage {
+            match self.db.get(ACC) {
+                Ok(Some(prom_bytes)) => {
+                    let b_store: BallotStorage =
+                        FromBytes::read_from(prom_bytes.as_slice()).unwrap();
+                    Ballot {
+                        n: b_store.n,
+                        priority: b_store.priority,
+                        pid: b_store.pid,
+                    }
+                }
+                Ok(None) => Ballot {
                     n: 0,
                     priority: 0,
                     pid: 0,
                 },
                 Err(_e) => panic!(),
-            };
-            Ballot {
-                n: b_store.n,
-                priority: b_store.priority,
-                pid: b_store.pid,
             }
         }
 
@@ -328,13 +331,12 @@ pub mod persistent_storage {
             match self.db.get(STOPSIGN) {
                 Ok(Some(ss_bytes)) => {
                     let ss_store: StopSignEntryStorage = bincode::deserialize(&ss_bytes).unwrap();
-                    let ss: StopSign = StopSign {
-                        config_id: ss_store.stopsign.config_id,
-                        metadata: ss_store.stopsign.metadata,
-                        nodes: ss_store.stopsign.nodes,
-                    };
                     Some(StopSignEntry {
-                        stopsign: ss,
+                        stopsign: StopSign {
+                            config_id: ss_store.stopsign.config_id,
+                            metadata: ss_store.stopsign.metadata,
+                            nodes: ss_store.stopsign.nodes,
+                        },
                         decided: ss_store.decided,
                     })
                 }
@@ -346,10 +348,7 @@ pub mod persistent_storage {
         fn set_stopsign(&mut self, s: StopSignEntry) {
             let ss_storage = StopSignEntryStorage::with(s);
             let stopsign = bincode::serialize(&ss_storage).unwrap();
-            match self.db.put(STOPSIGN, stopsign) {
-                Ok(()) => (),
-                Err(_e) => panic!(),
-            }
+            self.db.put(STOPSIGN, stopsign).unwrap(); 
         }
 
         fn get_snapshot(&self) -> Option<S> {
