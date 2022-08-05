@@ -7,10 +7,7 @@ use omnipaxos_core::{
     util::LogEntry,
 };
 use serial_test::serial;
-use utils::{
-    test_config::TestConfig,
-    util::{LatestValue, StorageType, TestSystem, Value},
-};
+use utils::{LatestValue, StorageType, TestConfig, TestSystem, Value};
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement

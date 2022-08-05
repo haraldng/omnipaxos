@@ -2,7 +2,6 @@ use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
 };
-use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
@@ -10,10 +9,12 @@ use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
     storage::{Entry, Snapshot, StopSign, Storage},
 };
-use omnipaxos_storage::memory::{
+use omnipaxos_storage::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
+
+use commitlog::LogOptions;
 use rocksdb::Options;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
@@ -25,37 +26,77 @@ const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "commitlog/";
 const ROCKSDB: &str = "rocksDB/";
+const PERSISTENT: &str = "persistent";
+const MEMORY: &str = "memory";
 
-pub struct TestSystem {
-    pub kompact_system: KompactSystem,
-    ble_paxos_nodes: HashMap<
-        u64,
-        (
-            Arc<Component<BLEComponent>>,
-            Arc<Component<SequencePaxosComponent>>,
-        ),
-    >,
+#[cfg(feature = "hocon_config")]
+use hocon::{Error, Hocon, HoconLoader};
+
+#[cfg(feature = "hocon_config")]
+/// Configuration for `TestSystem`. TestConfig loads the values from
+/// the configuration file `test.conf` using hocon
+pub struct TestConfig {
+    pub wait_timeout: Duration,
+    pub num_threads: usize,
+    pub num_nodes: usize,
+    pub ble_hb_delay: u64,
+    pub num_proposals: u64,
+    pub num_elections: u64,
+    pub gc_idx: u64,
+    pub storage_type: StorageTypeSelector,
 }
 
-/// An enum for selecting between the 'Persistent' and 'Memory' storage types
-/// The type can be set in config/test.conf at 'storage_type
+#[cfg(feature = "hocon_config")]
+impl TestConfig {
+    pub fn load(name: &str) -> Result<TestConfig, Error> {
+        let raw_cfg = HoconLoader::new()
+            .load_file("tests/config/test.conf")?
+            .hocon()?;
+
+        let cfg: &Hocon = &raw_cfg[name];
+
+        Ok(TestConfig {
+            wait_timeout: cfg["wait_timeout"].as_duration().unwrap_or_default(),
+            num_threads: cfg["num_threads"].as_i64().unwrap_or_default() as usize,
+            num_nodes: cfg["num_nodes"].as_i64().unwrap_or_default() as usize,
+            ble_hb_delay: cfg["ble_hb_delay"].as_i64().unwrap_or_default() as u64,
+            num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
+            num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
+            gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
+            storage_type: StorageTypeSelector::with(
+                &cfg["storage_type"]
+                    .as_string()
+                    .unwrap_or("memory".to_string()),
+            ),
+        })
+    }
+}
+
+impl Drop for TestConfig {
+    fn drop(&mut self) {
+        clear_storage();
+    }
+}
+
+/// An enum for selecting storage type. The type
+/// can be set in `config/test.conf` at `storage_type`
 #[derive(Clone, Copy)]
 pub enum StorageTypeSelector {
-    Persistent(),
-    Memory(),
+    Persistent,
+    Memory,
 }
 
 impl StorageTypeSelector {
     pub fn with(storage_type: &str) -> Self {
         match storage_type {
-            "Persistent" => StorageTypeSelector::Persistent(),
-            "Memory" => StorageTypeSelector::Memory(),
-            _ => panic!(),
+            PERSISTENT => StorageTypeSelector::Persistent,
+            MEMORY => StorageTypeSelector::Memory,
+            _ => panic!("No such storage type: {}", storage_type),
         }
     }
 }
 
-/// An enum which can either be aN 'PersistentStorage' or
+/// An enum which can either be 'PersistentStorage' or
 /// 'MemoryStorage' struct, the type depends on the
 /// 'StorageTypeSelector' enum
 pub enum StorageType<T, S>
@@ -74,19 +115,21 @@ where
 {
     pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
         match storage_type {
-            StorageTypeSelector::Persistent() =>  {  
+            StorageTypeSelector::Persistent => {
                 let my_logpath = COMMITLOG.to_string() + &path.to_string();
                 let my_rockspath = ROCKSDB.to_string() + &path.to_string();
                 let my_logopts = LogOptions::new(&my_logpath);
                 let mut my_rocksopts = Options::default();
-                my_rocksopts.increase_parallelism(4); // Set the amount threads for rocksDB compaction and flushing
                 my_rocksopts.create_if_missing(true); // Creates an database if its missing in the path
                 let persist_conf = PersistentStorageConfig::with(
-                    my_logpath, my_logopts, my_rockspath, my_rocksopts
+                    my_logpath,
+                    my_logopts,
+                    my_rockspath,
+                    my_rocksopts,
                 );
                 StorageType::Persistent(PersistentStorage::with(persist_conf))
-            } ,
-            StorageTypeSelector::Memory() => StorageType::Memory(MemoryStorage::default()),
+            }
+            StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
         }
     }
 }
@@ -228,6 +271,17 @@ where
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
         }
     }
+}
+
+pub struct TestSystem {
+    pub kompact_system: KompactSystem,
+    ble_paxos_nodes: HashMap<
+        u64,
+        (
+            Arc<Component<BLEComponent>>,
+            Arc<Component<SequencePaxosComponent>>,
+        ),
+    >,
 }
 
 impl TestSystem {

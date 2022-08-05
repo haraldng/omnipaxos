@@ -4,10 +4,7 @@ use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
-use utils::{
-    test_config::TestConfig,
-    util::{TestSystem, Value},
-};
+use utils::{TestConfig, TestSystem, Value};
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.

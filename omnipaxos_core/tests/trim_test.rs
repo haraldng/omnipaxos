@@ -3,10 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::thread;
-use utils::{
-    test_config::TestConfig,
-    util::{clear_storage, StorageTypeSelector, TestSystem, Value},
-};
+use utils::{TestConfig, TestSystem, Value};
 
 const GC_INDEX_INCREMENT: u64 = 10;
 
@@ -141,11 +138,6 @@ fn double_trim_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
-
-    match cfg.storage_type {
-        StorageTypeSelector::Persistent() => clear_storage(),
-        StorageTypeSelector::Memory() => (),
-    }
 }
 
 fn check_trim(vec_proposals: Vec<Value>, seq_after: Vec<(&u64, Vec<Value>)>, gc_idx: u64) {

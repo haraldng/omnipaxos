@@ -4,7 +4,7 @@ use omnipaxos_core::{
     storage::Snapshot,
     util::LogEntry,
 };
-use omnipaxos_storage::memory::memory_storage::MemoryStorage;
+use omnipaxos_storage::memory_storage::MemoryStorage;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]

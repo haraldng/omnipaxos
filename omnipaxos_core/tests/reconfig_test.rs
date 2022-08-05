@@ -7,18 +7,14 @@ use omnipaxos_core::sequence_paxos::ReconfigurationRequest;
 #[cfg(feature = "hocon_config")]
 use serial_test::serial;
 #[cfg(feature = "hocon_config")]
-use utils::test_config::TestConfig;
-#[cfg(feature = "hocon_config")]
-use utils::util::TestSystem;
-#[cfg(feature = "hocon_config")]
-use utils::util::{Value, SS_METADATA};
+use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
 #[serial]
 fn reconfig_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
     let sys = TestSystem::with(
         cfg.num_nodes,

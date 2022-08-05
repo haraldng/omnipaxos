@@ -3,7 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
-use utils::{test_config::TestConfig, util::TestSystem};
+use utils::{TestConfig, TestSystem};
 
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.

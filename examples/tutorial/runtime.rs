@@ -7,7 +7,7 @@ use omnipaxos_core::{
     messages::Message, sequence_paxos::ReconfigurationRequest, storage::Snapshot,
 };
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
-use omnipaxos_storage::memory::memory_storage::MemoryStorage;
+use omnipaxos_storage::memory_storage::MemoryStorage;
 
 #[derive(Clone, Debug)]
 pub struct KeyValue {
