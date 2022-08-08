@@ -6,6 +6,8 @@ use std::thread;
 use utils::{TestConfig, TestSystem, Value};
 
 const GC_INDEX_INCREMENT: u64 = 10;
+const TRIM_PATH: &str = "trim_test/";
+const DOUBLE_TRIM_PATH: &str = "double_trim_test/";
 
 /// Test Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
@@ -15,11 +17,12 @@ const GC_INDEX_INCREMENT: u64 = 10;
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
+    let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        TRIM_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -61,7 +64,9 @@ fn trim_test() {
 
     println!("Pass gc");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
@@ -75,11 +80,12 @@ fn trim_test() {
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
+    let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        DOUBLE_TRIM_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -134,7 +140,9 @@ fn double_trim_test() {
 
     println!("Pass double_gc");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

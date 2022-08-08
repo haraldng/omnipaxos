@@ -5,6 +5,8 @@ use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem};
 
+const BLE_PATH: &str = "ble_test/";
+
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.
 /// After each election, the leader node is killed and the process repeats
@@ -19,6 +21,7 @@ fn ble_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        BLE_PATH,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -42,7 +45,9 @@ fn ble_test() {
 
     println!("Pass ballot_leader_election");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

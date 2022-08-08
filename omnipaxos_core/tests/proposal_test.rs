@@ -6,6 +6,8 @@ use rand::Rng;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
 
+const PROPOSAL_PATH: &str = "proposal_test/";
+
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
 #[test]
@@ -13,11 +15,12 @@ use utils::{TestConfig, TestSystem, Value};
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
+    let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        PROPOSAL_PATH,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -55,7 +58,9 @@ fn forward_proposal_test() {
 
     println!("Pass forward_proposal");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

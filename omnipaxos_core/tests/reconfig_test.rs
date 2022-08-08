@@ -9,6 +9,8 @@ use serial_test::serial;
 #[cfg(feature = "hocon_config")]
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 
+const RECONFIG_PATH: &str = "reconfig_test/";
+
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
@@ -16,11 +18,12 @@ use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 fn reconfig_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
+    let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        RECONFIG_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -82,7 +85,9 @@ fn reconfig_test() {
             .expect_err("Should not be able to propose after decided StopSign!")
     });
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

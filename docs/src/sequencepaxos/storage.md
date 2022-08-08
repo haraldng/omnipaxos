@@ -1,10 +1,10 @@
 # Storage
-You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementations, depending on the users need for persistance or faster reads and writes: `PersistentStorage` and `MemoryStorage`
+You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation, depending on the users need for fast reads and writes or persistance: `MemoryStorage` and `PersistentStorage`
 
 ### MemoryStorage
-An in-memory storage implementation, `MemoryStorage` offers fast reads and writes but with no persistence. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
+An in-memory storage implementation, `MemoryStorage` offers fast reads and writes without persistence. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
 ```rust,edition2018,no_run,noplaypen
-    // from the module omnipaxos_storage::memory::memory_storage
+    // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]
     pub struct MemoryStorage<T, S>
     where
@@ -87,21 +87,23 @@ An in-memory storage implementation, `MemoryStorage` offers fast reads and write
 ```
 
 ### PersistentStorage
-A persistent disk-based storage implementation, `PersistentStorage` makes use of the [Commitlog](https://crates.io/crates/commitlog) and [rocksDB](https://crates.io/crates/rocksdb) libraries to store logged entries and replica state used in crash-recovery. Users can configure the path to store log entries, fields and storage related options through the `PersistentStorageConfig` struct
+A persistent disk-based storage implementation, `PersistentStorage` makes use of the [Commitlog](https://crates.io/crates/commitlog) and [rocksDB](https://crates.io/crates/rocksdb) libraries to store logged entries and replica state. Users can configure the path to store log entries, fields and storage related options through the `PersistentStorageConfig` struct
 
 ```rust,edition2018,no_run,noplaypen
-    // from the module omnipaxos_storage::memory::persistent_storage
+    // from the module omnipaxos_storage::persistent_storage
+
+    
     pub struct PersistentStorage<T, S>
     where
         T: Entry,
         S: Snapshot<T>,
     {
         /// disk-based commit log for entries
-        c_log: CommitLog,
+        commitlog: CommitLog,
         /// the path to the directory containing a commitlog
-        c_path: String,
+        log_path: String,
         /// local RocksDB key-value store
-        db: DB,
+        rocksdb: DB,
         /// A placeholder for the T: Entry
         t: PhantomData<T>,
         /// A placeholder for the S: Snapshot<T>
@@ -114,88 +116,93 @@ A persistent disk-based storage implementation, `PersistentStorage` makes use of
         S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {
-            let entry_bytes = bincode::serialize(&entry).unwrap();
-            match self.c_log.append_msg(entry_bytes) {
-                Ok(x) => x,
-                Err(_e) => panic!(),
-            }
+            let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize");
+            self.commitlog
+                .append_msg(entry_bytes)
+                .expect("Failed to append log entry")
+                + 1
         }
 
         fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            for entry in entries {
-                self.append_entry(entry);
-            }
-            self.get_log_len()
+            let serialized = entries
+                .into_iter()
+                .map(|entry| bincode::serialize(&entry).expect("Failed to serialize"));
+            let offset = self
+                .commitlog
+                .append(&mut MessageBuf::from_iter(serialized))
+                .expect("Falied to append entries");
+            offset.first() + offset.len() as u64
         }
 
         fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            self.c_log
+            self.commitlog
                 .truncate(from_idx)
-                .expect("Failed to truncate commitlog");
+                .expect("Failed to truncate log");
             self.append_entries(entries)
         }
 
         fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            let buffer = match self.c_log.read(from, ReadLimit::default()) {
-                Ok(buf) => buf,
-                Err(_) => panic!(),
-            };
+            let buffer = self
+                .commitlog
+                .read(from, ReadLimit::default())
+                .expect("Failed to read from log");
             let mut entries = Vec::<T>::with_capacity((to - from) as usize);
             let mut iter = buffer.iter();
             for _ in from..to {
                 let msg = iter.next().unwrap();
-                entries.push(bincode::deserialize(msg.payload()).unwrap());
+                entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize"));
             }
             entries
         }
 
         fn get_log_len(&self) -> u64 {
-            self.c_log.next_offset()
+            self.commitlog.next_offset()
         }
 
         fn get_suffix(&self, from: u64) -> Vec<T> {
-            self.get_entries(from, self.get_log_len())
+            self.get_entries(from, self.commitlog.next_offset())
         }
 
         fn get_promise(&self) -> Ballot {
-            match self.db.get(NPROM) {
-                Ok(Some(prom_bytes)) => {
+            let value = self.rocksdb.get(NPROM).expect("Failed to retrive 'NPROM'");
+            match value {
+                Some(prom_bytes) => {
                     let b_store: BallotStorage =
-                        FromBytes::read_from(prom_bytes.as_slice()).unwrap();
-                    Ballot {
-                        n: b_store.n,
-                        priority: b_store.priority,
-                        pid: b_store.pid,
-                    }
+                        FromBytes::read_from(prom_bytes.as_slice()).expect("Failed to deserialize");
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
-                Ok(None) => Ballot {
-                    n: 0,
-                    priority: 0,
-                    pid: 0,
-                },
-                Err(_e) => panic!(),
+                None => Ballot::default(),
             }
         }
 
         fn set_promise(&mut self, n_prom: Ballot) {
             let ballot_store = BallotStorage::with(n_prom);
             let prom_bytes = AsBytes::as_bytes(&ballot_store);
-            self.db.put(NPROM, prom_bytes).unwrap()
+            self.rocksdb
+                .put(NPROM, prom_bytes)
+                .expect("Failed to set 'NPROM'")
         }
 
         fn get_decided_idx(&self) -> u64 {
-            match self.db.get(DECIDE) {
-                Ok(Some(ld_bytes)) => bincode::deserialize(&ld_bytes).unwrap(),
-                Ok(None) => 0,
-                Err(_e) => panic!(),
+            let value = self
+                .rocksdb
+                .get(DECIDE)
+                .expect("Failed to retrive 'DECIDE'");
+            match value {
+                Some(ld_bytes) => {
+                    FromBytes::read_from(ld_bytes.as_slice()).expect("Failed to deserialize")
+                }
+                None => 0,
             }
         }
 
         fn set_decided_idx(&mut self, ld: u64) {
-            let ld_bytes = bincode::serialize(&ld).unwrap();
-            self.db.put(DECIDE, ld_bytes).unwrap();
+            let ld_bytes = AsBytes::as_bytes(&ld);
+            self.rocksdb
+                .put(DECIDE, ld_bytes)
+                .expect("Failed to set 'DECIDE'");
         }
-        
+            
         ...
     }
 ```

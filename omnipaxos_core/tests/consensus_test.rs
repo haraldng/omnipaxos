@@ -9,6 +9,8 @@ use omnipaxos_core::{
 use serial_test::serial;
 use utils::{LatestValue, StorageType, TestConfig, TestSystem, Value};
 
+const CONSENSUS_PATH: &str = "consensus_test/";
+
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
 #[test]
@@ -16,11 +18,12 @@ use utils::{LatestValue, StorageType, TestConfig, TestSystem, Value};
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(
+    let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
+        CONSENSUS_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -57,7 +60,9 @@ fn consensus_test() {
     check_validity(log.clone(), vec_proposals);
     check_uniform_agreement(log);
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

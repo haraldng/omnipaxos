@@ -66,15 +66,9 @@ impl TestConfig {
             storage_type: StorageTypeSelector::with(
                 &cfg["storage_type"]
                     .as_string()
-                    .unwrap_or("memory".to_string()),
+                    .unwrap_or(MEMORY.to_string()),
             ),
         })
-    }
-}
-
-impl Drop for TestConfig {
-    fn drop(&mut self) {
-        clear_storage();
     }
 }
 
@@ -116,11 +110,12 @@ where
     pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let my_logpath = COMMITLOG.to_string() + &path.to_string();
-                let my_rockspath = ROCKSDB.to_string() + &path.to_string();
+                let my_logpath = format!("{COMMITLOG}{path}");
+                let my_rockspath = format!("{ROCKSDB}{path}");
                 let my_logopts = LogOptions::new(&my_logpath);
                 let mut my_rocksopts = Options::default();
-                my_rocksopts.create_if_missing(true); // Creates an database if its missing in the path
+                my_rocksopts.create_if_missing(true);
+
                 let persist_conf = PersistentStorageConfig::with(
                     my_logpath,
                     my_logopts,
@@ -274,7 +269,7 @@ where
 }
 
 pub struct TestSystem {
-    pub kompact_system: KompactSystem,
+    pub kompact_system: Option<KompactSystem>,
     ble_paxos_nodes: HashMap<
         u64,
         (
@@ -290,6 +285,7 @@ impl TestSystem {
         ble_hb_delay: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
+        test_name: &str,
     ) -> Self {
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
@@ -329,7 +325,7 @@ impl TestSystem {
             sp_config.set_peers(peers);
 
             let storage: StorageType<Value, LatestValue> =
-                StorageType::with(storage_type, &pid.to_string());
+                StorageType::with(storage_type, &(test_name.to_string() + &pid.to_string()));
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
@@ -352,7 +348,7 @@ impl TestSystem {
         }
 
         Self {
-            kompact_system: system,
+            kompact_system: Some(system),
             ble_paxos_nodes,
         }
     }
@@ -360,10 +356,14 @@ impl TestSystem {
     pub fn start_all_nodes(&self) {
         for (ble, omni) in self.ble_paxos_nodes.values() {
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .start_notify(ble)
                 .wait_timeout(START_TIMEOUT)
                 .expect("BLEComp never started!");
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .start_notify(omni)
                 .wait_timeout(START_TIMEOUT)
                 .expect("ReplicaComp never started!");
@@ -373,10 +373,14 @@ impl TestSystem {
     pub fn stop_all_nodes(&self) {
         for (_pid, (ble, omni)) in &self.ble_paxos_nodes {
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .stop_notify(ble)
                 .wait_timeout(STOP_COMPONENT_TIMEOUT)
                 .expect("BLEComp never died!");
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .stop_notify(omni)
                 .wait_timeout(STOP_COMPONENT_TIMEOUT)
                 .expect("ReplicaComp replica never died!");
@@ -386,10 +390,14 @@ impl TestSystem {
     pub fn kill_node(&mut self, id: u64) {
         let (ble, omni) = self.ble_paxos_nodes.remove(&id).unwrap();
         self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .kill_notify(ble)
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("BLEComp never died!");
         self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .kill_notify(omni)
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("ReplicaComp replica never died!");
@@ -415,6 +423,12 @@ impl TestSystem {
         } else {
             conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
         };
+    }
+}
+
+impl Drop for TestSystem {
+    fn drop(&mut self) {
+        clear_storage();
     }
 }
 

@@ -361,12 +361,9 @@ where
             .rocksdb
             .get(SNAPSHOT)
             .expect("Failed to retive 'SNAPSHOT'");
-        match value {
-            Some(snapshot_bytes) => Some(
-                bincode::deserialize(snapshot_bytes.as_slice()).expect("Failed to deserialize"),
-            ),
-            None => None,
-        }
+        value.map(|snapshot_bytes| {
+            bincode::deserialize(snapshot_bytes.as_slice()).expect("Failed to deserialize")
+        })
     }
 
     fn set_snapshot(&mut self, snapshot: S) {
