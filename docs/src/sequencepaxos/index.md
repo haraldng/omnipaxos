@@ -34,7 +34,7 @@ sp_config.set_configuration_id(configuration_id);
 sp_config.set_pid(my_pid);
 sp_config.set_peers(my_peers);
 
-let storage = MemoryStorage::<KeyValue, ())>::default();
+let storage = MemoryStorage::<KeyValue, ()>::default();
 let mut sp = SequencePaxos::with(sp_config, storage);
 ```
 For convenience, `SequencePaxosConfig` also features a constructor `SequencePaxosConfig::with_hocon()` that loads the values using [hocon](https://vleue.com/hocon.rs/hocon/index.html). One could then instead have the parameters in a file `config/node2.conf`

@@ -1,8 +1,8 @@
 # Storage
 You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation, depending on the users need for fast reads and writes or persistance: `MemoryStorage` and `PersistentStorage`
 
-### MemoryStorage
-An in-memory storage implementation, `MemoryStorage` offers fast reads and writes without persistence. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
+## MemoryStorage
+An in-memory storage implementation, `MemoryStorage` offers fast reads and writes. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
 ```rust,edition2018,no_run,noplaypen
     // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]
@@ -86,13 +86,11 @@ An in-memory storage implementation, `MemoryStorage` offers fast reads and write
     }
 ```
 
-### PersistentStorage
-A persistent disk-based storage implementation, `PersistentStorage` makes use of the [Commitlog](https://crates.io/crates/commitlog) and [rocksDB](https://crates.io/crates/rocksdb) libraries to store logged entries and replica state. Users can configure the path to store log entries, fields and storage related options through the `PersistentStorageConfig` struct
+## PersistentStorage
+An persistent disk-based storage implementation, `PersistentStorage` makes use of the [Commitlog](https://crates.io/crates/commitlog) and [rocksDB](https://crates.io/crates/rocksdb) libraries to store logged entries and replica state. Users can configure the path to store log entries, replica state and storage related options through the `PersistentStorageConfig` struct. 
 
 ```rust,edition2018,no_run,noplaypen
     // from the module omnipaxos_storage::persistent_storage
-
-    
     pub struct PersistentStorage<T, S>
     where
         T: Entry,
