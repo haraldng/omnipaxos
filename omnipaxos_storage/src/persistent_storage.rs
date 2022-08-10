@@ -185,7 +185,7 @@ where
     S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> u64 {
-        let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize");
+        let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize log entry");
         self.commitlog
             .append_msg(entry_bytes)
             .expect("Failed to append log entry")
@@ -195,11 +195,11 @@ where
     fn append_entries(&mut self, entries: Vec<T>) -> u64 {
         let serialized = entries
             .into_iter()
-            .map(|entry| bincode::serialize(&entry).expect("Failed to serialize"));
+            .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
         let offset = self
             .commitlog
             .append(&mut MessageBuf::from_iter(serialized))
-            .expect("Falied to append entries");
+            .expect("Falied to append log entries");
         offset.first() + offset.len() as u64
     }
 
@@ -214,13 +214,13 @@ where
         let buffer = self
             .commitlog
             .read(from, ReadLimit::default())
-            .expect("Failed to read from log");
+            .expect("Failed to read from replicated log");
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
             match iter.next() {
                 Some(msg) => {
-                    entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize"));
+                    entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize log entries"));
                 },
                 None => {
                     return vec![];   // early return here
@@ -241,11 +241,11 @@ where
     }
 
     fn get_promise(&self) -> Ballot {
-        let value = self.rocksdb.get(NPROM).expect("Failed to retrive 'NPROM'");
-        match value {
+        let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
+        match promised {
             Some(prom_bytes) => {
                 let b_store: BallotStorage =
-                    FromBytes::read_from(prom_bytes.as_slice()).expect("Failed to deserialize");
+                    FromBytes::read_from(prom_bytes.as_slice()).expect("Failed to deserialize the promised ballot");
                 Ballot::with(b_store.n, b_store.priority, b_store.pid)
             }
             None => Ballot::default(),
@@ -261,13 +261,13 @@ where
     }
 
     fn get_decided_idx(&self) -> u64 {
-        let value = self
+        let decided = self
             .rocksdb
             .get(DECIDE)
-            .expect("Failed to retrive 'DECIDE'");
-        match value {
+            .expect("Failed to retrieve 'DECIDE'");
+        match decided {
             Some(ld_bytes) => {
-                FromBytes::read_from(ld_bytes.as_slice()).expect("Failed to deserialize")
+                FromBytes::read_from(ld_bytes.as_slice()).expect("Failed to deserialize the decided index")
             }
             None => 0,
         }
@@ -281,11 +281,11 @@ where
     }
 
     fn get_accepted_round(&self) -> Ballot {
-        let value = self.rocksdb.get(ACC).expect("Failed to retrive 'ACC'");
-        match value {
+        let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
+        match accepted {
             Some(acc_bytes) => {
                 let b_store: BallotStorage =
-                    FromBytes::read_from(acc_bytes.as_slice()).expect("Failed to deserialize");
+                    FromBytes::read_from(acc_bytes.as_slice()).expect("Failed to deserialize the accepted ballot");
                 Ballot::with(b_store.n, b_store.priority, b_store.pid)
             }
             None => Ballot::default(),
@@ -301,10 +301,10 @@ where
     }
 
     fn get_compacted_idx(&self) -> u64 {
-        let value = self.rocksdb.get(TRIM).expect("Failed to retrive 'TRIM'");
-        match value {
+        let trim = self.rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
+        match trim {
             Some(trim_bytes) => {
-                FromBytes::read_from(trim_bytes.as_slice()).expect("Failed to deserialize")
+                FromBytes::read_from(trim_bytes.as_slice()).expect("Failed to deserialize the compacted index")
             }
             None => 0,
         }
@@ -318,14 +318,14 @@ where
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
-        let value = self
+        let stopsign = self
             .rocksdb
             .get(STOPSIGN)
-            .expect("Failed to retive 'STOPSIGN'");
-        match value {
+            .expect("Failed to retrieve 'STOPSIGN'");
+        match stopsign {
             Some(ss_bytes) => {
                 let ss_storage: StopSignEntryStorage =
-                    bincode::deserialize(&ss_bytes).expect("Failed to deserialize");
+                    bincode::deserialize(&ss_bytes).expect("Failed to deserialize the stopsign");
                 Some(StopSignEntry::with(
                     StopSign::with(
                         ss_storage.ss.config_id,
@@ -341,35 +341,35 @@ where
 
     fn set_stopsign(&mut self, s: StopSignEntry) {
         let ss_storage = StopSignEntryStorage::with(s);
-        let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize");
+        let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
         self.rocksdb
             .put(STOPSIGN, stopsign)
             .expect("Failed to set 'STOPSIGN'")
     }
 
     fn get_snapshot(&self) -> Option<S> {
-        let value = self
+        let snapshot = self
             .rocksdb
             .get(SNAPSHOT)
             .expect("Failed to retrieve 'SNAPSHOT'");
-        value.map(|snapshot_bytes| {
-            bincode::deserialize(snapshot_bytes.as_slice()).expect("Failed to deserialize")
+        snapshot.map(|snapshot_bytes| {
+            bincode::deserialize(snapshot_bytes.as_slice()).expect("Failed to deserialize snapshot")
         })
     }
 
     fn set_snapshot(&mut self, snapshot: S) {
-        let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize 'SNAPSHOT'");
+        let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
         self.rocksdb
             .put(SNAPSHOT, stopsign)
-            .expect("Failed to deserialize");
+            .expect("Failed to set 'SNAPSHOT'");
     }
 
-    // TODO: A way to trim the comitlog without deleting and recreating the log
+    // TODO: A way to trim the commitlog without deleting and recreating the log
     fn trim(&mut self, trimmed_idx: u64) {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
         let c_opts = LogOptions::new(&self.log_path); // create new commitlog, insert the log into it
-        self.commitlog = CommitLog::new(c_opts).expect("Failed to create commitlog");
+        self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog");
         self.append_entries(trimmed_log);
     }
 }
