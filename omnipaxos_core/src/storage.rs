@@ -108,7 +108,8 @@ where
     /// Returns the latest round in which entries have been accepted.
     fn get_accepted_round(&self) -> Ballot;
 
-    /// Returns the entries in the log in the index interval of [from, to)
+    /// Returns the entries in the log in the index interval of [from, to). 
+    /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
     fn get_entries(&self, from: u64, to: u64) -> Vec<T>;
 
     /// Returns the current length of the log.

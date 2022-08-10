@@ -18,7 +18,9 @@ With the structs for log entry and storage defined, we can now go ahead and crea
 ```rust,edition2018,no_run,noplaypen
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{memory_storage::MemoryStorage},
+};
+use omnipaxos_storage::{
+    memory_storage::MemoryStorage,
 };
 
 // configuration with id 1 and the following cluster

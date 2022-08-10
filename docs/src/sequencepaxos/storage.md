@@ -1,5 +1,7 @@
 # Storage
-You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation, depending on the users need for fast reads and writes or persistance: `MemoryStorage` and `PersistentStorage`
+You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation that work out of the box: `MemoryStorage` **and** `PersistentStorage`.
+
+**If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
 
 ## MemoryStorage
 An in-memory storage implementation, `MemoryStorage` offers fast reads and writes. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
@@ -63,146 +65,63 @@ An in-memory storage implementation, `MemoryStorage` offers fast reads and write
             self.acc_round
         }
 
-        fn get_entries(&self, from: u64, to: u64) -> &[T] {
-            self.log.get(from as usize..to as usize).unwrap_or(&[])
+        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+            self.log
+                .get(from as usize..to as usize)
+                .unwrap_or(&[])
+                .to_vec()
         }
 
         fn get_log_len(&self) -> u64 {
             self.log.len() as u64
         }
 
-        fn get_suffix(&self, from: u64) -> &[T] {
+        fn get_suffix(&self, from: u64) -> Vec<T> {
             match self.log.get(from as usize..) {
-                Some(s) => s,
-                None => &[],
+                Some(s) => s.to_vec(),
+                None => vec![],
             }
         }
 
         fn get_promise(&self) -> Ballot {
             self.n_prom
         }
-        
         ...
     }
 ```
 
 ## PersistentStorage
-An persistent disk-based storage implementation, `PersistentStorage` makes use of the [Commitlog](https://crates.io/crates/commitlog) and [rocksDB](https://crates.io/crates/rocksdb) libraries to store logged entries and replica state. Users can configure the path to store log entries, replica state and storage related options through the `PersistentStorageConfig` struct. 
-
+`PersistentStorage` is a persistent storage implementation that uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log and [rocksDB](https://crates.io/crates/rocksdb) to store the state of OmniPaxos. Users can configure the path to store log entries, OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuraiton struct features a `default()` constructor for generating default configuration, and a constructor that takes path and storage options as arguments. We recommend the user to generate the default configuration and then setting the desired fields.
 ```rust,edition2018,no_run,noplaypen
-    // from the module omnipaxos_storage::persistent_storage
-    pub struct PersistentStorage<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        /// disk-based commit log for entries
-        commitlog: CommitLog,
-        /// the path to the directory containing a commitlog
-        log_path: String,
-        /// local RocksDB key-value store
-        rocksdb: DB,
-        /// A placeholder for the T: Entry
-        t: PhantomData<T>,
-        /// A placeholder for the S: Snapshot<T>
-        s: PhantomData<S>,
-    }
+use omnipaxos_core::{
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+};
+use omnipaxos_storage::{
+    persistent_storage::{PersistentStorage, PersistentStorageConfig},
+};
+use commitlog::LogOptions;
+use rocksdb::Options;
 
-    impl<T, S> Storage<T, S> for PersistentStorage<T, S>
-    where
-        T: Entry + Serialize + for<'a> Deserialize<'a>,
-        S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
-    {
-        fn append_entry(&mut self, entry: T) -> u64 {
-            let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize");
-            self.commitlog
-                .append_msg(entry_bytes)
-                .expect("Failed to append log entry")
-                + 1
-        }
+// user-defined configuration
+let my_path = "my_storage"
+let my_logopts = LogOptions::new(my_path);
+let mut my_rocksopts = Options::default();
+my_rocksopts.create_if_missing(true);
 
-        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-            let serialized = entries
-                .into_iter()
-                .map(|entry| bincode::serialize(&entry).expect("Failed to serialize"));
-            let offset = self
-                .commitlog
-                .append(&mut MessageBuf::from_iter(serialized))
-                .expect("Falied to append entries");
-            offset.first() + offset.len() as u64
-        }
-
-        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-            self.commitlog
-                .truncate(from_idx)
-                .expect("Failed to truncate log");
-            self.append_entries(entries)
-        }
-
-        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            let buffer = self
-                .commitlog
-                .read(from, ReadLimit::default())
-                .expect("Failed to read from log");
-            let mut entries = Vec::<T>::with_capacity((to - from) as usize);
-            let mut iter = buffer.iter();
-            for _ in from..to {
-                let msg = iter.next().unwrap();
-                entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize"));
-            }
-            entries
-        }
-
-        fn get_log_len(&self) -> u64 {
-            self.commitlog.next_offset()
-        }
-
-        fn get_suffix(&self, from: u64) -> Vec<T> {
-            self.get_entries(from, self.commitlog.next_offset())
-        }
-
-        fn get_promise(&self) -> Ballot {
-            let value = self.rocksdb.get(NPROM).expect("Failed to retrive 'NPROM'");
-            match value {
-                Some(prom_bytes) => {
-                    let b_store: BallotStorage =
-                        FromBytes::read_from(prom_bytes.as_slice()).expect("Failed to deserialize");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
-                }
-                None => Ballot::default(),
-            }
-        }
-
-        fn set_promise(&mut self, n_prom: Ballot) {
-            let ballot_store = BallotStorage::with(n_prom);
-            let prom_bytes = AsBytes::as_bytes(&ballot_store);
-            self.rocksdb
-                .put(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'")
-        }
-
-        fn get_decided_idx(&self) -> u64 {
-            let value = self
-                .rocksdb
-                .get(DECIDE)
-                .expect("Failed to retrive 'DECIDE'");
-            match value {
-                Some(ld_bytes) => {
-                    FromBytes::read_from(ld_bytes.as_slice()).expect("Failed to deserialize")
-                }
-                None => 0,
-            }
-        }
-
-        fn set_decided_idx(&mut self, ld: u64) {
-            let ld_bytes = AsBytes::as_bytes(&ld);
-            self.rocksdb
-                .put(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'");
-        }
-            
-        ...
-    }
+// generate default configuration, replace values with user-defined config
+let mut my_config = PersistentStorageConfig::default();
+my_config.set_path("my_storage")
+my_config.set_commitlog_options(my_logopts)
+my_config.set_rocksdb_options(my_rocksopts)
 ```
+The same configuration can also be done with the construct that takes arguments:
+```rust,edition2018,no_run,noplaypen
+let my_path = "another_storage"
+let my_logopts = LogOptions::new(my_path);
+let mut my_rocksopts = Options::default();
+my_rocksopts.create_if_missing(false);
+my_rocksopts.set_error_if_exists(true);
 
+let my_config = PersistentStorageConfig::default();
+```
 

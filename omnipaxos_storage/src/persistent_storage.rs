@@ -158,6 +158,10 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     pub fn with(storage_config: PersistentStorageConfig) -> Self {
         // path to storage
         let path = storage_config.path.expect("No path found in config");
+        
+        std::fs::metadata(format!("{path}{COMMITLOG}"))
+        .expect_err(&format!("commitlog already exists in {}", path));
+
 
         // Initialize Commitlog and rocksDB
         let commitlog =
@@ -339,14 +343,14 @@ where
         let value = self
             .rocksdb
             .get(SNAPSHOT)
-            .expect("Failed to retive 'SNAPSHOT'");
+            .expect("Failed to retrieve 'SNAPSHOT'");
         value.map(|snapshot_bytes| {
             bincode::deserialize(snapshot_bytes.as_slice()).expect("Failed to deserialize")
         })
     }
 
     fn set_snapshot(&mut self, snapshot: S) {
-        let stopsign = bincode::serialize(&snapshot).expect("Failed to set 'SNAPSHOT'");
+        let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize 'SNAPSHOT'");
         self.rocksdb
             .put(SNAPSHOT, stopsign)
             .expect("Failed to deserialize");
