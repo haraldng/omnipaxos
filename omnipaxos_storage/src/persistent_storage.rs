@@ -185,7 +185,7 @@ where
         self.commitlog
             .append_msg(entry_bytes)
             .expect("Failed to append log entry")
-            + 1
+            + 1  // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> u64 {
