@@ -159,8 +159,8 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
         // path to storage
         let path = storage_config.path.expect("No path found in config");
         
-        std::fs::metadata(format!("{path}{COMMITLOG}"))
-        .expect_err(&format!("commitlog already exists in {}", path));
+        //std::fs::metadata(format!("{path}{COMMITLOG}"))
+        //.expect_err(&format!("commitlog already exists in {}", path));
 
 
         // Initialize Commitlog and rocksDB
@@ -218,10 +218,18 @@ where
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
-            let msg = iter.next().unwrap();
-            entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize"));
+            match iter.next() {
+                Some(msg) => {
+                    entries.push(bincode::deserialize(msg.payload()).expect("Failed to deserialize"));
+                },
+                None => {
+                    return vec![];   // early return here
+                }     
+            }
         }
         entries
+
+        
     }
 
     fn get_log_len(&self) -> u64 {

@@ -268,7 +268,7 @@ where
 
 pub struct TestSystem {
     pub kompact_system: Option<KompactSystem>,
-    ble_paxos_nodes: HashMap<
+    pub ble_paxos_nodes: HashMap<
         u64,
         (
             Arc<Component<BLEComponent>>,
@@ -401,6 +401,44 @@ impl TestSystem {
             .expect("ReplicaComp replica never died!");
     }
 
+    pub fn create_node(&mut self, pid: u64, num_nodes: usize, ble_hb_delay: u64, storage_type: StorageTypeSelector, test_name: &str) {
+        let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
+        let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
+
+        //ble
+        let mut ble_config = BLEConfig::default();
+        ble_config.set_pid(pid);
+        ble_config.set_peers(peers.clone());
+        ble_config.set_hb_delay(ble_hb_delay);
+        let (ble_comp, ble_reg_f) = self.kompact_system.as_ref().expect("msg")
+            .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
+
+        //sp
+        let mut sp_config = SequencePaxosConfig::default();
+        sp_config.set_pid(pid);
+        sp_config.set_peers(peers);
+        let storage: StorageType<Value, LatestValue> =
+            StorageType::with(storage_type, &format!("{test_name}{pid}"));
+        let (omni_replica, omni_reg_f) = self.kompact_system.as_ref().expect("msg")
+            .create_and_register(|| {
+                let mut paxos = SequencePaxos::with(sp_config, storage);
+                paxos.fail_recovery();
+                SequencePaxosComponent::with(paxos)
+        });
+
+        biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
+            .expect("Could not connect BLE and OmniPaxosReplica!");
+        ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
+        omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
+
+        for (ble, omni) in self.ble_paxos_nodes.values() {
+            ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
+            omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
+        }
+        self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
+
+    }
+
     pub fn ble_paxos_nodes(
         &self,
     ) -> &HashMap<
@@ -445,7 +483,7 @@ pub mod ble {
     pub struct BLEComponent {
         ctx: ComponentContext<Self>,
         ble_port: ProvidedPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<BLEMessage>>,
+        pub peers: HashMap<u64, ActorRef<BLEMessage>>,
         pub leader: Option<Ballot>,
         timer: Option<ScheduledTimer>,
         ble: BallotLeaderElection,
@@ -553,7 +591,7 @@ pub mod omnireplica {
     pub struct SequencePaxosComponent {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
+        pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
         pub paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
