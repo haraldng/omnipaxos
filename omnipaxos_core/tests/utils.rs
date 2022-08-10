@@ -24,8 +24,8 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
-const COMMITLOG: &str = "commitlog/";
-const ROCKSDB: &str = "rocksDB/";
+const STORAGE: &str = "storage/";
+const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
 
@@ -82,7 +82,7 @@ pub enum StorageTypeSelector {
 
 impl StorageTypeSelector {
     pub fn with(storage_type: &str) -> Self {
-        match storage_type {
+        match storage_type.to_lowercase().as_ref() {
             PERSISTENT => StorageTypeSelector::Persistent,
             MEMORY => StorageTypeSelector::Memory,
             _ => panic!("No such storage type: {}", storage_type),
@@ -110,16 +110,14 @@ where
     pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let my_logpath = format!("{COMMITLOG}{path}");
-                let my_rockspath = format!("{ROCKSDB}{path}");
-                let my_logopts = LogOptions::new(&my_logpath);
+                let my_path = format!("{STORAGE}{path}");
+                let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
                 let mut my_rocksopts = Options::default();
                 my_rocksopts.create_if_missing(true);
 
                 let persist_conf = PersistentStorageConfig::with(
-                    my_logpath,
+                    my_path.to_string(),
                     my_logopts,
-                    my_rockspath,
                     my_rocksopts,
                 );
                 StorageType::Persistent(PersistentStorage::with(persist_conf))
@@ -325,7 +323,7 @@ impl TestSystem {
             sp_config.set_peers(peers);
 
             let storage: StorageType<Value, LatestValue> =
-                StorageType::with(storage_type, &(test_name.to_string() + &pid.to_string()));
+                StorageType::with(storage_type, &format!("{test_name}{pid}"));
 
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
@@ -725,6 +723,5 @@ fn stopsign_meta_to_value(ss: &StopSign) -> Value {
 }
 
 pub fn clear_storage() {
-    let _ = std::fs::remove_dir_all(COMMITLOG.to_string());
-    let _ = std::fs::remove_dir_all(ROCKSDB.to_string());
+    let _ = std::fs::remove_dir_all(STORAGE.to_string());
 }

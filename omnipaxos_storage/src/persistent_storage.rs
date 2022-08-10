@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
-const COMMITLOG: &str = "commitlog/";
-const ROCKSDB: &str = "rocksDB/";
+const COMMITLOG: &str = "/commitlog/";
+const ROCKSDB: &str = "/rocksDB/";
 const NPROM: &[u8] = b"NPROM";
 const ACC: &[u8] = b"ACC";
 const DECIDE: &[u8] = b"DECIDE";
@@ -80,27 +80,18 @@ impl StopSignStorage {
 /// * `rocksdb_path`: path to the rocksDB key-value store
 /// * `rocksdb_options` : Configuration of the rocksDB store
 pub struct PersistentStorageConfig {
-    commitlog_path: Option<String>,
+    path: Option<String>,
     commitlog_options: LogOptions,
-    rocksdb_path: Option<String>,
     rocksdb_options: Options,
 }
 
 impl PersistentStorageConfig {
-    pub fn get_commitlog_path(&self) -> Option<&String> {
-        self.commitlog_path.as_ref()
+    pub fn get_path(&self) -> Option<&String> {
+        self.path.as_ref()
     }
 
-    pub fn set_commitlog_path(&mut self, path: String) {
-        self.commitlog_path = Some(path);
-    }
-
-    pub fn get_rocksdb_path(&self) -> Option<&String> {
-        self.rocksdb_path.as_ref()
-    }
-
-    pub fn set_rocksdb_path(&mut self, path: String) {
-        self.rocksdb_path = Some(path);
+    pub fn set_path(&mut self, path: String) {
+        self.path = Some(path);
     }
 
     pub fn get_commitlog_options(&self) -> LogOptions {
@@ -119,16 +110,10 @@ impl PersistentStorageConfig {
         self.rocksdb_options = rocksdb_opts;
     }
 
-    pub fn with(
-        log_path: String,
-        commitlog_options: LogOptions,
-        rocksdb_path: String,
-        rocksdb_options: Options,
-    ) -> Self {
+    pub fn with(path: String, commitlog_options: LogOptions, rocksdb_options: Options) -> Self {
         Self {
-            commitlog_path: Some(log_path),
+            path: Some(path),
             commitlog_options,
-            rocksdb_path: Some(rocksdb_path),
             rocksdb_options,
         }
     }
@@ -136,13 +121,14 @@ impl PersistentStorageConfig {
 
 impl Default for PersistentStorageConfig {
     fn default() -> Self {
+        let default_path = String::from("default_storage");
+        let commitlog_options = LogOptions::new(format!("{default_path}{COMMITLOG}"));
         let mut rocksdb_options = Options::default();
         rocksdb_options.create_if_missing(true); // Creates rocksdb store if it is missing
 
         Self {
-            commitlog_path: Some(COMMITLOG.to_string()),
-            commitlog_options: LogOptions::new(COMMITLOG),
-            rocksdb_path: Some(ROCKSDB.to_string()),
+            path: Some(default_path),
+            commitlog_options,
             rocksdb_options,
         }
     }
@@ -170,25 +156,18 @@ where
 
 impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     pub fn with(storage_config: PersistentStorageConfig) -> Self {
-        // Paths to commitlog and rocksDB store
-        let log_path: String = storage_config.commitlog_path.unwrap();
-        let rocks_path = storage_config.rocksdb_path.unwrap();
-
-        // Check if storage already exists on the paths
-        std::fs::metadata(&log_path)
-            .expect_err(&format!("commitlog already exists in {}", log_path));
-        std::fs::metadata(&rocks_path)
-            .expect_err(&format!("rocksDB store already exists in {}", rocks_path));
+        // path to storage
+        let path = storage_config.path.expect("No path found in config");
 
         // Initialize Commitlog and rocksDB
         let commitlog =
             CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
-        let rocksdb = DB::open(&storage_config.rocksdb_options, &rocks_path)
+        let rocksdb = DB::open(&storage_config.rocksdb_options, format!("{path}{ROCKSDB}"))
             .expect("Failed to create rocksDB store");
 
         Self {
             commitlog,
-            log_path,
+            log_path: format!("{path}{COMMITLOG}"),
             rocksdb,
             t: PhantomData::default(),
             s: PhantomData::default(),

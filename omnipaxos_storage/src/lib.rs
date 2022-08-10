@@ -1,4 +1,4 @@
-//! An library of storage implementations for sequencePaxos
+//! A library of storage implementations for SequencePaxos
 
 //#![deny(missing_docs)]
 /// an in-memory storage implementation with fast read and writes
