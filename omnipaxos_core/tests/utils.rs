@@ -440,25 +440,43 @@ impl TestSystem {
         ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 
-        for (ble, omni) in self.ble_paxos_nodes.values() {
-            ble.on_definition(|b| { b.peers.insert(pid, ble_comp.actor_ref()) });
-            omni.on_definition(|o| { o.peers.insert(pid, omni_replica.actor_ref())});
+        ble_refs.insert(pid, ble_comp.actor_ref());
+        omni_refs.insert(pid, omni_replica.actor_ref());
+        for (_, (other_pid, (ble, omni)) ) in self.ble_paxos_nodes.iter().enumerate() {
+            ble_refs.insert(*other_pid, ble.actor_ref());
+            omni_refs.insert(*other_pid, omni.actor_ref());
+            ble.on_definition(|b| { 
+                b.peers.insert(pid, ble_comp.actor_ref()) 
+            });
+            omni.on_definition(|o| { 
+                o.peers.insert(pid, omni_replica.actor_ref())
+            });
         }
+        
 
-        let (BLEpeer, OMNIpeer) = self.ble_paxos_nodes.get(&2).expect("REPLACE!");
-        let ble_peers = BLEpeer.on_definition(|b| {
-            b.peers.clone()
-        });
-        let omni_peers = OMNIpeer.on_definition(|o| {
-            o.peers.clone()
-        });
+        // let (BLEpeer, OMNIpeer) = self.ble_paxos_nodes.get(&2).expect("REPLACE!");
+        // let ble_peers = BLEpeer.on_definition(|b| {
+        //     b.peers.clone()
+        // });
+        // let omni_peers = OMNIpeer.on_definition(|o| {
+        //     o.peers.clone()
+        // });
+        
+
         ble_comp.on_definition(|b| {
-            b.set_peers(ble_peers)
+            b.set_peers(ble_refs)
         });
         omni_replica.on_definition(|o| {
-            o.set_peers(omni_peers)
+            o.set_peers(omni_refs)
         });
-        
+
+        // let tmp = omni_replica.on_definition(|a| {
+        //     a.peers.clone()
+        // });
+
+        // println!("the new comp peers: {:?}", tmp);
+        // println!("the others: {:?}", omni_peers);
+
         self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
         
     }

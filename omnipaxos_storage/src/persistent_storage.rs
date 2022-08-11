@@ -189,7 +189,7 @@ where
             .commitlog
             .append_msg(entry_bytes)
             .expect("Failed to append log entry");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // makes sure all writes are durable
+        //self.commitlog.flush().expect("Failed to flush Commitlog"); // makes sure all writes are durable
         offset + 1 // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
 
@@ -201,7 +201,7 @@ where
             .commitlog
             .append(&mut MessageBuf::from_iter(serialized))
             .expect("Falied to append log entries");
-        self.commitlog.flush().expect("Failed to flush Commitlog");
+        //self.commitlog.flush().expect("Failed to flush Commitlog");
         offset.first() + offset.len() as u64
     }
 
@@ -261,7 +261,7 @@ where
         self.rocksdb
             .put(NPROM, prom_bytes)
             .expect("Failed to set 'NPROM'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_decided_idx(&self) -> u64 {
@@ -281,7 +281,7 @@ where
         self.rocksdb
             .put(DECIDE, ld_bytes)
             .expect("Failed to set 'DECIDE'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -302,7 +302,7 @@ where
         self.rocksdb
             .put(ACC, acc_bytes)
             .expect("Failed to set 'ACC'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_compacted_idx(&self) -> u64 {
