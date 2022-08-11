@@ -115,11 +115,8 @@ where
                 let mut my_rocksopts = Options::default();
                 my_rocksopts.create_if_missing(true);
 
-                let persist_conf = PersistentStorageConfig::with(
-                    my_path.to_string(),
-                    my_logopts,
-                    my_rocksopts,
-                );
+                let persist_conf =
+                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_rocksopts);
                 StorageType::Persistent(PersistentStorage::with(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
@@ -401,16 +398,27 @@ impl TestSystem {
             .expect("ReplicaComp replica never died!");
     }
 
-    pub fn create_node(&mut self, pid: u64, num_nodes: usize, ble_hb_delay: u64, storage_type: StorageTypeSelector, test_name: &str) {
-        let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
-        let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
+    pub fn create_node(
+        &mut self,
+        pid: u64,
+        num_nodes: usize,
+        ble_hb_delay: u64,
+        storage_type: StorageTypeSelector,
+        test_name: &str,
+    ) {
+        let peers: Vec<u64> = (1..=num_nodes as u64).collect::<Vec<u64>>().iter().filter(|id| id != &&pid).cloned().collect();
+        let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
         //ble
         let mut ble_config = BLEConfig::default();
         ble_config.set_pid(pid);
         ble_config.set_peers(peers.clone());
         ble_config.set_hb_delay(ble_hb_delay);
-        let (ble_comp, ble_reg_f) = self.kompact_system.as_ref().expect("msg")
+        let (ble_comp, ble_reg_f) = self
+            .kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
 
         //sp
@@ -419,12 +427,13 @@ impl TestSystem {
         sp_config.set_peers(peers);
         let storage: StorageType<Value, LatestValue> =
             StorageType::with(storage_type, &format!("{test_name}{pid}"));
-        let (omni_replica, omni_reg_f) = self.kompact_system.as_ref().expect("msg")
+        let (omni_replica, omni_reg_f) = self
+            .kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .create_and_register(|| {
-                let mut paxos = SequencePaxos::with(sp_config, storage);
-                paxos.fail_recovery();
-                SequencePaxosComponent::with(paxos)
-        });
+                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
+            });
 
         biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
             .expect("Could not connect BLE and OmniPaxosReplica!");
@@ -432,11 +441,42 @@ impl TestSystem {
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 
         for (ble, omni) in self.ble_paxos_nodes.values() {
-            ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
-            omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
+            ble.on_definition(|b| { b.peers.insert(pid, ble_comp.actor_ref()) });
+            omni.on_definition(|o| { o.peers.insert(pid, omni_replica.actor_ref())});
         }
-        self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
 
+        let (BLEpeer, OMNIpeer) = self.ble_paxos_nodes.get(&2).expect("REPLACE!");
+        let ble_peers = BLEpeer.on_definition(|b| {
+            b.peers.clone()
+        });
+        let omni_peers = OMNIpeer.on_definition(|o| {
+            o.peers.clone()
+        });
+        ble_comp.on_definition(|b| {
+            b.set_peers(ble_peers)
+        });
+        omni_replica.on_definition(|o| {
+            o.set_peers(omni_peers)
+        });
+        
+        self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
+        
+    }
+
+    pub fn start_node(&self, pid: u64) {
+        let (new_ble, new_px) = self.ble_paxos_nodes.get(&pid).expect(&format!("Cannot find node {pid}"));
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .start_notify(new_ble)
+            .wait_timeout(START_TIMEOUT)
+            .expect("BLEComp never started!");
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .start_notify(new_px)
+            .wait_timeout(START_TIMEOUT)
+            .expect("ReplicaComp never started!");
     }
 
     pub fn ble_paxos_nodes(
