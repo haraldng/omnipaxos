@@ -544,7 +544,7 @@ pub mod ble {
         pub peers: HashMap<u64, ActorRef<BLEMessage>>,
         pub leader: Option<Ballot>,
         timer: Option<ScheduledTimer>,
-        ble: BallotLeaderElection,
+        pub ble: BallotLeaderElection,
         ask_vector: LinkedList<Ask<(), Ballot>>,
     }
 

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
-const COMMITLOG: &str = "/commitlog/";
-const ROCKSDB: &str = "/rocksDB/";
+const COMMITLOG: &str = "/commitlog";
+const ROCKSDB: &str = "/rocksDB";
 const NPROM: &[u8] = b"NPROM";
 const ACC: &[u8] = b"ACC";
 const DECIDE: &[u8] = b"DECIDE";
@@ -194,6 +194,7 @@ where
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+        println!("entries to append: {:?}", entries);
         let serialized = entries
             .into_iter()
             .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
@@ -201,7 +202,7 @@ where
             .commitlog
             .append(&mut MessageBuf::from_iter(serialized))
             .expect("Falied to append log entries");
-        //self.commitlog.flush().expect("Failed to flush Commitlog");
+        self.commitlog.flush().expect("Failed to flush Commitlog");
         offset.first() + offset.len() as u64
     }
 
@@ -319,7 +320,7 @@ where
         self.rocksdb
             .put(TRIM, trim_bytes)
             .expect("Failed to set 'TRIM'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
@@ -350,7 +351,7 @@ where
         self.rocksdb
             .put(STOPSIGN, stopsign)
             .expect("Failed to set 'STOPSIGN'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_snapshot(&self) -> Option<S> {
@@ -368,13 +369,15 @@ where
         self.rocksdb
             .put(SNAPSHOT, stopsign)
             .expect("Failed to set 'SNAPSHOT'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     // TODO: A way to trim the commitlog without deleting and recreating the log
     fn trim(&mut self, trimmed_idx: u64) {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
+        println!("commitlog {:?}", self.log_path);
+        println!("saved entries {:?}", trimmed_idx);
         let c_opts = LogOptions::new(&self.log_path); // create new commitlog, insert the log into it
         self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog");
         self.append_entries(trimmed_log);
