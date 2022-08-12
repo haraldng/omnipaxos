@@ -406,7 +406,12 @@ impl TestSystem {
         storage_type: StorageTypeSelector,
         test_name: &str,
     ) {
-        let peers: Vec<u64> = (1..=num_nodes as u64).collect::<Vec<u64>>().iter().filter(|id| id != &&pid).cloned().collect();
+        let peers: Vec<u64> = (1..=num_nodes as u64)
+            .collect::<Vec<u64>>()
+            .iter()
+            .filter(|id| id != &&pid)
+            .cloned()
+            .collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
@@ -442,47 +447,23 @@ impl TestSystem {
 
         ble_refs.insert(pid, ble_comp.actor_ref());
         omni_refs.insert(pid, omni_replica.actor_ref());
-        for (_, (other_pid, (ble, omni)) ) in self.ble_paxos_nodes.iter().enumerate() {
+        for (_, (other_pid, (ble, omni))) in self.ble_paxos_nodes.iter().enumerate() {
             ble_refs.insert(*other_pid, ble.actor_ref());
             omni_refs.insert(*other_pid, omni.actor_ref());
-            ble.on_definition(|b| { 
-                b.peers.insert(pid, ble_comp.actor_ref()) 
-            });
-            omni.on_definition(|o| { 
-                o.peers.insert(pid, omni_replica.actor_ref())
-            });
+            ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
+            omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
         }
-        
 
-        // let (BLEpeer, OMNIpeer) = self.ble_paxos_nodes.get(&2).expect("REPLACE!");
-        // let ble_peers = BLEpeer.on_definition(|b| {
-        //     b.peers.clone()
-        // });
-        // let omni_peers = OMNIpeer.on_definition(|o| {
-        //     o.peers.clone()
-        // });
-        
-
-        ble_comp.on_definition(|b| {
-            b.set_peers(ble_refs)
-        });
-        omni_replica.on_definition(|o| {
-            o.set_peers(omni_refs)
-        });
-
-        // let tmp = omni_replica.on_definition(|a| {
-        //     a.peers.clone()
-        // });
-
-        // println!("the new comp peers: {:?}", tmp);
-        // println!("the others: {:?}", omni_peers);
-
+        ble_comp.on_definition(|b| b.set_peers(ble_refs));
+        omni_replica.on_definition(|o| o.set_peers(omni_refs));
         self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
-        
     }
 
     pub fn start_node(&self, pid: u64) {
-        let (new_ble, new_px) = self.ble_paxos_nodes.get(&pid).expect(&format!("Cannot find node {pid}"));
+        let (new_ble, new_px) = self
+            .ble_paxos_nodes
+            .get(&pid)
+            .expect(&format!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
