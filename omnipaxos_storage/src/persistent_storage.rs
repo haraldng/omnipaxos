@@ -159,9 +159,6 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
         // path to storage
         let path = storage_config.path.expect("No path found in config");
 
-        //std::fs::metadata(format!("{path}{COMMITLOG}"))
-        //.expect_err(&format!("commitlog already exists in {}", path));
-
         // Initialize Commitlog and rocksDB
         let commitlog =
             CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
@@ -189,12 +186,11 @@ where
             .commitlog
             .append_msg(entry_bytes)
             .expect("Failed to append log entry");
-        //self.commitlog.flush().expect("Failed to flush Commitlog"); // makes sure all writes are durable
+        self.commitlog.flush().expect("Failed to flush Commitlog"); // makes sure all writes are durable
         offset + 1 // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-        println!("entries to append: {:?}", entries);
         let serialized = entries
             .into_iter()
             .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
@@ -262,7 +258,7 @@ where
         self.rocksdb
             .put(NPROM, prom_bytes)
             .expect("Failed to set 'NPROM'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_decided_idx(&self) -> u64 {
@@ -282,7 +278,7 @@ where
         self.rocksdb
             .put(DECIDE, ld_bytes)
             .expect("Failed to set 'DECIDE'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -303,7 +299,7 @@ where
         self.rocksdb
             .put(ACC, acc_bytes)
             .expect("Failed to set 'ACC'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_compacted_idx(&self) -> u64 {
@@ -320,7 +316,7 @@ where
         self.rocksdb
             .put(TRIM, trim_bytes)
             .expect("Failed to set 'TRIM'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
@@ -351,7 +347,7 @@ where
         self.rocksdb
             .put(STOPSIGN, stopsign)
             .expect("Failed to set 'STOPSIGN'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_snapshot(&self) -> Option<S> {
@@ -369,15 +365,15 @@ where
         self.rocksdb
             .put(SNAPSHOT, stopsign)
             .expect("Failed to set 'SNAPSHOT'");
-        //self.rocksdb.flush().expect("Failed to flush rocksDB store");
+        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     // TODO: A way to trim the commitlog without deleting and recreating the log
     fn trim(&mut self, trimmed_idx: u64) {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
-        println!("commitlog {:?}", self.log_path);
-        println!("saved entries {:?}", trimmed_idx);
+                                                         //println!("commitlog {:?}", self.log_path);
+                                                         //println!("saved entries {:?}", trimmed_idx);
         let c_opts = LogOptions::new(&self.log_path); // create new commitlog, insert the log into it
         self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog");
         self.append_entries(trimmed_log);

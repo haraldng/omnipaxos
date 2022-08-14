@@ -2,9 +2,7 @@
 /target
 /log
 Cargo.lock
-omnipaxos_core/rocksDB/
-omnipaxos_core/commitlog/
-clean_test.sh
+omnipaxos_core/storage/
 
 # IntelliJ
 *.iml

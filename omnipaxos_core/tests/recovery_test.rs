@@ -9,13 +9,12 @@ use std::{
 };
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
-const RECOVERY_TEST: &str = "recovery_test/";
+const RECOVERY_PATH: &str = "recovery_test/";
 
-/// Test that SequencePaxos can recover from failure and decided new entries
 #[test]
 #[serial]
 fn leader_fail_follower_propose_test() {
-    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+    let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     // create testsystem
     let mut sys = TestSystem::with(
@@ -23,17 +22,17 @@ fn leader_fail_follower_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        RECOVERY_TEST,
+        RECOVERY_PATH,
     );
 
-    // check the first proposals go through
+    // check that the first proposals are decided
     let mut vec_proposals = check_first_proposals(&sys, cfg.num_proposals, cfg.wait_timeout);
 
-    // kill and recovery
-    kill_and_recreate_node(&mut sys, &cfg, 3);
+    // kill and recover node
+    kill_and_recreate_node(&mut sys, &cfg, 3, RECOVERY_PATH);
 
-    let mut new_futures: Vec<KFuture<Value>> = vec![];
-    let (_, leader_px) = sys.ble_paxos_nodes().get(&3).unwrap();
+    let mut futures: Vec<KFuture<Value>> = vec![];
+    let (_, recovered_px) = sys.ble_paxos_nodes().get(&3).unwrap();
     let (_, follower_px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
@@ -41,23 +40,142 @@ fn leader_fail_follower_propose_test() {
         vec_proposals.push(Value(i));
         follower_px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
+        });
+        recovered_px.on_definition(|x| {
+            x.add_ask(Ask::new(kprom, ()));
+        });
+        futures.push(kfuture);
+    }
+
+    thread::sleep(time::Duration::from_secs(cfg.ble_hb_delay));
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+        Ok(_) => {}
+        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+    }
+
+    let log: Vec<LogEntry<Value, LatestValue>> = recovered_px
+        .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
+    let snapshot = LatestValue::create(vec_proposals.as_slice());
+    verify_snapshot(&log, vec_proposals.len() as u64, &snapshot);
+
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
+        Ok(_) => {}
+        Err(e) => panic!("Error on kompact shutdown: {}", e),
+    };
+}
+
+#[test]
+#[serial]
+fn leader_fail_leader_propose_test() {
+    let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
+
+    // create testsystem
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+        RECOVERY_PATH,
+    );
+
+    // check the first proposals go through
+    let mut vec_proposals = check_first_proposals(&sys, cfg.num_proposals, cfg.wait_timeout);
+
+    // kill and recovery
+    kill_and_recreate_node(&mut sys, &cfg, 3, RECOVERY_PATH);
+
+    let mut futures: Vec<KFuture<Value>> = vec![];
+    let (_, recovered_px) = sys.ble_paxos_nodes().get(&3).unwrap();
+    let (_, follower_px) = sys.ble_paxos_nodes().get(&1).unwrap();
+
+    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
+        let (kprom, kfuture) = promise::<Value>();
+        vec_proposals.push(Value(i));
+        follower_px.on_definition(|x| {
+            x.add_ask(Ask::new(kprom, ()));
+            x.paxos.append(Value(i)).expect("Failed to append");
+        });
+        futures.push(kfuture);
+    }
+
+    thread::sleep(time::Duration::from_secs(cfg.ble_hb_delay));
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+        Ok(_) => {}
+        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+    }
+
+    let log: Vec<LogEntry<Value, LatestValue>> = recovered_px
+        .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
+    let snapshot = LatestValue::create(vec_proposals.as_slice());
+
+    verify_snapshot(&log, vec_proposals.len() as u64, &snapshot);
+
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
+        Ok(_) => {}
+        Err(e) => panic!("Error on kompact shutdown: {}", e),
+    };
+}
+
+#[test]
+#[serial]
+#[ignore = "reason"]
+
+fn follower_fail_leader_propose_test() {
+    let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
+
+    // create testsystem
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+        RECOVERY_PATH,
+    );
+
+    // check the first proposals go through
+    let mut vec_proposals = check_first_proposals(&sys, cfg.num_proposals, cfg.wait_timeout);
+
+    // kill and recovery
+    kill_and_recreate_node(&mut sys, &cfg, 1, RECOVERY_PATH);
+
+    //let (ble, _) = sys.ble_paxos_nodes().get(&3).unwrap();
+    // let leader = ble.on_definition(|x| {
+    //     x.ble.get_leader().expect("Found no leader!").pid
+    // });
+
+    //println!("{:?}",leader);
+    let mut futures: Vec<KFuture<Value>> = vec![];
+    let (_, recovered_px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let (_, leader_px) = sys.ble_paxos_nodes().get(&3).unwrap();
+
+    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
+        let (kprom, kfuture) = promise::<Value>();
+        vec_proposals.push(Value(i));
+        recovered_px.on_definition(|x| {
+            x.add_ask(Ask::new(kprom, ()));
         });
         leader_px.on_definition(|x| {
-            x.add_ask(Ask::new(kprom, ()));
+            x.paxos.append(Value(i)).expect("Failed to append");
         });
-        new_futures.push(kfuture);
+        
+        futures.push(kfuture);
     }
 
     thread::sleep(time::Duration::from_secs(cfg.ble_hb_delay));
-    match FutureCollection::collect_with_timeout::<Vec<_>>(new_futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> =
-        leader_px.on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
+    let log: Vec<LogEntry<Value, LatestValue>> = recovered_px
+        .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
     let snapshot = LatestValue::create(vec_proposals.as_slice());
-    verify_recovery_entries(&log, snapshot);
+
+    verify_snapshot_and_entries(&log, vec_proposals.len() as u64, &snapshot);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
@@ -67,8 +185,11 @@ fn leader_fail_follower_propose_test() {
     };
 }
 
-fn leader_fail_leader_propose_test() {
-    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+#[test]
+#[serial]
+#[ignore = "reason"]
+fn follower_fail_follower_propose_test() {
+    let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     // create testsystem
     let mut sys = TestSystem::with(
@@ -76,39 +197,44 @@ fn leader_fail_leader_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        RECOVERY_TEST,
+        RECOVERY_PATH,
     );
 
     // check the first proposals go through
     let mut vec_proposals = check_first_proposals(&sys, cfg.num_proposals, cfg.wait_timeout);
 
     // kill and recovery
-    kill_and_recreate_node(&mut sys, &cfg, 3);
+    kill_and_recreate_node(&mut sys, &cfg, 1, RECOVERY_PATH);
 
-    let mut new_futures: Vec<KFuture<Value>> = vec![];
-    let (_, leader_px) = sys.ble_paxos_nodes().get(&3).unwrap();
-    let (_, follower_px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    //let (ble, _) = sys.ble_paxos_nodes().get(&2).unwrap();
+    // let leader = ble.on_definition(|x| {
+    //     x.ble.get_leader()
+    // });
+
+    let mut futures: Vec<KFuture<Value>> = vec![];
+    let (_, recovered_px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
-        follower_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+        recovered_px.on_definition(|x| {
             x.add_ask(Ask::new(kprom, ()));
+            x.paxos.append(Value(i)).expect("Failed to append");
         });
-        new_futures.push(kfuture);
+        futures.push(kfuture);
     }
 
     thread::sleep(time::Duration::from_secs(cfg.ble_hb_delay));
-    match FutureCollection::collect_with_timeout::<Vec<_>>(new_futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> =
-        leader_px.on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
+    let log: Vec<LogEntry<Value, LatestValue>> = recovered_px
+        .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read log"));
     let snapshot = LatestValue::create(vec_proposals.as_slice());
-    verify_recovery_entries(&log, snapshot);
+
+    verify_snapshot_and_entries(&log, vec_proposals.len() as u64, &snapshot);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
@@ -118,24 +244,48 @@ fn leader_fail_leader_propose_test() {
     };
 }
 
-fn follower_fail_leader_propose_test_() {}
-
-fn follower_fail_follower_propose_test_() {}
-
-fn verify_recovery_entries(read_entries: &[LogEntry<Value, LatestValue>], exp_entry: LatestValue) {
-    assert_eq!(read_entries.len(), 1, "Not a snapshot!");
-
-    let snapshot = read_entries.first().expect("Error when taking logentry");
-    let verify_val = match snapshot {
-        LogEntry::Snapshotted(x) => x.snapshot,
-        _ => panic!(),
-    };
-
+fn verify_snapshot(
+    read_entries: &[LogEntry<Value, LatestValue>],
+    exp_compacted_idx: u64,
+    exp_snapshot: &LatestValue,
+) {
     assert_eq!(
-        verify_val, exp_entry,
-        "read: {:?}, expected: {:?}",
-        verify_val, exp_entry
+        read_entries.len(),
+        1,
+        "Expected only snapshot, got: {:?}",
+        read_entries
     );
+    match read_entries.first().unwrap() {
+        LogEntry::Snapshotted(s) => {
+            assert_eq!(s.trimmed_idx, exp_compacted_idx);
+            assert_eq!(&s.snapshot, exp_snapshot);
+        }
+        e => {
+            panic!("{}", format!("Not a snapshot: {:?}", e))
+        }
+    }
+}
+
+fn verify_snapshot_and_entries(
+    read_entries: &[LogEntry<Value, LatestValue>],
+    exp_compacted_idx: u64,
+    exp_snapshot: &LatestValue,
+) {
+    assert_eq!(
+        read_entries.len(),
+        11,
+        "Expected both snapshot and entries, got: {:?}",
+        read_entries
+    );
+    match read_entries.last().unwrap() {
+        LogEntry::Snapshotted(s) => {
+            assert_eq!(s.trimmed_idx, exp_compacted_idx);
+            assert_eq!(&s.snapshot, exp_snapshot);
+        }
+        e => {
+            panic!("{}", format!("Not a snapshot: {:?}", e))
+        }
+    }
 }
 
 // Check that the first 10 proposals are decided
@@ -144,14 +294,14 @@ fn check_first_proposals(
     num_proposals: u64,
     wait_timeout: Duration,
 ) -> Vec<Value> {
-    let (_, follower_px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=num_proposals / 2 {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
-        follower_px.on_definition(|x| {
+        px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
             x.add_ask(Ask::new(kprom, ()))
         });
@@ -164,21 +314,14 @@ fn check_first_proposals(
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
-
     vec_proposals
 }
 
 // kill and recovers node
-pub fn kill_and_recreate_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
+pub fn kill_and_recreate_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, path: &str) {
     sys.kill_node(pid);
 
-    sys.create_node(
-        pid,
-        cfg.num_nodes,
-        cfg.ble_hb_delay,
-        cfg.storage_type,
-        RECOVERY_TEST,
-    );
+    sys.create_node(pid, cfg.num_nodes, cfg.ble_hb_delay, cfg.storage_type, path);
     let (_, px) = sys.ble_paxos_nodes().get(&pid).unwrap();
     px.on_definition(|x| {
         x.paxos.fail_recovery();

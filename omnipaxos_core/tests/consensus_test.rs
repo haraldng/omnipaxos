@@ -10,6 +10,8 @@ use serial_test::serial;
 use utils::{LatestValue, StorageType, TestConfig, TestSystem, Value};
 
 const CONSENSUS_PATH: &str = "consensus_test/";
+const READ_PATH: &str = "read_test/";
+const READ_ENTRIES_PATH: &str = "read_entries_test/";
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -83,8 +85,7 @@ fn read_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &"read_test".to_string());
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_PATH);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -122,7 +123,7 @@ fn read_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &"ss_read_test".to_string());
+        StorageType::<Value, LatestValue>::with(cfg.storage_type, &format!("ss_{READ_PATH}"));
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -155,8 +156,7 @@ fn read_entries_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &"read_entries_test".to_string());
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_ENTRIES_PATH);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -202,7 +202,7 @@ fn read_entries_test() {
     // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage = StorageType::<Value, LatestValue>::with(
         cfg.storage_type,
-        &"ss_read_entries_test".to_string(),
+        &format!("ss_{READ_ENTRIES_PATH}"),
     );
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
