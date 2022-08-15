@@ -404,7 +404,7 @@ impl TestSystem {
         num_nodes: usize,
         ble_hb_delay: u64,
         storage_type: StorageTypeSelector,
-        test_name: &str,
+        path: &str,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64)
             .collect::<Vec<u64>>()
@@ -431,7 +431,7 @@ impl TestSystem {
         sp_config.set_pid(pid);
         sp_config.set_peers(peers);
         let storage: StorageType<Value, LatestValue> =
-            StorageType::with(storage_type, &format!("{test_name}{pid}"));
+            StorageType::with(storage_type, &format!("{path}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
