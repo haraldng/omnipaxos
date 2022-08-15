@@ -1535,6 +1535,27 @@ impl SequencePaxosConfig {
         }
         config
     }
+
+    pub fn build<T, S, B>(self, storage: B) -> SequencePaxos<T, S, B>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+        B: Storage<T, S>,
+    {
+        assert_ne!(self.pid, 0, "Pid cannot be 0!");
+        assert!(self.peers.len() >= 2, "Expected more than one peer");
+        assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0!");
+        assert_ne!(self.buffer_size, 0, "Buffer size must be higher than 0");
+        assert_ne!(
+            self.skip_prepare_use_leader
+                .expect("No initial leader found")
+                .pid,
+            0,
+            "Initial leader cannot be 0!"
+        );
+        assert!(self.buffer_size != 0, "Buffer size must be higher than 0");
+        SequencePaxos::with(self, storage)
+    }
 }
 
 impl Default for SequencePaxosConfig {

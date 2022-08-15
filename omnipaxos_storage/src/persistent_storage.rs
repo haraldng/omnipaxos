@@ -8,7 +8,7 @@ use omnipaxos_core::{
 };
 use rocksdb::{Options, DB};
 use serde::{Deserialize, Serialize};
-use std::{fs, iter::FromIterator, marker::PhantomData};
+use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
 const DEFAULT: &str = "/default_storage";
@@ -110,7 +110,6 @@ impl PersistentStorageConfig {
         self.rocksdb_options = rocksdb_opts;
     }
 
-    // Creates or opens existing storage
     pub fn with(path: String, commitlog_options: LogOptions, rocksdb_options: Options) -> Self {
         Self {
             path: Some(path),
