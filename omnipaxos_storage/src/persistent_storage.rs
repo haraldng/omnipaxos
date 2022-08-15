@@ -371,7 +371,7 @@ where
     fn trim(&mut self, trimmed_idx: u64) {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
-        let c_opts = LogOptions::new(&self.log_path); 
+        let c_opts = LogOptions::new(&self.log_path);
         self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog"); // create new commitlog
         self.append_entries(trimmed_log);
     }
