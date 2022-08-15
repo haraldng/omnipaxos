@@ -8,9 +8,10 @@ use omnipaxos_core::{
 };
 use rocksdb::{Options, DB};
 use serde::{Deserialize, Serialize};
-use std::{iter::FromIterator, marker::PhantomData};
+use std::{fs, iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
+const DEFAULT: &str = "/default_storage";
 const COMMITLOG: &str = "/commitlog";
 const ROCKSDB: &str = "/rocksDB";
 const NPROM: &[u8] = b"NPROM";
@@ -109,6 +110,7 @@ impl PersistentStorageConfig {
         self.rocksdb_options = rocksdb_opts;
     }
 
+    // Creates or opens existing storage
     pub fn with(path: String, commitlog_options: LogOptions, rocksdb_options: Options) -> Self {
         Self {
             path: Some(path),
@@ -120,13 +122,12 @@ impl PersistentStorageConfig {
 
 impl Default for PersistentStorageConfig {
     fn default() -> Self {
-        let default_path = String::from("default_storage");
-        let commitlog_options = LogOptions::new(format!("{default_path}{COMMITLOG}"));
+        let commitlog_options = LogOptions::new(format!("{DEFAULT}{COMMITLOG}"));
         let mut rocksdb_options = Options::default();
         rocksdb_options.create_if_missing(true); // Creates rocksdb store if it is missing
 
         Self {
-            path: Some(default_path),
+            path: Some(DEFAULT.to_string()),
             commitlog_options,
             rocksdb_options,
         }
@@ -155,7 +156,6 @@ where
 
 impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     pub fn with(storage_config: PersistentStorageConfig) -> Self {
-        // path to storage
         let path = storage_config.path.expect("No path found in config");
 
         // Initialize Commitlog and rocksDB
