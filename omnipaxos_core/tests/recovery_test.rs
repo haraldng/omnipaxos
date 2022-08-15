@@ -142,12 +142,12 @@ fn follower_fail_leader_propose_test() {
     // kill and recovery
     kill_and_recreate_node(&mut sys, &cfg, 1, RECOVERY_PATH);
 
-    //let (ble, _) = sys.ble_paxos_nodes().get(&3).unwrap();
+    // let (ble, _) = sys.ble_paxos_nodes().get(&3).unwrap();
     // let leader = ble.on_definition(|x| {
     //     x.ble.get_leader().expect("Found no leader!").pid
     // });
-
     //println!("{:?}",leader);
+    
     let mut futures: Vec<KFuture<Value>> = vec![];
     let (_, recovered_px) = sys.ble_paxos_nodes().get(&1).unwrap();
     let (_, leader_px) = sys.ble_paxos_nodes().get(&3).unwrap();

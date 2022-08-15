@@ -75,9 +75,8 @@ impl StopSignStorage {
 
 // Configuration for `PersistentStorage`.
 /// # Fields
-/// * `commitlog_path`: Path to the directory of the commitlog
+/// * `path`: Path to the commitlog and rocksDB store
 /// * `log_config`: Configuration of the commitlog
-/// * `rocksdb_path`: path to the rocksDB key-value store
 /// * `rocksdb_options` : Configuration of the rocksDB store
 pub struct PersistentStorageConfig {
     path: Option<String>,
@@ -372,10 +371,8 @@ where
     fn trim(&mut self, trimmed_idx: u64) {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
-                                                         //println!("commitlog {:?}", self.log_path);
-                                                         //println!("saved entries {:?}", trimmed_idx);
-        let c_opts = LogOptions::new(&self.log_path); // create new commitlog, insert the log into it
-        self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog");
+        let c_opts = LogOptions::new(&self.log_path); 
+        self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog"); // create new commitlog
         self.append_entries(trimmed_log);
     }
 }
