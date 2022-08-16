@@ -6,7 +6,7 @@ use rand::Rng;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
 
-const PROPOSAL_PATH: &str = "proposal_test/";
+const PROPOSAL_PATH: &str = "/proposal_test/";
 
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.

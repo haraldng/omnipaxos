@@ -2,7 +2,7 @@
 /target
 /log
 Cargo.lock
-omnipaxos_core/storage/
+omnipaxos_storage/src/storage
 
 # IntelliJ
 *.iml

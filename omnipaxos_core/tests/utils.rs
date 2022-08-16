@@ -24,7 +24,7 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
-const STORAGE: &str = "storage/";
+const STORAGE: &str = "../omnipaxos_storage/src/storage/";
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
@@ -117,7 +117,7 @@ where
 
                 let persist_conf =
                     PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_rocksopts);
-                StorageType::Persistent(PersistentStorage::with(persist_conf))
+                StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
         }
@@ -404,7 +404,7 @@ impl TestSystem {
         num_nodes: usize,
         ble_hb_delay: u64,
         storage_type: StorageTypeSelector,
-        path: &str,
+        test_name: &str,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64)
             .collect::<Vec<u64>>()
@@ -431,7 +431,7 @@ impl TestSystem {
         sp_config.set_pid(pid);
         sp_config.set_peers(peers);
         let storage: StorageType<Value, LatestValue> =
-            StorageType::with(storage_type, &format!("{path}{pid}"));
+            StorageType::with(storage_type, &format!("{test_name}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()

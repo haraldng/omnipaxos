@@ -9,7 +9,7 @@ use serial_test::serial;
 #[cfg(feature = "hocon_config")]
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 
-const RECONFIG_PATH: &str = "reconfig_test/";
+const RECONFIG_PATH: &str = "/reconfig_test/";
 
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.

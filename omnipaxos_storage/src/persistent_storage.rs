@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
-const DEFAULT: &str = "/default_storage";
-const COMMITLOG: &str = "/commitlog";
-const ROCKSDB: &str = "/rocksDB";
+const DEFAULT: &str = "/default_storage/";
+const COMMITLOG: &str = "/commitlog/";
+const ROCKSDB: &str = "/rocksDB/";
 const NPROM: &[u8] = b"NPROM";
 const ACC: &[u8] = b"ACC";
 const DECIDE: &[u8] = b"DECIDE";
@@ -154,10 +154,34 @@ where
 }
 
 impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
-    pub fn with(storage_config: PersistentStorageConfig) -> Self {
+
+    // Creates or opens an existing storage
+    pub fn open(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config.path.expect("No path found in config");
 
-        // Initialize Commitlog and rocksDB
+        let commitlog =
+            CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
+        let rocksdb = DB::open(&storage_config.rocksdb_options, format!("{path}{ROCKSDB}"))
+            .expect("Failed to create rocksDB store");
+
+        Self {
+            commitlog,
+            log_path: format!("{path}{COMMITLOG}"),
+            rocksdb,
+            t: PhantomData::default(),
+            s: PhantomData::default(),
+        }
+    }
+
+    // Creates a new storage instance, panics if a commitlog or rocksDB instance exists at the given path
+    pub fn new(storage_config: PersistentStorageConfig) -> Self {
+        let path = storage_config.path.expect("No path found in config");
+
+        std::fs::metadata(format!("{path}{COMMITLOG}"))
+            .expect_err(&format!("Cannot create new instance, commitlog already exists in {}", path));
+        std::fs::metadata(format!("{path}{ROCKSDB}"))
+            .expect_err(&format!("Cannot create new instance, rocksDB store already exists in {}", path));
+
         let commitlog =
             CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
         let rocksdb = DB::open(&storage_config.rocksdb_options, format!("{path}{ROCKSDB}"))
@@ -256,7 +280,6 @@ where
         self.rocksdb
             .put(NPROM, prom_bytes)
             .expect("Failed to set 'NPROM'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_decided_idx(&self) -> u64 {
@@ -276,7 +299,6 @@ where
         self.rocksdb
             .put(DECIDE, ld_bytes)
             .expect("Failed to set 'DECIDE'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -297,7 +319,6 @@ where
         self.rocksdb
             .put(ACC, acc_bytes)
             .expect("Failed to set 'ACC'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_compacted_idx(&self) -> u64 {
@@ -314,7 +335,6 @@ where
         self.rocksdb
             .put(TRIM, trim_bytes)
             .expect("Failed to set 'TRIM'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
@@ -345,7 +365,6 @@ where
         self.rocksdb
             .put(STOPSIGN, stopsign)
             .expect("Failed to set 'STOPSIGN'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     fn get_snapshot(&self) -> Option<S> {
@@ -363,7 +382,6 @@ where
         self.rocksdb
             .put(SNAPSHOT, stopsign)
             .expect("Failed to set 'SNAPSHOT'");
-        self.rocksdb.flush().expect("Failed to flush rocksDB store");
     }
 
     // TODO: A way to trim the commitlog without deleting and recreating the log

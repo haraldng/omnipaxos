@@ -9,9 +9,9 @@ use omnipaxos_core::{
 use serial_test::serial;
 use utils::{LatestValue, StorageType, TestConfig, TestSystem, Value};
 
-const CONSENSUS_PATH: &str = "consensus_test/";
-const READ_PATH: &str = "read_test/";
-const READ_ENTRIES_PATH: &str = "read_entries_test/";
+const CONSENSUS_PATH: &str = "/consensus_test/";
+const READ_PATH: &str = "/read_test/";
+const READ_ENTRIES_PATH: &str = "/read_entries_test/";
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement

@@ -5,7 +5,7 @@ use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem};
 
-const BLE_PATH: &str = "ble_test/";
+const BLE_PATH: &str = "/ble_test/";
 
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.

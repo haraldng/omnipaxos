@@ -6,8 +6,8 @@ use std::thread;
 use utils::{TestConfig, TestSystem, Value};
 
 const GC_INDEX_INCREMENT: u64 = 10;
-const TRIM_PATH: &str = "trim_test/";
-const DOUBLE_TRIM_PATH: &str = "double_trim_test/";
+const TRIM_PATH: &str = "/trim_test/";
+const DOUBLE_TRIM_PATH: &str = "/double_trim_test/";
 
 /// Test Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
