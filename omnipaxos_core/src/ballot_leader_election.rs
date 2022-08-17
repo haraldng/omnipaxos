@@ -500,17 +500,14 @@ impl BLEConfig {
         assert!(self.peers.len() >= 2, "Expected more than one peer");
         assert_ne!(self.buffer_size, 0, "Buffer size must be higher than 0");
         assert_ne!(self.hb_delay, 0, "hb_delay must be higher than 0");
-        assert!(
-            self.initial_delay.expect("No initial_delay in config!") > 0,
-            "Initial delay must be higher than 0"
-        );
-        assert_ne!(
-            self.initial_leader
-                .expect("No initial leader in config!")
-                .pid,
-            0,
-            "Initial leader cannot be 0!"
-        );
+        match self.initial_leader {
+            Some(x) =>  assert_ne!(
+                x.pid,
+                0,
+                "Initial leader cannot be 0!"
+            ),
+            None => ()
+        }
         BallotLeaderElection::with(self)
     }
 }

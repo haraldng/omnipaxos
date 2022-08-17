@@ -1546,14 +1546,14 @@ impl SequencePaxosConfig {
         assert!(self.peers.len() >= 2, "Expected more than one peer");
         assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0!");
         assert_ne!(self.buffer_size, 0, "Buffer size must be higher than 0");
-        assert_ne!(
-            self.skip_prepare_use_leader
-                .expect("No initial leader found")
-                .pid,
-            0,
-            "Initial leader cannot be 0!"
-        );
-        assert!(self.buffer_size != 0, "Buffer size must be higher than 0");
+        match self.skip_prepare_use_leader {
+            Some(x) =>  assert_ne!(
+                x.pid,
+                0,
+                "Initial leader cannot be 0!"
+            ),
+            None => ()
+        }
         SequencePaxos::with(self, storage)
     }
 }
