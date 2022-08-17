@@ -501,12 +501,8 @@ impl BLEConfig {
         assert_ne!(self.buffer_size, 0, "Buffer size must be higher than 0");
         assert_ne!(self.hb_delay, 0, "hb_delay must be higher than 0");
         match self.initial_leader {
-            Some(x) =>  assert_ne!(
-                x.pid,
-                0,
-                "Initial leader cannot be 0!"
-            ),
-            None => ()
+            Some(x) => assert_ne!(x.pid, 0, "Initial leader cannot be 0!"),
+            None => (),
         }
         BallotLeaderElection::with(self)
     }

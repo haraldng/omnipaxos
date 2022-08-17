@@ -28,7 +28,7 @@ where
 {
     storage: B,
     alias: PaxosAlias, // type alias for pid and config_id
-    peers: Vec<u64>, // excluding self pid
+    peers: Vec<u64>,   // excluding self pid
     state: (Role, Phase),
     leader: u64,
     pending_proposals: Vec<T>,
@@ -785,8 +785,11 @@ where
                     self.leader_state.get_chosen_idx(),
                     vec![entry.clone()],
                 );
-                self.outgoing
-                    .push(Message::with(self.alias.0, pid, PaxosMsg::AcceptDecide(acc)));
+                self.outgoing.push(Message::with(
+                    self.alias.0,
+                    pid,
+                    PaxosMsg::AcceptDecide(acc),
+                ));
             }
         }
     }
@@ -813,8 +816,11 @@ where
                     self.leader_state.get_chosen_idx(),
                     entries.clone(),
                 );
-                self.outgoing
-                    .push(Message::with(self.alias.0, pid, PaxosMsg::AcceptDecide(acc)));
+                self.outgoing.push(Message::with(
+                    self.alias.0,
+                    pid,
+                    PaxosMsg::AcceptDecide(acc),
+                ));
             }
         }
     }
@@ -1147,8 +1153,11 @@ where
                 self.handle_decide_stopsign(DecideStopSign::with(self.leader_state.n_leader));
                 for pid in self.leader_state.get_promised_followers() {
                     let d = DecideStopSign::with(self.leader_state.n_leader);
-                    self.outgoing
-                        .push(Message::with(self.alias.0, pid, PaxosMsg::DecideStopSign(d)));
+                    self.outgoing.push(Message::with(
+                        self.alias.0,
+                        pid,
+                        PaxosMsg::DecideStopSign(d),
+                    ));
                 }
             }
         }
@@ -1230,8 +1239,11 @@ where
                     stopsign,
                 )
             };
-            self.outgoing
-                .push(Message::with(self.alias.0, from, PaxosMsg::Promise(promise)));
+            self.outgoing.push(Message::with(
+                self.alias.0,
+                from,
+                PaxosMsg::Promise(promise),
+            ));
         }
     }
 
@@ -1264,8 +1276,11 @@ where
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((accsync.n, cached_idx));
             }
-            self.outgoing
-                .push(Message::with(self.alias.0, from, PaxosMsg::Accepted(accepted)));
+            self.outgoing.push(Message::with(
+                self.alias.0,
+                from,
+                PaxosMsg::Accepted(accepted),
+            ));
 
             if let Some(idx) = accsync.decide_idx {
                 self.storage.set_decided_idx(idx);
@@ -1544,12 +1559,8 @@ impl SequencePaxosConfig {
         assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0!");
         assert_ne!(self.buffer_size, 0, "Buffer size must be higher than 0");
         match self.skip_prepare_use_leader {
-            Some(x) =>  assert_ne!(
-                x.pid,
-                0,
-                "Initial leader cannot be 0!"
-            ),
-            None => ()
+            Some(x) => assert_ne!(x.pid, 0, "Initial leader cannot be 0!"),
+            None => (),
         }
         SequencePaxos::with(self, storage)
     }

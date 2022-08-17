@@ -1,11 +1,9 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
-use omnipaxos_core::{storage::Snapshot, util::LogEntry, ballot_leader_election::Ballot};
+use omnipaxos_core::{ballot_leader_election::Ballot, storage::Snapshot, util::LogEntry};
 use serial_test::serial;
-use std::{
-    thread, time::Duration,
-};
+use std::{thread, time::Duration};
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
 const RECOVERY_PATH: &str = "/recovery_test/";
@@ -50,24 +48,36 @@ fn leader_fail_follower_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px
-        .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read decided log entry"));
+    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+        comp.paxos
+            .read_decided_suffix(0)
+            .expect("Cannot read decided log entry")
+    });
 
     // Match the read log with the following scenarios
     match read_log[..] {
-        [LogEntry::Decided(_), ..] => verify_entries(&read_log, &vec_proposals, 0, cfg.num_proposals),
+        [LogEntry::Decided(_), ..] => {
+            verify_entries(&read_log, &vec_proposals, 0, cfg.num_proposals)
+        }
         [LogEntry::Snapshotted(_)] => {
             let snapshot = LatestValue::create(vec_proposals.as_slice());
             verify_snapshot(&read_log, cfg.num_proposals, &snapshot)
-        },
+        }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len()/2);
+            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
             let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(&read_log, cfg.num_proposals/2, &snapshot, &last_proposals, 0, cfg.num_proposals);     
-        },
+            verify_snapshot_and_entries(
+                &read_log,
+                cfg.num_proposals / 2,
+                &snapshot,
+                &last_proposals,
+                0,
+                cfg.num_proposals,
+            );
+        }
         _ => panic!("Unexpected entries in log: {:?} ", read_log),
     }
-    
+
     println!("Pass leader_fail_follower_propose!");
 
     let kompact_system =
@@ -114,21 +124,31 @@ fn leader_fail_leader_propose_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
-    
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px
-    .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read decided log entry"));
+
+    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+        comp.paxos
+            .read_decided_suffix(0)
+            .expect("Cannot read decided log entry")
+    });
 
     match log[..] {
         [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
         [LogEntry::Snapshotted(_)] => {
             let snapshot = LatestValue::create(vec_proposals.as_slice());
             verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        },
+        }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len()/2);
+            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
             let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(&log, cfg.num_proposals/2, &snapshot, &last_proposals, 0, cfg.num_proposals);     
-        },
+            verify_snapshot_and_entries(
+                &log,
+                cfg.num_proposals / 2,
+                &snapshot,
+                &last_proposals,
+                0,
+                cfg.num_proposals,
+            );
+        }
         _ => panic!("Unexpected entries in log: {:?} ", log),
     }
 
@@ -185,21 +205,31 @@ fn follower_fail_leader_propose_test() {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
-    
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px
-    .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read decided log entry"));
+
+    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+        comp.paxos
+            .read_decided_suffix(0)
+            .expect("Cannot read decided log entry")
+    });
 
     match log[..] {
         [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
         [LogEntry::Snapshotted(_)] => {
             let snapshot = LatestValue::create(vec_proposals.as_slice());
             verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        },
+        }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len()/2);
+            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
             let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(&log, cfg.num_proposals/2, &snapshot, &last_proposals, 0, cfg.num_proposals);     
-        },
+            verify_snapshot_and_entries(
+                &log,
+                cfg.num_proposals / 2,
+                &snapshot,
+                &last_proposals,
+                0,
+                cfg.num_proposals,
+            );
+        }
         _ => panic!("Unexpected entries in log: {:?} ", log),
     }
 
@@ -253,23 +283,33 @@ fn follower_fail_follower_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px
-    .on_definition(|comp| comp.paxos.read_decided_suffix(0).expect("Cannot read decided log entry"));
+    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+        comp.paxos
+            .read_decided_suffix(0)
+            .expect("Cannot read decided log entry")
+    });
 
     match log[..] {
         [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
         [LogEntry::Snapshotted(_)] => {
             let snapshot = LatestValue::create(vec_proposals.as_slice());
             verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        },
+        }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len()/2);
+            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
             let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(&log, cfg.num_proposals/2, &snapshot, &last_proposals, 0, cfg.num_proposals);     
-        },
+            verify_snapshot_and_entries(
+                &log,
+                cfg.num_proposals / 2,
+                &snapshot,
+                &last_proposals,
+                0,
+                cfg.num_proposals,
+            );
+        }
         _ => panic!("Unexpected entries in log: {:?} ", log),
     }
-    
+
     println!("Pass follower_fail_follower_propose");
 
     let kompact_system =
@@ -317,7 +357,7 @@ fn verify_snapshot_and_entries(
     match first_entry {
         LogEntry::Snapshotted(s) => {
             assert_eq!(s.trimmed_idx, exp_compacted_idx);
-            assert_eq!(&s.snapshot, exp_snapshot);        
+            assert_eq!(&s.snapshot, exp_snapshot);
         }
         e => {
             panic!("{}", format!("Not a snapshot: {:?}", e))
@@ -344,8 +384,8 @@ fn verify_entries(
     for (idx, entry) in read_entries.iter().enumerate() {
         let log_idx = idx as u64 + offset;
         match entry {
-            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]), 
-            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]), 
+            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
+            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
             e => panic!(
                 "{}",
                 format!(
@@ -360,20 +400,20 @@ fn verify_entries(
 // Check that the leader is elected before any node fails
 fn check_leader_is_elected(cfg: &TestConfig, leader_future: KFuture<Ballot>) -> (u64, u64) {
     let leader = leader_future
-    .wait_timeout(cfg.wait_timeout)
-    .expect("No leader has been elected in the allocated time!")
-    .pid;
-    let follower = (1..=cfg.num_nodes as u64).into_iter().find(|x| *x != leader).expect("No followers found!");
+        .wait_timeout(cfg.wait_timeout)
+        .expect("No leader has been elected in the allocated time!")
+        .pid;
+    let follower = (1..=cfg.num_nodes as u64)
+        .into_iter()
+        .find(|x| *x != leader)
+        .expect("No followers found!");
     println!("leader: {:?}, follower: {:?}", leader, follower);
     (leader, follower)
 }
 
 // Propose and check that the first proposals before any node fails are decided
 // returns expected entries and a promise that the leader is elected
-fn check_first_proposals(
-    sys: &TestSystem,
-    cfg: &TestConfig,
-) -> (Vec<Value>, KFuture<Ballot>) {
+fn check_first_proposals(sys: &TestSystem, cfg: &TestConfig) -> (Vec<Value>, KFuture<Ballot>) {
     let (ble, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
     let mut vec_proposals = vec![];

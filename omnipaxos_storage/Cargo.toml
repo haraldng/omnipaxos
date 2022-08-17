@@ -6,12 +6,17 @@ edition = "2018"
 
 [dependencies]
 omnipaxos_core = { path = "../omnipaxos_core" }
-commitlog = { version = "0.2.0", optional = false }
 rocksdb = { version = "0.18.0", optional = false }
-zerocopy = { version = "0.6.1", optional = false }
+sled = { version = "0.34.7", optional = false }
 serde = { version = "1.0", features = ["derive"] }
+commitlog = "0.2.0"
 bincode = "1.2.1"
+zerocopy = "0.6.1"
 
 [dev-dependencies]
 
 [features]
+#sled_storage = ["sled"]
+#rocksdb_storage = ["rocksdb"]
+
+# default = ["sled_storage"]
