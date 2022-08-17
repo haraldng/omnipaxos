@@ -141,11 +141,11 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    /// disk-based commit log for entries
+    /// Disk-based commit log for entries
     commitlog: CommitLog,
-    /// the path to the directory containing a commitlog
+    /// The path to the directory containing a commitlog
     log_path: String,
-    /// local RocksDB key-value store
+    /// Local RocksDB key-value store
     rocksdb: DB,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
@@ -175,25 +175,14 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
 
     // Creates a new storage instance, panics if a commitlog or rocksDB instance exists at the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
-        let path = storage_config.path.expect("No path found in config");
+        let path = storage_config.path.clone().expect("No path found in config").clone();
 
         std::fs::metadata(format!("{path}{COMMITLOG}"))
             .expect_err(&format!("Cannot create new instance, commitlog already exists in {}", path));
         std::fs::metadata(format!("{path}{ROCKSDB}"))
             .expect_err(&format!("Cannot create new instance, rocksDB store already exists in {}", path));
 
-        let commitlog =
-            CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
-        let rocksdb = DB::open(&storage_config.rocksdb_options, format!("{path}{ROCKSDB}"))
-            .expect("Failed to create rocksDB store");
-
-        Self {
-            commitlog,
-            log_path: format!("{path}{COMMITLOG}"),
-            rocksdb,
-            t: PhantomData::default(),
-            s: PhantomData::default(),
-        }
+        Self::open(storage_config)
     }
 }
 
