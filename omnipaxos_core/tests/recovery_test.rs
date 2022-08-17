@@ -4,7 +4,7 @@ use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::{storage::Snapshot, util::LogEntry, ballot_leader_election::Ballot};
 use serial_test::serial;
 use std::{
-    thread,
+    thread, time::Duration,
 };
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
@@ -407,7 +407,7 @@ fn check_first_proposals(
 // Kill and recover a node after some time
 pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, path: &str) {
     sys.kill_node(pid);
-    thread::sleep(cfg.wait_timeout);
+    thread::sleep(Duration::from_secs(cfg.ble_hb_delay));
 
     sys.create_node(pid, cfg.num_nodes, cfg.ble_hb_delay, cfg.storage_type, path);
     sys.start_node(pid);
