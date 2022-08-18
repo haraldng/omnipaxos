@@ -6,6 +6,7 @@ use omnipaxos_core::{
     ballot_leader_election::Ballot,
     storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
 };
+#[cfg(feature = "rocksdb")]
 use rocksdb::{Options, DB};
 use serde::{Deserialize, Serialize};
 use sled::{Config, Db};
@@ -75,21 +76,27 @@ impl StopSignStorage {
     }
 }
 
-#[derive(Clone)]
-pub enum PersistentStorageOption {
-    RocksdbOptions(Options),
-    SledOptions(Config),
-}
+// #[derive(Clone)]
+// pub enum PersistentStorageOption {
+//     #[cfg(feature = "rocksdb")]
+//     RocksdbOptions(Options),
+//     #[cfg(not(feature = "rocksdb"))]
+//     SledOptions(Config),
+// }
 
 // Configuration for `PersistentStorage`.
 /// # Fields
 /// * `path`: Path to the commitlog and rocksDB store
 /// * `log_config`: Configuration of the commitlog
-/// * `rocksdb_options` : Configuration of the rocksDB store
+/// * `rocksdb_options` : Configuration of the rocksDB store, if chosen as database
+/// * `sled_options` : Configuration of the sled store, enabled by default
 pub struct PersistentStorageConfig {
     path: Option<String>,
     commitlog_options: LogOptions,
-    database_options: PersistentStorageOption,
+    #[cfg(feature = "rocksdb")]
+    rocksdb_options: Options,
+    #[cfg(not(feature = "rocksdb"))]
+    sled_options: Config,
 }
 
 impl PersistentStorageConfig {
@@ -109,23 +116,47 @@ impl PersistentStorageConfig {
         self.commitlog_options = commitlog_opts;
     }
 
-    pub fn get_rocksdb_options(&self) -> PersistentStorageOption {
-        self.database_options.clone()
+    #[cfg(feature = "rocksdb")]
+    pub fn get_database_options(&self) -> Options {
+        self.rocksdb_options.clone()
+    }
+    #[cfg(not(feature = "rocksdb"))]
+    pub fn get_database_options(&self) -> Config {
+        self.sled_options.clone()
     }
 
-    pub fn set_rocksdb_options(&mut self, opts: PersistentStorageOption) {
-        self.database_options = opts;
+    #[cfg(feature = "rocksdb")]
+    pub fn set_database_options(&mut self, opts: Options) {
+        self.rocksdb_options = opts;
+    }
+    #[cfg(not(feature = "rocksdb"))]
+    pub fn set_database_options(&mut self, opts: Config) {
+        self.sled_options = opts;
     }
 
+    #[cfg(feature = "rocksdb")]
     pub fn with(
         path: String,
-        commitlog_options: LogOptions,
-        database_options: PersistentStorageOption,
+        commitlog_options: LogOptions, 
+        rocksdb_options: Options, 
     ) -> Self {
         Self {
             path: Some(path),
             commitlog_options,
-            database_options,
+            rocksdb_options,
+        }
+    }
+
+    #[cfg(not(feature = "rocksdb"))]
+    pub fn with(
+        path: String,
+        commitlog_options: LogOptions, 
+        sled_options: Config,
+    ) -> Self {
+        Self {
+            path: Some(path),
+            commitlog_options,
+            sled_options,
         }
     }
 }
@@ -133,28 +164,29 @@ impl PersistentStorageConfig {
 impl Default for PersistentStorageConfig {
     fn default() -> Self {
         let commitlog_options = LogOptions::new(format!("{DEFAULT}{COMMITLOG}"));
-        let database_options = {
-            if cfg!(feature = "rocksdb_storage") {
-                let mut opts = Options::default();
-                opts.create_if_missing(true);
-                PersistentStorageOption::RocksdbOptions(opts)
-            } else {
-                PersistentStorageOption::SledOptions(Config::new())
-            }
-        };
+        
         Self {
             path: Some(DEFAULT.to_string()),
             commitlog_options,
-            database_options,
+            #[cfg(feature = "rocksdb")]
+            rocksdb_options: {
+                let mut opts = Options::default();
+                opts.create_if_missing(true);
+                opts
+            },
+            #[cfg(not(feature = "rocksdb"))]
+            sled_options: Config::new()
         }
     }
 }
 
-// An enum for selecting the database to use in 'PersistentStorage'
-pub enum Database {
-    Rocksdb(DB),
-    Sled(Db),
-}
+// // An enum for selecting the database to use in 'PersistentStorage'
+// pub enum Database {
+//     #[cfg(feature = "rocksdb")]
+//     Rocksdb(DB),
+//     #[cfg(not(feature = "rocksdb"))]
+//     Sled(Db),
+// }
 
 /// A persistent storage implementation, lets sequence paxos write the log
 /// and current state to disk. Log entries are serialized and de-serialized
@@ -168,8 +200,12 @@ where
     commitlog: CommitLog,
     /// The path to the directory containing a commitlog
     log_path: String,
-    /// Local RocksDB key-value store
-    database: Database,
+    /// Local RocksDB key-value store, must be enabled as a feature
+    #[cfg(feature = "rocksdb")]
+    rocksdb: DB,
+    /// Local sled key-value store, default 
+    #[cfg(not(feature = "rocksdb"))]
+    sled: Db,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
     /// A placeholder for the S: Snapshot<T>
@@ -183,23 +219,19 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
 
         let commitlog =
             CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
-        let database = match storage_config.database_options {
-            PersistentStorageOption::RocksdbOptions(opts) => {
-                let rocksdb = DB::open(&opts, format!("{path}{DATABASE}"))
-                    .expect("Failed to create rocksDB database");
-                Database::Rocksdb(rocksdb)
-            }
-            PersistentStorageOption::SledOptions(opts) => {
-                let opts = Config::path(opts, format!("{path}{DATABASE}"));
-                let sled = Config::open(&opts).expect("Failed to create sled database");
-                Database::Sled(sled)
-            }
-        };
-
+        
         Self {
             commitlog,
             log_path: format!("{path}{COMMITLOG}"),
-            database,
+            #[cfg(feature = "rocksdb")]
+            rocksdb: {
+                DB::open(&storage_config.rocksdb_options, format!("{path}{DATABASE}")).expect("Failed to create rocksDB database")         
+            },
+            #[cfg(not(feature = "rocksdb"))]
+            sled: {
+                let opts = Config::path(storage_config.sled_options, format!("{path}{DATABASE}"));
+                Config::open(&opts).expect("Failed to create sled database")
+            },
             t: PhantomData::default(),
             s: PhantomData::default(),
         }
@@ -292,28 +324,26 @@ where
     }
 
     fn get_promise(&self) -> Ballot {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let promised = rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
-                match promised {
-                    Some(prom_bytes) => {
-                        let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_slice())
-                            .expect("Failed to deserialize the promised ballot");
-                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
-                    }
-                    None => Ballot::default(),
+        #[cfg(feature = "rocksdb")] {
+            let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
+            match promised {
+                Some(prom_bytes) => {
+                    let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_slice())
+                        .expect("Failed to deserialize the promised ballot");
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
+                None => Ballot::default(),
             }
-            Database::Sled(sled) => {
-                let promised = sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
-                match promised {
-                    Some(prom_bytes) => {
-                        let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_bytes())
-                            .expect("Failed to deserialize the promised ballot");
-                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
-                    }
-                    None => Ballot::default(),
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let promised = self.sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
+            match promised {
+                Some(prom_bytes) => {
+                    let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_bytes())
+                        .expect("Failed to deserialize the promised ballot");
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
+                None => Ballot::default(),
             }
         }
     }
@@ -321,76 +351,70 @@ where
     fn set_promise(&mut self, n_prom: Ballot) {
         let ballot_store = BallotStorage::with(n_prom);
         let prom_bytes = AsBytes::as_bytes(&ballot_store);
-        match &self.database {
-            Database::Rocksdb(rocksdb) => rocksdb
-                .put(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'"),
-            Database::Sled(sled) => {
-                sled.insert(NPROM, prom_bytes)
-                    .expect("Failed to set 'NPROM'");
-            }
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb.put(NPROM, prom_bytes).expect("Failed to set 'NPROM'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(NPROM, prom_bytes)
+            .expect("Failed to set 'NPROM'");
         }
     }
 
     fn get_decided_idx(&self) -> u64 {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let decided = rocksdb.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
-                match decided {
-                    Some(ld_bytes) => FromBytes::read_from(ld_bytes.as_slice())
-                        .expect("Failed to deserialize the decided index"),
-                    None => 0,
-                }
+        #[cfg(feature = "rocksdb")] {
+            let decided = self.rocksdb.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
+            match decided {
+                Some(ld_bytes) => FromBytes::read_from(ld_bytes.as_slice())
+                    .expect("Failed to deserialize the decided index"),
+                None => 0,
             }
-            Database::Sled(sled) => {
-                let decided = sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
-                match decided {
-                    Some(ld_bytes) => {
-                        FromBytes::read_from(ld_bytes.as_bytes())
-                        .expect("Failed to deserialize the decided index")
-                    },
-                    None => 0,
-                }
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let decided = self.sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
+            match decided {
+                Some(ld_bytes) => {
+                    FromBytes::read_from(ld_bytes.as_bytes())
+                    .expect("Failed to deserialize the decided index")
+                },
+                None => 0,
             }
         }
     }
 
     fn set_decided_idx(&mut self, ld: u64) {
         let ld_bytes = AsBytes::as_bytes(&ld);
-        match &self.database {
-            Database::Rocksdb(rocksdb) => rocksdb
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb
                 .put(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'"),
-            Database::Sled(sled) => {
-                sled.insert(DECIDE, ld_bytes)
-                    .expect("Failed to set 'DECIDE'");
-            }
-        };
+                .expect("Failed to set 'DECIDE'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(DECIDE, ld_bytes)
+                .expect("Failed to set 'DECIDE'");
+        }
     }
 
     fn get_accepted_round(&self) -> Ballot {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let accepted = rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
-                match accepted {
-                    Some(acc_bytes) => {
-                        let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_slice())
-                            .expect("Failed to deserialize the accepted ballot");
-                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
-                    }
-                    None => Ballot::default(),
+        #[cfg(feature = "rocksdb")] {
+            let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
+            match accepted {
+                Some(acc_bytes) => {
+                    let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_slice())
+                        .expect("Failed to deserialize the accepted ballot");
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
+                None => Ballot::default(),
             }
-            Database::Sled(sled) => {
-                let accepted = sled.get(ACC).expect("Failed to retrieve 'ACC'");
-                match accepted {
-                    Some(acc_bytes) => {
-                        let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_bytes())
-                            .expect("Failed to deserialize the accepted ballot");
-                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
-                    }
-                    None => Ballot::default(),
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let accepted = self.sled.get(ACC).expect("Failed to retrieve 'ACC'");
+            match accepted {
+                Some(acc_bytes) => {
+                    let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_bytes())
+                        .expect("Failed to deserialize the accepted ballot");
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
+                None => Ballot::default(),
             }
         }
     }
@@ -398,88 +422,80 @@ where
     fn set_accepted_round(&mut self, na: Ballot) {
         let ballot_store = BallotStorage::with(na);
         let acc_bytes = AsBytes::as_bytes(&ballot_store);
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                rocksdb.put(ACC, acc_bytes).expect("Failed to set 'ACC'");
-            }
-            Database::Sled(sled) => {
-                sled.insert(ACC, acc_bytes).expect("Failed to set 'ACC'");
-            }
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb.put(ACC, acc_bytes).expect("Failed to set 'ACC'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(ACC, acc_bytes).expect("Failed to set 'ACC'");
         }
     }
 
     fn get_compacted_idx(&self) -> u64 {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let trim = rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
-                match trim {
-                    Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_slice())
-                        .expect("Failed to deserialize the compacted index"),
-                    None => 0,
-                }
+        #[cfg(feature = "rocksdb")] {
+            let trim = self.rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
+            match trim {
+                Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_slice())
+                    .expect("Failed to deserialize the compacted index"),
+                None => 0,
             }
-            Database::Sled(sled) => {
-                let trim = sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
-                match trim {
-                    Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_bytes())
-                        .expect("Failed to deserialize the compacted index"),
-                    None => 0,
-                }
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let trim = self.sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
+            match trim {
+                Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_bytes())
+                    .expect("Failed to deserialize the compacted index"),
+                None => 0,
             }
         }
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) {
         let trim_bytes = AsBytes::as_bytes(&trimmed_idx);
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                rocksdb.put(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
-            }
-            Database::Sled(sled) => {
-                sled.insert(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
-            }
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb.put(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
         }
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let stopsign = rocksdb
-                    .get(STOPSIGN)
-                    .expect("Failed to retrieve 'STOPSIGN'");
-                match stopsign {
-                    Some(ss_bytes) => {
-                        let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
-                            .expect("Failed to deserialize the stopsign");
-                        Some(StopSignEntry::with(
-                            StopSign::with(
-                                ss_storage.ss.config_id,
-                                ss_storage.ss.nodes,
-                                ss_storage.ss.metadata,
-                            ),
-                            ss_storage.decided,
-                        ))
-                    }
-                    None => None,
+        #[cfg(feature = "rocksdb")] {
+            let stopsign = self.rocksdb
+                .get(STOPSIGN)
+                .expect("Failed to retrieve 'STOPSIGN'");
+            match stopsign {
+                Some(ss_bytes) => {
+                    let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
+                        .expect("Failed to deserialize the stopsign");
+                    Some(StopSignEntry::with(
+                        StopSign::with(
+                            ss_storage.ss.config_id,
+                            ss_storage.ss.nodes,
+                            ss_storage.ss.metadata,
+                        ),
+                        ss_storage.decided,
+                    ))
                 }
+                None => None,
             }
-            Database::Sled(sled) => {
-                let stopsign = sled.get(STOPSIGN).expect("Failed to retrieve 'STOPSIGN'");
-                match stopsign {
-                    Some(ss_bytes) => {
-                        let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
-                            .expect("Failed to deserialize the stopsign");
-                        Some(StopSignEntry::with(
-                            StopSign::with(
-                                ss_storage.ss.config_id,
-                                ss_storage.ss.nodes,
-                                ss_storage.ss.metadata,
-                            ),
-                            ss_storage.decided,
-                        ))
-                    }
-                    None => None,
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let stopsign = self.sled.get(STOPSIGN).expect("Failed to retrieve 'STOPSIGN'");
+            match stopsign {
+                Some(ss_bytes) => {
+                    let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
+                        .expect("Failed to deserialize the stopsign");
+                    Some(StopSignEntry::with(
+                        StopSign::with(
+                            ss_storage.ss.config_id,
+                            ss_storage.ss.nodes,
+                            ss_storage.ss.metadata,
+                        ),
+                        ss_storage.decided,
+                    ))
                 }
+                None => None,
             }
         }
     }
@@ -487,52 +503,46 @@ where
     fn set_stopsign(&mut self, s: StopSignEntry) {
         let ss_storage = StopSignEntryStorage::with(s);
         let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                rocksdb
-                    .put(STOPSIGN, stopsign)
-                    .expect("Failed to set 'STOPSIGN'");
-            }
-            Database::Sled(sled) => {
-                sled.insert(STOPSIGN, stopsign)
-                    .expect("Failed to set 'STOPSIGN'");
-            }
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb
+                .put(STOPSIGN, stopsign)
+                .expect("Failed to set 'STOPSIGN'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(STOPSIGN, stopsign)
+                .expect("Failed to set 'STOPSIGN'");
         }
     }
 
     fn get_snapshot(&self) -> Option<S> {
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                let snapshot = rocksdb
-                    .get(SNAPSHOT)
-                    .expect("Failed to retrieve 'SNAPSHOT'");
-                snapshot.map(|snapshot_bytes| {
-                    bincode::deserialize(snapshot_bytes.as_slice())
-                        .expect("Failed to deserialize snapshot")
-                })
-            }
-            Database::Sled(sled) => {
-                let snapshot = sled.get(SNAPSHOT).expect("Failed to retrieve 'SNAPSHOT'");
-                snapshot.map(|snapshot_bytes| {
-                    bincode::deserialize(snapshot_bytes.as_bytes())
-                        .expect("Failed to deserialize snapshot")
-                })
-            }
+        #[cfg(feature = "rocksdb")] {
+            let snapshot = self.rocksdb
+                .get(SNAPSHOT)
+                .expect("Failed to retrieve 'SNAPSHOT'");
+            snapshot.map(|snapshot_bytes| {
+                bincode::deserialize(snapshot_bytes.as_slice())
+                    .expect("Failed to deserialize snapshot")
+            })
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            let snapshot = self.sled.get(SNAPSHOT).expect("Failed to retrieve 'SNAPSHOT'");
+            snapshot.map(|snapshot_bytes| {
+                bincode::deserialize(snapshot_bytes.as_bytes())
+                    .expect("Failed to deserialize snapshot")
+            })
         }
     }
 
     fn set_snapshot(&mut self, snapshot: S) {
         let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
-        match &self.database {
-            Database::Rocksdb(rocksdb) => {
-                rocksdb
-                    .put(SNAPSHOT, stopsign)
-                    .expect("Failed to set 'SNAPSHOT'");
-            }
-            Database::Sled(sled) => {
-                sled.insert(SNAPSHOT, stopsign)
-                    .expect("Failed to set 'SNAPSHOT'");
-            }
+        #[cfg(feature = "rocksdb")] {
+            self.rocksdb
+                .put(SNAPSHOT, stopsign)
+                .expect("Failed to set 'SNAPSHOT'");
+        }
+        #[cfg(not(feature = "rocksdb"))] {
+            self.sled.insert(SNAPSHOT, stopsign)
+                .expect("Failed to set 'SNAPSHOT'");
         }
     }
 

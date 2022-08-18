@@ -11,7 +11,7 @@ use omnipaxos_core::{
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
-    persistent_storage::{PersistentStorage, PersistentStorageConfig, PersistentStorageOption},
+    persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
 
 use commitlog::LogOptions;
@@ -114,18 +114,20 @@ where
                 let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
 
-                // rocksdb test
-                // let mut my_rocksopts = Options::default();
-                // my_rocksopts.create_if_missing(true);
-                // let db_option = PersistentStorageOption::RocksdbOptions(my_rocksopts);
+                #[cfg(feature = "rocksdb")] {
+                    let mut my_rocksopts = Options::default();
+                    my_rocksopts.create_if_missing(true);
+                    let persist_conf =
+                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_rocksopts);
+                    StorageType::Persistent(PersistentStorage::open(persist_conf))
+                }                
 
-                // sled test
-                let my_sledopts = Config::new();
-                let db_option = PersistentStorageOption::SledOptions(my_sledopts);
-
-                let persist_conf =
-                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, db_option);
-                StorageType::Persistent(PersistentStorage::open(persist_conf))
+                #[cfg(not(feature = "rocksdb"))] {
+                    let my_sledopts = Config::new();
+                    let persist_conf =
+                        PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
+                    StorageType::Persistent(PersistentStorage::open(persist_conf))
+                }
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
         }
