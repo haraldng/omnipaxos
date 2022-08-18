@@ -11,12 +11,13 @@ use omnipaxos_core::{
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
-    persistent_storage::{PersistentStorage, PersistentStorageConfig},
+    persistent_storage::{PersistentStorage, PersistentStorageConfig, PersistentStorageOption},
 };
 
 use commitlog::LogOptions;
 use rocksdb::Options;
 use serde::{Deserialize, Serialize};
+use sled::Config;
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -112,11 +113,18 @@ where
             StorageTypeSelector::Persistent => {
                 let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
-                let mut my_rocksopts = Options::default();
-                my_rocksopts.create_if_missing(true);
+
+                // rocksdb test
+                // let mut my_rocksopts = Options::default();
+                // my_rocksopts.create_if_missing(true);
+                // let db_option = PersistentStorageOption::RocksdbOptions(my_rocksopts);
+
+                // sled test
+                let my_sledopts = Config::new();
+                let db_option = PersistentStorageOption::SledOptions(my_sledopts);
 
                 let persist_conf =
-                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_rocksopts);
+                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, db_option);
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),

@@ -14,7 +14,7 @@ use zerocopy::{AsBytes, FromBytes};
 
 const DEFAULT: &str = "/default_storage/";
 const COMMITLOG: &str = "/commitlog/";
-const ROCKSDB: &str = "/rocksDB/";
+const DATABASE: &str = "/database/";
 const NPROM: &[u8] = b"NPROM";
 const ACC: &[u8] = b"ACC";
 const DECIDE: &[u8] = b"DECIDE";
@@ -133,18 +133,19 @@ impl PersistentStorageConfig {
 impl Default for PersistentStorageConfig {
     fn default() -> Self {
         let commitlog_options = LogOptions::new(format!("{DEFAULT}{COMMITLOG}"));
+        let database_options = {
+            if cfg!(feature = "rocksdb_storage") {
+                let mut opts = Options::default();
+                opts.create_if_missing(true);
+                PersistentStorageOption::RocksdbOptions(opts)
+            } else {
+                PersistentStorageOption::SledOptions(Config::new())
+            }
+        };
         Self {
             path: Some(DEFAULT.to_string()),
             commitlog_options,
-            database_options: {
-                if cfg!(feature = "rocksdb_storage") {
-                    let mut opts = Options::default();
-                    opts.create_if_missing(true);
-                    PersistentStorageOption::RocksdbOptions(opts)
-                } else {
-                    PersistentStorageOption::SledOptions(Config::new())
-                }
-            },
+            database_options,
         }
     }
 }
@@ -184,13 +185,13 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
             CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
         let database = match storage_config.database_options {
             PersistentStorageOption::RocksdbOptions(opts) => {
-                let rocksdb = DB::open(&opts, format!("{path}{ROCKSDB}"))
+                let rocksdb = DB::open(&opts, format!("{path}{DATABASE}"))
                     .expect("Failed to create rocksDB database");
                 Database::Rocksdb(rocksdb)
             }
             PersistentStorageOption::SledOptions(opts) => {
-                let sled =
-                    sled::open(format!("{path}{ROCKSDB}")).expect("Failed to create sled database");
+                let opts = Config::path(opts, format!("{path}{DATABASE}"));
+                let sled = Config::open(&opts).expect("Failed to create sled database");
                 Database::Sled(sled)
             }
         };
@@ -216,8 +217,8 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
             "Cannot create new instance, commitlog already exists in {}",
             path
         ));
-        std::fs::metadata(format!("{path}{ROCKSDB}")).expect_err(&format!(
-            "Cannot create new instance, rocksDB store already exists in {}",
+        std::fs::metadata(format!("{path}{DATABASE}")).expect_err(&format!(
+            "Cannot create new instance, database already exists in {}",
             path
         ));
 
@@ -304,7 +305,15 @@ where
                 }
             }
             Database::Sled(sled) => {
-                todo!()
+                let promised = sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
+                match promised {
+                    Some(prom_bytes) => {
+                        let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_bytes())
+                            .expect("Failed to deserialize the promised ballot");
+                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    }
+                    None => Ballot::default(),
+                }
             }
         }
     }
@@ -316,7 +325,10 @@ where
             Database::Rocksdb(rocksdb) => rocksdb
                 .put(NPROM, prom_bytes)
                 .expect("Failed to set 'NPROM'"),
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                sled.insert(NPROM, prom_bytes)
+                    .expect("Failed to set 'NPROM'");
+            }
         }
     }
 
@@ -331,7 +343,14 @@ where
                 }
             }
             Database::Sled(sled) => {
-                todo!()
+                let decided = sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
+                match decided {
+                    Some(ld_bytes) => {
+                        FromBytes::read_from(ld_bytes.as_bytes())
+                        .expect("Failed to deserialize the decided index")
+                    },
+                    None => 0,
+                }
             }
         }
     }
@@ -342,8 +361,11 @@ where
             Database::Rocksdb(rocksdb) => rocksdb
                 .put(DECIDE, ld_bytes)
                 .expect("Failed to set 'DECIDE'"),
-            Database::Sled(_) => todo!(),
-        }
+            Database::Sled(sled) => {
+                sled.insert(DECIDE, ld_bytes)
+                    .expect("Failed to set 'DECIDE'");
+            }
+        };
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -359,7 +381,17 @@ where
                     None => Ballot::default(),
                 }
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                let accepted = sled.get(ACC).expect("Failed to retrieve 'ACC'");
+                match accepted {
+                    Some(acc_bytes) => {
+                        let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_bytes())
+                            .expect("Failed to deserialize the accepted ballot");
+                        Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    }
+                    None => Ballot::default(),
+                }
+            }
         }
     }
 
@@ -370,7 +402,9 @@ where
             Database::Rocksdb(rocksdb) => {
                 rocksdb.put(ACC, acc_bytes).expect("Failed to set 'ACC'");
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                sled.insert(ACC, acc_bytes).expect("Failed to set 'ACC'");
+            }
         }
     }
 
@@ -384,7 +418,14 @@ where
                     None => 0,
                 }
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                let trim = sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
+                match trim {
+                    Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_bytes())
+                        .expect("Failed to deserialize the compacted index"),
+                    None => 0,
+                }
+            }
         }
     }
 
@@ -394,7 +435,9 @@ where
             Database::Rocksdb(rocksdb) => {
                 rocksdb.put(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                sled.insert(TRIM, trim_bytes).expect("Failed to set 'TRIM'");
+            }
         }
     }
 
@@ -420,7 +463,24 @@ where
                     None => None,
                 }
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                let stopsign = sled.get(STOPSIGN).expect("Failed to retrieve 'STOPSIGN'");
+                match stopsign {
+                    Some(ss_bytes) => {
+                        let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
+                            .expect("Failed to deserialize the stopsign");
+                        Some(StopSignEntry::with(
+                            StopSign::with(
+                                ss_storage.ss.config_id,
+                                ss_storage.ss.nodes,
+                                ss_storage.ss.metadata,
+                            ),
+                            ss_storage.decided,
+                        ))
+                    }
+                    None => None,
+                }
+            }
         }
     }
 
@@ -433,7 +493,10 @@ where
                     .put(STOPSIGN, stopsign)
                     .expect("Failed to set 'STOPSIGN'");
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                sled.insert(STOPSIGN, stopsign)
+                    .expect("Failed to set 'STOPSIGN'");
+            }
         }
     }
 
@@ -448,20 +511,28 @@ where
                         .expect("Failed to deserialize snapshot")
                 })
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                let snapshot = sled.get(SNAPSHOT).expect("Failed to retrieve 'SNAPSHOT'");
+                snapshot.map(|snapshot_bytes| {
+                    bincode::deserialize(snapshot_bytes.as_bytes())
+                        .expect("Failed to deserialize snapshot")
+                })
+            }
         }
     }
 
     fn set_snapshot(&mut self, snapshot: S) {
         let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
-
         match &self.database {
             Database::Rocksdb(rocksdb) => {
                 rocksdb
                     .put(SNAPSHOT, stopsign)
                     .expect("Failed to set 'SNAPSHOT'");
             }
-            Database::Sled(_) => todo!(),
+            Database::Sled(sled) => {
+                sled.insert(SNAPSHOT, stopsign)
+                    .expect("Failed to set 'SNAPSHOT'");
+            }
         }
     }
 
