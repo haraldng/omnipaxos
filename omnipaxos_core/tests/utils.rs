@@ -114,15 +114,20 @@ where
                 let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
 
-                #[cfg(feature = "rocksdb")] {
+                #[cfg(feature = "rocksdb")]
+                {
                     let mut my_rocksopts = Options::default();
                     my_rocksopts.create_if_missing(true);
-                    let persist_conf =
-                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_rocksopts);
+                    let persist_conf = PersistentStorageConfig::with(
+                        my_path.to_string(),
+                        my_logopts,
+                        my_rocksopts,
+                    );
                     StorageType::Persistent(PersistentStorage::open(persist_conf))
-                }                
+                }
 
-                #[cfg(not(feature = "rocksdb"))] {
+                #[cfg(not(feature = "rocksdb"))]
+                {
                     let my_sledopts = Config::new();
                     let persist_conf =
                         PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
