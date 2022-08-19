@@ -2,6 +2,7 @@ use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
 };
+use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
@@ -13,11 +14,7 @@ use omnipaxos_storage::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
-
-use commitlog::LogOptions;
-use rocksdb::Options;
 use serde::{Deserialize, Serialize};
-use sled::Config;
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -32,6 +29,10 @@ const MEMORY: &str = "memory";
 
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
+#[cfg(feature = "rocksdb")]
+use rocksdb::Options;
+#[cfg(not(feature = "rocksdb"))]
+use sled::Config;
 
 #[cfg(feature = "hocon_config")]
 /// Configuration for `TestSystem`. TestConfig loads the values from
@@ -123,7 +124,7 @@ where
                         my_logopts,
                         my_rocksopts,
                     );
-                    StorageType::Persistent(PersistentStorage::open(persist_conf))
+                    return StorageType::Persistent(PersistentStorage::open(persist_conf));
                 }
 
                 #[cfg(not(feature = "rocksdb"))]

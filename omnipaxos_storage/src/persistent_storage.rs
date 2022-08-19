@@ -6,12 +6,14 @@ use omnipaxos_core::{
     ballot_leader_election::Ballot,
     storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
 };
-#[cfg(feature = "rocksdb")]
-use rocksdb::{Options, DB};
 use serde::{Deserialize, Serialize};
-use sled::{Config, Db};
 use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
+
+#[cfg(feature = "rocksdb")]
+use rocksdb::{Options, DB};
+#[cfg(not(feature = "rocksdb"))]
+use sled::{Config, Db};
 
 const DEFAULT: &str = "/default_storage/";
 const COMMITLOG: &str = "/commitlog/";
@@ -76,19 +78,11 @@ impl StopSignStorage {
     }
 }
 
-// #[derive(Clone)]
-// pub enum PersistentStorageOption {
-//     #[cfg(feature = "rocksdb")]
-//     RocksdbOptions(Options),
-//     #[cfg(not(feature = "rocksdb"))]
-//     SledOptions(Config),
-// }
-
 // Configuration for `PersistentStorage`.
 /// # Fields
 /// * `path`: Path to the commitlog and rocksDB store
-/// * `log_config`: Configuration of the commitlog
-/// * `rocksdb_options` : Configuration of the rocksDB store, if chosen as database
+/// * `commitlog_options`: Configuration of the commitlog
+/// * `rocksdb_options` : Configuration of the rocksDB store, must be enabled as a feature
 /// * `sled_options` : Configuration of the sled store, enabled by default
 pub struct PersistentStorageConfig {
     path: Option<String>,
@@ -120,15 +114,17 @@ impl PersistentStorageConfig {
     pub fn get_database_options(&self) -> Options {
         self.rocksdb_options.clone()
     }
-    #[cfg(not(feature = "rocksdb"))]
-    pub fn get_database_options(&self) -> Config {
-        self.sled_options.clone()
-    }
 
     #[cfg(feature = "rocksdb")]
     pub fn set_database_options(&mut self, opts: Options) {
         self.rocksdb_options = opts;
     }
+
+    #[cfg(not(feature = "rocksdb"))]
+    pub fn get_database_options(&self) -> Config {
+        self.sled_options.clone()
+    }
+
     #[cfg(not(feature = "rocksdb"))]
     pub fn set_database_options(&mut self, opts: Config) {
         self.sled_options = opts;
@@ -172,14 +168,6 @@ impl Default for PersistentStorageConfig {
     }
 }
 
-// // An enum for selecting the database to use in 'PersistentStorage'
-// pub enum Database {
-//     #[cfg(feature = "rocksdb")]
-//     Rocksdb(DB),
-//     #[cfg(not(feature = "rocksdb"))]
-//     Sled(Db),
-// }
-
 /// A persistent storage implementation, lets sequence paxos write the log
 /// and current state to disk. Log entries are serialized and de-serialized
 /// into slice of bytes when read or written from the log.
@@ -195,7 +183,7 @@ where
     /// Local RocksDB key-value store, must be enabled as a feature
     #[cfg(feature = "rocksdb")]
     rocksdb: DB,
-    /// Local sled key-value store, default
+    /// Local sled key-value store, enabled by default
     #[cfg(not(feature = "rocksdb"))]
     sled: Db,
     /// A placeholder for the T: Entry
@@ -230,7 +218,7 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
         }
     }
 
-    // Creates a new storage instance, panics if a commitlog or rocksDB instance exists at the given path
+    // Creates a new storage instance, panics if a commitlog or rocksDB/sled instance exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config
             .path
@@ -261,7 +249,7 @@ where
             .commitlog
             .append_msg(entry_bytes)
             .expect("Failed to append log entry");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // makes sure all writes are durable
+        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
         offset + 1 // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
 
@@ -273,7 +261,7 @@ where
             .commitlog
             .append(&mut MessageBuf::from_iter(serialized))
             .expect("Falied to append log entries");
-        self.commitlog.flush().expect("Failed to flush Commitlog");
+        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
         offset.first() + offset.len() as u64
     }
 
@@ -284,6 +272,7 @@ where
         self.append_entries(entries)
     }
 
+    // todo MAKE BETTER SOMEHOW
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
         let buffer = self
             .commitlog
@@ -489,15 +478,15 @@ where
                 .expect("Failed to retrieve 'STOPSIGN'");
             match stopsign {
                 Some(ss_bytes) => {
-                    let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
+                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
                         .expect("Failed to deserialize the stopsign");
                     Some(StopSignEntry::with(
                         StopSign::with(
-                            ss_storage.ss.config_id,
-                            ss_storage.ss.nodes,
-                            ss_storage.ss.metadata,
+                            ss_entry_storage.ss.config_id,
+                            ss_entry_storage.ss.nodes,
+                            ss_entry_storage.ss.metadata,
                         ),
-                        ss_storage.decided,
+                        ss_entry_storage.decided,
                     ))
                 }
                 None => None,
@@ -511,15 +500,15 @@ where
                 .expect("Failed to retrieve 'STOPSIGN'");
             match stopsign {
                 Some(ss_bytes) => {
-                    let ss_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
+                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
                         .expect("Failed to deserialize the stopsign");
                     Some(StopSignEntry::with(
                         StopSign::with(
-                            ss_storage.ss.config_id,
-                            ss_storage.ss.nodes,
-                            ss_storage.ss.metadata,
+                            ss_entry_storage.ss.config_id,
+                            ss_entry_storage.ss.nodes,
+                            ss_entry_storage.ss.metadata,
                         ),
-                        ss_storage.decided,
+                        ss_entry_storage.decided,
                     ))
                 }
                 None => None,

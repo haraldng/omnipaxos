@@ -12,8 +12,8 @@ slog-async = { version = "2.7.0", optional = true }
 hocon = { version = "0.9.0", optional = true }
 
 [dev-dependencies]
-kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"]}
-omnipaxos_storage = { path = "../omnipaxos_storage"} 
+kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
+omnipaxos_storage = { path = "../omnipaxos_storage" } 
 serde = { version = "1.0", features = ["derive"] }
 commitlog = { version = "0.2.0", optional = false }
 sled = { version = "0.34.7", optional = false }
@@ -25,11 +25,13 @@ rand = "0.8.4"
 batch_accept = []
 latest_accepted = []
 latest_decide = []
+rocksdb = []
+sled = []
 continued_leader_reconfiguration = []
 logging  = [ "slog", "slog-term", "slog-async"]
 hocon_config = [ "hocon" ]
 
-default = ["latest_accepted", "latest_decide", "continued_leader_reconfiguration", "batch_accept"]
+default = ["sled", "latest_accepted", "latest_decide", "continued_leader_reconfiguration", "batch_accept"]
 
 #[profile.release]
 #lto = true
