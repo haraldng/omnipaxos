@@ -29,9 +29,6 @@ const MEMORY: &str = "memory";
 
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
-#[cfg(feature = "rocksdb")]
-use rocksdb::Options;
-#[cfg(not(feature = "rocksdb"))]
 use sled::Config;
 
 #[cfg(feature = "hocon_config")]
@@ -114,26 +111,11 @@ where
             StorageTypeSelector::Persistent => {
                 let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
-
-                #[cfg(feature = "rocksdb")]
-                {
-                    let mut my_rocksopts = Options::default();
-                    my_rocksopts.create_if_missing(true);
-                    let persist_conf = PersistentStorageConfig::with(
-                        my_path.to_string(),
-                        my_logopts,
-                        my_rocksopts,
-                    );
-                    return StorageType::Persistent(PersistentStorage::open(persist_conf));
-                }
-
-                #[cfg(not(feature = "rocksdb"))]
-                {
-                    let my_sledopts = Config::new();
-                    let persist_conf =
-                        PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
-                    StorageType::Persistent(PersistentStorage::open(persist_conf))
-                }
+                let my_sledopts = Config::new();
+                let persist_conf =
+                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
+                StorageType::Persistent(PersistentStorage::open(persist_conf))
+                     
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
         }
