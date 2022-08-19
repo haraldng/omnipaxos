@@ -272,7 +272,6 @@ where
         self.append_entries(entries)
     }
 
-    // todo MAKE BETTER SOMEHOW
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
         let buffer = self
             .commitlog
