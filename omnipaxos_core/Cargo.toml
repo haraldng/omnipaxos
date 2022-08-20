@@ -17,7 +17,6 @@ omnipaxos_storage = { path = "../omnipaxos_storage", default-features = true }
 serde = { version = "1.0", features = ["derive"] }
 commitlog = { version = "0.2.0", optional = false }
 sled = { version = "0.34.7", optional = false }
-rocksdb = { version = "0.18.0", optional = false }
 serial_test = "0.5.1"
 rand = "0.8.4"
 

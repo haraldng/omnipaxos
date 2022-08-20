@@ -352,19 +352,10 @@ fn verify_snapshot_and_entries(
     offset: u64,
     decided_idx: u64,
 ) {
-    let (first_entry, decided_entries) = read_entries.split_first().expect("No entries in log!");
+    let (first_entry, decided_entries) = read_entries.split_at(1);
 
-    match first_entry {
-        LogEntry::Snapshotted(s) => {
-            assert_eq!(s.trimmed_idx, exp_compacted_idx);
-            assert_eq!(&s.snapshot, exp_snapshot);
-        }
-        e => {
-            panic!("{}", format!("Not a snapshot: {:?}", e))
-        }
-    }
-
-    verify_entries(decided_entries, exp_entries, offset, decided_idx)
+    verify_snapshot(first_entry, exp_compacted_idx, exp_snapshot);   
+    verify_entries(decided_entries, exp_entries, offset, decided_idx);
 }
 
 // Verify that all log entries are decided and matches the proposed entries

@@ -222,7 +222,7 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config
             .path
-            .clone()
+            .as_ref()
             .expect("No path found in config");
 
         std::fs::metadata(format!("{path}{COMMITLOG}")).expect_err(&format!(

@@ -115,7 +115,6 @@ where
                 let persist_conf =
                     PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
-                     
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
         }
