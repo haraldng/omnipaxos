@@ -21,8 +21,8 @@ fn leader_fail_follower_propose_test() {
         RECOVERY_PATH,
     );
 
-    let (mut vec_proposals, leader_future) = check_first_proposals(&sys, &cfg);
-    let (leader, follower) = check_leader_is_elected(&cfg, leader_future);
+    let mut vec_proposals = check_initial_proposals(&sys, &cfg);
+    let (leader, follower) = check_leader_is_elected(&sys, &cfg);
 
     kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
 
@@ -54,29 +54,7 @@ fn leader_fail_follower_propose_test() {
             .expect("Cannot read decided log entry")
     });
 
-    // Match the read log with the following scenarios
-    match read_log[..] {
-        [LogEntry::Decided(_), ..] => {
-            verify_entries(&read_log, &vec_proposals, 0, cfg.num_proposals)
-        }
-        [LogEntry::Snapshotted(_)] => {
-            let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&read_log, cfg.num_proposals, &snapshot)
-        }
-        [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
-            let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(
-                &read_log,
-                cfg.num_proposals / 2,
-                &snapshot,
-                &last_proposals,
-                0,
-                cfg.num_proposals,
-            );
-        }
-        _ => panic!("Unexpected entries in log: {:?} ", read_log),
-    }
+    verify_log_after_recovery(read_log, vec_proposals, cfg.num_proposals);
 
     println!("Pass leader_fail_follower_propose!");
 
@@ -101,8 +79,8 @@ fn leader_fail_leader_propose_test() {
         RECOVERY_PATH,
     );
 
-    let (mut vec_proposals, leader_future) = check_first_proposals(&sys, &cfg);
-    let (leader, _) = check_leader_is_elected(&cfg, leader_future);
+    let mut vec_proposals = check_initial_proposals(&sys, &cfg);
+    let (leader, _) = check_leader_is_elected(&sys, &cfg);
 
     kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
 
@@ -125,32 +103,13 @@ fn leader_fail_leader_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
 
-    match log[..] {
-        [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
-        [LogEntry::Snapshotted(_)] => {
-            let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        }
-        [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
-            let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(
-                &log,
-                cfg.num_proposals / 2,
-                &snapshot,
-                &last_proposals,
-                0,
-                cfg.num_proposals,
-            );
-        }
-        _ => panic!("Unexpected entries in log: {:?} ", log),
-    }
+    verify_log_after_recovery(read_log, vec_proposals, cfg.num_proposals);
 
     println!("Pass leader_fail_leader_propose!");
 
@@ -177,8 +136,8 @@ fn follower_fail_leader_propose_test() {
     );
 
     // check the first proposals go through
-    let (mut vec_proposals, leader_future) = check_first_proposals(&sys, &cfg);
-    let (leader, follower) = check_leader_is_elected(&cfg, leader_future);
+    let mut vec_proposals = check_initial_proposals(&sys, &cfg);
+    let (leader, follower) = check_leader_is_elected(&sys, &cfg);
 
     // kill and recovery
     kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
@@ -206,32 +165,13 @@ fn follower_fail_leader_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
 
-    match log[..] {
-        [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
-        [LogEntry::Snapshotted(_)] => {
-            let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        }
-        [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
-            let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(
-                &log,
-                cfg.num_proposals / 2,
-                &snapshot,
-                &last_proposals,
-                0,
-                cfg.num_proposals,
-            );
-        }
-        _ => panic!("Unexpected entries in log: {:?} ", log),
-    }
+    verify_log_after_recovery(read_log, vec_proposals, cfg.num_proposals);
 
     println!("Pass follower_fail_leader_propose");
 
@@ -258,8 +198,8 @@ fn follower_fail_follower_propose_test() {
     );
 
     // check the first proposals go through
-    let (mut vec_proposals, leader_future) = check_first_proposals(&sys, &cfg);
-    let (_, follower) = check_leader_is_elected(&cfg, leader_future);
+    let mut vec_proposals = check_initial_proposals(&sys, &cfg);
+    let (_, follower) = check_leader_is_elected(&sys, &cfg);
 
     // kill and recovery
     kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
@@ -283,32 +223,13 @@ fn follower_fail_follower_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
 
-    match log[..] {
-        [LogEntry::Decided(_), ..] => verify_entries(&log, &vec_proposals, 0, cfg.num_proposals),
-        [LogEntry::Snapshotted(_)] => {
-            let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&log, cfg.num_proposals, &snapshot)
-        }
-        [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
-            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
-            let snapshot = LatestValue::create(first_proposals);
-            verify_snapshot_and_entries(
-                &log,
-                cfg.num_proposals / 2,
-                &snapshot,
-                &last_proposals,
-                0,
-                cfg.num_proposals,
-            );
-        }
-        _ => panic!("Unexpected entries in log: {:?} ", log),
-    }
+    verify_log_after_recovery(read_log, vec_proposals, cfg.num_proposals);
 
     println!("Pass follower_fail_follower_propose");
 
@@ -320,7 +241,39 @@ fn follower_fail_follower_propose_test() {
     };
 }
 
-// Verify that the log has a single snapshot of the latest entry
+/// Verify that the log is correct after a fail recovery, Depending on
+/// the timing the log should match one of the following cases:
+/// * All entries are decided, call 'verify_entries' to verify the decided entries
+/// * Only a snapshot was taken, call 'verify_snapshot' to verify the snapshot
+/// * A snapshot was taken and entries decided on afterwards, call 'verify_snapshot_and_entries' to verify both entry types
+fn verify_log_after_recovery(
+    read_log: Vec<LogEntry<Value, LatestValue>>,
+    vec_proposals: Vec<Value>,
+    num_proposals: u64,
+) {
+    match read_log[..] {
+        [LogEntry::Decided(_), ..] => verify_entries(&read_log, &vec_proposals, 0, num_proposals),
+        [LogEntry::Snapshotted(_)] => {
+            let snapshot = LatestValue::create(vec_proposals.as_slice());
+            verify_snapshot(&read_log, num_proposals, &snapshot)
+        }
+        [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
+            let (first_proposals, last_proposals) = vec_proposals.split_at(vec_proposals.len() / 2);
+            let snapshot = LatestValue::create(first_proposals);
+            verify_snapshot_and_entries(
+                &read_log,
+                num_proposals / 2,
+                &snapshot,
+                &last_proposals,
+                0,
+                num_proposals,
+            );
+        }
+        _ => panic!("Unexpected entries in the log: {:?} ", read_log),
+    }
+}
+
+/// Verify that the log has a single snapshot of the latest entry
 fn verify_snapshot(
     read_entries: &[LogEntry<Value, LatestValue>],
     exp_compacted_idx: u64,
@@ -343,7 +296,7 @@ fn verify_snapshot(
     }
 }
 
-// Verify that the log contains a snapshot of the first entries and the last decided entries
+/// Verify that the log contains a snapshot of the first entries and the last decided entries
 fn verify_snapshot_and_entries(
     read_entries: &[LogEntry<Value, LatestValue>],
     exp_compacted_idx: u64,
@@ -354,11 +307,11 @@ fn verify_snapshot_and_entries(
 ) {
     let (first_entry, decided_entries) = read_entries.split_at(1);
 
-    verify_snapshot(first_entry, exp_compacted_idx, exp_snapshot);   
+    verify_snapshot(first_entry, exp_compacted_idx, exp_snapshot);
     verify_entries(decided_entries, exp_entries, offset, decided_idx);
 }
 
-// Verify that all log entries are decided and matches the proposed entries
+/// Verify that all log entries are decided and matches the proposed entries
 fn verify_entries(
     read_entries: &[LogEntry<Value, LatestValue>],
     exp_entries: &[Value],
@@ -388,8 +341,15 @@ fn verify_entries(
     }
 }
 
-// Check that the leader is elected before any node fails
-fn check_leader_is_elected(cfg: &TestConfig, leader_future: KFuture<Ballot>) -> (u64, u64) {
+/// Check that the leader is elected before any node fails
+fn check_leader_is_elected(sys: &TestSystem, cfg: &TestConfig) -> (u64, u64) {
+    let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let leader_future = ble.on_definition(|x| {
+        let (kprom, kfuture) = promise::<Ballot>();
+        x.add_ask(Ask::new(kprom, ()));
+        kfuture
+    });
+
     let leader = leader_future
         .wait_timeout(cfg.wait_timeout)
         .expect("No leader has been elected in the allocated time!")
@@ -402,10 +362,9 @@ fn check_leader_is_elected(cfg: &TestConfig, leader_future: KFuture<Ballot>) -> 
     (leader, follower)
 }
 
-// Propose and check that the first proposals before any node fails are decided
-// returns expected entries and a promise that the leader is elected
-fn check_first_proposals(sys: &TestSystem, cfg: &TestConfig) -> (Vec<Value>, KFuture<Ballot>) {
-    let (ble, px) = sys.ble_paxos_nodes().get(&1).unwrap();
+/// Propose and check that the first proposals before any node fails are decided
+fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) -> Vec<Value> {
+    let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap(); // todo move outside along with ble, send it in instead
 
     let mut vec_proposals = vec![];
     let mut proposal_futures = vec![];
@@ -419,12 +378,6 @@ fn check_first_proposals(sys: &TestSystem, cfg: &TestConfig) -> (Vec<Value>, KFu
         proposal_futures.push(kfuture);
     }
 
-    let leader_future = ble.on_definition(|x| {
-        let (kprom, kfuture) = promise::<Ballot>();
-        x.add_ask(Ask::new(kprom, ()));
-        kfuture
-    });
-
     sys.start_all_nodes();
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
@@ -432,10 +385,10 @@ fn check_first_proposals(sys: &TestSystem, cfg: &TestConfig) -> (Vec<Value>, KFu
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    (vec_proposals, leader_future)
+    vec_proposals
 }
 
-// Kill and recover a node after some time
+/// Kill and recover a node after some time
 pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, path: &str) {
     sys.kill_node(pid);
     thread::sleep(Duration::from_secs(cfg.ble_hb_delay));

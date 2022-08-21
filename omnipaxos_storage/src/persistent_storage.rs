@@ -1,3 +1,6 @@
+#[cfg(all(feature = "rocksdb", feature = "sled"))]
+compile_error!("Cannot enable features \"rocksdb\" and \"sled\" at the same time");
+
 use commitlog::{
     message::{MessageBuf, MessageSet},
     CommitLog, LogOptions, ReadLimit,
@@ -12,7 +15,7 @@ use zerocopy::{AsBytes, FromBytes};
 
 #[cfg(feature = "rocksdb")]
 use rocksdb::{Options, DB};
-#[cfg(not(feature = "rocksdb"))]
+#[cfg(feature = "sled")]
 use sled::{Config, Db};
 
 const DEFAULT: &str = "/default_storage/";
@@ -89,7 +92,7 @@ pub struct PersistentStorageConfig {
     commitlog_options: LogOptions,
     #[cfg(feature = "rocksdb")]
     rocksdb_options: Options,
-    #[cfg(not(feature = "rocksdb"))]
+    #[cfg(feature = "sled")]
     sled_options: Config,
 }
 
@@ -120,12 +123,12 @@ impl PersistentStorageConfig {
         self.rocksdb_options = opts;
     }
 
-    #[cfg(not(feature = "rocksdb"))]
+    #[cfg(feature = "sled")]
     pub fn get_database_options(&self) -> Config {
         self.sled_options.clone()
     }
 
-    #[cfg(not(feature = "rocksdb"))]
+    #[cfg(feature = "sled")]
     pub fn set_database_options(&mut self, opts: Config) {
         self.sled_options = opts;
     }
@@ -139,7 +142,7 @@ impl PersistentStorageConfig {
         }
     }
 
-    #[cfg(not(feature = "rocksdb"))]
+    #[cfg(feature = "sled")]
     pub fn with(path: String, commitlog_options: LogOptions, sled_options: Config) -> Self {
         Self {
             path: Some(path),
@@ -162,7 +165,7 @@ impl Default for PersistentStorageConfig {
                 opts.create_if_missing(true);
                 opts
             },
-            #[cfg(not(feature = "rocksdb"))]
+            #[cfg(feature = "sled")]
             sled_options: Config::new(),
         }
     }
@@ -184,7 +187,7 @@ where
     #[cfg(feature = "rocksdb")]
     rocksdb: DB,
     /// Local sled key-value store, enabled by default
-    #[cfg(not(feature = "rocksdb"))]
+    #[cfg(feature = "sled")]
     sled: Db,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
@@ -208,7 +211,7 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
                 DB::open(&storage_config.rocksdb_options, format!("{path}{DATABASE}"))
                     .expect("Failed to create rocksDB database")
             },
-            #[cfg(not(feature = "rocksdb"))]
+            #[cfg(feature = "sled")]
             sled: {
                 let opts = Config::path(storage_config.sled_options, format!("{path}{DATABASE}"));
                 Config::open(&opts).expect("Failed to create sled database")
@@ -316,7 +319,7 @@ where
                 None => Ballot::default(),
             }
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let promised = self.sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
             match promised {
@@ -339,7 +342,7 @@ where
                 .put(NPROM, prom_bytes)
                 .expect("Failed to set 'NPROM'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(NPROM, prom_bytes)
@@ -360,7 +363,7 @@ where
                 None => 0,
             }
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let decided = self.sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
             match decided {
@@ -379,7 +382,7 @@ where
                 .put(DECIDE, ld_bytes)
                 .expect("Failed to set 'DECIDE'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(DECIDE, ld_bytes)
@@ -400,7 +403,7 @@ where
                 None => Ballot::default(),
             }
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let accepted = self.sled.get(ACC).expect("Failed to retrieve 'ACC'");
             match accepted {
@@ -423,7 +426,7 @@ where
                 .put(ACC, acc_bytes)
                 .expect("Failed to set 'ACC'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(ACC, acc_bytes)
@@ -441,7 +444,7 @@ where
                 None => 0,
             }
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let trim = self.sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
             match trim {
@@ -460,7 +463,7 @@ where
                 .put(TRIM, trim_bytes)
                 .expect("Failed to set 'TRIM'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(TRIM, trim_bytes)
@@ -491,7 +494,7 @@ where
                 None => None,
             }
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let stopsign = self
                 .sled
@@ -524,7 +527,7 @@ where
                 .put(STOPSIGN, stopsign)
                 .expect("Failed to set 'STOPSIGN'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(STOPSIGN, stopsign)
@@ -544,7 +547,7 @@ where
                     .expect("Failed to deserialize snapshot")
             })
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             let snapshot = self
                 .sled
@@ -565,7 +568,7 @@ where
                 .put(SNAPSHOT, stopsign)
                 .expect("Failed to set 'SNAPSHOT'");
         }
-        #[cfg(not(feature = "rocksdb"))]
+        #[cfg(feature = "sled")]
         {
             self.sled
                 .insert(SNAPSHOT, stopsign)
