@@ -27,8 +27,14 @@ fn leader_fail_follower_propose_test() {
     kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
-    let (_, recovery_px) = sys.ble_paxos_nodes().get(&leader).unwrap();
-    let (_, follower_px) = sys.ble_paxos_nodes().get(&follower).unwrap();
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&leader)
+        .expect("No SequencePaxos component found");
+    let (_, follower_px) = sys
+        .ble_paxos_nodes()
+        .get(&follower)
+        .expect("No SequencePaxos component found");
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
@@ -87,7 +93,10 @@ fn leader_fail_leader_propose_test() {
     kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
-    let (_, recovery_px) = sys.ble_paxos_nodes().get(&leader).unwrap();
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&leader)
+        .expect("No SequencePaxos component found");
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
@@ -144,8 +153,14 @@ fn follower_fail_leader_propose_test() {
     kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
-    let (_, recovery_px) = sys.ble_paxos_nodes().get(&follower).unwrap();
-    let (_, leader_px) = sys.ble_paxos_nodes().get(&leader).unwrap();
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&follower)
+        .expect("No SequencePaxos component found");
+    let (_, leader_px) = sys
+        .ble_paxos_nodes()
+        .get(&leader)
+        .expect("No SequencePaxos component found");
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
@@ -204,7 +219,10 @@ fn follower_fail_follower_propose_test() {
     kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
-    let (_, recovery_px) = sys.ble_paxos_nodes().get(&follower).unwrap();
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&follower)
+        .expect("No SequencePaxos component found");
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
@@ -256,7 +274,7 @@ fn verify_log_after_recovery(
         [LogEntry::Decided(_), ..] => verify_entries(&read_log, &vec_proposals, 0, num_proposals),
         [LogEntry::Snapshotted(_)] => {
             let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&read_log, num_proposals, &snapshot)
+            verify_snapshot(&read_log, num_proposals, &snapshot);
         }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
             let (first_proposals, last_proposals) =
@@ -282,13 +300,16 @@ fn verify_snapshot(
         "Expected snapshot, got: {:?}",
         read_entries
     );
-    match read_entries.first().unwrap() {
+    match read_entries
+        .first()
+        .expect("Expected entry from first element")
+    {
         LogEntry::Snapshotted(s) => {
             assert_eq!(s.trimmed_idx, exp_compacted_idx);
             assert_eq!(&s.snapshot, exp_snapshot);
         }
         e => {
-            panic!("{}", format!("Not a snapshot: {:?}", e))
+            panic!("{}", format!("Not a snapshot: {:?}", e));
         }
     }
 }
@@ -335,7 +356,7 @@ fn check_leader_is_elected(sys: &TestSystem, cfg: &TestConfig) -> (u64, u64) {
             // leader is already elected
             return ballot.pid;
         } else {
-            // leader is not yet elected
+            // leader is not elected yet
             let (kprom, kfuture) = promise::<Ballot>();
             x.add_ask(Ask::new(kprom, ()));
 
@@ -383,13 +404,16 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) -> Vec<Value> {
     vec_proposals
 }
 
-/// Kill and recover a node after some time
+/// Kill and recover a node
 pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, path: &str) {
     sys.kill_node(pid);
 
     sys.create_node(pid, cfg.num_nodes, cfg.ble_hb_delay, cfg.storage_type, path);
     sys.start_node(pid);
-    let (_, px) = sys.ble_paxos_nodes().get(&pid).unwrap();
+    let (_, px) = sys
+        .ble_paxos_nodes()
+        .get(&pid)
+        .expect("No SequencePaxos component found");
     px.on_definition(|x| {
         x.paxos.fail_recovery();
     });
