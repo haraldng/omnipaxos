@@ -7,6 +7,7 @@ use std::{thread, time::Duration};
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
 const RECOVERY_PATH: &str = "/recovery_test/";
+const ONE_SEC: u64 = 1;
 
 #[test]
 #[serial]
@@ -54,7 +55,7 @@ fn leader_fail_follower_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(ONE_SEC));
 
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
@@ -114,7 +115,7 @@ fn leader_fail_leader_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(ONE_SEC));
 
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
@@ -180,7 +181,7 @@ fn follower_fail_leader_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(ONE_SEC));
 
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
@@ -240,7 +241,7 @@ fn follower_fail_follower_propose_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(cfg.ble_hb_delay));
 
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
