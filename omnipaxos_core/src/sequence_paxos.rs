@@ -17,7 +17,9 @@ use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
 
+/// Type alias for SequencePaxos Pid
 type Pid = u64;
+/// Type alias for SequencePaxos Configuration ID
 type ConfigurationID = u32;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
