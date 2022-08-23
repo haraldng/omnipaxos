@@ -36,40 +36,14 @@ fn leader_fail_follower_propose_test() {
         .expect("No followers found!");
 
     kill_and_recover_node(&mut sys, &cfg, leader);
+    check_last_proposals(follower, leader, &sys, &cfg);
+
+    thread::sleep(SLEEP_TIMEOUT);
 
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let (_, follower_px) = sys
-        .ble_paxos_nodes()
-        .get(&follower)
-        .expect("No SequencePaxos component found");
-
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .into_iter()
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
-            recovery_px.on_definition(|x| {
-                x.add_ask(Ask::new(kprom, ()));
-            });
-            kfuture
-        })
-        .collect();
-
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        follower_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-        });
-    }
-
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
-
-    thread::sleep(SLEEP_TIMEOUT);
-
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
@@ -111,36 +85,14 @@ fn leader_fail_leader_propose_test() {
     let leader = get_elected_leader(&sys, cfg.wait_timeout);
 
     kill_and_recover_node(&mut sys, &cfg, leader);
+    check_last_proposals(leader, leader, &sys, &cfg);
+
+    thread::sleep(SLEEP_TIMEOUT);
 
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
         .get(&leader)
         .expect("No SequencePaxos component found");
-
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .into_iter()
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
-            recovery_px.on_definition(|x| {
-                x.add_ask(Ask::new(kprom, ()));
-            });
-            kfuture
-        })
-        .collect();
-
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        recovery_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-        });
-    }
-
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
-
-    thread::sleep(SLEEP_TIMEOUT);
-
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
@@ -186,40 +138,14 @@ fn follower_fail_leader_propose_test() {
         .expect("No followers found!");
 
     kill_and_recover_node(&mut sys, &cfg, follower);
-
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
-        .get(&follower)
-        .expect("No SequencePaxos component found");
-    let (_, leader_px) = sys
-        .ble_paxos_nodes()
-        .get(&leader)
-        .expect("No SequencePaxos component found");
-
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .into_iter()
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
-            recovery_px.on_definition(|x| {
-                x.add_ask(Ask::new(kprom, ()));
-            });
-            kfuture
-        })
-        .collect();
-
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        leader_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-        });
-    }
-
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
+    check_last_proposals(leader, leader, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
 
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&leader)
+        .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
@@ -265,36 +191,14 @@ fn follower_fail_follower_propose_test() {
         .expect("No followers found!");
 
     kill_and_recover_node(&mut sys, &cfg, follower);
-
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
-        .get(&follower)
-        .expect("No SequencePaxos component found");
-
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .into_iter()
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
-            recovery_px.on_definition(|x| {
-                x.add_ask(Ask::new(kprom, ()));
-            });
-            kfuture
-        })
-        .collect();
-
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        recovery_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-        });
-    }
-
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
+    check_last_proposals(leader, leader, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
 
+    let (_, recovery_px) = sys
+        .ble_paxos_nodes()
+        .get(&leader)
+        .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
@@ -440,6 +344,41 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
+        Ok(_) => {}
+        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+    }
+}
+
+/// Propose and check that the last proposals are decided by the 
+/// recovered node. The recovered node can also be the proposer 
+fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &TestConfig) {
+    let (_, proposer_px) = sys
+        .ble_paxos_nodes()
+        .get(&proposer)
+        .expect("No SequencePaxos component found");
+    let (_, recover_px) = sys
+        .ble_paxos_nodes()
+        .get(&recover)
+        .expect("No SequencePaxos component found");
+    
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .into_iter()
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recover_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
+
+    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
+        proposer_px.on_definition(|x| {
+            x.paxos.append(Value(i)).expect("Failed to append");
+        });
+    }
+
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
