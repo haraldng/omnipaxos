@@ -29,13 +29,13 @@ fn leader_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     check_initial_proposals(&sys, &cfg);
-    let leader = get_elected_leader(&sys, &cfg);
+    let leader = get_elected_leader(&sys, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
+    kill_and_recover_node(&mut sys, &cfg, leader);
 
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
@@ -104,9 +104,9 @@ fn leader_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     check_initial_proposals(&sys, &cfg);
-    let leader = get_elected_leader(&sys, &cfg);
+    let leader = get_elected_leader(&sys, cfg.wait_timeout);
 
-    kill_and_recover_node(&mut sys, &cfg, leader, RECOVERY_PATH);
+    kill_and_recover_node(&mut sys, &cfg, leader);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
     let (_, recovery_px) = sys
@@ -169,13 +169,13 @@ fn follower_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     check_initial_proposals(&sys, &cfg);
-    let leader = get_elected_leader(&sys, &cfg);
+    let leader = get_elected_leader(&sys, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
+    kill_and_recover_node(&mut sys, &cfg, follower);
 
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
@@ -244,12 +244,13 @@ fn follower_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     check_initial_proposals(&sys, &cfg);
-    let leader = get_elected_leader(&sys, &cfg);
+    let leader = get_elected_leader(&sys, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
-    kill_and_recover_node(&mut sys, &cfg, follower, RECOVERY_PATH);
+
+    kill_and_recover_node(&mut sys, &cfg, follower);
 
     let mut futures: Vec<KFuture<Value>> = vec![];
     let (_, recovery_px) = sys
@@ -299,18 +300,18 @@ fn follower_fail_follower_propose_test() {
 /// * A snapshot was taken and entries decided on afterwards, verify both the snapshot and entries
 fn verify_log_after_recovery(
     read_log: Vec<LogEntry<Value, LatestValue>>,
-    vec_proposals: Vec<Value>,
+    proposals: Vec<Value>,
     num_proposals: u64,
 ) {
     match read_log[..] {
-        [LogEntry::Decided(_), ..] => verify_entries(&read_log, &vec_proposals, 0, num_proposals),
+        [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
         [LogEntry::Snapshotted(_)] => {
-            let snapshot = LatestValue::create(vec_proposals.as_slice());
-            verify_snapshot(&read_log, num_proposals, &snapshot);
+            let exp_snapshot = LatestValue::create(proposals.as_slice());
+            verify_snapshot(&read_log, num_proposals, &exp_snapshot);
         }
         [LogEntry::Snapshotted(_), LogEntry::Decided(_), ..] => {
             let (first_proposals, last_proposals) =
-                vec_proposals.split_at((num_proposals / 2) as usize);
+                proposals.split_at((num_proposals / 2) as usize);
             let (first_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
             let exp_snapshot = LatestValue::create(first_proposals);
             verify_snapshot(first_entry, num_proposals / 2, &exp_snapshot);
@@ -378,13 +379,13 @@ fn verify_entries(
 
 /// Return the elected leader. If there is no leader yet then
 /// wait until a leader is elected in the allocated time.
-fn get_elected_leader(sys: &TestSystem, cfg: &TestConfig) -> u64 {
+fn get_elected_leader(sys: &TestSystem, wait_timeout: Duration) -> u64 {
     let (ble, _) = sys
         .ble_paxos_nodes()
         .get(&1)
         .expect("No BLE component found");
 
-    let leader = ble.on_definition(|x| {
+    ble.on_definition(|x| {
         if let Some(ballot) = x.ble.get_leader() {
             // Leader is already elected
             return ballot.pid;
@@ -394,12 +395,11 @@ fn get_elected_leader(sys: &TestSystem, cfg: &TestConfig) -> u64 {
             x.add_ask(Ask::new(kprom, ()));
 
             let ballot = kfuture
-                .wait_timeout(cfg.wait_timeout)
+                .wait_timeout(wait_timeout)
                 .expect("No leader has been elected in the allocated time!");
             ballot.pid
         }
-    });
-    leader
+    })
 }
 
 /// Propose and check that the first proposals before any node fails are decided.
@@ -426,10 +426,16 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
 }
 
 /// Kill and recover node given its 'pid'.
-pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, path: &str) {
+pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     sys.kill_node(pid);
 
-    sys.create_node(pid, cfg.num_nodes, cfg.ble_hb_delay, cfg.storage_type, path);
+    sys.create_node(
+        pid,
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.storage_type,
+        RECOVERY_PATH,
+    );
     sys.start_node(pid);
     let (_, px) = sys
         .ble_paxos_nodes()
