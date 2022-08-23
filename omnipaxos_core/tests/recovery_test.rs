@@ -46,17 +46,21 @@ fn leader_fail_follower_propose_test() {
         .get(&follower)
         .expect("No SequencePaxos component found");
 
-    let mut futures: Vec<KFuture<Value>> = vec![];
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .into_iter()
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recovery_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
+
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        recovery_px.on_definition(|x| {
-            x.add_ask(Ask::new(kprom, ()));
-        });
         follower_px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
         });
-
-        futures.push(kfuture);
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
@@ -108,20 +112,26 @@ fn leader_fail_leader_propose_test() {
 
     kill_and_recover_node(&mut sys, &cfg, leader);
 
-    let mut futures: Vec<KFuture<Value>> = vec![];
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
         .get(&leader)
         .expect("No SequencePaxos component found");
 
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .into_iter()
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recovery_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
+
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
         recovery_px.on_definition(|x| {
-            x.add_ask(Ask::new(kprom, ()));
             x.paxos.append(Value(i)).expect("Failed to append");
         });
-
-        futures.push(kfuture);
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
@@ -186,17 +196,21 @@ fn follower_fail_leader_propose_test() {
         .get(&leader)
         .expect("No SequencePaxos component found");
 
-    let mut futures: Vec<KFuture<Value>> = vec![];
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .into_iter()
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recovery_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
+
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        recovery_px.on_definition(|x| {
-            x.add_ask(Ask::new(kprom, ()));
-        });
         leader_px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
         });
-
-        futures.push(kfuture);
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
@@ -252,20 +266,26 @@ fn follower_fail_follower_propose_test() {
 
     kill_and_recover_node(&mut sys, &cfg, follower);
 
-    let mut futures: Vec<KFuture<Value>> = vec![];
     let (_, recovery_px) = sys
         .ble_paxos_nodes()
         .get(&follower)
         .expect("No SequencePaxos component found");
 
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .into_iter()
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recovery_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
+
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
         recovery_px.on_definition(|x| {
-            x.add_ask(Ask::new(kprom, ()));
             x.paxos.append(Value(i)).expect("Failed to append");
         });
-
-        futures.push(kfuture);
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
