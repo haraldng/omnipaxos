@@ -349,8 +349,8 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
     }
 }
 
-/// Propose and check that the last proposals are decided by the 
-/// recovered node. The recovered node can also be the proposer 
+/// Propose and check that the last proposals are decided by the
+/// recovered node. The recovered node can also be the proposer
 fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &TestConfig) {
     let (_, proposer_px) = sys
         .ble_paxos_nodes()
@@ -360,7 +360,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .ble_paxos_nodes()
         .get(&recover)
         .expect("No SequencePaxos component found");
-    
+
     let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
         .into_iter()
         .map(|_| {
