@@ -85,25 +85,25 @@ where
     S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
-    fn append_entry(&mut self, entry: T) -> u64;
+    fn append_entry(&mut self, entry: T) -> Result<u64, StorageErr>;
 
     /// Appends the entries of `entries` to the end of the log and returns the log length.
-    fn append_entries(&mut self, entries: Vec<T>) -> u64;
+    fn append_entries(&mut self, entries: Vec<T>) -> Result<u64, StorageErr>;
 
     /// Appends the entries of `entries` to the prefix from index `from_index` in the log and returns the log length.
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64;
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> Result<u64, StorageErr>;
 
     /// Sets the round that has been promised.
-    fn set_promise(&mut self, n_prom: Ballot);
+    fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr>;
 
     /// Sets the decided index in the log.
-    fn set_decided_idx(&mut self, ld: u64);
+    fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr>;
 
     /// Returns the decided index in the log.
     fn get_decided_idx(&self) -> u64;
 
     /// Sets the latest accepted round.
-    fn set_accepted_round(&mut self, na: Ballot);
+    fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr>;
 
     /// Returns the latest round in which entries have been accepted.
     fn get_accepted_round(&self) -> Ballot;
@@ -122,29 +122,36 @@ where
     fn get_promise(&self) -> Ballot;
 
     /// Sets the StopSign used for reconfiguration.
-    fn set_stopsign(&mut self, s: StopSignEntry);
+    fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr>;
 
     /// Returns the stored StopSign.
     fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
-    fn trim(&mut self, idx: u64);
+    fn trim(&mut self, idx: u64) -> Result<(), StorageErr>;
 
     /// Sets the compacted (i.e. trimmed or snapshotted) index.
-    fn set_compacted_idx(&mut self, idx: u64);
+    fn set_compacted_idx(&mut self, idx: u64) -> Result<(), StorageErr>;
 
     /// Returns the garbage collector index from storage.
     fn get_compacted_idx(&self) -> u64;
 
     /// Sets the snapshot.
-    fn set_snapshot(&mut self, snapshot: S);
+    fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr>;
 
     /// Returns the stored snapshot.
     fn get_snapshot(&self) -> Option<S>;
 }
 
+#[derive(Clone, Debug)]
 #[allow(missing_docs)]
+/// An error that describes the type of failure when writing to storage
+pub enum StorageErr {
+    AppendLog(),
+    SetState(),
+}
 
+#[allow(missing_docs)]
 impl<T: Entry> Snapshot<T> for () {
     fn create(_: &[T]) -> Self {
         unimplemented!()
