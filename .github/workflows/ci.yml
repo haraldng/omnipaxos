@@ -20,6 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         rust: [stable, nightly]
+        max-parallel: 1
     steps:
       - name: Setup rust toolchain
         uses: actions-rs/toolchain@v1
