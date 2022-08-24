@@ -26,8 +26,9 @@ fn ble_test() {
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 
+    let num_elections = cfg.num_nodes / 2;
     let mut futures = vec![];
-    for _ in 0..cfg.num_elections {
+    for _ in 0..num_elections {
         let (kprom, kfuture) = promise::<Ballot>();
         ble.on_definition(|x| x.add_ask(Ask::new(kprom, ())));
         futures.push(kfuture);

@@ -1,11 +1,13 @@
 pub mod utils;
 
+use crate::utils::StorageTypeSelector;
 use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::{ballot_leader_election::Ballot, storage::Snapshot, util::LogEntry};
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
+const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
 const RECOVERY_PATH: &str = "/recovery_test/";
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -18,7 +20,7 @@ fn leader_fail_follower_propose_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        cfg.storage_type,
+        PERSISTENT_STORAGE,
         RECOVERY_PATH,
     );
 
@@ -71,7 +73,7 @@ fn leader_fail_leader_propose_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        cfg.storage_type,
+        PERSISTENT_STORAGE,
         RECOVERY_PATH,
     );
 
@@ -120,7 +122,7 @@ fn follower_fail_leader_propose_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        cfg.storage_type,
+        PERSISTENT_STORAGE,
         RECOVERY_PATH,
     );
 
@@ -173,7 +175,7 @@ fn follower_fail_follower_propose_test() {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
-        cfg.storage_type,
+        PERSISTENT_STORAGE,
         RECOVERY_PATH,
     );
 
@@ -362,7 +364,6 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .expect("No SequencePaxos component found");
 
     let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .into_iter()
         .map(|_| {
             let (kprom, kfuture) = promise::<Value>();
             recover_px.on_definition(|x| {
@@ -392,7 +393,7 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         pid,
         cfg.num_nodes,
         cfg.ble_hb_delay,
-        cfg.storage_type,
+        PERSISTENT_STORAGE,
         RECOVERY_PATH,
     );
     sys.start_node(pid);
