@@ -111,7 +111,7 @@ where
                 })
             },
         };
-        paxos.storage.set_promise(n_leader);
+        paxos.storage.set_promise(n_leader).expect("Failed to set promise");
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -927,7 +927,7 @@ where
     fn set_snapshot(&mut self, compact_idx: u64, snapshot: S) {
         let compacted_len = self.get_compacted_idx();
         let old_compacted_idx = self.storage.get_compacted_idx();
-        let old_snapshot = self.storage.get_snapshot().expect("No snapshot found");
+        let old_snapshot = self.storage.get_snapshot().unwrap_or(snapshot.clone()); // todo handle the first time snapshot is called
 
         if compact_idx > compacted_len {
             let idx = compact_idx - compacted_len;
@@ -1004,10 +1004,10 @@ where
         match max_promise {
             SyncItem::Entries(sfx) => {
                 if max_promise_meta.n == self.storage.get_accepted_round() {
-                    self.storage.append_entries(sfx);
+                    self.storage.append_entries(sfx).expect("Failed to append log entries");
                 } else {
                     let ld = self.storage.get_decided_idx();
-                    self.storage.append_on_prefix(ld, sfx);
+                    self.storage.append_on_prefix(ld, sfx).expect("Failed to append log entries");
                 }
                 if let Some(ss) = max_stopsign {
                     self.accept_stopsign(ss);

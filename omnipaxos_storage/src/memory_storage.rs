@@ -1,6 +1,6 @@
 use omnipaxos_core::{
     ballot_leader_election::Ballot,
-    storage::{Entry, Snapshot, StopSignEntry, Storage},
+    storage::{Entry, Snapshot, StopSignEntry, Storage, StorageErr},
 };
 /// An in-memory storage implementation for SequencePaxos.
 #[derive(Clone)]
@@ -30,36 +30,39 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    fn append_entry(&mut self, entry: T) -> u64 {
+    fn append_entry(&mut self, entry: T) -> Result<u64, StorageErr> {
         self.log.push(entry);
-        self.get_log_len()
+        Ok(self.get_log_len())
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+    fn append_entries(&mut self, entries: Vec<T>) -> Result<u64, StorageErr> {
         let mut e = entries;
         self.log.append(&mut e);
-        self.get_log_len()
+        Ok(self.get_log_len())
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> Result<u64, StorageErr> {
         self.log.truncate(from_idx as usize);
         self.append_entries(entries)
     }
 
-    fn set_promise(&mut self, n_prom: Ballot) {
+    fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
         self.n_prom = n_prom;
+        Ok(())
     }
 
-    fn set_decided_idx(&mut self, ld: u64) {
+    fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
         self.ld = ld;
+        Ok(())
     }
 
     fn get_decided_idx(&self) -> u64 {
         self.ld
     }
 
-    fn set_accepted_round(&mut self, na: Ballot) {
+    fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
         self.acc_round = na;
+        Ok(())
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -88,28 +91,32 @@ where
         self.n_prom
     }
 
-    fn set_stopsign(&mut self, s: StopSignEntry) {
+    fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr> {
         self.stopsign = Some(s);
+        Ok(())
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
         self.stopsign.clone()
     }
 
-    fn trim(&mut self, trimmed_idx: u64) {
+    fn trim(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
         self.log.drain(0..trimmed_idx as usize);
+        Ok(())
     }
 
-    fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+    fn set_compacted_idx(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
         self.trimmed_idx = trimmed_idx;
+        Ok(())
     }
 
     fn get_compacted_idx(&self) -> u64 {
         self.trimmed_idx
     }
 
-    fn set_snapshot(&mut self, snapshot: S) {
+    fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr> {
         self.snapshot = Some(snapshot);
+        Ok(())
     }
 
     fn get_snapshot(&self) -> Option<S> {
