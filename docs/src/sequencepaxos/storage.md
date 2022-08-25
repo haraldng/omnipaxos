@@ -91,7 +91,7 @@ An in-memory storage implementation, `MemoryStorage` offers fast reads and write
 ```
 
 ## PersistentStorage
-`PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store replicated logs, for storing the OmniPaxos state users can choose between [rocksDB](https://crates.io/crates/rocksdb) or [sled](https://crates.io/crates/sled). Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuraiton struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes path and storage options as arguments. We recommend the user to generate the default configuration and then setting the desired fields.
+`PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature`rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes path and storage options as arguments. 
 ```rust,edition2018,no_run,noplaypen
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
@@ -125,9 +125,12 @@ my_sled_opts.new(true);
 // create configuration with given arguments
 let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
 ```
-## Selecting storage for OmniPaxos state
-`PersistentStorage` is configured to use `sled` by default, users can enable `rocksDB` as storage by adding `--features rocksdb` to their cargo command. The example below runs tests with rocksDB enabled:
+## Importing `omnipaxos_storage`
+To use the package, we need to add `omnipaxos_storage` to the dependencies in the cargo file. If a user wish to configure the options for the commit then the user must also add `commitlog` and either `rocksdb` or `sled` as dependencies. Otherwise the default constructor for `PersistentStorageConfig` lets the user create options for the commitlog and the state storage without importing. 
 
-```no_run,noplaypen
-cargo test --features rocksdb
+```rust,edition2018,no_run,noplaypen
+[dependencies]
+omnipaxos_storage = { path = "../omnipaxos_storage", default-features = true } 
+commitlog = "0.2.0"
+rocksdb = "0.34.7"
 ```

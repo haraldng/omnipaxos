@@ -276,6 +276,11 @@ where
     }
 
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+        // Check if the commit log has entries up to the requested endpoint.
+        if to > self.commitlog.next_offset() {
+            return vec![]; // Do an early return
+        }
+
         let buffer = self
             .commitlog
             .read(from, ReadLimit::default())
@@ -283,17 +288,10 @@ where
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
-            match iter.next() {
-                Some(msg) => {
-                    entries.push(
-                        bincode::deserialize(msg.payload())
-                            .expect("Failed to deserialize log entries"),
-                    );
-                }
-                None => {
-                    return vec![]; // early return here
-                }
-            }
+            let msg = iter.next().expect("Failed to get value from iterator");
+            entries.push(
+                bincode::deserialize(msg.payload()).expect("Failed to deserialize log entries"),
+            );
         }
         entries
     }
@@ -312,7 +310,7 @@ where
             let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
             match promised {
                 Some(prom_bytes) => {
-                    let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_slice())
+                    let b_store = BallotStorage::read_from(prom_bytes.as_slice())
                         .expect("Failed to deserialize the promised ballot");
                     Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
@@ -324,7 +322,7 @@ where
             let promised = self.sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
             match promised {
                 Some(prom_bytes) => {
-                    let b_store: BallotStorage = FromBytes::read_from(prom_bytes.as_bytes())
+                    let b_store = BallotStorage::read_from(prom_bytes.as_ref())
                         .expect("Failed to deserialize the promised ballot");
                     Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
@@ -335,7 +333,7 @@ where
 
     fn set_promise(&mut self, n_prom: Ballot) {
         let ballot_store = BallotStorage::with(n_prom);
-        let prom_bytes = AsBytes::as_bytes(&ballot_store);
+        let prom_bytes = ballot_store.as_bytes();
         #[cfg(feature = "rocksdb")]
         {
             self.rocksdb
@@ -358,7 +356,7 @@ where
                 .get(DECIDE)
                 .expect("Failed to retrieve 'DECIDE'");
             match decided {
-                Some(ld_bytes) => FromBytes::read_from(ld_bytes.as_slice())
+                Some(ld_bytes) => u64::read_from(ld_bytes.as_slice())
                     .expect("Failed to deserialize the decided index"),
                 None => 0,
             }
@@ -367,7 +365,7 @@ where
         {
             let decided = self.sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
             match decided {
-                Some(ld_bytes) => FromBytes::read_from(ld_bytes.as_bytes())
+                Some(ld_bytes) => u64::read_from(ld_bytes.as_bytes())
                     .expect("Failed to deserialize the decided index"),
                 None => 0,
             }
@@ -375,7 +373,7 @@ where
     }
 
     fn set_decided_idx(&mut self, ld: u64) {
-        let ld_bytes = AsBytes::as_bytes(&ld);
+        let ld_bytes = u64::as_bytes(&ld);
         #[cfg(feature = "rocksdb")]
         {
             self.rocksdb
@@ -396,7 +394,7 @@ where
             let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_slice())
+                    let b_store = BallotStorage::read_from(acc_bytes.as_slice())
                         .expect("Failed to deserialize the accepted ballot");
                     Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
@@ -408,7 +406,7 @@ where
             let accepted = self.sled.get(ACC).expect("Failed to retrieve 'ACC'");
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store: BallotStorage = FromBytes::read_from(acc_bytes.as_bytes())
+                    let b_store = BallotStorage::read_from(acc_bytes.as_bytes())
                         .expect("Failed to deserialize the accepted ballot");
                     Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
@@ -419,7 +417,7 @@ where
 
     fn set_accepted_round(&mut self, na: Ballot) {
         let ballot_store = BallotStorage::with(na);
-        let acc_bytes = AsBytes::as_bytes(&ballot_store);
+        let acc_bytes = ballot_store.as_bytes();
         #[cfg(feature = "rocksdb")]
         {
             self.rocksdb
@@ -439,7 +437,7 @@ where
         {
             let trim = self.rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
             match trim {
-                Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_slice())
+                Some(trim_bytes) => u64::read_from(trim_bytes.as_slice())
                     .expect("Failed to deserialize the compacted index"),
                 None => 0,
             }
@@ -448,7 +446,7 @@ where
         {
             let trim = self.sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
             match trim {
-                Some(trim_bytes) => FromBytes::read_from(trim_bytes.as_bytes())
+                Some(trim_bytes) => u64::read_from(trim_bytes.as_bytes())
                     .expect("Failed to deserialize the compacted index"),
                 None => 0,
             }
@@ -456,7 +454,7 @@ where
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) {
-        let trim_bytes = AsBytes::as_bytes(&trimmed_idx);
+        let trim_bytes = u64::as_bytes(&trimmed_idx);
         #[cfg(feature = "rocksdb")]
         {
             self.rocksdb
