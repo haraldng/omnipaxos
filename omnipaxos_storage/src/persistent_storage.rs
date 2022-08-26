@@ -10,7 +10,7 @@ use omnipaxos_core::{
     storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage, StorageErr},
 };
 use serde::{Deserialize, Serialize};
-use std::{iter::FromIterator, marker::PhantomData};
+use std::{iter::FromIterator, marker::PhantomData, fmt::Error};
 use zerocopy::{AsBytes, FromBytes};
 
 #[cfg(feature = "rocksdb")]
@@ -251,38 +251,55 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     }
 }
 
+
+
 impl<T, S> Storage<T, S> for PersistentStorage<T, S>
 where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> Result<u64, StorageErr> {
-        let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize log entry");
-        let offset = self
-            .commitlog
-            .append_msg(entry_bytes)
-            .expect("Failed to append log entry");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
-        Ok(offset + 1) // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
+        match {
+            let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize log entry");
+            let offset = self
+                .commitlog
+                .append_msg(entry_bytes)
+                .expect("Failed to append log entry");
+            self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
+            Ok::<u64, Error>(offset + 1) // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
+        } {
+            Ok(res) => Ok(res),
+            Err(_) => Err(StorageErr::LogError),
+        }
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> Result<u64, StorageErr> {
-        let serialized = entries
-            .into_iter()
-            .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
-        let offset = self
-            .commitlog
-            .append(&mut MessageBuf::from_iter(serialized))
-            .expect("Falied to append log entries");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
-        Ok(offset.first() + offset.len() as u64)
+        match {
+            let serialized = entries
+                .into_iter()
+                .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
+            let offset = self
+                .commitlog
+                .append(&mut MessageBuf::from_iter(serialized))
+                .expect("Falied to append log entries");
+            self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
+            Ok::<u64, Error>(offset.first() + offset.len() as u64)
+        } {
+            Ok(res) => Ok(res),
+            Err(_) => Err(StorageErr::LogError),
+        }
     }
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> Result<u64, StorageErr> {
-        self.commitlog
+        match {
+            self.commitlog
             .truncate(from_idx)
             .expect("Failed to truncate log");
-        self.append_entries(entries)
+            self.append_entries(entries)
+        } {
+            Ok(res) => Ok(res),
+            Err(_) => Err(StorageErr::LogError),
+        }
     }
 
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
@@ -342,21 +359,27 @@ where
     }
 
     fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
-        let ballot_store = BallotStorage::with(n_prom);
-        let prom_bytes = ballot_store.as_bytes();
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'");
+        match {
+            let ballot_store = BallotStorage::with(n_prom);
+            let prom_bytes = ballot_store.as_bytes();
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(NPROM, prom_bytes)
+                    .expect("Failed to set 'NPROM'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(NPROM, prom_bytes)
+                    .expect("Failed to set 'NPROM'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'");
-        }
-        Ok(())
+        
     }
 
     fn get_decided_idx(&self) -> u64 {
@@ -384,20 +407,25 @@ where
     }
 
     fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
-        let ld_bytes = u64::as_bytes(&ld);
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'");
+        match {
+            let ld_bytes = ld.as_bytes();
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(DECIDE, ld_bytes)
+                    .expect("Failed to set 'DECIDE'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(DECIDE, ld_bytes)
+                    .expect("Failed to set 'DECIDE'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'");
-        }
-        Ok(())
     }
 
     fn get_accepted_round(&self) -> Ballot {
@@ -428,21 +456,26 @@ where
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
-        let ballot_store = BallotStorage::with(na);
-        let acc_bytes = ballot_store.as_bytes();
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(ACC, acc_bytes)
-                .expect("Failed to set 'ACC'");
+        match {
+            let ballot_store = BallotStorage::with(na);
+            let acc_bytes = ballot_store.as_bytes();
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(ACC, acc_bytes)
+                    .expect("Failed to set 'ACC'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(ACC, acc_bytes)
+                    .expect("Failed to set 'ACC'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(ACC, acc_bytes)
-                .expect("Failed to set 'ACC'");
-        }
-        Ok(())
     }
 
     fn get_compacted_idx(&self) -> u64 {
@@ -467,20 +500,25 @@ where
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
-        let trim_bytes = u64::as_bytes(&trimmed_idx);
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(TRIM, trim_bytes)
-                .expect("Failed to set 'TRIM'");
+        match {
+            let trim_bytes = trimmed_idx.as_bytes();
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(TRIM, trim_bytes)
+                    .expect("Failed to set 'TRIM'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(TRIM, trim_bytes)
+                    .expect("Failed to set 'TRIM'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(TRIM, trim_bytes)
-                .expect("Failed to set 'TRIM'");
-        }
-        Ok(())
     }
 
     fn get_stopsign(&self) -> Option<StopSignEntry> {
@@ -531,21 +569,26 @@ where
     }
 
     fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr> {
-        let ss_storage = StopSignEntryStorage::with(s);
-        let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(STOPSIGN, stopsign)
-                .expect("Failed to set 'STOPSIGN'");
+        match {
+            let ss_storage = StopSignEntryStorage::with(s);
+            let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(STOPSIGN, stopsign)
+                    .expect("Failed to set 'STOPSIGN'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(STOPSIGN, stopsign)
+                    .expect("Failed to set 'STOPSIGN'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(STOPSIGN, stopsign)
-                .expect("Failed to set 'STOPSIGN'");
-        }
-        Ok(())
     }
 
     fn get_snapshot(&self) -> Option<S> {
@@ -574,20 +617,24 @@ where
     }
 
     fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr> {
-        let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(SNAPSHOT, stopsign)
-                .expect("Failed to set 'SNAPSHOT'");
+        match { let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
+            #[cfg(feature = "rocksdb")]
+            {
+                self.rocksdb
+                    .put(SNAPSHOT, stopsign)
+                    .expect("Failed to set 'SNAPSHOT'");
+            }
+            #[cfg(feature = "sled")]
+            {
+                self.sled
+                    .insert(SNAPSHOT, stopsign)
+                    .expect("Failed to set 'SNAPSHOT'");
+            }
+            Ok::<(), Error>(())
+        } {
+            Ok(_) => Ok(()),
+            Err(_) => Err(StorageErr::LogError),
         }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(SNAPSHOT, stopsign)
-                .expect("Failed to set 'SNAPSHOT'");
-        }
-        Ok(())
     }
 
     // TODO: A way to trim the commitlog without deleting and recreating the log

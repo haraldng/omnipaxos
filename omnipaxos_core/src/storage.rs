@@ -147,8 +147,8 @@ where
 #[allow(missing_docs)]
 /// An error that describes the type of failure when writing to storage
 pub enum StorageErr {
-    AppendLog(),
-    SetState(),
+    LogError,
+    StateError,
 }
 
 #[allow(missing_docs)]
