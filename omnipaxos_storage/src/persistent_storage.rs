@@ -85,7 +85,7 @@ impl StopSignStorage {
 /// # Fields
 /// * `path`: Path to the commitlog and rocksDB store
 /// * `commitlog_options`: Configuration of the commitlog
-/// * `rocksdb_options` : Configuration of the rocksDB store, must be enabled as a feature
+/// * `rocksdb_options` : Configuration of the rocksDB store, must be enabled
 /// * `sled_options` : Configuration of the sled store, enabled by default
 pub struct PersistentStorageConfig {
     path: Option<String>,
