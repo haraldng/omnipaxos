@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         rust: [stable, nightly]
-        max-parallel: 1
     steps:
       - name: Setup rust toolchain
         uses: actions-rs/toolchain@v1
