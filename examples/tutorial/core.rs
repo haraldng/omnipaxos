@@ -58,7 +58,7 @@ fn main() {
 
     let mut seq_paxos = SequencePaxos::with(sp_config, storage);
     let write_entry = KeyValue {
-        key: "a".to_string(),
+        key: String::from("a"),
         value: 123,
     };
     seq_paxos.append(write_entry).expect("Failed to append");

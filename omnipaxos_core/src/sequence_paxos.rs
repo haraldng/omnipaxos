@@ -63,7 +63,7 @@ where
         let num_nodes = &peers.len() + 1;
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
-        let max_pid = *std::cmp::max(max_peer_pid, &config.pid) as usize;
+        let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let (state, leader, n_leader, lds) = match &config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {

@@ -28,7 +28,7 @@ const TRIM: &[u8] = b"TRIM";
 const STOPSIGN: &[u8] = b"STOPSIGN";
 const SNAPSHOT: &[u8] = b"SNAPSHOT";
 
-/// Wrapper struct that represents `Ballot` struct. Implements AsBytes and FromBytes.
+/// Wrapper struct that represents a `Ballot` type. Implements AsBytes and FromBytes.
 #[repr(packed)]
 #[derive(Clone, Copy, AsBytes, FromBytes)]
 struct BallotStorage {
@@ -47,7 +47,7 @@ impl BallotStorage {
     }
 }
 
-/// Wrapper struct that represents `StopSignEntry` struct. Implements Serialize and Deserialize.
+/// Wrapper struct that represents a `StopSignEntry` type. Implements Serialize and Deserialize.
 #[derive(Clone, Serialize, Deserialize)]
 struct StopSignEntryStorage {
     ss: StopSignStorage,
@@ -63,7 +63,7 @@ impl StopSignEntryStorage {
     }
 }
 
-/// Wrapper struct that represents `StopSign` struct. Implements Serialize and Deserialize.
+/// Wrapper struct that represents a `StopSign` type. Implements Serialize and Deserialize.
 #[derive(Clone, Serialize, Deserialize)]
 struct StopSignStorage {
     config_id: u32,
@@ -83,8 +83,8 @@ impl StopSignStorage {
 
 // Configuration for `PersistentStorage`.
 /// # Fields
-/// * `path`: Path to the commitlog and rocksDB store
-/// * `commitlog_options`: Configuration of the commitlog
+/// * `path`: Path to the Commitlog and state storage
+/// * `commitlog_options`: Configuration of the Commitlog
 /// * `rocksdb_options` : Configuration of the rocksDB store, must be enabled
 /// * `sled_options` : Configuration of the sled store, enabled by default
 pub struct PersistentStorageConfig {
@@ -96,6 +96,7 @@ pub struct PersistentStorageConfig {
     sled_options: Config,
 }
 
+#[allow(missing_docs)]
 impl PersistentStorageConfig {
     pub fn get_path(&self) -> Option<&String> {
         self.path.as_ref()
@@ -196,7 +197,7 @@ where
 }
 
 impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
-    // Creates or opens an existing storage
+    /// Creates or opens an existing storage
     pub fn open(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config.path.expect("No path found in config");
 
@@ -221,7 +222,7 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
         }
     }
 
-    // Creates a new storage instance, panics if a commitlog or rocksDB/sled instance exists in the given path
+    /// Creates a new storage instance, panics if a commitlog or rocksDB/sled instance exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config
             .path
@@ -288,7 +289,7 @@ where
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
-            let msg = iter.next().expect("Failed to get value from iterator");
+            let msg = iter.next().expect("Failed to get log entry from iterator");
             entries.push(
                 bincode::deserialize(msg.payload()).expect("Failed to deserialize log entries"),
             );

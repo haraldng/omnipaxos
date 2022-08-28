@@ -123,7 +123,7 @@ fn read_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &format!("ss_{READ_PATH}"));
+        StorageType::<Value, LatestValue>::with(cfg.storage_type, &format!("stopped_{READ_PATH}"));
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -202,7 +202,7 @@ fn read_entries_test() {
     // create stopped storage and SequencePaxos to test reading StopSign.
     let mut stopped_storage = StorageType::<Value, LatestValue>::with(
         cfg.storage_type,
-        &format!("ss_{READ_ENTRIES_PATH}"),
+        &format!("stopped_{READ_ENTRIES_PATH}"),
     );
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
@@ -320,8 +320,8 @@ fn verify_entries(
     for (idx, entry) in read_entries.iter().enumerate() {
         let log_idx = idx as u64 + offset;
         match entry {
-            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]), //todo removed *
-            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]), //todo removed *
+            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
+            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
             e => panic!(
                 "{}",
                 format!(

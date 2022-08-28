@@ -89,9 +89,8 @@ impl StorageTypeSelector {
     }
 }
 
-/// An enum which can either be 'PersistentStorage' or
-/// 'MemoryStorage' struct, the type depends on the
-/// 'StorageTypeSelector' enum
+/// An enum which can either be a 'PersistentStorage' or 'MemoryStorage', the type depends on the
+/// 'StorageTypeSelector' enum. Used for testing purposes with SequencePaxos and BallotLeaderElection.
 pub enum StorageType<T, S>
 where
     T: Entry,
@@ -262,7 +261,7 @@ where
 
 pub struct TestSystem {
     pub kompact_system: Option<KompactSystem>,
-    pub ble_paxos_nodes: HashMap<
+    ble_paxos_nodes: HashMap<
         u64,
         (
             Arc<Component<BLEComponent>>,
@@ -277,7 +276,7 @@ impl TestSystem {
         ble_hb_delay: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
-        test_name: &str,
+        storage_path: &str,
     ) -> Self {
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
@@ -315,10 +314,8 @@ impl TestSystem {
             let mut sp_config = SequencePaxosConfig::default();
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
-
             let storage: StorageType<Value, LatestValue> =
-                StorageType::with(storage_type, &format!("{test_name}{pid}"));
-
+                StorageType::with(storage_type, &format!("{storage_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
             });
@@ -401,18 +398,13 @@ impl TestSystem {
         num_nodes: usize,
         ble_hb_delay: u64,
         storage_type: StorageTypeSelector,
-        test_name: &str,
+        storage_path: &str,
     ) {
-        let peers: Vec<u64> = (1..=num_nodes as u64)
-            .collect::<Vec<u64>>()
-            .iter()
-            .filter(|id| id != &&pid)
-            .cloned()
-            .collect();
+        let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
-        //ble
+        // ble
         let mut ble_config = BLEConfig::default();
         ble_config.set_pid(pid);
         ble_config.set_peers(peers.clone());
@@ -423,12 +415,12 @@ impl TestSystem {
             .expect("No KompactSystem found!")
             .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
 
-        //sp
+        // sp
         let mut sp_config = SequencePaxosConfig::default();
         sp_config.set_pid(pid);
         sp_config.set_peers(peers);
         let storage: StorageType<Value, LatestValue> =
-            StorageType::with(storage_type, &format!("{test_name}{pid}"));
+            StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
@@ -442,15 +434,21 @@ impl TestSystem {
         ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 
+        // Insert the new node into vector of peers.
         ble_refs.insert(pid, ble_comp.actor_ref());
         omni_refs.insert(pid, omni_replica.actor_ref());
-        for (_, (other_pid, (ble, omni))) in self.ble_paxos_nodes.iter().enumerate() {
+
+        for (other_pid, (ble, omni)) in self.ble_paxos_nodes.iter() {
+            // Insert each peer node into HashMap as peers to the new node
             ble_refs.insert(*other_pid, ble.actor_ref());
             omni_refs.insert(*other_pid, omni.actor_ref());
+
+            // Also insert the new node as a peer into their Hashmaps
             ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
             omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
         }
 
+        // Set the peers of the new node, add it to HashMaps of nodes
         ble_comp.on_definition(|b| b.set_peers(ble_refs));
         omni_replica.on_definition(|o| o.set_peers(omni_refs));
         self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));

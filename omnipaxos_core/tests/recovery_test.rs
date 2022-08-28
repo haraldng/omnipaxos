@@ -140,7 +140,7 @@ fn follower_fail_leader_propose_test() {
         .expect("No followers found!");
 
     kill_and_recover_node(&mut sys, &cfg, follower);
-    check_last_proposals(leader, leader, &sys, &cfg);
+    check_last_proposals(leader, follower, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
 
@@ -193,7 +193,7 @@ fn follower_fail_follower_propose_test() {
         .expect("No followers found!");
 
     kill_and_recover_node(&mut sys, &cfg, follower);
-    check_last_proposals(leader, leader, &sys, &cfg);
+    check_last_proposals(follower, follower, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
 

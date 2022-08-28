@@ -61,15 +61,21 @@ let sp_config = SequencePaxosConfig::with_hocon(cfg);
 ```
 
 ## Fail-recovery
-To support Fail-recovery, we have to make sure that our storage implementation persisted the values. Upon recovery, we have to make sure that our ``SequencePaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `SequencePaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md), which gurantee persistency.
+To support Fail-recovery, we have to make sure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``SequencePaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `SequencePaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md), which gurantee persistency.
 
 ```rust,edition2018,no_run,noplaypen
 /* Re-creating our node after a crash... */
-let my_path = "/my_old_path/";
-let persist_conf = PersistentStorageConfig::default();
-persist_conf.set_path(my_path); // set the path to the persistent storage
 
-let recovered_storage = PersistentStorage::open(persist_conf); // The recovered persistent state.
+// Configuration from previous storage
+let my_path = "/my_old_path/";
+let my_log_opts = LogOptions::new(my_path);
+let persist_conf = PersistentStorageConfig::default();
+
+persist_conf.set_path(my_path); // set the path to the persistent storage
+my_config.set_commitlog_options(my_logopts);
+
+// Re-create storage with previous state, then create `SequencePaxos`
+let recovered_storage = PersistentStorage::open(persist_conf); 
 let mut recovered_paxos = SequencePaxos::with(sp_config, recovered_storage);
 recovered_paxos.fail_recovery();
 ```

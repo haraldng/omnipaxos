@@ -91,7 +91,7 @@ An in-memory storage implementation, `MemoryStorage` offers fast reads and write
 ```
 
 ## PersistentStorage
-`PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature `rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes path and storage options as arguments. 
+`PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature `rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments. 
 ```rust,edition2018,no_run,noplaypen
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
@@ -108,7 +108,7 @@ let my_log_opts = LogOptions::new(my_path);
 let mut my_sled_opts = Config::new();
 my_sled_opts.path(self, my_path);
 
-// generate default configuration and set user-defined configuration
+// generate default configuration and set user-defined options
 let mut my_config = PersistentStorageConfig::default();
 my_config.set_path(my_path);
 my_config.set_commitlog_options(my_logopts);
@@ -126,9 +126,9 @@ my_sled_opts.new(true);
 let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
 ```
 ## Importing `omnipaxos_storage`
-To use the package, we need to add `omnipaxos_storage` to the dependencies in the cargo file. If a user wish to configure the options for the commitlog or state storage, then the user must also add `commitlog` and either `rocksdb` or `sled` as dependencies. Otherwise the default constructor for `PersistentStorageConfig` lets the user create default options for the commitlog and the state storage without importing. 
+To use the package, we need to add `omnipaxos_storage` to the dependencies in the cargo file. If a user wishes to configure the options for the commit log, then the user must add `commitlog` as a dependency. For configuring the state storage, either `rocksdb` or `sled` must also be added. Otherwise the default constructor for `PersistentStorageConfig` lets the user create default options for the commit log and the state storage without importing any dependencies.
 
 ```rust,edition2018,no_run,noplaypen
 [dependencies]
-omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos" } 
+omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-features = true } 
 ```
