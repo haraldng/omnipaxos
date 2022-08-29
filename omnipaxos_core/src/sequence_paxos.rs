@@ -1283,7 +1283,7 @@ where
                 self.latest_accepted_meta = Some((accsync.n, cached_idx));
             }
             if let Some(cache) = accsync.cache {
-                self.cache  = serde_json::from_str(&cache).unwrap();
+                self.cache = serde_json::from_str(&cache).unwrap();
             }
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
