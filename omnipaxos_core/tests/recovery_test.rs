@@ -197,7 +197,7 @@ fn follower_fail_follower_propose_test() {
 
     kill_and_recover_node(&mut sys, &cfg, follower, FOLLWER_FAIL_FOLLOWER_PROPOSE);
     check_last_proposals(follower, follower, &sys, &cfg);
-    
+
     thread::sleep(SLEEP_TIMEOUT);
 
     let (_, recovery_px) = sys
