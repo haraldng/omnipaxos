@@ -5,18 +5,20 @@ use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::{ballot_leader_election::Ballot, storage::Snapshot, util::LogEntry};
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{LatestValue, TestConfig, TestSystem, Value};
+use utils::{LatestValue, TestConfig, TestSystem, Value, clear_storage};
 
 const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 const LEADER_FAIL_FOLLOWER_PROPOSE: &str = "/leader_follower/";
 const LEADER_FAIL_LEADER_PROPOSE: &str = "/leader_leader/";
 const FOLLOWER_FAIL_LEADER_PROPOSE: &str = "/follower_leader/";
-const FOLLWER_FAIL_FOLLOWER_PROPOSE: &str = "/follower_follower/";
+const FOLLOWER_FAIL_FOLLOWER_PROPOSE: &str = "/follower_follower/";
 
 #[test]
 #[serial]
 fn leader_fail_follower_propose_test() {
+    clear_storage();
+    
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     let mut sys = TestSystem::with(
@@ -70,6 +72,8 @@ fn leader_fail_follower_propose_test() {
 #[test]
 #[serial]
 fn leader_fail_leader_propose_test() {
+    clear_storage();
+
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     let mut sys = TestSystem::with(
@@ -119,6 +123,8 @@ fn leader_fail_leader_propose_test() {
 #[test]
 #[serial]
 fn follower_fail_leader_propose_test() {
+    clear_storage();
+
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     let mut sys = TestSystem::with(
@@ -172,6 +178,8 @@ fn follower_fail_leader_propose_test() {
 #[test]
 #[serial]
 fn follower_fail_follower_propose_test() {
+    clear_storage();
+
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     let mut sys = TestSystem::with(
@@ -179,7 +187,7 @@ fn follower_fail_follower_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         PERSISTENT_STORAGE,
-        FOLLWER_FAIL_FOLLOWER_PROPOSE,
+        FOLLOWER_FAIL_FOLLOWER_PROPOSE,
     );
 
     sys.start_all_nodes();
@@ -195,7 +203,7 @@ fn follower_fail_follower_propose_test() {
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, follower, FOLLWER_FAIL_FOLLOWER_PROPOSE);
+    kill_and_recover_node(&mut sys, &cfg, follower, FOLLOWER_FAIL_FOLLOWER_PROPOSE);
     check_last_proposals(follower, follower, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
