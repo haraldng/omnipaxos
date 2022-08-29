@@ -223,7 +223,9 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
             },
             #[cfg(feature = "sled")]
             sled: {
-                let opts = Config::path(storage_config.sled_options, format!("{path}{DATABASE}"));
+                let opts = storage_config
+                    .sled_options
+                    .path(format!("{path}{DATABASE}"));
                 Config::open(&opts).expect("Failed to create sled database")
             },
             t: PhantomData::default(),

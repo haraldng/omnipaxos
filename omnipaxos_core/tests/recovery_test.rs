@@ -396,9 +396,10 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
     }
 }
 
-/// Kill and recover node given its 'pid'.
+/// Kill and recover node given its 'pid' after some time.
 pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, storage_path: &str) {
     sys.kill_node(pid);
+    thread::sleep(SLEEP_TIMEOUT);
 
     sys.create_node(
         pid,
