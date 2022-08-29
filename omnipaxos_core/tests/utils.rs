@@ -209,7 +209,10 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) -> Result<(), StorageErr> {
+    fn set_stopsign(
+        &mut self,
+        s: omnipaxos_core::storage::StopSignEntry,
+    ) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),

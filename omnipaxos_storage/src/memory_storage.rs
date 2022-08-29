@@ -32,7 +32,7 @@ where
 {
     fn append_entry(&mut self, entry: T) -> Result<u64, StorageErr> {
         self.log.push(entry);
-        Ok(self.get_log_len()) 
+        Ok(self.get_log_len())
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> Result<u64, StorageErr> {

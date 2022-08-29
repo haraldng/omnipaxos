@@ -86,8 +86,12 @@ fn read_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_PATH);
-    storage.append_entries(log.clone()).expect("Failed to append log entries");
-    storage.set_decided_idx(decided_idx).expect("Failed to append decided index");
+    storage
+        .append_entries(log.clone())
+        .expect("Failed to append log entries");
+    storage
+        .set_decided_idx(decided_idx)
+        .expect("Failed to append decided index");
 
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
@@ -126,9 +130,15 @@ fn read_test() {
         StorageType::<Value, LatestValue>::with(cfg.storage_type, &format!("stopped_{READ_PATH}"));
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone()).expect("Failed to append log entries");
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true)).expect("Failed to set stopsign");
-    stopped_storage.set_decided_idx(log_len).expect("Failed to set decided index");
+    stopped_storage
+        .append_entries(log.clone())
+        .expect("Failed to append log entries");
+    stopped_storage
+        .set_stopsign(StopSignEntry::with(ss.clone(), true))
+        .expect("Failed to set stopsign");
+    stopped_storage
+        .set_decided_idx(log_len)
+        .expect("Failed to set decided index");
 
     let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
     stopped_op
@@ -157,8 +167,12 @@ fn read_entries_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_ENTRIES_PATH);
-    storage.append_entries(log.clone()).expect("Failed to append log entries");
-    storage.set_decided_idx(decided_idx).expect("Failed to set decided index");
+    storage
+        .append_entries(log.clone())
+        .expect("Failed to append log entries");
+    storage
+        .set_decided_idx(decided_idx)
+        .expect("Failed to set decided index");
 
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
@@ -206,9 +220,15 @@ fn read_entries_test() {
     );
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone()).expect("Failed to append log entries");
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true)).expect("Failed to set stopsign");
-    stopped_storage.set_decided_idx(log_len).expect("Failed to set decided index");
+    stopped_storage
+        .append_entries(log.clone())
+        .expect("Failed to append log entries");
+    stopped_storage
+        .set_stopsign(StopSignEntry::with(ss.clone(), true))
+        .expect("Failed to set stopsign");
+    stopped_storage
+        .set_decided_idx(log_len)
+        .expect("Failed to set decided index");
 
     let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
     stopped_op

@@ -10,7 +10,7 @@ use omnipaxos_core::{
     storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage, StorageErr},
 };
 use serde::{Deserialize, Serialize};
-use std::{iter::FromIterator, marker::PhantomData, fmt::Error};
+use std::{fmt::Error, iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
 
 #[cfg(feature = "rocksdb")]
@@ -251,8 +251,6 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     }
 }
 
-
-
 impl<T, S> Storage<T, S> for PersistentStorage<T, S>
 where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
@@ -293,8 +291,8 @@ where
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> Result<u64, StorageErr> {
         match {
             self.commitlog
-            .truncate(from_idx)
-            .expect("Failed to truncate log");
+                .truncate(from_idx)
+                .expect("Failed to truncate log");
             self.append_entries(entries)
         } {
             Ok(res) => Ok(res),
@@ -377,9 +375,8 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
-        
     }
 
     fn get_decided_idx(&self) -> u64 {
@@ -424,7 +421,7 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
     }
 
@@ -474,7 +471,7 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
     }
 
@@ -517,7 +514,7 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
     }
 
@@ -571,7 +568,8 @@ where
     fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr> {
         match {
             let ss_storage = StopSignEntryStorage::with(s);
-            let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
+            let stopsign =
+                bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
             #[cfg(feature = "rocksdb")]
             {
                 self.rocksdb
@@ -587,7 +585,7 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
     }
 
@@ -617,7 +615,8 @@ where
     }
 
     fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr> {
-        match { let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
+        match {
+            let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
             #[cfg(feature = "rocksdb")]
             {
                 self.rocksdb
@@ -633,7 +632,7 @@ where
             Ok::<(), Error>(())
         } {
             Ok(_) => Ok(()),
-            Err(_) => Err(StorageErr::LogError),
+            Err(_) => Err(StorageErr::StateError),
         }
     }
 
