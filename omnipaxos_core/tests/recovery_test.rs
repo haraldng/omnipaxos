@@ -5,7 +5,7 @@ use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::{ballot_leader_election::Ballot, storage::Snapshot, util::LogEntry};
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{LatestValue, TestConfig, TestSystem, Value, clear_storage};
+use utils::{clear_storage, LatestValue, TestConfig, TestSystem, Value};
 
 const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -18,7 +18,7 @@ const FOLLOWER_FAIL_FOLLOWER_PROPOSE: &str = "/follower_follower/";
 #[serial]
 fn leader_fail_follower_propose_test() {
     clear_storage();
-    
+
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
 
     let mut sys = TestSystem::with(
