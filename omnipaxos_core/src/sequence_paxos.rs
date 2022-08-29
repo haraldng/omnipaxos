@@ -1,7 +1,7 @@
 use super::{
     ballot_leader_election::Ballot,
     messages::*,
-    storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage, CachedState},
+    storage::{CachedState, Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
         defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData,
         SnapshottedEntry, SyncItem,
@@ -114,8 +114,8 @@ where
                 })
             },
         };
-        paxos
-            .storage.set_promise(n_leader);
+        paxos.storage.set_promise(n_leader);
+        paxos.cache.set_promise(n_leader);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -229,17 +229,9 @@ where
         let compacted_idx = self.storage.get_compacted_idx();
         match c {
             Compaction::Trim(Some(idx)) if idx <= decided_idx && idx > compacted_idx => {
-                let old_compacted_idx = self.storage.get_compacted_idx();
                 self.storage.set_compacted_idx(idx);
-                match self.storage.trim(idx - compacted_idx) {
-                    Ok(_) => (),
-                    Err(_) => {
-                        self.storage
-                            .set_compacted_idx(old_compacted_idx)
-                            .expect("Failed to restore compacted index");
-                        panic!();
-                    }
-                }
+                self.cache.set_compacted_idx(idx);
+                self.storage.trim(idx - compacted_idx);
             }
             Compaction::Snapshot(idx) if idx <= decided_idx && idx > compacted_idx => {
                 let s = self.create_snapshot(idx);
@@ -626,7 +618,8 @@ where
                 self.leader_state.majority,
             );
             self.leader = leader_pid;
-            self.storage.set_promise(n); //todo
+            self.storage.set_promise(n);
+            self.cache.set_promise(n);
             /* insert my promise */
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_idx();
@@ -952,9 +945,11 @@ where
             }
             self.storage.set_snapshot(snapshot);
             self.storage.set_compacted_idx(compact_idx);
+            self.cache.set_compacted_idx(compact_idx);
         } else if compact_idx == 0 {
             self.storage.set_snapshot(snapshot);
             self.storage.set_compacted_idx(compact_idx);
+            self.cache.set_compacted_idx(compact_idx);
         }
     }
 
@@ -977,6 +972,7 @@ where
             snapshot.merge(delta);
             self.set_snapshot(compacted_idx, snapshot);
             self.storage.set_accepted_round(self.leader_state.n_leader);
+            self.cache.set_accepted_round(self.leader_state.n_leader);
         }
     }
 
@@ -1208,6 +1204,7 @@ where
         if self.storage.get_promise() <= prep.n {
             self.leader = from;
             self.storage.set_promise(prep.n);
+            self.cache.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_log_len();
@@ -1296,6 +1293,7 @@ where
                 _ => unimplemented!(),
             };
             self.storage.set_accepted_round(accsync.n);
+            self.cache.set_accepted_round(accsync.n);
             self.state = (Role::Follower, Phase::Accept);
             #[cfg(feature = "latest_accepted")]
             {
@@ -1307,6 +1305,7 @@ where
 
             if let Some(idx) = accsync.decide_idx {
                 self.storage.set_decided_idx(idx);
+                self.cache.set_decided_idx(idx);
             }
             match accsync.stopsign {
                 Some(ss) => {
@@ -1345,6 +1344,7 @@ where
         debug!(self.logger, "Incoming message First Accept");
         if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
             self.storage.set_accepted_round(f.n);
+            self.cache.set_accepted_round(f.n);
             self.state.1 = Phase::Accept;
             self.forward_pending_proposals();
         }
@@ -1357,6 +1357,7 @@ where
             // handle decide
             if acc.ld > self.storage.get_decided_idx() {
                 self.storage.set_decided_idx(acc.ld);
+                self.cache.set_decided_idx(acc.ld);
             }
         }
     }
@@ -1376,6 +1377,7 @@ where
     fn handle_decide(&mut self, dec: Decide) {
         if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
             self.storage.set_decided_idx(dec.ld);
+            self.cache.set_decided_idx(dec.ld);
         }
     }
 
@@ -1388,6 +1390,7 @@ where
             ss.decided = true;
             self.storage.set_stopsign(ss);
             self.storage.set_decided_idx(self.storage.get_log_len() + 1);
+            self.cache.set_decided_idx(self.storage.get_log_len() + 1);
         }
     }
 

@@ -78,9 +78,9 @@ where
     //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
-/// CachedState is an in-memory state storage for SequencePaxos, the stuct 
-/// caches any new state that is written to persistent storage and 
-/// can be used recover state when an atomic commit fails. 
+/// CachedState is an in-memory state storage for SequencePaxos, the stuct
+/// caches any new state that is written to persistent storage and
+/// can be used recover state when an atomic commit fails.
 // todo Implement caching, atomic commit and recovery in SequencePaxos
 #[derive(Clone)]
 pub(crate) struct CachedState {
@@ -95,39 +95,39 @@ pub(crate) struct CachedState {
 }
 
 impl CachedState {
-    fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
+    pub fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
         self.n_prom = n_prom;
         Ok(())
     }
 
-    fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
+    pub fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
         self.ld = ld;
         Ok(())
     }
 
-    fn get_decided_idx(&self) -> u64 {
+    pub fn get_decided_idx(&self) -> u64 {
         self.ld
     }
 
-    fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
+    pub fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
         self.acc_round = na;
         Ok(())
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    pub fn get_accepted_round(&self) -> Ballot {
         self.acc_round
     }
 
-    fn get_promise(&self) -> Ballot {
+    pub fn get_promise(&self) -> Ballot {
         self.n_prom
     }
 
-    fn set_compacted_idx(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
+    pub fn set_compacted_idx(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
         self.trimmed_idx = trimmed_idx;
         Ok(())
     }
 
-    fn get_compacted_idx(&self) -> u64 {
+    pub fn get_compacted_idx(&self) -> u64 {
         self.trimmed_idx
     }
 }
