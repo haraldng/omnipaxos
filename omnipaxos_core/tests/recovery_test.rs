@@ -8,8 +8,11 @@ use std::{thread, time::Duration};
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
 const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
-const RECOVERY_PATH: &str = "/recovery_test/";
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
+const LEADER_FAIL_FOLLOWER_PROPOSE: &str = "/leader_follower/";
+const LEADER_FAIL_LEADER_PROPOSE: &str = "/leader_leader/";
+const FOLLOWER_FAIL_LEADER_PROPOSE: &str = "/follower_leader/";
+const FOLLWER_FAIL_FOLLOWER_PROPOSE: &str = "/follower_follower/";
 
 #[test]
 #[serial]
@@ -21,7 +24,7 @@ fn leader_fail_follower_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         PERSISTENT_STORAGE,
-        RECOVERY_PATH,
+        LEADER_FAIL_FOLLOWER_PROPOSE,
     );
 
     sys.start_all_nodes();
@@ -37,7 +40,7 @@ fn leader_fail_follower_propose_test() {
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, leader);
+    kill_and_recover_node(&mut sys, &cfg, leader, LEADER_FAIL_FOLLOWER_PROPOSE);
     check_last_proposals(follower, leader, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
@@ -74,7 +77,7 @@ fn leader_fail_leader_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         PERSISTENT_STORAGE,
-        RECOVERY_PATH,
+        LEADER_FAIL_LEADER_PROPOSE,
     );
 
     sys.start_all_nodes();
@@ -86,7 +89,7 @@ fn leader_fail_leader_propose_test() {
     check_initial_proposals(&sys, &cfg);
     let leader = get_elected_leader(&sys, cfg.wait_timeout);
 
-    kill_and_recover_node(&mut sys, &cfg, leader);
+    kill_and_recover_node(&mut sys, &cfg, leader, LEADER_FAIL_LEADER_PROPOSE);
     check_last_proposals(leader, leader, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
@@ -123,7 +126,7 @@ fn follower_fail_leader_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         PERSISTENT_STORAGE,
-        RECOVERY_PATH,
+        FOLLOWER_FAIL_LEADER_PROPOSE,
     );
 
     sys.start_all_nodes();
@@ -139,7 +142,7 @@ fn follower_fail_leader_propose_test() {
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, follower);
+    kill_and_recover_node(&mut sys, &cfg, follower, FOLLOWER_FAIL_LEADER_PROPOSE);
     check_last_proposals(leader, follower, &sys, &cfg);
 
     thread::sleep(SLEEP_TIMEOUT);
@@ -176,7 +179,7 @@ fn follower_fail_follower_propose_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         PERSISTENT_STORAGE,
-        RECOVERY_PATH,
+        FOLLWER_FAIL_FOLLOWER_PROPOSE,
     );
 
     sys.start_all_nodes();
@@ -192,9 +195,9 @@ fn follower_fail_follower_propose_test() {
         .find(|x| *x != leader)
         .expect("No followers found!");
 
-    kill_and_recover_node(&mut sys, &cfg, follower);
+    kill_and_recover_node(&mut sys, &cfg, follower, FOLLWER_FAIL_FOLLOWER_PROPOSE);
     check_last_proposals(follower, follower, &sys, &cfg);
-
+    
     thread::sleep(SLEEP_TIMEOUT);
 
     let (_, recovery_px) = sys
@@ -386,7 +389,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
 }
 
 /// Kill and recover node given its 'pid'.
-pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
+pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64, storage_path: &str) {
     sys.kill_node(pid);
 
     sys.create_node(
@@ -394,7 +397,7 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         cfg.num_nodes,
         cfg.ble_hb_delay,
         PERSISTENT_STORAGE,
-        RECOVERY_PATH,
+        storage_path,
     );
     sys.start_node(pid);
     let (_, px) = sys
