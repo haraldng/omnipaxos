@@ -84,9 +84,9 @@ impl StopSignStorage {
 // Configuration for `PersistentStorage`.
 /// # Fields
 /// * `path`: Path to the Commitlog and state storage
-/// * `commitlog_options`: Configuration of the Commitlog
-/// * `rocksdb_options` : Configuration of the rocksDB store, must be enabled
-/// * `sled_options` : Configuration of the sled store, enabled by default
+/// * `commitlog_options`: Options for the Commitlog
+/// * `rocksdb_options` : Options for the rocksDB store, must be enabled
+/// * `sled_options` : Options for the sled store, enabled by default
 pub struct PersistentStorageConfig {
     path: Option<String>,
     commitlog_options: LogOptions,
@@ -96,45 +96,53 @@ pub struct PersistentStorageConfig {
     sled_options: Config,
 }
 
-#[allow(missing_docs)]
 impl PersistentStorageConfig {
+    /// Returns the current path to the persistent storage.
     pub fn get_path(&self) -> Option<&String> {
         self.path.as_ref()
     }
 
+    /// Sets the path to the persistent storage.
     pub fn set_path(&mut self, path: String) {
         self.path = Some(path);
     }
 
+    /// Returns the options for the Commitlog.
     pub fn get_commitlog_options(&self) -> LogOptions {
         self.commitlog_options.clone()
     }
 
+    /// Sets the options for the Commitlog.
     pub fn set_commitlog_options(&mut self, commitlog_opts: LogOptions) {
         self.commitlog_options = commitlog_opts;
     }
 
     #[cfg(feature = "rocksdb")]
+    /// Returns the options for the rocksDB store.
     pub fn get_database_options(&self) -> Options {
         self.rocksdb_options.clone()
     }
 
     #[cfg(feature = "rocksdb")]
+    /// Sets the options for the rocksDB store.
     pub fn set_database_options(&mut self, opts: Options) {
         self.rocksdb_options = opts;
     }
 
     #[cfg(feature = "sled")]
+    /// Returns the options for the sled store.
     pub fn get_database_options(&self) -> Config {
         self.sled_options.clone()
     }
 
     #[cfg(feature = "sled")]
+    /// Sets the options for the sled store.
     pub fn set_database_options(&mut self, opts: Config) {
         self.sled_options = opts;
     }
 
     #[cfg(feature = "rocksdb")]
+    /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and rocksDB
     pub fn with(path: String, commitlog_options: LogOptions, rocksdb_options: Options) -> Self {
         Self {
             path: Some(path),
@@ -144,6 +152,7 @@ impl PersistentStorageConfig {
     }
 
     #[cfg(feature = "sled")]
+    /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and sled
     pub fn with(path: String, commitlog_options: LogOptions, sled_options: Config) -> Self {
         Self {
             path: Some(path),

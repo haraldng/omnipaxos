@@ -1,6 +1,13 @@
 # Storage
 You are free to use any storage implementation with `SequencePaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation that work out of the box: `MemoryStorage` **and** `PersistentStorage`.
 
+## Importing `omnipaxos_storage`
+To use the provided storage implementations, we need to add `omnipaxos_storage` to the dependencies in the cargo file.
+```rust,edition2018,no_run,noplaypen
+[dependencies]
+omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-features = true } 
+```
+
 **If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
 
 ## MemoryStorage
@@ -124,11 +131,4 @@ my_sled_opts.new(true);
 
 // create configuration with given arguments
 let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
-```
-## Importing `omnipaxos_storage`
-To use the package, we need to add `omnipaxos_storage` to the dependencies in the cargo file. If a user wishes to configure the options for the commit log, then the user must add `commitlog` as a dependency. For configuring the state storage, either `rocksdb` or `sled` must also be added. Otherwise the default constructor for `PersistentStorageConfig` lets the user create default options for the commit log and the state storage without importing any dependencies.
-
-```rust,edition2018,no_run,noplaypen
-[dependencies]
-omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-features = true } 
 ```

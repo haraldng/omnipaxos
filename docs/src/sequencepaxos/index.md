@@ -61,7 +61,7 @@ let sp_config = SequencePaxosConfig::with_hocon(cfg);
 ```
 
 ## Fail-recovery
-To support Fail-recovery, we have to make sure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``SequencePaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `SequencePaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md), which gurantee persistency.
+To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``SequencePaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `SequencePaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md#persistentstorage).
 
 ```rust,edition2018,no_run,noplaypen
 /* Re-creating our node after a crash... */
