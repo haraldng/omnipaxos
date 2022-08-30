@@ -32,7 +32,7 @@ fn reconfig_test() {
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, ()))
+            x.add_ask(Ask::new(kprom, Value(i)))
         });
         futures.push(kfuture);
     }
@@ -50,7 +50,7 @@ fn reconfig_test() {
     let reconfig_f = px.on_definition(|x| {
         let (kprom, kfuture) = promise::<Value>();
         x.paxos.reconfigure(rc).expect("Failed to reconfigure");
-        x.add_ask(Ask::new(kprom, ()));
+        x.add_ask(Ask::new(kprom, Value(SS_METADATA as u64)));
         kfuture
     });
 

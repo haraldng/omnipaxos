@@ -624,7 +624,7 @@ pub mod omnireplica {
         pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
         pub paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
-        ask_vector: LinkedList<Ask<(), Value>>,
+        ask_vector: LinkedList<Ask<Value, Value>>,
         decided_idx: u64,
     }
 
@@ -666,7 +666,7 @@ pub mod omnireplica {
             }
         }
 
-        pub fn add_ask(&mut self, ask: Ask<(), Value>) {
+        pub fn add_ask(&mut self, ask: Ask<Value, Value>) {
             self.ask_vector.push_back(ask);
         }
 
