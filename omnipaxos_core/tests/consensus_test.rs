@@ -32,7 +32,7 @@ fn consensus_test() {
         vec_proposals.push(Value(i));
         px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, Value(i)))
+            x.add_ask(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
     }

@@ -335,7 +335,7 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
         let (kprom, kfuture) = promise::<Value>();
         px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::<Value, Value>::new(kprom, Value(i)));
+            x.add_ask(Ask::new(kprom, ()));
         });
         proposal_futures.push(kfuture);
     }
@@ -358,14 +358,15 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .get(&recover)
         .expect("No SequencePaxos component found");
 
-    let mut futures: Vec<KFuture<Value>> = vec![];
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        recover_px.on_definition(|x| {
-            x.add_ask(Ask::<Value, Value>::new(kprom, Value(i)));
-        });
-        futures.push(kfuture);
-    }
+    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
+        .map(|_| {
+            let (kprom, kfuture) = promise::<Value>();
+            recover_px.on_definition(|x| {
+                x.add_ask(Ask::new(kprom, ()));
+            });
+            kfuture
+        })
+        .collect();
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         proposer_px.on_definition(|x| {
@@ -382,6 +383,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
 /// Kill and recover node given its 'pid' after some time.
 pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     sys.kill_node(pid);
+    thread::sleep(SLEEP_TIMEOUT);
 
     let storage_path = sys.temp_dir_path.clone();
     sys.create_node(
