@@ -9,8 +9,6 @@ use serial_test::serial;
 #[cfg(feature = "hocon_config")]
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 
-const RECONFIG_PATH: &str = "/reconfig_test/";
-
 #[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
@@ -23,7 +21,6 @@ fn reconfig_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        RECONFIG_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();

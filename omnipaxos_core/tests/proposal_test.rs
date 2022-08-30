@@ -6,8 +6,6 @@ use rand::Rng;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
 
-const PROPOSAL_PATH: &str = "/proposal_test/";
-
 /// Verifies if the follower nodes forwards the proposal message to a leader
 /// so it can get decided.
 #[test]
@@ -20,7 +18,6 @@ fn forward_proposal_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        PROPOSAL_PATH,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();

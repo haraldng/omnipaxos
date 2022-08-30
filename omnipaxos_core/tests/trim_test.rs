@@ -6,8 +6,6 @@ use std::thread;
 use utils::{TestConfig, TestSystem, Value};
 
 const GC_INDEX_INCREMENT: u64 = 10;
-const TRIM_PATH: &str = "/trim_test/";
-const DOUBLE_TRIM_PATH: &str = "/double_trim_test/";
 
 /// Test Garbage Collection.
 /// At the end the log is retrieved from each replica and verified
@@ -22,7 +20,6 @@ fn trim_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        TRIM_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
@@ -85,7 +82,6 @@ fn double_trim_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        DOUBLE_TRIM_PATH,
     );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();

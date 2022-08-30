@@ -5,8 +5,6 @@ use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem};
 
-const BLE_PATH: &str = "/ble_test/";
-
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.
 /// After each election, the leader node is killed and the process repeats
@@ -21,7 +19,6 @@ fn ble_test() {
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
-        BLE_PATH,
     );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();

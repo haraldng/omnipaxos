@@ -16,13 +16,13 @@ use omnipaxos_storage::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
+use tempfile::TempDir;
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
-const STORAGE: &str = "../omnipaxos_storage/storage/";
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
@@ -105,10 +105,9 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
+    pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
                 let my_sledopts = Config::new();
                 let persist_conf =
@@ -260,6 +259,7 @@ where
 }
 
 pub struct TestSystem {
+    pub temp_dir_path: String,
     pub kompact_system: Option<KompactSystem>,
     ble_paxos_nodes: HashMap<
         u64,
@@ -276,8 +276,9 @@ impl TestSystem {
         ble_hb_delay: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
-        storage_path: &str,
     ) -> Self {
+        let temp_dir_path = create_temp_dir();
+
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
         conf.set_config_value(&system::THREADS, num_threads);
@@ -315,7 +316,7 @@ impl TestSystem {
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
             let storage: StorageType<Value, LatestValue> =
-                StorageType::with(storage_type, &format!("{storage_path}{pid}"));
+                StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
             });
@@ -339,6 +340,7 @@ impl TestSystem {
         Self {
             kompact_system: Some(system),
             ble_paxos_nodes,
+            temp_dir_path,
         }
     }
 
@@ -493,12 +495,6 @@ impl TestSystem {
         } else {
             conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
         };
-    }
-}
-
-impl Drop for TestSystem {
-    fn drop(&mut self) {
-        clear_storage();
     }
 }
 
@@ -794,6 +790,9 @@ fn stopsign_meta_to_value(ss: &StopSign) -> Value {
     Value(*v as u64)
 }
 
-pub fn clear_storage() {
-    let _ = std::fs::remove_dir_all(STORAGE.to_string());
+/// Create a temporary directory in /tmp/
+pub fn create_temp_dir() -> String {
+    let dir = TempDir::new().expect("Failed to create temporary directory");
+    let dir_path = dir.path().to_path_buf();
+    dir_path.to_string_lossy().to_string()
 }
