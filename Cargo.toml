@@ -2,6 +2,7 @@
 members = [
     "omnipaxos_core",
     "omnipaxos_runtime",
+    "omnipaxos_storage",
     "examples"
 ]
 

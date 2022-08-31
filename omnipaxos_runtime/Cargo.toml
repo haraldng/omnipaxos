@@ -10,6 +10,8 @@ tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
 serial_test = "0.5.1"
+omnipaxos_storage = { path = "../omnipaxos_storage", default-features = true }
+
 
 [features]
 batch_accept = []

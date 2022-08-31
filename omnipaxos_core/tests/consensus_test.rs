@@ -1,16 +1,13 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
-use crate::util::{LatestValue, Value};
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{memory_storage::MemoryStorage, Snapshot, StopSign, StopSignEntry, Storage},
+    storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
 use serial_test::serial;
-use test_config::TestConfig;
-use util::TestSystem;
+use utils::{create_temp_dir, LatestValue, StorageType, TestConfig, TestSystem, Value};
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -19,7 +16,12 @@ use util::TestSystem;
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+    );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -55,14 +57,19 @@ fn consensus_test() {
     check_validity(log.clone(), vec_proposals);
     check_uniform_agreement(log);
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
 
 #[test]
+#[serial]
 fn read_test() {
+    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value(*v as u64))
@@ -73,14 +80,15 @@ fn read_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut mem_storage = MemoryStorage::<Value, LatestValue>::default();
-    mem_storage.append_entries(log.clone());
-    mem_storage.set_decided_idx(decided_idx);
+    let temp_dir = create_temp_dir();
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    storage.append_entries(log.clone());
+    storage.set_decided_idx(decided_idx);
 
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
     sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), mem_storage);
+    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
 
     // read decided entries
     let entries = seq_paxos
@@ -110,7 +118,9 @@ fn read_test() {
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
+    let ss_temp_dir = create_temp_dir();
+    let mut stopped_storage =
+        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -129,7 +139,10 @@ fn read_test() {
 }
 
 #[test]
+#[serial]
 fn read_entries_test() {
+    let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value(*v as u64))
@@ -140,14 +153,15 @@ fn read_entries_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut mem_storage = MemoryStorage::<Value, LatestValue>::default();
-    mem_storage.append_entries(log.clone());
-    mem_storage.set_decided_idx(decided_idx);
+    let temp_dir = create_temp_dir();
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    storage.append_entries(log.clone());
+    storage.set_decided_idx(decided_idx);
 
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
     sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), mem_storage);
+    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
     seq_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -184,7 +198,9 @@ fn read_entries_test() {
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
-    let mut stopped_storage = MemoryStorage::<Value, LatestValue>::default();
+    let ss_temp_dir = create_temp_dir();
+    let mut stopped_storage =
+        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -301,8 +317,8 @@ fn verify_entries(
     for (idx, entry) in read_entries.iter().enumerate() {
         let log_idx = idx as u64 + offset;
         match entry {
-            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(**i, exp_entries[idx]),
-            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(**i, exp_entries[idx]),
+            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
+            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
             e => panic!(
                 "{}",
                 format!(

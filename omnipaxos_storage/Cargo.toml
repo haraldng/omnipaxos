@@ -1,0 +1,22 @@
+[package]
+name = "omnipaxos_storage"
+version = "0.1.0"
+authors = ["Abyel Tesfay <abyel@kth.se>", "Harald Ng <hng@kth.se>"]
+edition = "2018"
+
+[dependencies]
+omnipaxos_core = { path = "../omnipaxos_core" }
+rocksdb = { version = "0.18.0", optional = true }
+sled = { version = "0.34.7", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+commitlog = "0.2.0"
+bincode = "1.2.1"
+zerocopy = "0.6.1"
+
+[dev-dependencies]
+
+[features]
+sled = ["dep:sled"]
+rocksdb = ["dep:rocksdb"]
+
+default = ["sled"]

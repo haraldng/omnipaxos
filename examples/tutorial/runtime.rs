@@ -4,11 +4,10 @@ use tokio::sync::mpsc;
 use omnipaxos_core::ballot_leader_election::messages::BLEMessage;
 // use std::sync::mpsc::Sender;
 use omnipaxos_core::{
-    messages::Message,
-    sequence_paxos::ReconfigurationRequest,
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    messages::Message, sequence_paxos::ReconfigurationRequest, storage::Snapshot,
 };
 use omnipaxos_runtime::omnipaxos::{NodeConfig, OmniPaxosHandle, OmniPaxosNode, ReadEntry};
+use omnipaxos_storage::memory_storage::MemoryStorage;
 
 #[derive(Clone, Debug)]
 pub struct KeyValue {

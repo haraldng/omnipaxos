@@ -1,28 +1,266 @@
-use omnipaxos_core::{
-    ballot_leader_election::{messages::BLEMessage, Ballot, BallotLeaderElection},
-    messages::Message,
-    sequence_paxos::SequencePaxos,
-    storage::{memory_storage::MemoryStorage, Snapshot},
-};
-
 use self::{
     ble::{BLEComponent, BallotLeaderElectionPort},
     omnireplica::SequencePaxosComponent,
 };
+use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
-    ballot_leader_election::BLEConfig, sequence_paxos::SequencePaxosConfig, storage::StopSign,
+    ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
+    messages::Message,
+    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+    storage::{Entry, Snapshot, StopSign, Storage},
 };
+use omnipaxos_storage::{
+    memory_storage::MemoryStorage,
+    persistent_storage::{PersistentStorage, PersistentStorageConfig},
+};
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str, sync::Arc, time::Duration};
+use tempfile::TempDir;
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
+const COMMITLOG: &str = "/commitlog/";
+const PERSISTENT: &str = "persistent";
+const MEMORY: &str = "memory";
+
+#[cfg(feature = "hocon_config")]
+use hocon::{Error, Hocon, HoconLoader};
+use sled::Config;
+
+#[cfg(feature = "hocon_config")]
+/// Configuration for `TestSystem`. TestConfig loads the values from
+/// the configuration file `test.conf` using hocon
+pub struct TestConfig {
+    pub wait_timeout: Duration,
+    pub num_threads: usize,
+    pub num_nodes: usize,
+    pub ble_hb_delay: u64,
+    pub num_proposals: u64,
+    pub num_elections: u64,
+    pub gc_idx: u64,
+    pub storage_type: StorageTypeSelector,
+}
+
+#[cfg(feature = "hocon_config")]
+impl TestConfig {
+    pub fn load(name: &str) -> Result<TestConfig, Error> {
+        let raw_cfg = HoconLoader::new()
+            .load_file("tests/config/test.conf")?
+            .hocon()?;
+
+        let cfg: &Hocon = &raw_cfg[name];
+
+        Ok(TestConfig {
+            wait_timeout: cfg["wait_timeout"].as_duration().unwrap_or_default(),
+            num_threads: cfg["num_threads"].as_i64().unwrap_or_default() as usize,
+            num_nodes: cfg["num_nodes"].as_i64().unwrap_or_default() as usize,
+            ble_hb_delay: cfg["ble_hb_delay"].as_i64().unwrap_or_default() as u64,
+            num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
+            num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
+            gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
+            storage_type: StorageTypeSelector::with(
+                &cfg["storage_type"]
+                    .as_string()
+                    .unwrap_or(MEMORY.to_string()),
+            ),
+        })
+    }
+}
+
+/// An enum for selecting storage type. The type
+/// can be set in `config/test.conf` at `storage_type`
+#[derive(Clone, Copy)]
+pub enum StorageTypeSelector {
+    Persistent,
+    Memory,
+}
+
+impl StorageTypeSelector {
+    pub fn with(storage_type: &str) -> Self {
+        match storage_type.to_lowercase().as_ref() {
+            PERSISTENT => StorageTypeSelector::Persistent,
+            MEMORY => StorageTypeSelector::Memory,
+            _ => panic!("No such storage type: {}", storage_type),
+        }
+    }
+}
+
+/// An enum which can either be a 'PersistentStorage' or 'MemoryStorage', the type depends on the
+/// 'StorageTypeSelector' enum. Used for testing purposes with SequencePaxos and BallotLeaderElection.
+pub enum StorageType<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    Persistent(PersistentStorage<T, S>),
+    Memory(MemoryStorage<T, S>),
+}
+
+impl<T, S> StorageType<T, S>
+where
+    T: Entry,
+    S: Snapshot<T>,
+{
+    pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
+        match storage_type {
+            StorageTypeSelector::Persistent => {
+                let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
+                let my_sledopts = Config::new();
+                let persist_conf =
+                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
+                StorageType::Persistent(PersistentStorage::open(persist_conf))
+            }
+            StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
+        }
+    }
+}
+
+impl<T, S> Storage<T, S> for StorageType<T, S>
+where
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
+    S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
+{
+    fn append_entry(&mut self, entry: T) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
+            StorageType::Memory(mem_s) => mem_s.append_entry(entry),
+        }
+    }
+
+    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
+            StorageType::Memory(mem_s) => mem_s.append_entries(entries),
+        }
+    }
+
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
+            StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
+        }
+    }
+
+    fn set_promise(&mut self, n_prom: Ballot) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
+            StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
+        }
+    }
+
+    fn set_decided_idx(&mut self, ld: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
+            StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
+        }
+    }
+
+    fn get_decided_idx(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
+            StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
+        }
+    }
+
+    fn set_accepted_round(&mut self, na: Ballot) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
+            StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
+        }
+    }
+
+    fn get_accepted_round(&self) -> Ballot {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
+            StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
+        }
+    }
+
+    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
+            StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
+        }
+    }
+
+    fn get_log_len(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_log_len(),
+            StorageType::Memory(mem_s) => mem_s.get_log_len(),
+        }
+    }
+
+    fn get_suffix(&self, from: u64) -> Vec<T> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
+            StorageType::Memory(mem_s) => mem_s.get_suffix(from),
+        }
+    }
+
+    fn get_promise(&self) -> Ballot {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_promise(),
+            StorageType::Memory(mem_s) => mem_s.get_promise(),
+        }
+    }
+
+    fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
+            StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
+        }
+    }
+
+    fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
+            StorageType::Memory(mem_s) => mem_s.get_stopsign(),
+        }
+    }
+
+    fn trim(&mut self, idx: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.trim(idx),
+            StorageType::Memory(mem_s) => mem_s.trim(idx),
+        }
+    }
+
+    fn set_compacted_idx(&mut self, idx: u64) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
+            StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
+        }
+    }
+
+    fn get_compacted_idx(&self) -> u64 {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
+            StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
+        }
+    }
+
+    fn set_snapshot(&mut self, snapshot: S) {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
+            StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
+        }
+    }
+
+    fn get_snapshot(&self) -> Option<S> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
+            StorageType::Memory(mem_s) => mem_s.get_snapshot(),
+        }
+    }
+}
 
 pub struct TestSystem {
-    pub kompact_system: KompactSystem,
+    pub temp_dir_path: String,
+    pub kompact_system: Option<KompactSystem>,
     ble_paxos_nodes: HashMap<
         u64,
         (
@@ -33,7 +271,14 @@ pub struct TestSystem {
 }
 
 impl TestSystem {
-    pub fn with(num_nodes: usize, ble_hb_delay: u64, num_threads: usize) -> Self {
+    pub fn with(
+        num_nodes: usize,
+        ble_hb_delay: u64,
+        num_threads: usize,
+        storage_type: StorageTypeSelector,
+    ) -> Self {
+        let temp_dir_path = create_temp_dir();
+
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
         conf.set_config_value(&system::THREADS, num_threads);
@@ -70,11 +315,10 @@ impl TestSystem {
             let mut sp_config = SequencePaxosConfig::default();
             sp_config.set_pid(pid);
             sp_config.set_peers(peers);
+            let storage: StorageType<Value, LatestValue> =
+                StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                SequencePaxosComponent::with(SequencePaxos::with(
-                    sp_config,
-                    MemoryStorage::default(),
-                ))
+                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
             });
 
             biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
@@ -94,18 +338,23 @@ impl TestSystem {
         }
 
         Self {
-            kompact_system: system,
+            kompact_system: Some(system),
             ble_paxos_nodes,
+            temp_dir_path,
         }
     }
 
     pub fn start_all_nodes(&self) {
         for (ble, omni) in self.ble_paxos_nodes.values() {
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .start_notify(ble)
                 .wait_timeout(START_TIMEOUT)
                 .expect("BLEComp never started!");
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .start_notify(omni)
                 .wait_timeout(START_TIMEOUT)
                 .expect("ReplicaComp never started!");
@@ -115,10 +364,14 @@ impl TestSystem {
     pub fn stop_all_nodes(&self) {
         for (_pid, (ble, omni)) in &self.ble_paxos_nodes {
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .stop_notify(ble)
                 .wait_timeout(STOP_COMPONENT_TIMEOUT)
                 .expect("BLEComp never died!");
             self.kompact_system
+                .as_ref()
+                .expect("No KompactSystem found!")
                 .stop_notify(omni)
                 .wait_timeout(STOP_COMPONENT_TIMEOUT)
                 .expect("ReplicaComp replica never died!");
@@ -128,13 +381,98 @@ impl TestSystem {
     pub fn kill_node(&mut self, id: u64) {
         let (ble, omni) = self.ble_paxos_nodes.remove(&id).unwrap();
         self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .kill_notify(ble)
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("BLEComp never died!");
         self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
             .kill_notify(omni)
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("ReplicaComp replica never died!");
+    }
+
+    pub fn create_node(
+        &mut self,
+        pid: u64,
+        num_nodes: usize,
+        ble_hb_delay: u64,
+        storage_type: StorageTypeSelector,
+        storage_path: &str,
+    ) {
+        let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
+        let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
+        let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
+
+        // ble
+        let mut ble_config = BLEConfig::default();
+        ble_config.set_pid(pid);
+        ble_config.set_peers(peers.clone());
+        ble_config.set_hb_delay(ble_hb_delay);
+        let (ble_comp, ble_reg_f) = self
+            .kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
+
+        // sp
+        let mut sp_config = SequencePaxosConfig::default();
+        sp_config.set_pid(pid);
+        sp_config.set_peers(peers);
+        let storage: StorageType<Value, LatestValue> =
+            StorageType::with(storage_type, &format!("{storage_path}{pid}"));
+        let (omni_replica, omni_reg_f) = self
+            .kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .create_and_register(|| {
+                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
+            });
+
+        biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
+            .expect("Could not connect BLE and OmniPaxosReplica!");
+        ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
+        omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
+
+        // Insert the new node into vector of peers.
+        ble_refs.insert(pid, ble_comp.actor_ref());
+        omni_refs.insert(pid, omni_replica.actor_ref());
+
+        for (other_pid, (ble, omni)) in self.ble_paxos_nodes.iter() {
+            // Insert each peer node into HashMap as peers to the new node
+            ble_refs.insert(*other_pid, ble.actor_ref());
+            omni_refs.insert(*other_pid, omni.actor_ref());
+
+            // Also insert the new node as a peer into their Hashmaps
+            ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
+            omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
+        }
+
+        // Set the peers of the new node, add it to HashMaps of nodes
+        ble_comp.on_definition(|b| b.set_peers(ble_refs));
+        omni_replica.on_definition(|o| o.set_peers(omni_refs));
+        self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
+    }
+
+    pub fn start_node(&self, pid: u64) {
+        let (new_ble, new_px) = self
+            .ble_paxos_nodes
+            .get(&pid)
+            .expect(&format!("Cannot find node {pid}"));
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .start_notify(new_ble)
+            .wait_timeout(START_TIMEOUT)
+            .expect("BLEComp never started!");
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .start_notify(new_px)
+            .wait_timeout(START_TIMEOUT)
+            .expect("ReplicaComp never started!");
     }
 
     pub fn ble_paxos_nodes(
@@ -175,10 +513,10 @@ pub mod ble {
     pub struct BLEComponent {
         ctx: ComponentContext<Self>,
         ble_port: ProvidedPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<BLEMessage>>,
+        pub peers: HashMap<u64, ActorRef<BLEMessage>>,
         pub leader: Option<Ballot>,
         timer: Option<ScheduledTimer>,
-        ble: BallotLeaderElection,
+        pub ble: BallotLeaderElection,
         ask_vector: LinkedList<Ask<(), Ballot>>,
     }
 
@@ -272,7 +610,7 @@ pub mod omnireplica {
     use super::{ble::BallotLeaderElectionPort, *};
     use omnipaxos_core::{
         ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
-        storage::memory_storage::MemoryStorage, util::LogEntry,
+        util::LogEntry,
     };
     use std::{
         collections::{HashMap, LinkedList},
@@ -283,9 +621,9 @@ pub mod omnireplica {
     pub struct SequencePaxosComponent {
         ctx: ComponentContext<Self>,
         ble_port: RequiredPort<BallotLeaderElectionPort>,
-        peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
+        pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
         timer: Option<ScheduledTimer>,
-        pub paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+        pub paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
         ask_vector: LinkedList<Ask<(), Value>>,
         decided_idx: u64,
     }
@@ -315,7 +653,7 @@ pub mod omnireplica {
 
     impl SequencePaxosComponent {
         pub fn with(
-            paxos: SequencePaxos<Value, LatestValue, MemoryStorage<Value, LatestValue>>,
+            paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -342,7 +680,7 @@ pub mod omnireplica {
                 };
                 ents.iter()
                     .map(|x| match x {
-                        LogEntry::Decided(i) => **i,
+                        LogEntry::Decided(i) => *i,
                         err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                     })
                     .collect()
@@ -374,7 +712,7 @@ pub mod omnireplica {
                                 .ask_vector
                                 .pop_front()
                                 .unwrap()
-                                .reply(*i)
+                                .reply(i)
                                 .expect("Failed to reply promise!"),
                             LogEntry::Snapshotted(s) => self
                                 .ask_vector
@@ -418,10 +756,10 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct Value(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct LatestValue {
     value: Value,
 }
@@ -450,4 +788,11 @@ fn stopsign_meta_to_value(ss: &StopSign) -> Value {
         .first()
         .expect("Empty metadata");
     Value(*v as u64)
+}
+
+/// Create a temporary directory in /tmp/
+pub fn create_temp_dir() -> String {
+    let dir = TempDir::new().expect("Failed to create temporary directory");
+    let dir_path = dir.path().to_path_buf();
+    dir_path.to_string_lossy().to_string()
 }

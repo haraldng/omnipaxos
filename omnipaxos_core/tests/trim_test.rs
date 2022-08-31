@@ -1,12 +1,9 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
-use crate::util::Value;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::thread;
-use test_config::TestConfig;
-use util::TestSystem;
+use utils::{TestConfig, TestSystem, Value};
 
 const GC_INDEX_INCREMENT: u64 = 10;
 
@@ -18,7 +15,12 @@ const GC_INDEX_INCREMENT: u64 = 10;
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+    );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -59,7 +61,9 @@ fn trim_test() {
 
     println!("Pass gc");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
@@ -73,7 +77,12 @@ fn trim_test() {
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
 
-    let sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+    );
 
     let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
 
@@ -127,7 +136,9 @@ fn double_trim_test() {
 
     println!("Pass double_gc");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

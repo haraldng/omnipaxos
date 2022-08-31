@@ -5,6 +5,7 @@
 
 - [Introduction](introduction/index.md)
 - [SequencePaxos](sequencepaxos/index.md)
+    - [Storage](sequencepaxos/storage.md)
     - [Communication](sequencepaxos/communication.md)
     - [Reading and Writing](sequencepaxos/log.md)
     - [Compaction](sequencepaxos/compaction.md)

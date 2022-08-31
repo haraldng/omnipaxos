@@ -1,6 +1,8 @@
 /docs/book/*
 /target
+/log
 Cargo.lock
+omnipaxos_storage/storage
 
 # IntelliJ
 *.iml

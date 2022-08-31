@@ -495,6 +495,21 @@ impl BLEConfig {
         );
         config
     }
+
+    pub fn build(self) -> BallotLeaderElection {
+        assert_ne!(self.pid, 0, "Pid cannot be 0");
+        assert!(!self.peers.is_empty(), "Peers cannot be empty");
+        assert!(
+            !self.peers.contains(&self.pid),
+            "Peers should not include self pid"
+        );
+        assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
+        assert!(self.hb_delay > 0, "hb_delay must be greater than 0");
+        if let Some(x) = self.initial_leader {
+            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
+        };
+        BallotLeaderElection::with(self)
+    }
 }
 
 impl Default for BLEConfig {

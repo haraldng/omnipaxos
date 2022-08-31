@@ -1,9 +1,10 @@
 use omnipaxos_core::{
     ballot_leader_election::{BLEConfig, BallotLeaderElection},
     sequence_paxos::{CompactionErr, ReconfigurationRequest, SequencePaxos, SequencePaxosConfig},
-    storage::{memory_storage::MemoryStorage, Snapshot},
+    storage::Snapshot,
     util::LogEntry,
 };
+use omnipaxos_storage::memory_storage::MemoryStorage;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -21,8 +22,8 @@ impl Snapshot<KeyValue> for KVSnapshot {
     fn create(entries: &[KeyValue]) -> Self {
         let mut snapshotted = HashMap::new();
         for e in entries {
-            let KeyValue { key, value } = e;
-            snapshotted.insert(key.clone(), *value);
+            let (key, val) = (e.key.to_owned(), e.value);
+            snapshotted.insert(key, val);
         }
         Self { snapshotted }
     }

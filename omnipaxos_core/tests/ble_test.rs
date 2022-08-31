@@ -1,11 +1,9 @@
-pub mod test_config;
-pub mod util;
+pub mod utils;
 
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
-use test_config::TestConfig;
-use util::TestSystem;
+use utils::{TestConfig, TestSystem};
 
 /// Test Ballot Election Leader module.
 /// The test waits for [`num_elections`] elections.
@@ -16,12 +14,18 @@ use util::TestSystem;
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");
 
-    let mut sys = TestSystem::with(cfg.num_nodes, cfg.ble_hb_delay, cfg.num_threads);
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.ble_hb_delay,
+        cfg.num_threads,
+        cfg.storage_type,
+    );
 
     let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
 
+    let num_elections = cfg.num_nodes / 2;
     let mut futures = vec![];
-    for _ in 0..cfg.num_elections {
+    for _ in 0..num_elections {
         let (kprom, kfuture) = promise::<Ballot>();
         ble.on_definition(|x| x.add_ask(Ask::new(kprom, ())));
         futures.push(kfuture);
@@ -39,7 +43,9 @@ fn ble_test() {
 
     println!("Pass ballot_leader_election");
 
-    match sys.kompact_system.shutdown() {
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
         Ok(_) => {}
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };

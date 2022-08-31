@@ -17,6 +17,11 @@ use hocon::Hocon;
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
 
+/// Type alias for SequencePaxos Pid
+type Pid = u64;
+/// Type alias for SequencePaxos Configuration ID
+type ConfigurationID = u32;
+
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 /// If snapshots are not desired to be used, use `()` for the type parameter `S`.
@@ -27,8 +32,8 @@ where
     B: Storage<T, S>,
 {
     storage: B,
-    config_id: u32,
-    pid: u64,
+    config_id: ConfigurationID,
+    pid: Pid,
     peers: Vec<u64>, // excluding self pid
     state: (Role, Phase),
     leader: u64,
@@ -84,8 +89,8 @@ where
 
         let mut paxos = SequencePaxos {
             storage,
-            pid,
             config_id,
+            pid,
             peers,
             state,
             pending_proposals: vec![],
@@ -279,9 +284,9 @@ where
                     // TODO
                     Some(data) => {
                         if idx < self.storage.get_decided_idx() {
-                            Some(LogEntry::Decided(data))
+                            Some(LogEntry::Decided(data.clone()))
                         } else {
-                            Some(LogEntry::Undecided(data))
+                            Some(LogEntry::Undecided(data.clone()))
                         }
                     }
                     None => None,
@@ -398,12 +403,11 @@ where
 
     fn create_read_log_entries(&self, from_idx: u64, to_idx: u64) -> Vec<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
-        let entries = self
-            .storage
-            .get_entries(from_idx - compacted_idx, to_idx - compacted_idx);
         let decided_idx = self.storage.get_decided_idx();
-        entries
-            .iter()
+
+        self.storage
+            .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
+            .into_iter()
             .enumerate()
             .map(|(idx, e)| {
                 let log_idx = idx as u64 + compacted_idx;
@@ -1040,7 +1044,7 @@ where
                     let compacted_idx =
                         self.storage.get_compacted_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
                     let entries = self.storage.get_suffix(prom.la);
-                    let snapshot = SnapshotType::Delta(S::create(entries));
+                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
                     (compacted_idx, snapshot)
                 } else {
                     let compact_idx = self.storage.get_log_len() + self.get_compacted_idx();
@@ -1162,7 +1166,7 @@ where
         let entries = self
             .storage
             .get_entries(0, compact_idx - self.storage.get_compacted_idx());
-        let delta = S::create(entries);
+        let delta = S::create(entries.as_slice());
         match self.storage.get_snapshot() {
             Some(mut s) => {
                 s.merge(delta);
@@ -1191,7 +1195,7 @@ where
                     )
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self.storage.get_suffix(prep.la);
-                    let snapshot = SnapshotType::Delta(S::create(entries));
+                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
                     let compacted_idx = self.storage.get_compacted_idx() + la;
                     (
                         compacted_idx,
@@ -1535,6 +1539,26 @@ impl SequencePaxosConfig {
             config.set_buffer_size(b as usize);
         }
         config
+    }
+
+    pub fn build<T, S, B>(self, storage: B) -> SequencePaxos<T, S, B>
+    where
+        T: Entry,
+        S: Snapshot<T>,
+        B: Storage<T, S>,
+    {
+        assert_ne!(self.pid, 0, "Pid cannot be 0");
+        assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
+        assert!(!self.peers.is_empty(), "Peers cannot be empty");
+        assert!(
+            !self.peers.contains(&self.pid),
+            "Peers should not include self pid"
+        );
+        assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
+        if let Some(x) = self.skip_prepare_use_leader {
+            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
+        };
+        SequencePaxos::with(self, storage)
     }
 }
 

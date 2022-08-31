@@ -220,15 +220,15 @@ where
 
 /// The entry read in the log.
 #[derive(Debug, Clone)]
-pub enum LogEntry<'a, T, S>
+pub enum LogEntry<T, S>
 where
     T: Entry,
     S: Snapshot<T>,
 {
     /// The entry is decided.
-    Decided(&'a T),
+    Decided(T),
     /// The entry is NOT decided. Might be removed from the log at a later time.
-    Undecided(&'a T),
+    Undecided(T),
     /// The entry has been trimmed.
     Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
