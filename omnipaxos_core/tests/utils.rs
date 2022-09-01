@@ -8,7 +8,7 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{Entry, Snapshot, StopSign, Storage},
+    storage::{Entry, Snapshot, StopSign, Storage, StorageErr},
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -23,6 +23,7 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
+const STORAGE: &str = "../omnipaxos_storage/storage/";
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
@@ -105,9 +106,10 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
+    pub fn with(storage_type: StorageTypeSelector, path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
+                let my_path = format!("{STORAGE}{path}");
                 let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
                 let my_sledopts = Config::new();
                 let persist_conf =
@@ -124,35 +126,35 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
 {
-    fn append_entry(&mut self, entry: T) -> u64 {
+    fn append_entry(&mut self, entry: T) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
         }
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+    fn append_entries(&mut self, entries: Vec<T>) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
         }
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
         }
     }
 
-    fn set_promise(&mut self, n_prom: Ballot) {
+    fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
             StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
         }
     }
 
-    fn set_decided_idx(&mut self, ld: u64) {
+    fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
@@ -166,7 +168,7 @@ where
         }
     }
 
-    fn set_accepted_round(&mut self, na: Ballot) {
+    fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
             StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
@@ -208,7 +210,10 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
+    fn set_stopsign(
+        &mut self,
+        s: omnipaxos_core::storage::StopSignEntry,
+    ) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
@@ -222,14 +227,14 @@ where
         }
     }
 
-    fn trim(&mut self, idx: u64) {
+    fn trim(&mut self, idx: u64) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
         }
     }
 
-    fn set_compacted_idx(&mut self, idx: u64) {
+    fn set_compacted_idx(&mut self, idx: u64) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
@@ -243,7 +248,7 @@ where
         }
     }
 
-    fn set_snapshot(&mut self, snapshot: S) {
+    fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
@@ -495,6 +500,12 @@ impl TestSystem {
         } else {
             conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
         };
+    }
+}
+
+impl Drop for TestSystem {
+    fn drop(&mut self) {
+        clear_storage();
     }
 }
 
