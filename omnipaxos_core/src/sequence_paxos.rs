@@ -11,17 +11,11 @@ use super::{
 use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZE};
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
-use core::panic;
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
-
-/// Type alias for SequencePaxos Pid
-type Pid = u64;
-/// Type alias for SequencePaxos Configuration ID
-type ConfigurationID = u32;
 
 /// Type alias for SequencePaxos Pid
 type Pid = u64;
@@ -38,7 +32,7 @@ where
     B: Storage<T, S>,
 {
     storage: B,
-    cache: CachedState,
+    cached_state: CachedState,
     config_id: ConfigurationID,
     pid: Pid,
     peers: Vec<u64>, // excluding self pid
@@ -93,11 +87,11 @@ where
                 (state, 0, Ballot::default(), lds)
             }
         };
-        let cache = CachedState::default();
+        let cached_state = CachedState::default();
 
         let mut paxos = SequencePaxos {
             storage,
-            cache,
+            cached_state,
             config_id,
             pid,
             peers,
@@ -119,8 +113,8 @@ where
                 })
             },
         };
-        paxos.storage.set_promise(n_leader);
-        paxos.cache.set_promise(n_leader);
+        paxos.storage.set_promise(n_leader).expect("Falied to set promised ballot");
+        paxos.cached_state.set_promise(n_leader);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -150,7 +144,7 @@ where
         compact_idx: Option<u64>,
         local_only: bool,
     ) -> Result<(), CompactionErr> {
-        let decided_idx = self.storage.get_decided_idx();
+        let decided_idx = self.storage.get_decided_idx().expect("Failed to get decided index");
         let idx = match compact_idx {
             Some(i) => {
                 if i <= decided_idx {
@@ -177,12 +171,12 @@ where
 
     /// Return the decided index.
     pub fn get_decided_idx(&self) -> u64 {
-        self.storage.get_decided_idx()
+        self.storage.get_decided_idx().expect("Failed to get decided index")
     }
 
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> u64 {
-        self.storage.get_compacted_idx()
+        self.storage.get_compacted_idx().expect("Failed to get compacted index")
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
@@ -198,13 +192,13 @@ where
         let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
         let compact_idx = match index {
             Some(idx) => {
-                if (min_all_accepted_idx < &idx) || (idx < self.storage.get_compacted_idx()) {
+                if (min_all_accepted_idx < &idx) || (idx < self.storage.get_compacted_idx().expect("Failed to get compacted index")) {
                     #[cfg(feature = "logging")]
                     warn!(
                         self.logger,
                         "Invalid trim index: {:?}, compacted_idx: {}, las: {:?}",
                         index,
-                        self.storage.get_compacted_idx(),
+                        self.storage.get_compacted_idx().expect("Failed to get compacted index"),
                         self.leader_state.las
                     );
                     return Err(CompactionErr::NotAllDecided(*min_all_accepted_idx));
@@ -230,17 +224,23 @@ where
     }
 
     fn handle_compaction(&mut self, c: Compaction) {
-        let decided_idx = self.storage.get_decided_idx();
-        let compacted_idx = self.storage.get_compacted_idx();
+        let decided_idx = self.storage.get_decided_idx().expect("Failed to get decided index");
+        let compacted_idx = self.storage.get_compacted_idx().expect("Failed to get compacted index");
         match c {
             Compaction::Trim(Some(idx)) if idx <= decided_idx && idx > compacted_idx => {
-                self.storage.set_compacted_idx(idx);
-                self.cache.set_compacted_idx(idx);
-                self.storage.trim(idx - compacted_idx);
+                self.storage.set_compacted_idx(idx).expect("Failed to set compacted index");
+                match self.storage.trim(idx - compacted_idx) {
+                    Ok(_) => self.cached_state.set_compacted_idx(idx),
+                    Err(_) => {
+                        self.storage.set_compacted_idx(self.cached_state.get_compacted_idx()).expect("Failed to restore compacted index");
+                        panic!();
+                    },
+                }
+                
             }
             Compaction::Snapshot(idx) if idx <= decided_idx && idx > compacted_idx => {
                 let s = self.create_snapshot(idx);
-                self.set_snapshot(idx, s);
+                self.set_snapshot(idx, s)
             }
             _ => {
                 #[cfg(feature = "logging")]
@@ -282,19 +282,19 @@ where
             Some(self.create_compacted_entry(compacted_idx))
         } else {
             let suffix_idx = idx - compacted_idx;
-            let log_len = self.storage.get_log_len();
+            let log_len = self.storage.get_log_len().expect("Failed to get log length");
             if suffix_idx >= log_len {
-                match self.storage.get_stopsign() {
+                match self.storage.get_stopsign().expect("Failed to get stopsign") {
                     Some(ss) if ss.decided && suffix_idx == log_len => {
                         Some(LogEntry::StopSign(ss.stopsign))
                     }
                     _ => None,
                 }
             } else {
-                match self.storage.get_entries(suffix_idx, suffix_idx + 1).first() {
+                match self.storage.get_entries(suffix_idx, suffix_idx + 1).expect("Failed to get log entries").first() {
                     // TODO
                     Some(data) => {
-                        if idx < self.storage.get_decided_idx() {
+                        if idx < self.storage.get_decided_idx().expect("Failed to get decided index") {
                             Some(LogEntry::Decided(data.clone()))
                         } else {
                             Some(LogEntry::Undecided(data.clone()))
@@ -320,8 +320,8 @@ where
             Bound::Included(i) => *i + 1,
             Bound::Excluded(e) => *e,
             Bound::Unbounded => {
-                let idx = self.storage.get_compacted_idx() + self.storage.get_log_len();
-                match self.storage.get_stopsign() {
+                let idx = self.storage.get_compacted_idx().expect("Failed to get compacted index") + self.storage.get_log_len().expect("Failed to get log length");
+                match self.storage.get_stopsign().expect("Failed to get stopsign") {
                     Some(ss) if ss.decided => idx + 1,
                     _ => idx,
                 }
@@ -331,13 +331,13 @@ where
         if to_idx < compacted_idx {
             Some(vec![self.create_compacted_entry(compacted_idx)])
         } else {
-            let log_len = self.storage.get_log_len();
+            let log_len = self.storage.get_log_len().expect("Failed to get log length");
             let from_type = if from_idx < compacted_idx {
                 IndexEntry::Compacted
             } else if from_idx - compacted_idx < log_len {
                 IndexEntry::Entry
             } else if from_idx - compacted_idx == log_len {
-                match self.storage.get_stopsign() {
+                match self.storage.get_stopsign().expect("Failed to get stopsign") {
                     Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
@@ -350,7 +350,7 @@ where
             let to_type = if to_suffix_idx <= log_len {
                 IndexEntry::Entry
             } else if to_suffix_idx == log_len + 1 {
-                match self.storage.get_stopsign() {
+                match self.storage.get_stopsign().expect("Failed to get stopsign") {
                     Some(ss) if ss.decided => IndexEntry::StopSign(ss.stopsign),
                     _ => {
                         return None;
@@ -397,7 +397,7 @@ where
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
     pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
-        let decided_idx = self.storage.get_decided_idx();
+        let decided_idx = self.storage.get_decided_idx().expect("Failed to get decided index");
         if from_idx < decided_idx {
             self.read_entries(from_idx..decided_idx)
         } else {
@@ -406,7 +406,7 @@ where
     }
 
     fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T, S> {
-        match self.storage.get_snapshot() {
+        match self.storage.get_snapshot().expect("Failed to get snapshot") {
             Some(s) => LogEntry::Snapshotted(SnapshottedEntry::with(compacted_idx, s)),
             None => LogEntry::Trimmed(compacted_idx),
         }
@@ -414,10 +414,11 @@ where
 
     fn create_read_log_entries(&self, from_idx: u64, to_idx: u64) -> Vec<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
-        let decided_idx = self.storage.get_decided_idx();
+        let decided_idx = self.storage.get_decided_idx().expect("Failed to get decided index");
 
         self.storage
             .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
+            .expect("Failed to get log entries")
             .into_iter()
             .enumerate()
             .map(|(idx, e)| {
@@ -458,7 +459,7 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub fn is_reconfigured(&self) -> Option<StopSign> {
-        match self.storage.get_stopsign() {
+        match self.storage.get_stopsign().expect("Failed to get stopsign") {
             Some(ss) if ss.decided => Some(ss.stopsign),
             _ => None,
         }
@@ -539,7 +540,7 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
-        self.storage.set_stopsign(StopSignEntry::with(ss, false));
+        self.storage.set_stopsign(StopSignEntry::with(ss, false)).expect("Failed to set stopsign");
         if self.state.0 == Role::Leader {
             self.leader_state.set_accepted_stopsign(self.pid);
         }
@@ -563,7 +564,7 @@ where
 
     /// Returns the currently promised round.
     pub fn get_promise(&self) -> Ballot {
-        self.storage.get_promise()
+        self.cached_state.get_promise()
     }
 
     /*
@@ -600,7 +601,7 @@ where
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {
-        self.storage.get_stopsign().map(|x| x.stopsign)
+        self.storage.get_stopsign().expect("Failed to get stopsign").map(|x| x.stopsign)
     }
 
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
@@ -609,7 +610,7 @@ where
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
         let leader_pid = n.pid;
-        if n <= self.leader_state.n_leader || n <= self.storage.get_promise() {
+        if n <= self.leader_state.n_leader || n <= self.storage.get_promise().expect("Failed to get promised round") {
             return;
         }
         if self.stopped() {
@@ -623,17 +624,17 @@ where
                 self.leader_state.majority,
             );
             self.leader = leader_pid;
-            self.storage.set_promise(n);
-            self.cache.set_promise(n);
+            self.storage.set_promise(n).expect("Failed to set promied round");
+            self.cached_state.set_promise(n);
             /* insert my promise */
-            let na = self.storage.get_accepted_round();
-            let ld = self.storage.get_decided_idx();
-            let la = self.storage.get_log_len();
+            let na = self.cached_state.get_accepted_round();
+            let ld = self.cached_state.get_decided_idx();
+            let la = self.storage.get_log_len().expect("Failed to get log length");
             let my_promise = Promise::with(n, na, None, ld, la, self.get_stopsign());
             self.leader_state.set_promise(my_promise, self.pid);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
-            let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
+            let prep = Prepare::with(n, ld, self.storage.get_accepted_round().expect("Failed to get accepted round"), la);
             /* send prepare */
             for pid in &self.peers {
                 self.outgoing
@@ -653,9 +654,9 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            let ld = self.storage.get_decided_idx();
-            let n_accepted = self.storage.get_accepted_round();
-            let la = self.storage.get_log_len();
+            let ld = self.storage.get_decided_idx().expect("Failed to get decided index");
+            let n_accepted = self.storage.get_accepted_round().expect("Failed to get accepted round");
+            let la = self.storage.get_log_len().expect("Failed to get log length");
             let prep = Prepare::with(self.leader_state.n_leader, ld, n_accepted, la);
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Prepare(prep)));
@@ -848,16 +849,16 @@ where
     fn create_pending_proposals_snapshot(&mut self) -> (u64, S) {
         let pending_proposals = std::mem::take(&mut self.pending_proposals);
         let s = S::create(pending_proposals.as_slice());
-        let compacted_idx = self.storage.get_compacted_idx() + pending_proposals.len() as u64;
+        let compacted_idx = self.storage.get_compacted_idx().expect("Failed to get compacted index") + pending_proposals.len() as u64;
         (compacted_idx, s)
     }
 
     fn send_accsync_with_snapshot(&mut self) {
-        let current_snapshot = self.storage.get_snapshot();
+        let current_snapshot = self.storage.get_snapshot().expect("Failed to get snapshot");
         let (compacted_idx, snapshot) = match current_snapshot {
-            Some(s) => (self.storage.get_compacted_idx(), s),
+            Some(s) => (self.storage.get_compacted_idx().expect("Failed to get compacted index"), s),
             None => {
-                let compact_idx = self.storage.get_log_len();
+                let compact_idx = self.storage.get_log_len().expect("Failed to get log length");
                 let snapshot = self.create_snapshot(compact_idx);
                 self.set_snapshot(compact_idx, snapshot.clone());
                 (compact_idx, snapshot)
@@ -893,7 +894,8 @@ where
             let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
                 let sfx = self
                     .storage
-                    .get_suffix(*promise_la - self.storage.get_compacted_idx())
+                    .get_suffix(*promise_la - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+                    .expect("Failed to get log entries")
                     .to_vec();
                 (sfx, *promise_la)
             } else {
@@ -903,7 +905,8 @@ where
                     .expect("Received PromiseMetaData but not found in ld");
                 let sfx = self
                     .storage
-                    .get_suffix(ld - self.storage.get_compacted_idx())
+                    .get_suffix(ld - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+                    .expect("Failed to get log entries")
                     .to_vec();
                 (sfx, ld)
             };
@@ -941,20 +944,38 @@ where
         let compacted_len = self.get_compacted_idx();
         if compact_idx > compacted_len {
             let idx = compact_idx - compacted_len;
-            let log_len = self.storage.get_log_len();
-            if log_len >= idx {
-                // need to check log_len as a node could be lagging in the log but receive a snapshot with higher index.
-                self.storage.trim(idx);
-            } else if log_len < idx {
-                self.storage.trim(log_len);
+            let log_len = self.storage.get_log_len().expect("Failed to get log length");
+            self.storage.set_compacted_idx(compact_idx).expect("Failed to set compacted index");
+            let old_snapshot = self.storage.get_snapshot().expect("Failed to get snapshot").expect("No snapshot found");
+            match self.storage.set_snapshot(snapshot) {
+                Ok(_) => {
+                    // need to check log_len as a node could be lagging in the log but receive a snapshot with higher index.
+                    let trim_idx = if log_len >= idx { idx } else { log_len };
+                    match self.storage.trim(trim_idx) {
+                        Ok(_) => self.cached_state.set_compacted_idx(compact_idx),
+                        Err(_) => {
+                            self.storage.set_snapshot(old_snapshot).expect("Failed to restore snapshot");
+                            self.storage.set_compacted_idx(self.cached_state.get_compacted_idx()).expect("Failed to restore compacted index");
+                            panic!();
+                        },
+                    }
+                },
+                Err(_) => {
+                    self.storage.set_compacted_idx(compact_idx).expect("Failed to restore compacted index");
+                    panic!();
+                }
             }
-            self.storage.set_snapshot(snapshot);
-            self.storage.set_compacted_idx(compact_idx);
-            self.cache.set_compacted_idx(compact_idx);
         } else if compact_idx == 0 {
-            self.storage.set_snapshot(snapshot);
-            self.storage.set_compacted_idx(compact_idx);
-            self.cache.set_compacted_idx(compact_idx);
+            self.storage.set_compacted_idx(compact_idx).expect("Failed to set compacted index");
+            match self.storage.set_snapshot(snapshot) {
+                Ok(_) => {     
+                    self.cached_state.set_compacted_idx(compact_idx);       
+                },
+                Err(_) => {
+                    self.storage.set_compacted_idx(self.cached_state.get_compacted_idx()).expect("Failed to restore compacted index");
+                    panic!();
+                }
+            }
         }
     }
 
@@ -962,7 +983,8 @@ where
         let mut snapshot = self
             .storage
             .get_snapshot()
-            .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
+            .expect("Failed to get snapshot")
+            .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len().expect("Failed to get log length")));
         snapshot.merge(delta);
         self.set_snapshot(compacted_idx, snapshot);
     }
@@ -973,11 +995,12 @@ where
             let mut snapshot = self
                 .storage
                 .get_snapshot()
-                .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
+                .expect("Failed to get snapshot")
+                .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len().expect("Failed to get log length")));
             snapshot.merge(delta);
             self.set_snapshot(compacted_idx, snapshot);
-            self.storage.set_accepted_round(self.leader_state.n_leader);
-            self.cache.set_accepted_round(self.leader_state.n_leader);
+            self.storage.set_accepted_round(self.leader_state.n_leader).expect("Failed to set accepted round");
+            self.cached_state.set_accepted_round(self.leader_state.n_leader);
         }
     }
 
@@ -988,12 +1011,12 @@ where
         let max_promise_meta = self.leader_state.get_max_promise_meta();
         match max_promise {
             SyncItem::Entries(sfx) => {
-                if max_promise_meta.n == self.storage.get_accepted_round() {
+                if max_promise_meta.n == self.storage.get_accepted_round().expect("Failed to get accepted round") {
                     self.storage
                         .append_entries(sfx)
                         .expect("Failed to append log entries");
                 } else {
-                    let ld = self.storage.get_decided_idx();
+                    let ld = self.storage.get_decided_idx().expect("Failed to get decided index");
                     self.storage
                         .append_on_prefix(ld, sfx)
                         .expect("Failed to append log entries");
@@ -1070,12 +1093,12 @@ where
                     && prom.la < self.leader_state.get_max_promise_meta().la
                 {
                     let compacted_idx =
-                        self.storage.get_compacted_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
-                    let entries = self.storage.get_suffix(prom.la);
+                        self.storage.get_compacted_idx().expect("Failed to get compacted index") + self.storage.get_log_len().expect("Failed to get log length"); // TODO use a wrapper around storage and implement these functions?
+                    let entries = self.storage.get_suffix(prom.la).expect("Failed to get log entries");
                     let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
                     (compacted_idx, snapshot)
                 } else {
-                    let compact_idx = self.storage.get_log_len() + self.get_compacted_idx();
+                    let compact_idx = self.storage.get_log_len().expect("Failed to get log length") + self.get_compacted_idx();
                     let snapshot = self.create_snapshot(compact_idx);
                     (compact_idx, SnapshotType::Complete(snapshot))
                 };
@@ -1096,13 +1119,14 @@ where
                 };
                 let sfx = self
                     .storage
-                    .get_suffix(sync_idx - self.storage.get_compacted_idx())
+                    .get_suffix(sync_idx - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+                    .expect("Failed to get log entries")
                     .to_vec();
                 // inform what got decided already
                 let ld = if self.leader_state.get_chosen_idx() > 0 {
                     self.leader_state.get_chosen_idx()
                 } else {
-                    self.storage.get_decided_idx()
+                    self.storage.get_decided_idx().expect("Failed to get decided index")
                 };
                 AcceptSync::with(
                     self.leader_state.n_leader,
@@ -1193,9 +1217,10 @@ where
     fn create_snapshot(&mut self, compact_idx: u64) -> S {
         let entries = self
             .storage
-            .get_entries(0, compact_idx - self.storage.get_compacted_idx());
+            .get_entries(0, compact_idx - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+            .expect("Failed to get log entries");
         let delta = S::create(entries.as_slice());
-        match self.storage.get_snapshot() {
+        match self.storage.get_snapshot().expect("Failed to get snapshot") {
             Some(mut s) => {
                 s.merge(delta);
                 s
@@ -1206,16 +1231,16 @@ where
 
     /*** Follower ***/
     fn handle_prepare(&mut self, prep: Prepare, from: u64) {
-        if self.storage.get_promise() <= prep.n {
+        if self.storage.get_promise().expect("Failed to get promised round") <= prep.n {
             self.leader = from;
-            self.storage.set_promise(prep.n);
-            self.cache.set_promise(prep.n);
+            self.storage.set_promise(prep.n).expect("Failed to set promied round");
+            self.cached_state.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
-            let na = self.storage.get_accepted_round();
-            let la = self.storage.get_log_len();
+            let na = self.storage.get_accepted_round().expect("Failed to get accepted round");
+            let la = self.storage.get_log_len().expect("Failed to get log length");
             let promise = if Self::use_snapshots() {
                 let (compacted_idx, sync_item, stopsign) = if na > prep.n_accepted {
-                    let compact_idx = self.storage.get_log_len();
+                    let compact_idx = self.storage.get_log_len().expect("Failed to get log length");
                     let snapshot = self.create_snapshot(compact_idx);
                     (
                         compact_idx,
@@ -1223,9 +1248,9 @@ where
                         self.get_stopsign(),
                     )
                 } else if na == prep.n_accepted && la > prep.la {
-                    let entries = self.storage.get_suffix(prep.la);
+                    let entries = self.storage.get_suffix(prep.la).expect("Failed to get log entries");
                     let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
-                    let compacted_idx = self.storage.get_compacted_idx() + la;
+                    let compacted_idx = self.storage.get_compacted_idx().expect("Failed to get compacted index") + la;
                     (
                         compacted_idx,
                         Some(SyncItem::Snapshot(snapshot)),
@@ -1238,7 +1263,7 @@ where
                     prep.n,
                     na,
                     sync_item,
-                    self.storage.get_decided_idx(),
+                    self.storage.get_decided_idx().expect("Failed to get decided index"),
                     compacted_idx,
                     stopsign,
                 )
@@ -1246,13 +1271,15 @@ where
                 let (sync_item, stopsign) = if na > prep.n_accepted {
                     let entries = self
                         .storage
-                        .get_suffix(prep.ld - self.storage.get_compacted_idx())
+                        .get_suffix(prep.ld - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+                        .expect("Failed to get log entries")
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else if na == prep.n_accepted && la > prep.la {
                     let entries = self
                         .storage
-                        .get_suffix(prep.la - self.storage.get_compacted_idx())
+                        .get_suffix(prep.la - self.storage.get_compacted_idx().expect("Failed to get compacted index"))
+                        .expect("Failed to get log entries")
                         .to_vec();
                     (Some(SyncItem::Entries(entries)), self.get_stopsign())
                 } else {
@@ -1262,7 +1289,7 @@ where
                     prep.n,
                     na,
                     sync_item,
-                    self.storage.get_decided_idx(),
+                    self.storage.get_decided_idx().expect("Failed to get decided index"),
                     la,
                     stopsign,
                 )
@@ -1273,7 +1300,7 @@ where
     }
 
     fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: u64) {
-        if self.storage.get_promise() == accsync.n && self.state == (Role::Follower, Phase::Prepare)
+        if self.storage.get_promise().expect("Failed to get promised round") == accsync.n && self.state == (Role::Follower, Phase::Prepare)
         {
             let accepted = match accsync.sync_item {
                 SyncItem::Entries(e) => {
@@ -1297,8 +1324,7 @@ where
                 }
                 _ => unimplemented!(),
             };
-            self.storage.set_accepted_round(accsync.n);
-            self.cache.set_accepted_round(accsync.n);
+            self.storage.set_accepted_round(accsync.n).expect("Failed to set accepted round");
             self.state = (Role::Follower, Phase::Accept);
             #[cfg(feature = "latest_accepted")]
             {
@@ -1309,12 +1335,20 @@ where
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
 
             if let Some(idx) = accsync.decide_idx {
-                self.storage.set_decided_idx(idx);
-                self.cache.set_decided_idx(idx);
+                match self.storage.set_decided_idx(idx) {
+                    Ok(_) => {
+                        self.cached_state.set_accepted_round(accsync.n);
+                        self.cached_state.set_decided_idx(idx);
+                    },
+                    Err(_) => {
+                        self.storage.set_accepted_round(self.cached_state.get_accepted_round()).expect("Failed to restore accepted round");
+                    },
+                }
+
             }
             match accsync.stopsign {
                 Some(ss) => {
-                    if let Some(ss_entry) = self.storage.get_stopsign() {
+                    if let Some(ss_entry) = self.storage.get_stopsign().expect("Failed to get stopsign") {
                         let StopSignEntry {
                             decided: has_decided,
                             stopsign: _my_ss,
@@ -1347,28 +1381,28 @@ where
     fn handle_firstaccept(&mut self, f: FirstAccept) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message First Accept");
-        if self.storage.get_promise() == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
-            self.storage.set_accepted_round(f.n);
-            self.cache.set_accepted_round(f.n);
+        if self.storage.get_promise().expect("Failed to get promised round") == f.n && self.state == (Role::Follower, Phase::FirstAccept) {
+            self.storage.set_accepted_round(f.n).expect("Failed to set accepted round");
+            self.cached_state.set_accepted_round(f.n);
             self.state.1 = Phase::Accept;
             self.forward_pending_proposals();
         }
     }
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
-        if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
+        if self.storage.get_promise().expect("Failed to get promised round") == acc.n && self.state == (Role::Follower, Phase::Accept) {
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
             // handle decide
-            if acc.ld > self.storage.get_decided_idx() {
-                self.storage.set_decided_idx(acc.ld);
-                self.cache.set_decided_idx(acc.ld);
+            if acc.ld > self.storage.get_decided_idx().expect("Failed to get decided index") {
+                self.storage.set_decided_idx(acc.ld).expect("Failed to set decided index");
+                self.cached_state.set_decided_idx(acc.ld);
             }
         }
     }
 
     fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
-        if self.storage.get_promise() == acc_ss.n && self.state == (Role::Follower, Phase::Accept) {
+        if self.storage.get_promise().expect("Failed to get promised round") == acc_ss.n && self.state == (Role::Follower, Phase::Accept) {
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign::with(acc_ss.n);
             self.outgoing.push(Message::with(
@@ -1380,22 +1414,32 @@ where
     }
 
     fn handle_decide(&mut self, dec: Decide) {
-        if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            self.storage.set_decided_idx(dec.ld);
-            self.cache.set_decided_idx(dec.ld);
+        if self.storage.get_promise().expect("Failed to get promised round") == dec.n && self.state.1 == Phase::Accept {
+            self.storage.set_decided_idx(dec.ld).expect("Failed to set decided idex");
+            self.cached_state.set_decided_idx(dec.ld);
         }
     }
 
     fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
-        if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
+        if self.storage.get_promise().expect("Failed to get promised round") == dec.n && self.state.1 == Phase::Accept {
             let mut ss = self
                 .storage
                 .get_stopsign()
+                .expect("Failed to get stopsign")
                 .expect("No stopsign found when deciding!");
             ss.decided = true;
-            self.storage.set_stopsign(ss);
-            self.storage.set_decided_idx(self.storage.get_log_len() + 1);
-            self.cache.set_decided_idx(self.storage.get_log_len() + 1);
+            let new_decided_idx = self.storage.get_log_len().expect("Failed to get log length") + 1;
+            self.storage.set_decided_idx(new_decided_idx).expect("Failed to set decided index");
+            match self.storage.set_stopsign(ss) {
+                Ok(_) => {
+                    self.cached_state.set_decided_idx(new_decided_idx)
+                },
+                Err(_) => {
+                    self.storage.set_decided_idx(self.cached_state.get_decided_idx()).expect("Failed to restore decided index");
+                },
+            }
+
+            
         }
     }
 

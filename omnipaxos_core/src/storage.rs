@@ -81,7 +81,6 @@ where
 /// CachedState is an in-memory state storage for SequencePaxos, the stuct
 /// caches any new state that is written to persistent storage and
 /// can be used recover state when an atomic commit fails.
-// todo Implement caching, atomic commit and recovery in SequencePaxos
 #[derive(Clone)]
 pub(crate) struct CachedState {
     /// Last cached promised round.
@@ -95,23 +94,20 @@ pub(crate) struct CachedState {
 }
 
 impl CachedState {
-    pub fn set_promise(&mut self, n_prom: Ballot) -> Result<(), StorageErr> {
+    pub fn set_promise(&mut self, n_prom: Ballot) {
         self.n_prom = n_prom;
-        Ok(())
     }
 
-    pub fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr> {
+    pub fn set_decided_idx(&mut self, ld: u64) {
         self.ld = ld;
-        Ok(())
     }
 
     pub fn get_decided_idx(&self) -> u64 {
         self.ld
     }
 
-    pub fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr> {
+    pub fn set_accepted_round(&mut self, na: Ballot) {
         self.acc_round = na;
-        Ok(())
     }
 
     pub fn get_accepted_round(&self) -> Ballot {
@@ -122,9 +118,8 @@ impl CachedState {
         self.n_prom
     }
 
-    pub fn set_compacted_idx(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
+    pub fn set_compacted_idx(&mut self, trimmed_idx: u64) {
         self.trimmed_idx = trimmed_idx;
-        Ok(())
     }
 
     pub fn get_compacted_idx(&self) -> u64 {
@@ -165,32 +160,32 @@ where
     fn set_decided_idx(&mut self, ld: u64) -> Result<(), StorageErr>;
 
     /// Returns the decided index in the log.
-    fn get_decided_idx(&self) -> u64;
+    fn get_decided_idx(&self) -> Result<u64, StorageErr>;
 
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: Ballot) -> Result<(), StorageErr>;
 
     /// Returns the latest round in which entries have been accepted.
-    fn get_accepted_round(&self) -> Ballot;
+    fn get_accepted_round(&self) -> Result<Ballot, StorageErr>;
 
     /// Returns the entries in the log in the index interval of [from, to).
     /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
-    fn get_entries(&self, from: u64, to: u64) -> Vec<T>;
+    fn get_entries(&self, from: u64, to: u64) -> Result<Vec<T>, StorageErr>;
 
     /// Returns the current length of the log.
-    fn get_log_len(&self) -> u64;
+    fn get_log_len(&self) -> Result<u64, StorageErr>;
 
     /// Returns the suffix of entries in the log from index `from`.
-    fn get_suffix(&self, from: u64) -> Vec<T>;
+    fn get_suffix(&self, from: u64) -> Result<Vec<T>, StorageErr>;
 
     /// Returns the round that has been promised.
-    fn get_promise(&self) -> Ballot;
+    fn get_promise(&self) -> Result<Ballot, StorageErr>;
 
     /// Sets the StopSign used for reconfiguration.
     fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr>;
 
     /// Returns the stored StopSign.
-    fn get_stopsign(&self) -> Option<StopSignEntry>;
+    fn get_stopsign(&self) ->  Result<Option<StopSignEntry>, StorageErr>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64) -> Result<(), StorageErr>;
@@ -199,13 +194,13 @@ where
     fn set_compacted_idx(&mut self, idx: u64) -> Result<(), StorageErr>;
 
     /// Returns the garbage collector index from storage.
-    fn get_compacted_idx(&self) -> u64;
+    fn get_compacted_idx(&self) -> Result<u64, StorageErr>;
 
     /// Sets the snapshot.
     fn set_snapshot(&mut self, snapshot: S) -> Result<(), StorageErr>;
 
     /// Returns the stored snapshot.
-    fn get_snapshot(&self) -> Option<S>;
+    fn get_snapshot(&self) -> Result<Option<S>, StorageErr>;
 }
 
 #[derive(Clone, Debug)]
