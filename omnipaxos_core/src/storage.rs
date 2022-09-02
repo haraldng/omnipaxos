@@ -185,7 +185,7 @@ where
     fn set_stopsign(&mut self, s: StopSignEntry) -> Result<(), StorageErr>;
 
     /// Returns the stored StopSign.
-    fn get_stopsign(&self) ->  Result<Option<StopSignEntry>, StorageErr>;
+    fn get_stopsign(&self) -> Result<Option<StopSignEntry>, StorageErr>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64) -> Result<(), StorageErr>;

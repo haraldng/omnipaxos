@@ -8,7 +8,7 @@ use omnipaxos_core::{
     ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-    storage::{Entry, Snapshot, StopSign, Storage, StorageErr},
+    storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage, StorageErr},
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -161,7 +161,7 @@ where
         }
     }
 
-    fn get_decided_idx(&self) -> u64 {
+    fn get_decided_idx(&self) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
@@ -175,35 +175,37 @@ where
         }
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(
+        &self,
+    ) -> Result<omnipaxos_core::ballot_leader_election::Ballot, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
         }
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+    fn get_entries(&self, from: u64, to: u64) -> Result<Vec<T>, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
         }
     }
 
-    fn get_log_len(&self) -> u64 {
+    fn get_log_len(&self) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
         }
     }
 
-    fn get_suffix(&self, from: u64) -> Vec<T> {
+    fn get_suffix(&self, from: u64) -> Result<Vec<T>, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
         }
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> Result<omnipaxos_core::ballot_leader_election::Ballot, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
@@ -220,7 +222,7 @@ where
         }
     }
 
-    fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
+    fn get_stopsign(&self) -> Result<std::option::Option<StopSignEntry>, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
@@ -241,7 +243,7 @@ where
         }
     }
 
-    fn get_compacted_idx(&self) -> u64 {
+    fn get_compacted_idx(&self) -> Result<u64, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
@@ -255,7 +257,7 @@ where
         }
     }
 
-    fn get_snapshot(&self) -> Option<S> {
+    fn get_snapshot(&self) -> Result<std::option::Option<S>, StorageErr> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
@@ -500,12 +502,6 @@ impl TestSystem {
         } else {
             conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
         };
-    }
-}
-
-impl Drop for TestSystem {
-    fn drop(&mut self) {
-        clear_storage();
     }
 }
 

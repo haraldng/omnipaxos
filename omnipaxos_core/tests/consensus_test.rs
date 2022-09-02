@@ -80,7 +80,8 @@ fn read_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_PATH);
+    let temp_dir = create_temp_dir();
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
     storage
         .append_entries(log.clone())
         .expect("Failed to append log entries");
@@ -162,7 +163,8 @@ fn read_entries_test() {
 
     let exp_snapshot = LatestValue::create(snapshotted);
 
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, READ_ENTRIES_PATH);
+    let temp_dir = create_temp_dir();
+    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
     storage
         .append_entries(log.clone())
         .expect("Failed to append log entries");

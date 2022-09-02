@@ -300,10 +300,10 @@ where
         }
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+    fn get_entries(&self, from: u64, to: u64) -> Result<Vec<T>, StorageErr> {
         // Check if the commit log has entries up to the requested endpoint.
         if to > self.commitlog.next_offset() {
-            return vec![]; // Do an early return
+            return Ok(vec![]); // Do an early return
         }
 
         let buffer = self
@@ -318,18 +318,18 @@ where
                 bincode::deserialize(msg.payload()).expect("Failed to deserialize log entries"),
             );
         }
-        entries
+        Ok(entries)
     }
 
-    fn get_log_len(&self) -> u64 {
-        self.commitlog.next_offset()
+    fn get_log_len(&self) -> Result<u64, StorageErr> {
+        Ok(self.commitlog.next_offset())
     }
 
-    fn get_suffix(&self, from: u64) -> Vec<T> {
+    fn get_suffix(&self, from: u64) -> Result<Vec<T>, StorageErr> {
         self.get_entries(from, self.commitlog.next_offset())
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> Result<Ballot, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
@@ -349,9 +349,9 @@ where
                 Some(prom_bytes) => {
                     let b_store = BallotStorage::read_from(prom_bytes.as_ref())
                         .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Ok(Ballot::default()),
             }
         }
     }
@@ -379,7 +379,7 @@ where
         }
     }
 
-    fn get_decided_idx(&self) -> u64 {
+    fn get_decided_idx(&self) -> Result<u64, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let decided = self
@@ -396,9 +396,9 @@ where
         {
             let decided = self.sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
             match decided {
-                Some(ld_bytes) => u64::read_from(ld_bytes.as_bytes())
-                    .expect("Failed to deserialize the decided index"),
-                None => 0,
+                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes())
+                    .expect("Failed to deserialize the decided index")),
+                None => Ok(0),
             }
         }
     }
@@ -425,7 +425,7 @@ where
         }
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> Result<Ballot, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
@@ -445,9 +445,9 @@ where
                 Some(acc_bytes) => {
                     let b_store = BallotStorage::read_from(acc_bytes.as_bytes())
                         .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Ok(Ballot::default()),
             }
         }
     }
@@ -475,7 +475,7 @@ where
         }
     }
 
-    fn get_compacted_idx(&self) -> u64 {
+    fn get_compacted_idx(&self) -> Result<u64, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let trim = self.rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
@@ -489,9 +489,9 @@ where
         {
             let trim = self.sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
             match trim {
-                Some(trim_bytes) => u64::read_from(trim_bytes.as_bytes())
-                    .expect("Failed to deserialize the compacted index"),
-                None => 0,
+                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes())
+                    .expect("Failed to deserialize the compacted index")),
+                None => Ok(0),
             }
         }
     }
@@ -518,7 +518,7 @@ where
         }
     }
 
-    fn get_stopsign(&self) -> Option<StopSignEntry> {
+    fn get_stopsign(&self) -> Result<std::option::Option<StopSignEntry>, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let stopsign = self
@@ -551,16 +551,16 @@ where
                 Some(ss_bytes) => {
                     let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
                         .expect("Failed to deserialize the stopsign");
-                    Some(StopSignEntry::with(
+                    Ok(Some(StopSignEntry::with(
                         StopSign::with(
                             ss_entry_storage.ss.config_id,
                             ss_entry_storage.ss.nodes,
                             ss_entry_storage.ss.metadata,
                         ),
                         ss_entry_storage.decided,
-                    ))
+                    )))
                 }
-                None => None,
+                None => Ok(None),
             }
         }
     }
@@ -589,7 +589,7 @@ where
         }
     }
 
-    fn get_snapshot(&self) -> Option<S> {
+    fn get_snapshot(&self) -> Result<std::option::Option<S>, StorageErr> {
         #[cfg(feature = "rocksdb")]
         {
             let snapshot = self
@@ -607,10 +607,10 @@ where
                 .sled
                 .get(SNAPSHOT)
                 .expect("Failed to retrieve 'SNAPSHOT'");
-            snapshot.map(|snapshot_bytes| {
+            Ok(snapshot.map(|snapshot_bytes| {
                 bincode::deserialize(snapshot_bytes.as_bytes())
                     .expect("Failed to deserialize snapshot")
-            })
+            }))
         }
     }
 
@@ -638,7 +638,9 @@ where
 
     // TODO: A way to trim the commitlog without deleting and recreating the log
     fn trim(&mut self, trimmed_idx: u64) -> Result<(), StorageErr> {
-        let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
+        let trimmed_log: Vec<T> = self
+            .get_entries(trimmed_idx, self.commitlog.next_offset())
+            .expect("Failed to get log entries for trim operations"); // get the log entries from 'trimmed_idx' to latest
         let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
         let c_opts = LogOptions::new(&self.log_path);
         self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog"); // create new commitlog
