@@ -6,9 +6,14 @@ use crate::utils::hocon_kv::{
 };
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
+use crate::{
+    messages::ballot_leader_election::{
+        BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest,
+    },
+    util::Id,
+};
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
-use messages::{BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 
@@ -20,7 +25,7 @@ pub struct Ballot {
     /// Custom priority parameter
     pub priority: u64,
     /// The pid of the process
-    pub pid: u64,
+    pub pid: Id,
 }
 
 impl Ballot {
@@ -29,7 +34,7 @@ impl Ballot {
     /// * `n` - Ballot number.
     /// * `priority` - Custom priority parameter.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(n: u32, priority: u64, pid: u64) -> Ballot {
+    pub(crate) fn with(n: u32, priority: u64, pid: Id) -> Ballot {
         Ballot { n, priority, pid }
     }
 }
@@ -39,7 +44,7 @@ impl Ballot {
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct BallotLeaderElection {
     /// Process identifier used to uniquely identify this instance.
-    pid: u64,
+    pid: Id,
     /// Vector that holds all the other replicas.
     peers: Vec<u64>,
     /// The current round of the heartbeat cycle.
@@ -49,7 +54,7 @@ pub struct BallotLeaderElection {
     /// Holds the current ballot of this instance.
     current_ballot: Ballot, // (round, pid)
     /// States if the instance is a candidate to become a leader.
-    majority_connected: bool,
+    quorum_connected: bool,
     /// Current elected leader.
     leader: Option<Ballot>,
     /// Internal delay used for timeout.
@@ -73,7 +78,7 @@ pub struct BallotLeaderElection {
 
 impl BallotLeaderElection {
     /// Construct a new BallotLeaderElection node
-    pub fn with(config: BLEConfig) -> Self {
+    pub(crate) fn with(config: BLEConfig) -> Self {
         let pid = config.pid;
         let peers = config.peers;
         let n = &peers.len() + 1;
@@ -89,7 +94,7 @@ impl BallotLeaderElection {
             hb_round: 0,
             ballots: Vec::with_capacity(n),
             current_ballot: initial_ballot,
-            majority_connected: true,
+            quorum_connected: true,
             leader: config.initial_leader,
             hb_current_delay: hb_delay,
             hb_delay,
@@ -116,24 +121,19 @@ impl BallotLeaderElection {
     }
 
     /// Update the custom priority used in the Ballot for this server.
-    pub fn set_priority(&mut self, p: u64) {
+    pub(crate) fn set_priority(&mut self, p: u64) {
         self.current_ballot.priority = p;
     }
 
     /// Returns outgoing messages
-    pub fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
+    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
         std::mem::take(&mut self.outgoing)
-    }
-
-    /// Returns the currently elected leader.
-    pub fn get_leader(&self) -> Option<Ballot> {
-        self.leader
     }
 
     /// Tick is run by all servers to simulate the passage of time
     /// If one wishes to have hb_delay of 500ms, one can set a periodic timer of 100ms to call tick(). After 5 calls to this function, the timeout will occur.
     /// Returns an Option with the elected leader otherwise None
-    pub fn tick(&mut self) -> Option<Ballot> {
+    pub(crate) fn tick(&mut self) -> Option<Ballot> {
         self.ticks_elapsed += 1;
         if self.ticks_elapsed >= self.hb_current_delay {
             self.ticks_elapsed = 0;
@@ -146,27 +146,27 @@ impl BallotLeaderElection {
     /// Handle an incoming message.
     /// # Arguments
     /// * `m` - the message to be handled.
-    pub fn handle(&mut self, m: BLEMessage) {
+    pub(crate) fn handle(&mut self, m: BLEMessage) {
         match m.msg {
             HeartbeatMsg::Request(req) => self.handle_request(m.from, req),
             HeartbeatMsg::Reply(rep) => self.handle_reply(rep),
         }
     }
 
+    /*
     /// Sets initial state after creation. *Must only be used before being started*.
     /// # Arguments
     /// * `leader_ballot` - Initial leader.
-    pub fn set_initial_leader(&mut self, leader_ballot: Ballot) {
+    pub(crate) fn set_initial_leader(&mut self, leader_ballot: Ballot) {
         assert!(self.leader.is_none());
         if leader_ballot.pid == self.pid {
             self.current_ballot = leader_ballot;
-            self.majority_connected = true;
         }
         self.leader = Some(leader_ballot);
-    }
+    }*/
 
     fn check_leader(&mut self) -> Option<Ballot> {
-        self.majority_connected = true;
+        self.quorum_connected = true;
         let ballots = std::mem::take(&mut self.ballots);
         let top_ballot = ballots
             .into_iter()
@@ -203,7 +203,7 @@ impl BallotLeaderElection {
     }
 
     /// Initiates a new heartbeat round.
-    pub fn new_hb_round(&mut self) {
+    pub(crate) fn new_hb_round(&mut self) {
         self.hb_round += 1;
         #[cfg(feature = "logging")]
         trace!(
@@ -233,7 +233,7 @@ impl BallotLeaderElection {
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
             self.ballots
-                .push((self.current_ballot, self.majority_connected));
+                .push((self.current_ballot, self.quorum_connected));
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -244,7 +244,7 @@ impl BallotLeaderElection {
                 self.ballots
             );
             self.ballots.clear();
-            self.majority_connected = false;
+            self.quorum_connected = false;
             None
         };
         self.new_hb_round();
@@ -252,8 +252,7 @@ impl BallotLeaderElection {
     }
 
     fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
-        let hb_reply =
-            HeartbeatReply::with(req.round, self.current_ballot, self.majority_connected);
+        let hb_reply = HeartbeatReply::with(req.round, self.current_ballot, self.quorum_connected);
 
         self.outgoing.push(BLEMessage::with(
             self.pid,
@@ -278,83 +277,6 @@ impl BallotLeaderElection {
     }
 }
 
-/// The different messages BLE uses to communicate with other replicas.
-pub mod messages {
-    use crate::ballot_leader_election::Ballot;
-
-    /// An enum for all the different BLE message types.
-    #[allow(missing_docs)]
-    #[derive(Clone, Debug)]
-    pub enum HeartbeatMsg {
-        Request(HeartbeatRequest),
-        Reply(HeartbeatReply),
-    }
-
-    /// Requests a reply from all the other replicas.
-    #[derive(Clone, Debug)]
-    pub struct HeartbeatRequest {
-        /// Number of the current round.
-        pub round: u32,
-    }
-
-    impl HeartbeatRequest {
-        /// Creates a new HeartbeatRequest
-        /// # Arguments
-        /// * `round` - number of the current round.
-        pub fn with(round: u32) -> HeartbeatRequest {
-            HeartbeatRequest { round }
-        }
-    }
-
-    /// Replies
-    #[derive(Clone, Debug)]
-    pub struct HeartbeatReply {
-        /// Number of the current round.
-        pub round: u32,
-        /// Ballot of a replica.
-        pub ballot: Ballot,
-        /// States if the replica is a candidate to become a leader.
-        pub majority_connected: bool,
-    }
-
-    impl HeartbeatReply {
-        /// Creates a new HeartbeatRequest
-        /// # Arguments
-        /// * `round` - Number of the current round.
-        /// * `ballot` -  Ballot of a replica.
-        /// * `majority_connected` -  States if the replica is majority_connected to become a leader.
-        pub fn with(round: u32, ballot: Ballot, majority_connected: bool) -> HeartbeatReply {
-            HeartbeatReply {
-                round,
-                ballot,
-                majority_connected,
-            }
-        }
-    }
-
-    /// A struct for a Paxos message that also includes sender and receiver.
-    #[derive(Clone, Debug)]
-    pub struct BLEMessage {
-        /// Sender of `msg`.
-        pub from: u64,
-        /// Receiver of `msg`.
-        pub to: u64,
-        /// The message content.
-        pub msg: HeartbeatMsg,
-    }
-
-    impl BLEMessage {
-        /// Creates a BLE message.
-        /// # Arguments
-        /// * `from` - Sender of `msg`.
-        /// * `to` -  Receiver of `msg`.
-        /// * `msg` -  The message content.
-        pub fn with(from: u64, to: u64, msg: HeartbeatMsg) -> Self {
-            BLEMessage { from, to, msg }
-        }
-    }
-}
-
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
@@ -368,7 +290,7 @@ pub mod messages {
 /// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
 pub struct BLEConfig {
-    pid: u64,
+    pid: Id,
     peers: Vec<u64>,
     priority: Option<u64>,
     hb_delay: u64,
@@ -383,7 +305,7 @@ pub struct BLEConfig {
 
 #[allow(missing_docs)]
 impl BLEConfig {
-    pub fn set_pid(&mut self, pid: u64) {
+    pub fn set_pid(&mut self, pid: Id) {
         self.pid = pid;
     }
 

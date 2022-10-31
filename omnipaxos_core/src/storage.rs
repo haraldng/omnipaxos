@@ -1,5 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
+use crate::util::ConfigurationId;
+
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}
 
@@ -24,7 +26,7 @@ impl StopSignEntry {
 #[derive(Clone, Debug)]
 pub struct StopSign {
     /// The identifier for the new configuration.
-    pub config_id: u32,
+    pub config_id: ConfigurationId,
     /// The process ids of the new configuration.
     pub nodes: Vec<u64>,
     /// Metadata for the reconfiguration. Can be used for pre-electing leader for the new configuration and skip prepare phase when starting the new configuration with the given leader.
@@ -33,7 +35,7 @@ pub struct StopSign {
 
 impl StopSign {
     /// Creates a [`StopSign`].
-    pub fn with(config_id: u32, nodes: Vec<u64>, metadata: Option<Vec<u8>>) -> Self {
+    pub fn with(config_id: ConfigurationId, nodes: Vec<u64>, metadata: Option<Vec<u8>>) -> Self {
         StopSign {
             config_id,
             nodes,
