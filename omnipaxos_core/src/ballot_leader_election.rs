@@ -1,16 +1,18 @@
 /// Ballot Leader Election algorithm for electing new leaders
 use crate::util::defaults::{BLE_BUFFER_SIZE as DEFAULT_BUFFER_SIZE, *};
 #[cfg(feature = "hocon_config")]
-use crate::utils::hocon_kv::{
-    BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, LOG_FILE_PATH, PEERS, PID, PRIORITY,
-};
+#[allow(unused_imports)]
+use crate::utils::hocon_kv::LOG_FILE_PATH;
+#[cfg(feature = "hocon_config")]
+use crate::utils::hocon_kv::{BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, PEERS, PID, PRIORITY}; // only needed when using persistent storage
+
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
     messages::ballot_leader_election::{
         BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest,
     },
-    util::Id,
+    util::NodeId,
 };
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
@@ -25,7 +27,7 @@ pub struct Ballot {
     /// Custom priority parameter
     pub priority: u64,
     /// The pid of the process
-    pub pid: Id,
+    pub pid: NodeId,
 }
 
 impl Ballot {
@@ -34,7 +36,7 @@ impl Ballot {
     /// * `n` - Ballot number.
     /// * `priority` - Custom priority parameter.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub(crate) fn with(n: u32, priority: u64, pid: Id) -> Ballot {
+    pub fn with(n: u32, priority: u64, pid: NodeId) -> Ballot {
         Ballot { n, priority, pid }
     }
 }
@@ -44,7 +46,7 @@ impl Ballot {
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub struct BallotLeaderElection {
     /// Process identifier used to uniquely identify this instance.
-    pid: Id,
+    pid: NodeId,
     /// Vector that holds all the other replicas.
     peers: Vec<u64>,
     /// The current round of the heartbeat cycle.
@@ -87,7 +89,7 @@ impl BallotLeaderElection {
             _ => Ballot::with(0, config.priority.unwrap_or_default(), pid),
         };
         let hb_delay = config.hb_delay;
-        let ble = BallotLeaderElection {
+        let mut ble = BallotLeaderElection {
             pid,
             majority: n / 2 + 1, // +1 because peers is exclusive ourselves
             peers,
@@ -117,6 +119,7 @@ impl BallotLeaderElection {
                 "Ballot Leader Election component pid: {} created!", pid
             );
         }
+        ble.new_hb_round();
         ble
     }
 
@@ -290,7 +293,7 @@ impl BallotLeaderElection {
 /// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
 pub struct BLEConfig {
-    pid: Id,
+    pid: NodeId,
     peers: Vec<u64>,
     priority: Option<u64>,
     hb_delay: u64,
@@ -305,7 +308,7 @@ pub struct BLEConfig {
 
 #[allow(missing_docs)]
 impl BLEConfig {
-    pub fn set_pid(&mut self, pid: Id) {
+    pub fn set_pid(&mut self, pid: NodeId) {
         self.pid = pid;
     }
 

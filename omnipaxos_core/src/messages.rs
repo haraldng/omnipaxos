@@ -1,7 +1,7 @@
 use crate::{
     messages::{ballot_leader_election::BLEMessage, sequence_paxos::PaxosMessage},
     storage::{Entry, Snapshot},
-    util::Id,
+    util::NodeId,
 };
 
 /// Internal component for log replication
@@ -398,7 +398,7 @@ where
     S: Snapshot<T>,
 {
     /// Get the sender id of the message
-    pub fn get_sender(&self) -> Id {
+    pub fn get_sender(&self) -> NodeId {
         match self {
             Message::SequencePaxos(p) => p.from,
             Message::BLE(b) => b.from,
@@ -406,7 +406,7 @@ where
     }
 
     /// Get the receiver id of the message
-    pub fn get_receiver(&self) -> Id {
+    pub fn get_receiver(&self) -> NodeId {
         match self {
             Message::SequencePaxos(p) => p.to,
             Message::BLE(b) => b.to,

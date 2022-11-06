@@ -1,6 +1,6 @@
 use super::ballot_leader_election::Ballot;
-use std::{fmt::Debug, marker::PhantomData};
 use crate::util::ConfigurationId;
+use std::{fmt::Debug, marker::PhantomData};
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}

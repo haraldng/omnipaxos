@@ -21,22 +21,25 @@ fn ble_test() {
         cfg.storage_type,
     );
 
-    let (ble, _) = sys.ble_paxos_nodes().get(&1).unwrap();
-
     let num_elections = cfg.num_nodes / 2;
+    let mut promises = vec![];
     let mut futures = vec![];
     for _ in 0..num_elections {
         let (kprom, kfuture) = promise::<Ballot>();
-        ble.on_definition(|x| x.add_ask(Ask::new(kprom, ())));
+        promises.push(Ask::new(kprom, ()));
         futures.push(kfuture);
     }
 
+    let first_node = sys.nodes.get(&1).unwrap();
+    first_node.on_definition(|x| x.election_futures.append(&mut promises));
     sys.start_all_nodes();
 
-    for fr in futures.into_iter() {
+    futures.reverse(); // reverse as the future is being popped when replying
+
+    for (i, fr) in futures.into_iter().enumerate() {
         let elected_leader = fr
             .wait_timeout(cfg.wait_timeout)
-            .expect("No leader has been elected in the allocated time!");
+            .expect(format!("No leader in election {}", i + 1).as_str());
         println!("elected: {:?}", elected_leader);
         sys.kill_node(elected_leader.pid);
     }

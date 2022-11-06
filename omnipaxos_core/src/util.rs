@@ -10,12 +10,12 @@ use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 pub(crate) struct PromiseMetaData {
     pub n: Ballot,
     pub la: u64,
-    pub pid: Id,
+    pub pid: NodeId,
     pub stopsign: Option<StopSign>,
 }
 
 impl PromiseMetaData {
-    pub fn with(n: Ballot, la: u64, pid: Id, stopsign: Option<StopSign>) -> Self {
+    pub fn with(n: Ballot, la: u64, pid: NodeId, stopsign: Option<StopSign>) -> Self {
         Self {
             n,
             la,
@@ -91,11 +91,11 @@ where
         }
     }
 
-    fn pid_to_idx(pid: Id) -> usize {
+    fn pid_to_idx(pid: NodeId) -> usize {
         (pid - 1) as usize
     }
 
-    pub fn set_decided_idx(&mut self, pid: Id, idx: Option<u64>) {
+    pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
         self.lds[Self::pid_to_idx(pid)] = idx;
     }
 
@@ -123,7 +123,7 @@ where
         self.accepted_stopsign[Self::pid_to_idx(from)] = true;
     }
 
-    pub fn get_promise_meta(&self, pid: Id) -> &PromiseMetaData {
+    pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
         self.promises_meta[Self::pid_to_idx(pid)]
             .as_ref()
             .expect("No Metadata found for promised follower")
@@ -159,17 +159,17 @@ where
     }
 
     #[cfg(feature = "batch_accept")]
-    pub fn set_batch_accept_meta(&mut self, pid: Id, idx: Option<usize>) {
+    pub fn set_batch_accept_meta(&mut self, pid: NodeId, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn set_accepted_idx(&mut self, pid: Id, idx: u64) {
+    pub fn set_accepted_idx(&mut self, pid: NodeId, idx: u64) {
         self.las[Self::pid_to_idx(pid)] = idx;
     }
 
     #[cfg(feature = "batch_accept")]
-    pub fn get_batch_accept_meta(&self, pid: Id) -> Option<(Ballot, usize)> {
+    pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
             .get(Self::pid_to_idx(pid))
             .unwrap()
@@ -177,7 +177,7 @@ where
             .copied()
     }
 
-    pub fn get_decided_idx(&self, pid: Id) -> &Option<u64> {
+    pub fn get_decided_idx(&self, pid: NodeId) -> &Option<u64> {
         self.lds.get(Self::pid_to_idx(pid)).unwrap()
     }
 
@@ -280,7 +280,7 @@ pub(crate) mod defaults {
 #[allow(missing_docs)]
 pub type TrimmedIndex = u64;
 
-/// ID for an OmniPaxos server
-pub type Id = u64;
+/// ID for an OmniPaxos node
+pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;

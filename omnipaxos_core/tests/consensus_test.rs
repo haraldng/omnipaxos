@@ -2,7 +2,9 @@ pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+    ballot_leader_election::BLEConfig,
+    omni_paxos::OmniPaxos,
+    sequence_paxos::SequencePaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
@@ -23,16 +25,16 @@ fn consensus_test() {
         cfg.storage_type,
     );
 
-    let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let first_node = sys.nodes.get(&1).unwrap();
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
-        px.on_definition(|x| {
+        first_node.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, ()))
+            x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
     }
@@ -44,11 +46,11 @@ fn consensus_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let mut log: Vec<(&u64, Vec<Value>)> = vec![];
-    for (i, (_, px)) in sys.ble_paxos_nodes() {
-        log.push(px.on_definition(|comp| {
+    let mut log = vec![];
+    for (pid, node) in sys.nodes {
+        log.push(node.on_definition(|comp| {
             let log = comp.get_trimmed_suffix();
-            (i, log.to_vec())
+            (pid, log.to_vec())
         }));
     }
 
@@ -88,7 +90,7 @@ fn read_test() {
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
     sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
+    let mut seq_paxos = OmniPaxos::with(sp_config.clone(), BLEConfig::default(), storage);
 
     // read decided entries
     let entries = seq_paxos
@@ -127,7 +129,7 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
+    let mut stopped_op = OmniPaxos::with(sp_config, BLEConfig::default(), stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -161,7 +163,7 @@ fn read_entries_test() {
     let mut sp_config = SequencePaxosConfig::default();
     sp_config.set_pid(1);
     sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
+    let mut seq_paxos = OmniPaxos::with(sp_config.clone(), BLEConfig::default(), storage);
     seq_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -207,7 +209,7 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
+    let mut stopped_op = OmniPaxos::with(sp_config, BLEConfig::default(), stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -331,7 +333,7 @@ fn verify_entries(
 }
 /// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
-    log_responses: Vec<(&u64, Vec<Value>)>,
+    log_responses: Vec<(u64, Vec<Value>)>,
     quorum_size: usize,
     num_proposals: Vec<Value>,
 ) {
@@ -355,7 +357,7 @@ fn check_quorum(
 }
 
 /// Verifies that only proposed values are decided.
-fn check_validity(log_responses: Vec<(&u64, Vec<Value>)>, num_proposals: Vec<Value>) {
+fn check_validity(log_responses: Vec<(u64, Vec<Value>)>, num_proposals: Vec<Value>) {
     let invalid_nodes: Vec<_> = log_responses
         .iter()
         .filter(|(_, sr)| {
@@ -375,7 +377,7 @@ fn check_validity(log_responses: Vec<(&u64, Vec<Value>)>, num_proposals: Vec<Val
 }
 
 /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(log_responses: Vec<(&u64, Vec<Value>)>) {
+fn check_uniform_agreement(log_responses: Vec<(u64, Vec<Value>)>) {
     let (_, longest_log) = log_responses
         .iter()
         .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))

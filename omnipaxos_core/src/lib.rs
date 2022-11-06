@@ -12,13 +12,13 @@
 
 #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
-pub(crate) mod ballot_leader_election;
+pub mod ballot_leader_election;
 /// The different messages Omni-Paxos replicas can communicate to each other with.
 pub mod messages;
 /// The user-facing Omni-Paxos struct.
 pub mod omni_paxos;
 /// The core replication algorithm of Omni-Paxos.
-pub(crate) mod sequence_paxos;
+pub mod sequence_paxos;
 /// Traits and structs related to the backend storage of an Omni-Paxos replica.
 pub mod storage;
 /// A module containing helper functions and structs.

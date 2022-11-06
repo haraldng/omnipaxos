@@ -23,16 +23,16 @@ fn reconfig_test() {
         cfg.storage_type,
     );
 
-    let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let first_node = sys.nodes.get(&1).unwrap();
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
-        px.on_definition(|x| {
+        first_node.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, ()))
+            x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
     }
@@ -47,10 +47,10 @@ fn reconfig_test() {
     let new_config: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
     let rc = ReconfigurationRequest::with(new_config.clone(), Some(vec![SS_METADATA]));
 
-    let reconfig_f = px.on_definition(|x| {
+    let reconfig_f = first_node.on_definition(|x| {
         let (kprom, kfuture) = promise::<Value>();
         x.paxos.reconfigure(rc).expect("Failed to reconfigure");
-        x.add_ask(Ask::new(kprom, ()));
+        x.decided_futures.push(Ask::new(kprom, ()));
         kfuture
     });
 
@@ -59,24 +59,20 @@ fn reconfig_test() {
         .expect("Failed to collect reconfiguration future");
     assert_eq!(decided_ss_metadata, Value(SS_METADATA as u64));
 
-    let decided_nodes = sys
-        .ble_paxos_nodes()
-        .iter()
-        .fold(vec![], |mut x, (pid, comps)| {
-            let paxos = &comps.1;
-            let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());
-            if let Some(stop_sign) = ss {
-                assert_eq!(stop_sign.nodes, new_config);
-                x.push(pid);
-            }
-            x
-        });
+    let decided_nodes = sys.nodes.iter().fold(vec![], |mut x, (pid, paxos)| {
+        let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());
+        if let Some(stop_sign) = ss {
+            assert_eq!(stop_sign.nodes, new_config);
+            x.push(pid);
+        }
+        x
+    });
     let quorum_size = cfg.num_nodes as usize / 2 + 1;
     assert!(decided_nodes.len() >= quorum_size);
 
     let pid = *decided_nodes.last().unwrap();
-    let (_ble, paxos) = sys.ble_paxos_nodes().get(pid).unwrap();
-    paxos.on_definition(|x| {
+    let node = sys.nodes.get(pid).unwrap();
+    node.on_definition(|x| {
         x.paxos
             .append(Value(0))
             .expect_err("Should not be able to propose after decided StopSign!")

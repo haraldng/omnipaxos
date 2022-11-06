@@ -41,8 +41,8 @@ fn leader_fail_follower_propose_test() {
 
     thread::sleep(SLEEP_TIMEOUT);
 
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
+    let recovery_px = sys
+        .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
@@ -90,8 +90,8 @@ fn leader_fail_leader_propose_test() {
 
     thread::sleep(SLEEP_TIMEOUT);
 
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
+    let recovery_px = sys
+        .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
@@ -143,8 +143,8 @@ fn follower_fail_leader_propose_test() {
 
     thread::sleep(SLEEP_TIMEOUT);
 
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
+    let recovery_px = sys
+        .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
@@ -196,8 +196,8 @@ fn follower_fail_follower_propose_test() {
 
     thread::sleep(SLEEP_TIMEOUT);
 
-    let (_, recovery_px) = sys
-        .ble_paxos_nodes()
+    let recovery_px = sys
+        .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
     let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
@@ -305,41 +305,33 @@ fn verify_entries(
 /// Return the elected leader. If there is no leader yet then
 /// wait until a leader is elected in the allocated time.
 fn get_elected_leader(sys: &TestSystem, wait_timeout: Duration) -> u64 {
-    let (ble, _) = sys
-        .ble_paxos_nodes()
-        .get(&1)
-        .expect("No BLE component found");
+    let first_node = sys.nodes.get(&1).expect("No BLE component found");
 
-    ble.on_definition(|x| {
-        if let Some(ballot) = x.ble.get_leader() {
-            // Leader is already elected
-            return ballot.pid;
-        } else {
+    first_node.on_definition(|x| {
+        let leader_pid = x.paxos.get_current_leader();
+        leader_pid.unwrap_or_else(|| {
             // Leader is not elected yet
             let (kprom, kfuture) = promise::<Ballot>();
-            x.add_ask(Ask::new(kprom, ()));
+            x.election_futures.push(Ask::new(kprom, ()));
 
             let ballot = kfuture
                 .wait_timeout(wait_timeout)
                 .expect("No leader has been elected in the allocated time!");
             ballot.pid
-        }
+        })
     })
 }
 
 /// Propose and check that the first proposals before any node fails are decided.
 fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
-    let (_, px) = sys
-        .ble_paxos_nodes()
-        .get(&1)
-        .expect("No SequencePaxos component found");
+    let px = sys.nodes.get(&1).expect("No SequencePaxos component found");
 
     let mut proposal_futures = vec![];
     for i in 1..=(cfg.num_proposals / 2) {
         let (kprom, kfuture) = promise::<Value>();
         px.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, ()));
+            x.decided_futures.push(Ask::new(kprom, ()));
         });
         proposal_futures.push(kfuture);
     }
@@ -353,12 +345,12 @@ fn check_initial_proposals(sys: &TestSystem, cfg: &TestConfig) {
 /// Propose and check that the last proposals are decided by the
 /// recovered node. The recovered node can also be the proposer
 fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &TestConfig) {
-    let (_, proposer_px) = sys
-        .ble_paxos_nodes()
+    let proposer_px = sys
+        .nodes
         .get(&proposer)
         .expect("No SequencePaxos component found");
-    let (_, recover_px) = sys
-        .ble_paxos_nodes()
+    let recover_px = sys
+        .nodes
         .get(&recover)
         .expect("No SequencePaxos component found");
 
@@ -366,7 +358,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .map(|_| {
             let (kprom, kfuture) = promise::<Value>();
             recover_px.on_definition(|x| {
-                x.add_ask(Ask::new(kprom, ()));
+                x.decided_futures.push(Ask::new(kprom, ()));
             });
             kfuture
         })
@@ -398,8 +390,8 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         &storage_path,
     );
     sys.start_node(pid);
-    let (_, px) = sys
-        .ble_paxos_nodes()
+    let px = sys
+        .nodes
         .get(&pid)
         .expect("No SequencePaxos component found");
     px.on_definition(|x| {

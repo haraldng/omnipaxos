@@ -1,11 +1,11 @@
 use crate::{
-    ballot_leader_election::{BLEConfig, BallotLeaderElection},
+    ballot_leader_election::{BLEConfig, Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::{
         CompactionErr, ProposeErr, ReconfigurationRequest, SequencePaxos, SequencePaxosConfig,
     },
     storage::{Entry, Snapshot, StopSign, Storage},
-    util::{Id, LogEntry},
+    util::{LogEntry, NodeId},
 };
 use std::ops::RangeBounds;
 
@@ -70,8 +70,18 @@ where
     }
 
     /// Returns the id of the current leader.
-    pub fn get_current_leader(&self) -> u64 {
-        self.seq_paxos.get_current_leader()
+    pub fn get_current_leader(&self) -> Option<NodeId> {
+        self.get_current_leader_ballot().map(|ballot| ballot.pid)
+    }
+
+    /// Returns the ballot of the current leader.
+    pub fn get_current_leader_ballot(&self) -> Option<Ballot> {
+        let ballot = self.seq_paxos.get_current_leader();
+        if ballot == Ballot::default() {
+            None
+        } else {
+            Some(ballot)
+        }
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
@@ -132,7 +142,7 @@ where
 
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
-    pub fn reconnected(&mut self, pid: Id) {
+    pub fn reconnected(&mut self, pid: NodeId) {
         self.seq_paxos.reconnected(pid)
     }
 

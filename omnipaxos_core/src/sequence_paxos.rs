@@ -7,7 +7,7 @@ use super::{
         SnapshottedEntry, SyncItem,
     },
 };
-use crate::util::{ConfigurationId, Id};
+use crate::util::{ConfigurationId, NodeId};
 #[cfg(feature = "hocon_config")]
 use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZE};
 #[cfg(feature = "logging")]
@@ -29,10 +29,10 @@ where
 {
     storage: B,
     config_id: ConfigurationId,
-    pid: Id,
+    pid: NodeId,
     peers: Vec<u64>, // excluding self pid
     state: (Role, Phase),
-    leader: u64,
+    leader: Ballot,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T, S>>,
@@ -40,6 +40,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     buffer_size: usize,
     s: PhantomData<S>,
+    intermediate_snapshot: Option<S>,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -60,7 +61,7 @@ where
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, n_leader, lds) = match &config.skip_prepare_use_leader {
+        let (state, leader, lds) = match &config.skip_prepare_use_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -74,12 +75,12 @@ where
                     (Role::Follower, None)
                 };
                 let state = (role, Phase::FirstAccept);
-                (state, l.pid, *l, lds)
+                (state, *l, lds)
             }
             None => {
                 let state = (Role::Follower, Phase::None);
                 let lds = None;
-                (state, 0, Ballot::default(), lds)
+                (state, Ballot::default(), lds)
             }
         };
 
@@ -93,10 +94,11 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::with(n_leader, lds, max_pid, majority),
+            leader_state: LeaderState::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             buffer_size: config.buffer_size,
             s: PhantomData,
+            intermediate_snapshot: None,
             #[cfg(feature = "logging")]
             logger: {
                 let path = config.logger_file_path;
@@ -106,7 +108,7 @@ where
                 })
             },
         };
-        paxos.storage.set_promise(n_leader);
+        paxos.storage.set_promise(leader);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -241,7 +243,7 @@ where
     }
 
     /// Returns the id of the current leader.
-    pub(crate) fn get_current_leader(&self) -> u64 {
+    pub(crate) fn get_current_leader(&self) -> Ballot {
         self.leader
     }
 
@@ -260,8 +262,18 @@ where
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
     pub(crate) fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
         let compacted_idx = self.get_compacted_idx();
+        let decided_idx = self.storage.get_decided_idx();
+        // println!("READING: {}, compacted: {}, decided: {}", idx, compacted_idx, decided_idx);
         if idx < compacted_idx {
-            Some(self.create_compacted_entry(compacted_idx))
+            if compacted_idx > decided_idx {
+                // undecided snapshot, return the intermediate snapshot
+                self.intermediate_snapshot.as_ref().map(|s| {
+                    let snap_entry = SnapshottedEntry::with(decided_idx, s.clone());
+                    LogEntry::Snapshotted(snap_entry)
+                })
+            } else {
+                Some(self.create_compacted_entry(compacted_idx))
+            }
         } else {
             let suffix_idx = idx - compacted_idx;
             let log_len = self.storage.get_log_len();
@@ -276,7 +288,7 @@ where
                 match self.storage.get_entries(suffix_idx, suffix_idx + 1).first() {
                     // TODO
                     Some(data) => {
-                        if idx < self.storage.get_decided_idx() {
+                        if idx < decided_idx {
                             Some(LogEntry::Decided(data.clone()))
                         } else {
                             Some(LogEntry::Undecided(data.clone()))
@@ -561,10 +573,10 @@ where
 
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
-    pub(crate) fn reconnected(&mut self, pid: Id) {
+    pub(crate) fn reconnected(&mut self, pid: NodeId) {
         if pid == self.pid {
             return;
-        } else if pid == self.leader {
+        } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
         }
         self.outgoing
@@ -592,21 +604,20 @@ where
     pub(crate) fn handle_leader(&mut self, n: Ballot) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
-        let leader_pid = n.pid;
         if n <= self.leader_state.n_leader || n <= self.storage.get_promise() {
             return;
         }
         if self.stopped() {
             self.pending_proposals.clear();
         }
-        if self.pid == leader_pid {
+        if self.pid == n.pid {
             self.leader_state = LeaderState::with(
                 n,
                 None,
                 self.leader_state.max_pid,
                 self.leader_state.majority,
             );
-            self.leader = leader_pid;
+            self.leader = n;
             self.storage.set_promise(n);
             /* insert my promise */
             let na = self.storage.get_accepted_round();
@@ -646,7 +657,7 @@ where
     }
 
     fn forward_compaction(&mut self, c: Compaction) {
-        if self.leader > 0 && self.leader != self.pid {
+        if self.leader.pid > 0 && self.leader.pid != self.pid {
             #[cfg(feature = "logging")]
             trace!(
                 self.logger,
@@ -655,17 +666,17 @@ where
                 c
             );
             let fc = PaxosMsg::ForwardCompaction(c);
-            let msg = PaxosMessage::with(self.pid, self.leader, fc);
+            let msg = PaxosMessage::with(self.pid, self.leader.pid, fc);
             self.outgoing.push(msg);
         }
     }
 
     fn forward_proposals(&mut self, mut entries: Vec<T>) {
-        if self.leader > 0 && self.leader != self.pid {
+        if self.leader.pid > 0 && self.leader.pid != self.pid {
             #[cfg(feature = "logging")]
             trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
             let pf = PaxosMsg::ProposalForward(entries);
-            let msg = PaxosMessage::with(self.pid, self.leader, pf);
+            let msg = PaxosMessage::with(self.pid, self.leader.pid, pf);
             self.outgoing.push(msg);
         } else {
             self.pending_proposals.append(&mut entries);
@@ -673,11 +684,11 @@ where
     }
 
     fn forward_stopsign(&mut self, ss: StopSign) {
-        if self.leader > 0 && self.leader != self.pid {
+        if self.leader.pid > 0 && self.leader.pid != self.pid {
             #[cfg(feature = "logging")]
             trace!(self.logger, "Forwarding StopSign to Leader {}", self.leader);
             let fs = PaxosMsg::ForwardStopSign(ss);
-            let msg = PaxosMessage::with(self.pid, self.leader, fs);
+            let msg = PaxosMessage::with(self.pid, self.leader.pid, fs);
             self.outgoing.push(msg);
         } else {
             if self.pending_stopsign.as_mut().is_none() {
@@ -925,11 +936,11 @@ where
         if compact_idx > compacted_len {
             let idx = compact_idx - compacted_len;
             let log_len = self.storage.get_log_len();
-            if log_len >= idx {
+            if log_len < idx {
                 // need to check log_len as a node could be lagging in the log but receive a snapshot with higher index.
-                self.storage.trim(idx);
-            } else if log_len < idx {
                 self.storage.trim(log_len)
+            } else {
+                self.storage.trim(idx);
             }
             self.storage.set_snapshot(snapshot);
             self.storage.set_compacted_idx(compact_idx);
@@ -1186,7 +1197,7 @@ where
     /*** Follower ***/
     fn handle_prepare(&mut self, prep: Prepare, from: u64) {
         if self.storage.get_promise() <= prep.n {
-            self.leader = from;
+            self.leader = prep.n;
             self.storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
@@ -1262,6 +1273,11 @@ where
                     Accepted::with(accsync.n, la)
                 }
                 SyncItem::Snapshot(s) => {
+                    let decided_idx = self.get_decided_idx();
+                    if decided_idx > 0 {
+                        let decided_snapshot = self.create_snapshot(decided_idx);
+                        self.intermediate_snapshot = Some(decided_snapshot);
+                    }
                     match s {
                         SnapshotType::Complete(c) => {
                             self.set_snapshot(accsync.sync_idx, c);
@@ -1336,7 +1352,7 @@ where
             self.accept_entries(acc.n, entries);
             // handle decide
             if acc.ld > self.storage.get_decided_idx() {
-                self.storage.set_decided_idx(acc.ld);
+                self.handle_decide_idx(acc.ld);
             }
         }
     }
@@ -1347,7 +1363,7 @@ where
             let a = AcceptedStopSign::with(acc_ss.n);
             self.outgoing.push(PaxosMessage::with(
                 self.pid,
-                self.leader,
+                self.leader.pid,
                 PaxosMsg::AcceptedStopSign(a),
             ));
         }
@@ -1355,7 +1371,7 @@ where
 
     fn handle_decide(&mut self, dec: Decide) {
         if self.storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            self.storage.set_decided_idx(dec.ld);
+            self.handle_decide_idx(dec.ld);
         }
     }
 
@@ -1368,6 +1384,14 @@ where
             ss.decided = true;
             self.storage.set_stopsign(ss); // need to set it again now with the modified decided flag
             self.storage.set_decided_idx(self.storage.get_log_len() + 1);
+        }
+    }
+
+    fn handle_decide_idx(&mut self, idx: u64) {
+        self.storage.set_decided_idx(idx);
+        if idx > self.storage.get_compacted_idx() {
+            // snapshot is decided - intermediate snapshot can be dropped
+            self.intermediate_snapshot = None;
         }
     }
 
@@ -1387,7 +1411,7 @@ where
                 self.latest_accepted_meta = Some((n, cached_idx));
                 self.outgoing.push(PaxosMessage::with(
                     self.pid,
-                    self.leader,
+                    self.leader.pid,
                     PaxosMsg::Accepted(accepted),
                 ));
             }
@@ -1446,7 +1470,7 @@ pub enum CompactionErr {
 #[derive(Clone, Debug)]
 pub struct SequencePaxosConfig {
     configuration_id: u32,
-    pid: Id,
+    pid: NodeId,
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
