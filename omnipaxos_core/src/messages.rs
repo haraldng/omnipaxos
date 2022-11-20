@@ -8,8 +8,7 @@ use crate::{
 pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
-        storage::{Entry, Snapshot, StopSign},
-        util::SyncItem,
+        storage::{Entry, Snapshot, SnapshotType, StopSign},
     };
     use std::fmt::Debug;
 
@@ -49,39 +48,16 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The latest round in which an entry was accepted.
         pub n_accepted: Ballot,
-        /// The suffix of missing entries at the leader.
-        pub sync_item: Option<SyncItem<T, S>>,
+        /// The decided snapshot.
+        pub decided_snapshot: Option<SnapshotType<T, S>>,
+        /// The log suffix.
+        pub suffix: Vec<T>,
         /// The decided index of this follower.
         pub ld: u64,
         /// The log length of this follower.
         pub la: u64,
         /// The StopSign accepted by this follower
         pub stopsign: Option<StopSign>,
-    }
-
-    impl<T, S> Promise<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        /// Creates a [`Promise`] message.
-        pub fn with(
-            n: Ballot,
-            n_accepted: Ballot,
-            sync_item: Option<SyncItem<T, S>>,
-            ld: u64,
-            la: u64,
-            stopsign: Option<StopSign>,
-        ) -> Self {
-            Self {
-                n,
-                n_accepted,
-                sync_item,
-                ld,
-                la,
-                stopsign,
-            }
-        }
     }
 
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
@@ -93,37 +69,16 @@ pub mod sequence_paxos {
     {
         /// The current round.
         pub n: Ballot,
-        /// Entries that the receiving replica is missing in its log.
-        pub sync_item: SyncItem<T, S>,
+        /// The decided snapshot.
+        pub decided_snapshot: Option<SnapshotType<T, S>>,
+        /// The log suffix.
+        pub suffix: Vec<T>,
         /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
         pub sync_idx: u64,
         /// The decided index
-        pub decide_idx: Option<u64>,
+        pub decided_idx: u64,
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
-    }
-
-    impl<T, S> AcceptSync<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        /// Creates an [`AcceptSync`] message.
-        pub fn with(
-            n: Ballot,
-            sync_item: SyncItem<T, S>,
-            sync_idx: u64,
-            decide_idx: Option<u64>,
-            stopsign: Option<StopSign>,
-        ) -> Self {
-            AcceptSync {
-                n,
-                sync_item,
-                sync_idx,
-                decide_idx,
-                stopsign,
-            }
-        }
     }
 
     /// The first accept message sent. Only used by a pre-elected leader after reconfiguration.

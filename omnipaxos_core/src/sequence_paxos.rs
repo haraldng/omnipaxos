@@ -3,8 +3,7 @@ use super::{
     messages::sequence_paxos::*,
     storage::{Entry, Snapshot, SnapshotType, StopSign, StopSignEntry, Storage},
     util::{
-        defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData,
-        SnapshottedEntry, SyncItem,
+        defaults::BUFFER_SIZE, IndexEntry, LeaderState, LogEntry, PromiseMetaData, SnapshottedEntry,
     },
 };
 use crate::util::{ConfigurationId, NodeId};
@@ -40,7 +39,6 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     buffer_size: usize,
     s: PhantomData<S>,
-    intermediate_snapshot: Option<S>,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -94,11 +92,10 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::with(leader, lds, max_pid, majority),
+            leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             buffer_size: config.buffer_size,
             s: PhantomData,
-            intermediate_snapshot: None,
             #[cfg(feature = "logging")]
             logger: {
                 let path = config.logger_file_path;
@@ -265,15 +262,7 @@ where
         let decided_idx = self.storage.get_decided_idx();
         // println!("READING: {}, compacted: {}, decided: {}", idx, compacted_idx, decided_idx);
         if idx < compacted_idx {
-            if compacted_idx > decided_idx {
-                // undecided snapshot, return the intermediate snapshot
-                self.intermediate_snapshot.as_ref().map(|s| {
-                    let snap_entry = SnapshottedEntry::with(decided_idx, s.clone());
-                    LogEntry::Snapshotted(snap_entry)
-                })
-            } else {
-                Some(self.create_compacted_entry(compacted_idx))
-            }
+            Some(self.create_compacted_entry(compacted_idx))
         } else {
             let suffix_idx = idx - compacted_idx;
             let log_len = self.storage.get_log_len();
@@ -539,38 +528,6 @@ where
         }
     }
 
-    /*
-    /// Returns chosen entries between the given indices. If no chosen entries in the given interval, an empty vec is returned.
-    pub(crate) fn get_chosen_entries(&self, from_idx: u64, to_idx: u64) -> Vec<T> {
-        let ld = self.storage.get_decided_idx();
-        let max_idx = std::cmp::max(ld, self.leader_state.get_chosen_idx());
-        if to_idx > max_idx {
-            vec![]
-        } else {
-            let compacted_idx = self.storage.get_compacted_idx();
-            self.storage
-                .get_entries(from_idx - compacted_idx, to_idx - compacted_idx)
-                .to_vec()
-        }
-    }
-    */
-
-    /*
-    /// Returns the currently promised round.
-    pub(crate) fn get_promise(&self) -> Ballot {
-        self.storage.get_promise()
-    }
-    */
-
-    /*
-    /// Stops this Paxos to write any new entries to the log and returns the final log.
-    /// This should only be called **after a reconfiguration has been decided.**
-    // TODO with new reconfiguration
-    pub(crate) fn stop_and_get_log(&mut self) -> Arc<L> {
-        self.storage.stop_and_get_log()
-    }
-    */
-
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub(crate) fn reconnected(&mut self, pid: NodeId) {
@@ -623,8 +580,16 @@ where
             let na = self.storage.get_accepted_round();
             let ld = self.storage.get_decided_idx();
             let la = self.storage.get_log_len();
-            let my_promise = Promise::with(n, na, None, ld, la, self.get_stopsign());
-            self.leader_state.set_promise(my_promise, self.pid);
+            let my_promise = Promise {
+                n,
+                n_accepted: na,
+                decided_snapshot: None,
+                ld,
+                la,
+                suffix: vec![],
+                stopsign: self.get_stopsign(),
+            };
+            self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
             let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
@@ -842,78 +807,53 @@ where
         }
     }
 
-    fn create_pending_proposals_snapshot(&mut self) -> (u64, S) {
-        let pending_proposals = std::mem::take(&mut self.pending_proposals);
-        let s = S::create(pending_proposals.as_slice());
-        let compacted_idx = self.storage.get_compacted_idx() + pending_proposals.len() as u64;
-        (compacted_idx, s)
-    }
-
-    fn send_accsync_with_snapshot(&mut self) {
-        let current_snapshot = self.storage.get_snapshot();
-        let (compacted_idx, snapshot) = match current_snapshot {
-            Some(s) => (self.storage.get_compacted_idx(), s),
-            None => {
-                let compact_idx = self.storage.get_log_len();
-                let snapshot = self.create_snapshot(compact_idx);
-                self.set_snapshot(compact_idx, snapshot.clone());
-                (compact_idx, snapshot)
-            }
-        };
-        let acc_sync = AcceptSync::with(
-            self.leader_state.n_leader,
-            SyncItem::Snapshot(SnapshotType::Complete(snapshot)),
-            compacted_idx,
-            None,
-            self.get_stopsign(),
-        );
-        for pid in self.leader_state.get_promised_followers() {
-            let msg = PaxosMessage::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync.clone()));
-            self.outgoing.push(msg);
-        }
-    }
-
-    fn send_accsync_with_entries(&mut self) {
-        // create accept_sync with only new proposals for all pids with max_promise
+    fn send_accsync(&mut self, to: NodeId) {
+        let decided_idx = self.get_decided_idx();
         let PromiseMetaData {
             n: max_promise_n,
             la: max_la,
             ..
         } = &self.leader_state.get_max_promise_meta();
-        for pid in self.leader_state.get_promised_followers() {
-            let PromiseMetaData {
-                n: promise_n,
-                la: promise_la,
-                pid,
-                ..
-            } = self.leader_state.get_promise_meta(pid);
-            let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
-                let sfx = self
-                    .storage
-                    .get_suffix(*promise_la - self.storage.get_compacted_idx())
-                    .to_vec();
-                (sfx, *promise_la)
+        let PromiseMetaData {
+            n: promise_n,
+            la: promise_la,
+            pid,
+            ..
+        } = self.leader_state.get_promise_meta(to);
+        let (delta_snapshot, suffix, sync_idx) = if (promise_n == max_promise_n)
+            && (promise_la < max_la)
+        {
+            let sfx = self
+                .storage
+                .get_suffix(*promise_la - self.storage.get_compacted_idx())
+                .to_vec();
+            (None, sfx, *promise_la)
+        } else {
+            let ld = self
+                .leader_state
+                .get_decided_idx(*pid)
+                .expect("Received PromiseMetaData but not found in ld");
+            let offset = self.storage.get_compacted_idx();
+            if ld < decided_idx && Self::use_snapshots() {
+                let diff_entries = self.storage.get_entries(ld - offset, decided_idx - offset);
+                let delta_snapshot = Some(SnapshotType::Delta(S::create(diff_entries.as_slice())));
+                let suffix = self.storage.get_suffix(decided_idx - offset);
+                (delta_snapshot, suffix, ld)
             } else {
-                let ld = self
-                    .leader_state
-                    .get_decided_idx(*pid)
-                    .expect("Received PromiseMetaData but not found in ld");
-                let sfx = self
-                    .storage
-                    .get_suffix(ld - self.storage.get_compacted_idx())
-                    .to_vec();
-                (sfx, ld)
-            };
-            let acc_sync = AcceptSync::with(
-                self.leader_state.n_leader,
-                SyncItem::Entries(sfx),
-                sync_idx,
-                None,
-                self.get_stopsign(),
-            );
-            let msg = PaxosMessage::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync));
-            self.outgoing.push(msg);
-        }
+                let suffix = self.storage.get_suffix(ld - offset);
+                (None, suffix, ld)
+            }
+        };
+        let acc_sync = AcceptSync {
+            n: self.leader_state.n_leader,
+            decided_snapshot: delta_snapshot,
+            suffix,
+            sync_idx,
+            decided_idx,
+            stopsign: self.get_stopsign(),
+        };
+        let msg = PaxosMessage::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync));
+        self.outgoing.push(msg);
     }
 
     fn adopt_pending_stopsign(&mut self) {
@@ -959,70 +899,64 @@ where
         self.set_snapshot(compacted_idx, snapshot);
     }
 
-    fn merge_pending_proposals_with_snapshot(&mut self) {
-        if !self.pending_proposals.is_empty() {
-            let (compacted_idx, delta) = self.create_pending_proposals_snapshot();
-            let mut snapshot = self
-                .storage
-                .get_snapshot()
-                .unwrap_or_else(|| self.create_snapshot(self.storage.get_log_len()));
-            snapshot.merge(delta);
-            self.set_snapshot(compacted_idx, snapshot);
-            self.storage.set_accepted_round(self.leader_state.n_leader);
-        }
-    }
-
     fn handle_majority_promises(&mut self) {
         self.state = (Role::Leader, Phase::Accept);
         let max_stopsign = self.leader_state.take_max_promise_stopsign();
         let max_promise = self.leader_state.take_max_promise();
         let max_promise_meta = self.leader_state.get_max_promise_meta();
+        let decided_idx = self.leader_state.lds.iter().max().unwrap().unwrap();
+        self.storage.set_decided_idx(decided_idx);
         match max_promise {
-            SyncItem::Entries(sfx) => {
-                if max_promise_meta.n == self.storage.get_accepted_round() {
-                    self.storage.append_entries(sfx);
-                } else {
-                    let ld = self.storage.get_decided_idx();
-                    self.storage.append_on_prefix(ld, sfx);
-                }
-                if let Some(ss) = max_stopsign {
-                    self.accept_stopsign(ss);
-                } else {
-                    self.append_pending_proposals();
-                    self.adopt_pending_stopsign();
-                }
-                self.send_accsync_with_entries();
-            }
-            SyncItem::Snapshot(s) => {
-                match s {
-                    SnapshotType::Complete(c) => {
-                        self.set_snapshot(self.leader_state.get_max_promise_meta().la, c);
+            Some((decided_snapshot, suffix)) => {
+                match decided_snapshot {
+                    Some(s) => {
+                        let ld = self
+                            .leader_state
+                            .get_decided_idx(max_promise_meta.pid)
+                            .unwrap();
+                        match s {
+                            SnapshotType::Complete(c) => {
+                                self.set_snapshot(ld, c);
+                            }
+                            SnapshotType::Delta(d) => {
+                                self.merge_snapshot(ld, d);
+                            }
+                            _ => unimplemented!(),
+                        }
+                        self.storage.append_entries(suffix);
+                        if let Some(ss) = max_stopsign {
+                            self.accept_stopsign(ss);
+                        } else {
+                            self.append_pending_proposals();
+                            self.adopt_pending_stopsign();
+                        }
                     }
-                    SnapshotType::Delta(d) => {
-                        self.merge_snapshot(self.leader_state.get_max_promise_meta().la, d);
+                    None => {
+                        // no snapshot, only suffix
+                        if max_promise_meta.n == self.storage.get_accepted_round() {
+                            self.storage.append_entries(suffix);
+                        } else {
+                            let decided_idx = self.storage.get_decided_idx();
+                            self.storage
+                                .append_on_prefix(decided_idx - self.get_compacted_idx(), suffix);
+                        }
+                        if let Some(ss) = max_stopsign {
+                            self.accept_stopsign(ss);
+                        } else {
+                            self.append_pending_proposals();
+                            self.adopt_pending_stopsign();
+                        }
                     }
-                    _ => unimplemented!(),
                 }
-                if let Some(ss) = max_stopsign {
-                    self.accept_stopsign(ss);
-                } else {
-                    self.merge_pending_proposals_with_snapshot();
-                    self.adopt_pending_stopsign();
-                }
-                self.send_accsync_with_snapshot();
             }
-            SyncItem::None => {
+            None => {
                 // I am the most updated
-                if Self::use_snapshots() {
-                    self.merge_pending_proposals_with_snapshot();
-                    self.adopt_pending_stopsign();
-                    self.send_accsync_with_snapshot();
-                } else {
-                    self.append_pending_proposals();
-                    self.adopt_pending_stopsign();
-                    self.send_accsync_with_entries();
-                }
+                self.append_pending_proposals();
+                self.adopt_pending_stopsign();
             }
+        }
+        for pid in self.leader_state.get_promised_followers() {
+            self.send_accsync(pid);
         }
     }
 
@@ -1033,7 +967,7 @@ where
             "Handling promise from {} in Prepare phase", from
         );
         if prom.n == self.leader_state.n_leader {
-            let received_majority = self.leader_state.set_promise(prom, from);
+            let received_majority = self.leader_state.set_promise(prom, from, true);
             if received_majority {
                 self.handle_majority_promises();
             }
@@ -1050,57 +984,8 @@ where
             );
         }
         if prom.n == self.leader_state.n_leader {
-            self.leader_state.set_decided_idx(from, Some(prom.ld));
-            let acc_sync = if Self::use_snapshots() {
-                let (compacted_idx, snapshot) = if prom.n_accepted
-                    == self.leader_state.get_max_promise_meta().n
-                    && prom.la < self.leader_state.get_max_promise_meta().la
-                {
-                    let compacted_idx =
-                        self.storage.get_compacted_idx() + self.storage.get_log_len(); // TODO use a wrapper around storage and implement these functions?
-                    let entries = self.storage.get_suffix(prom.la);
-                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
-                    (compacted_idx, snapshot)
-                } else {
-                    let compact_idx = self.storage.get_log_len() + self.get_compacted_idx();
-                    let snapshot = self.create_snapshot(compact_idx);
-                    (compact_idx, SnapshotType::Complete(snapshot))
-                };
-                AcceptSync::with(
-                    self.leader_state.n_leader,
-                    SyncItem::Snapshot(snapshot),
-                    compacted_idx,
-                    None,
-                    self.get_stopsign(),
-                ) // TODO decided_idx with snapshot?
-            } else {
-                let sync_idx = if prom.n_accepted == self.leader_state.get_max_promise_meta().n
-                    && prom.la < self.leader_state.get_max_promise_meta().la
-                {
-                    prom.la
-                } else {
-                    prom.ld
-                };
-                let sfx = self
-                    .storage
-                    .get_suffix(sync_idx - self.storage.get_compacted_idx())
-                    .to_vec();
-                // inform what got decided already
-                let ld = if self.leader_state.get_chosen_idx() > 0 {
-                    self.leader_state.get_chosen_idx()
-                } else {
-                    self.storage.get_decided_idx()
-                };
-                AcceptSync::with(
-                    self.leader_state.n_leader,
-                    SyncItem::Entries(sfx),
-                    sync_idx,
-                    Some(ld),
-                    self.get_stopsign(),
-                )
-            };
-            let msg = PaxosMessage::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
-            self.outgoing.push(msg);
+            self.leader_state.set_promise(prom, from, false);
+            self.send_accsync(from);
         }
     }
 
@@ -1202,59 +1087,36 @@ where
             self.state = (Role::Follower, Phase::Prepare);
             let na = self.storage.get_accepted_round();
             let la = self.storage.get_log_len();
-            let promise = if Self::use_snapshots() {
-                let (compacted_idx, sync_item, stopsign) = if na > prep.n_accepted {
-                    let compact_idx = self.storage.get_log_len();
-                    let snapshot = self.create_snapshot(compact_idx);
-                    (
-                        compact_idx,
-                        Some(SyncItem::Snapshot(SnapshotType::Complete(snapshot))),
-                        self.get_stopsign(),
-                    )
-                } else if na == prep.n_accepted && la > prep.la {
-                    let entries = self.storage.get_suffix(prep.la);
-                    let snapshot = SnapshotType::Delta(S::create(entries.as_slice()));
-                    let compacted_idx = self.storage.get_compacted_idx() + la;
-                    (
-                        compacted_idx,
-                        Some(SyncItem::Snapshot(snapshot)),
-                        self.get_stopsign(),
-                    )
+            let decided_idx = self.get_decided_idx();
+            let (decided_snapshot, suffix) = if na > prep.n_accepted {
+                let ld = prep.ld;
+                let offset = self.storage.get_compacted_idx();
+                if ld < decided_idx && Self::use_snapshots() {
+                    let diff_entries = self.storage.get_entries(ld - offset, decided_idx - offset);
+                    let delta_snapshot =
+                        Some(SnapshotType::Delta(S::create(diff_entries.as_slice())));
+                    let suffix = self.storage.get_suffix(decided_idx - offset);
+                    (delta_snapshot, suffix)
                 } else {
-                    (la, None, None)
-                };
-                Promise::with(
-                    prep.n,
-                    na,
-                    sync_item,
-                    self.storage.get_decided_idx(),
-                    compacted_idx,
-                    stopsign,
-                )
+                    let suffix = self.storage.get_suffix(ld - offset);
+                    (None, suffix)
+                }
+            } else if na == prep.n_accepted && la > prep.la {
+                let suffix = self
+                    .storage
+                    .get_suffix(prep.la - self.storage.get_compacted_idx());
+                (None, suffix)
             } else {
-                let (sync_item, stopsign) = if na > prep.n_accepted {
-                    let entries = self
-                        .storage
-                        .get_suffix(prep.ld - self.storage.get_compacted_idx())
-                        .to_vec();
-                    (Some(SyncItem::Entries(entries)), self.get_stopsign())
-                } else if na == prep.n_accepted && la > prep.la {
-                    let entries = self
-                        .storage
-                        .get_suffix(prep.la - self.storage.get_compacted_idx())
-                        .to_vec();
-                    (Some(SyncItem::Entries(entries)), self.get_stopsign())
-                } else {
-                    (None, None)
-                };
-                Promise::with(
-                    prep.n,
-                    na,
-                    sync_item,
-                    self.storage.get_decided_idx(),
-                    la,
-                    stopsign,
-                )
+                (None, vec![])
+            };
+            let promise = Promise {
+                n: prep.n,
+                n_accepted: na,
+                decided_snapshot,
+                suffix,
+                ld: decided_idx,
+                la,
+                stopsign: self.get_stopsign(),
             };
             self.outgoing.push(PaxosMessage::with(
                 self.pid,
@@ -1267,29 +1129,28 @@ where
     fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: u64) {
         if self.storage.get_promise() == accsync.n && self.state == (Role::Follower, Phase::Prepare)
         {
-            let accepted = match accsync.sync_item {
-                SyncItem::Entries(e) => {
-                    let la = self.storage.append_on_prefix(accsync.sync_idx, e);
-                    Accepted::with(accsync.n, la)
-                }
-                SyncItem::Snapshot(s) => {
-                    let decided_idx = self.get_decided_idx();
-                    if decided_idx > 0 {
-                        let decided_snapshot = self.create_snapshot(decided_idx);
-                        self.intermediate_snapshot = Some(decided_snapshot);
-                    }
+            let accepted = match accsync.decided_snapshot {
+                Some(s) => {
                     match s {
                         SnapshotType::Complete(c) => {
-                            self.set_snapshot(accsync.sync_idx, c);
+                            self.set_snapshot(accsync.decided_idx, c);
                         }
                         SnapshotType::Delta(d) => {
-                            self.merge_snapshot(accsync.sync_idx, d);
+                            self.merge_snapshot(accsync.decided_idx, d);
                         }
                         _ => unimplemented!(),
-                    };
-                    Accepted::with(accsync.n, accsync.sync_idx)
+                    }
+                    let la = self.storage.append_entries(accsync.suffix) + accsync.decided_idx;
+                    Accepted::with(accsync.n, la)
                 }
-                _ => unimplemented!(),
+                None => {
+                    // no snapshot, only suffix
+                    let la = self
+                        .storage
+                        .append_on_prefix(accsync.sync_idx, accsync.suffix)
+                        + self.get_compacted_idx();
+                    Accepted::with(accsync.n, la)
+                }
             };
             self.storage.set_accepted_round(accsync.n);
             self.state = (Role::Follower, Phase::Accept);
@@ -1300,10 +1161,6 @@ where
                 from,
                 PaxosMsg::Accepted(accepted),
             ));
-
-            if let Some(idx) = accsync.decide_idx {
-                self.storage.set_decided_idx(idx);
-            }
             match accsync.stopsign {
                 Some(ss) => {
                     if let Some(ss_entry) = self.storage.get_stopsign() {
@@ -1326,6 +1183,7 @@ where
                 }
                 None => self.forward_pending_proposals(),
             }
+            self.storage.set_decided_idx(accsync.decided_idx);
         }
     }
 
@@ -1389,10 +1247,6 @@ where
 
     fn handle_decide_idx(&mut self, idx: u64) {
         self.storage.set_decided_idx(idx);
-        if idx > self.storage.get_compacted_idx() {
-            // snapshot is decided - intermediate snapshot can be dropped
-            self.intermediate_snapshot = None;
-        }
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) {

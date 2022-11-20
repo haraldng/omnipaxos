@@ -14,17 +14,6 @@ pub(crate) struct PromiseMetaData {
     pub stopsign: Option<StopSign>,
 }
 
-impl PromiseMetaData {
-    pub fn with(n: Ballot, la: u64, pid: NodeId, stopsign: Option<StopSign>) -> Self {
-        Self {
-            n,
-            la,
-            pid,
-            stopsign,
-        }
-    }
-}
-
 impl PartialOrd for PromiseMetaData {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let ordering = if self.n == other.n && self.la == other.la && self.pid == other.pid {
@@ -56,7 +45,7 @@ where
     pub lds: Vec<Option<u64>>,
     pub lc: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
-    pub max_promise: SyncItem<T, S>,
+    pub max_promise: Option<(Option<SnapshotType<T, S>>, Vec<T>)>, // (decided_snapshot, suffix)
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
@@ -82,7 +71,7 @@ where
             lds: lds.unwrap_or_else(|| vec![None; max_pid]),
             lc: 0,
             max_promise_meta: PromiseMetaData::default(),
-            max_promise: SyncItem::None,
+            max_promise: None,
             #[cfg(feature = "batch_accept")]
             batch_accept_meta: vec![None; max_pid],
             accepted_stopsign: vec![false; max_pid],
@@ -99,11 +88,16 @@ where
         self.lds[Self::pid_to_idx(pid)] = idx;
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64) -> bool {
-        let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from, prom.stopsign);
-        if promise_meta > self.max_promise_meta {
+    pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64, check_max_prom: bool) -> bool {
+        let promise_meta = PromiseMetaData {
+            n: prom.n_accepted,
+            la: prom.la,
+            pid: from,
+            stopsign: prom.stopsign,
+        };
+        if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
-            self.max_promise = prom.sync_item.unwrap_or(SyncItem::None); // TODO: this should be fine?
+            self.max_promise = Some((prom.decided_snapshot, prom.suffix))
         }
         self.lds[Self::pid_to_idx(from)] = Some(prom.ld);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
@@ -111,7 +105,7 @@ where
         num_promised >= self.majority
     }
 
-    pub fn take_max_promise(&mut self) -> SyncItem<T, S> {
+    pub fn take_max_promise(&mut self) -> Option<(Option<SnapshotType<T, S>>, Vec<T>)> {
         std::mem::take(&mut self.max_promise)
     }
 
@@ -195,6 +189,7 @@ where
     }
 }
 
+/*
 /// Item used for log synchronization in the Prepare phase.
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
@@ -217,6 +212,7 @@ where
         SyncItem::None
     }
 }
+*/
 
 /// The entry read in the log.
 #[derive(Debug, Clone)]

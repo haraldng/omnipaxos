@@ -281,9 +281,11 @@ where
     }
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-        self.commitlog
-            .truncate(from_idx)
-            .expect("Failed to truncate log");
+        if from_idx > 0 {
+            self.commitlog
+                .truncate(from_idx)
+                .expect("Failed to truncate log");
+        }
         self.append_entries(entries)
     }
 
