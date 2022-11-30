@@ -200,7 +200,7 @@ pub mod sequence_paxos {
     #[derive(Clone, Debug)]
     pub enum Compaction {
         Trim(Option<u64>),
-        Snapshot(u64),
+        Snapshot(Option<u64>),
     }
 
     /// An enum for all the different message types.
@@ -224,7 +224,6 @@ pub mod sequence_paxos {
         /// Forward client proposals to the leader.
         ProposalForward(Vec<T>),
         Compaction(Compaction),
-        ForwardCompaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         AcceptedStopSign(AcceptedStopSign),
         DecideStopSign(DecideStopSign),

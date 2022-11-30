@@ -237,7 +237,7 @@ fn read_entries_test() {
     let from_idx = 0;
     let entries = stopped_op
         .read_entries(from_idx..)
-        .expect("No StopSign and Entries");
+        .expect("No Snapshot, Entries and StopSign");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
     let (snapshot, ents) = prefix.split_at(1);
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);

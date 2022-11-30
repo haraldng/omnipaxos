@@ -101,7 +101,10 @@ where
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
     pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
-        self.seq_paxos.read(idx)
+        match self.seq_paxos.internal_storage.read(idx..idx + 1) {
+            Some(mut v) => v.pop(),
+            None => None,
+        }
     }
 
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
@@ -109,12 +112,14 @@ where
     where
         R: RangeBounds<u64>,
     {
-        self.seq_paxos.read_entries(r)
+        self.seq_paxos.internal_storage.read(r)
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
     pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
-        self.seq_paxos.read_decided_suffix(from_idx)
+        self.seq_paxos
+            .internal_storage
+            .read_decided_suffix(from_idx)
     }
 
     /// Handle an incoming message.
