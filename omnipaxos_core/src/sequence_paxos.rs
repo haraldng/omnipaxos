@@ -133,21 +133,13 @@ where
                         *min_all_accepted_idx
                     }
                     _ => {
-                        #[cfg(feature = "logging")]
-                        warn!(
-                            self.logger,
-                            "Invalid trim index: {:?}, compacted_idx: {}, las: {:?}",
-                            index,
-                            self.internal_storage.get_compacted_idx(),
-                            self.leader_state.las
-                        );
                         return Err(CompactionErr::NotAllDecided(*min_all_accepted_idx));
                     }
                 };
                 let result = self.internal_storage.try_trim(trimmed_idx);
                 if result.is_ok() {
                     for pid in &self.peers {
-                        let msg = PaxosMsg::Compaction(Compaction::Trim(Some(trimmed_idx)));
+                        let msg = PaxosMsg::Compaction(Compaction::Trim(trimmed_idx));
                         self.outgoing.push(PaxosMessage::with(self.pid, *pid, msg));
                     }
                 }
@@ -159,18 +151,18 @@ where
 
     /// Trim the log and create a snapshot. ** Note: only up to the `decided_idx` can be snapshotted **
     /// # Arguments
-    /// `compact_idx` - Snapshots all entries < [`trim_index`], if the [`trim_index`] is None then the decided index will be used.
+    /// `idx` - Snapshots all entries with index < [`idx`], if the [`idx`] is None then the decided index will be used.
     /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
     pub(crate) fn snapshot(
         &mut self,
-        compact_idx: Option<u64>,
+        idx: Option<u64>,
         local_only: bool,
     ) -> Result<(), CompactionErr> {
-        let result = self.internal_storage.try_snapshot(compact_idx);
+        let result = self.internal_storage.try_snapshot(idx);
         if !local_only && result.is_ok() {
             // since it is decided, it is ok even for a follower to send this
             for pid in &self.peers {
-                let msg = PaxosMsg::Compaction(Compaction::Snapshot(compact_idx));
+                let msg = PaxosMsg::Compaction(Compaction::Snapshot(idx));
                 self.outgoing.push(PaxosMessage::with(self.pid, *pid, msg));
             }
         }
@@ -199,21 +191,11 @@ where
     fn handle_compaction(&mut self, c: Compaction) {
         // try trimming and snapshotting forwarded compaction. Errors are ignored as that the data will still be kept.
         match c {
-            Compaction::Trim(Some(idx)) => {
+            Compaction::Trim(idx) => {
                 let _ = self.internal_storage.try_trim(idx);
             }
             Compaction::Snapshot(idx) => {
                 let _ = self.snapshot(idx, true);
-            }
-            _ => {
-                #[cfg(feature = "logging")]
-                warn!(
-                    self.logger,
-                    "Received invalid Compaction: {:?}, decided_idx: {}, compacted_idx: {}",
-                    c,
-                    decided_idx,
-                    compacted_idx
-                );
             }
         }
     }

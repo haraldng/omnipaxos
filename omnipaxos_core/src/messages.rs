@@ -199,7 +199,7 @@ pub mod sequence_paxos {
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
     pub enum Compaction {
-        Trim(Option<u64>),
+        Trim(u64),
         Snapshot(Option<u64>),
     }
 

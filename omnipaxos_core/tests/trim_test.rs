@@ -6,27 +6,24 @@ use serial_test::serial;
 use std::thread;
 use utils::{TestConfig, TestSystem, Value};
 
-const GC_INDEX_INCREMENT: u64 = 10;
+const TRIM_INDEX_INCREMENT: u64 = 10;
 
-/// Test Garbage Collection.
+/// Test trimming the log.
 /// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] are removed.
 #[test]
 #[serial]
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
     );
-
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
-
     sys.start_all_nodes();
 
     let elected_pid = kfuture
@@ -68,7 +65,7 @@ fn trim_test() {
 
     check_trim(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
 
-    println!("Pass gc");
+    println!("Pass trim");
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -78,26 +75,22 @@ fn trim_test() {
     };
 }
 
-/// Test double Garbage Collection.
+/// Test trimming the log twice.
 /// At the end the log is retrieved from each replica and verified
 /// if the first [`gc_index`] + an increment are removed.
 #[test]
 #[serial]
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.ble_hb_delay,
         cfg.num_threads,
         cfg.storage_type,
     );
-
     let first_node = sys.nodes.get(&1).unwrap();
-
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
-
     sys.start_all_nodes();
 
     let elected_pid = kfuture
@@ -131,7 +124,7 @@ fn double_trim_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .trim(Some(cfg.gc_idx + GC_INDEX_INCREMENT))
+            .trim(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT))
             .expect("Failed to trim");
     });
 
@@ -148,11 +141,11 @@ fn double_trim_test() {
     check_trim(
         vec_proposals,
         seq_after_double,
-        cfg.gc_idx + GC_INDEX_INCREMENT,
+        cfg.gc_idx + TRIM_INDEX_INCREMENT,
         elected_pid,
     );
 
-    println!("Pass double_gc");
+    println!("Pass double trim");
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
