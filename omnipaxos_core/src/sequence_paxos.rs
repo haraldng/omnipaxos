@@ -44,6 +44,7 @@ where
     logger: Logger,
     /// cache model
     pub cache: Controller,
+    use_caching: bool,
 }
 
 impl<T, S, B> SequencePaxos<T, S, B>
@@ -54,7 +55,7 @@ where
 {
     /*** User functions ***/
     /// Creates a Sequence Paxos replica.
-    pub fn with(config: SequencePaxosConfig, storage: B) -> Self {
+    pub fn with(config: SequencePaxosConfig, storage: B, use_caching: bool) -> Self {
         let pid = config.pid;
         let peers = config.peers;
         let config_id = config.configuration_id;
@@ -108,6 +109,7 @@ where
                 })
             },
             cache: Controller::new(500, 100, 100),
+            use_caching
         };
         paxos.storage.set_promise(n_leader);
         #[cfg(feature = "logging")]
@@ -773,8 +775,11 @@ where
 
     fn send_accept(&mut self, entry: T) {
         let la = self.storage.append_entry(entry.clone());
+        let mut entry = entry;
         self.leader_state.set_accepted_idx(self.pid, la);
-        let entry = self.compress_entry(entry.clone());
+        if self.use_caching {
+            Self::compress_entry(&mut self.cache, &mut entry);
+        }
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 #[cfg(feature = "batch_accept")]
@@ -802,8 +807,11 @@ where
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
         let la = self.storage.append_entries(entries.clone());
+        let mut entries = entries;
         self.leader_state.set_accepted_idx(self.pid, la);
-        let entries = self.compress_entries(entries.clone());
+        if self.use_caching {
+            Self::compress_entries(&mut self.cache, &mut entries);
+        }
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 #[cfg(feature = "batch_accept")]
@@ -1335,10 +1343,13 @@ where
 
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
-            let entries = acc.entries;
-            let entries = self.decompress_entries(entries);
-
-            self.accept_entries(acc.n, entries);
+            if self.use_caching {
+                let mut entries = acc.entries;
+                Self::decompress_entries(&mut self.cache, &mut entries);
+                self.accept_entries(acc.n, entries);
+            } else {
+                self.accept_entries(acc.n, acc.entries);
+            }
             // handle decide
             if acc.ld > self.storage.get_decided_idx() {
                 self.storage.set_decided_idx(acc.ld);
@@ -1412,27 +1423,23 @@ where
         S::use_snapshots()
     }
 
-    fn compress_entry(&mut self, mut entry: T) -> T {
-        entry.encode(&mut self.cache);
-
-        entry
+    fn compress_entry(cache: &mut Controller, entry: &mut T) {
+        entry.encode(cache);
     }
 
-    fn compress_entries(&mut self, entries: Vec<T>) -> Vec<T> {
+    fn compress_entries(cache: &mut Controller, entries: &mut [T]) {
         entries.into_iter()
-            .map(|e| self.compress_entry(e))
+            .map(|e| Self::compress_entry(cache, e))
             .collect()
     }
 
-    fn decompress_entry(&mut self, mut entry: T) -> T {
-        entry.decode(&mut self.cache);
-
-        entry
+    fn decompress_entry(cache: &mut Controller, entry: &mut T) {
+        entry.decode(cache);
     }
 
-    fn decompress_entries(&mut self, entries: Vec<T>) -> Vec<T> {
+    fn decompress_entries(cache: &mut Controller, entries: &mut [T]) {
         entries.into_iter()
-            .map(|e| self.decompress_entry(e))
+            .map(|e| Self::decompress_entry(cache, e))
             .collect()
     }
 }

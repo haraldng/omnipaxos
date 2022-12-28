@@ -5,10 +5,10 @@ use lecar::controller::Controller;
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {
     /// encode the entry with cache
-    fn encode(&mut self, cache: &mut Controller){}
+    fn encode(&mut self, cache: &mut Controller);
     
     /// decode the entry with cache
-    fn decode(&mut self, cache: &mut Controller){}
+    fn decode(&mut self, cache: &mut Controller);
 }
 
 // impl<T> Entry for T where T: Clone + Debug {}

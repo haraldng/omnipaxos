@@ -31,5 +31,5 @@ hocon_config = [ "hocon" ]
 
 default = ["latest_accepted", "latest_decide", "continued_leader_reconfiguration", "batch_accept"]
 
-#[profile.release]
-#lto = true
+[profile.release]
+lto = true
