@@ -1,15 +1,8 @@
 use super::ballot_leader_election::Ballot;
 use std::{fmt::Debug, marker::PhantomData};
-use lecar::controller::Controller;
 
 /// Type of the entries stored in the log.
-pub trait Entry: Clone + Debug {
-    /// encode the entry with cache
-    fn encode(&mut self, cache: &mut Controller);
-    
-    /// decode the entry with cache
-    fn decode(&mut self, cache: &mut Controller);
-}
+pub trait Entry: Clone + Debug {}
 
 // impl<T> Entry for T where T: Clone + Debug {}
 

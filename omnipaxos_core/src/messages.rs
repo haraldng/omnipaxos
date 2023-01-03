@@ -93,8 +93,6 @@ where
     pub decide_idx: Option<u64>,
     /// StopSign to be accepted
     pub stopsign: Option<StopSign>,
-    /// cache model
-    pub cache: Option<String>,
 }
 
 impl<T, S> AcceptSync<T, S>
@@ -109,7 +107,6 @@ where
         sync_idx: u64,
         decide_idx: Option<u64>,
         stopsign: Option<StopSign>,
-        cache: Option<String>,
     ) -> Self {
         AcceptSync {
             n,
@@ -117,7 +114,6 @@ where
             sync_idx,
             decide_idx,
             stopsign,
-            cache,
         }
     }
 }

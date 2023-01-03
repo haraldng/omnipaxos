@@ -13,19 +13,21 @@ use crate::utils::hocon_kv::{CONFIG_ID, LOG_FILE_PATH, PEERS, PID, SP_BUFFER_SIZ
 use crate::utils::logger::create_logger;
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
+use preprocessor::cache::unicache::{OmniCache, UniCache};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
-use lecar::controller::Controller;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 /// If snapshots are not desired to be used, use `()` for the type parameter `S`.
-pub struct SequencePaxos<T, S, B>
+pub struct SequencePaxos<T, S, B, C, U>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: OmniCache<T, U>,
+    U: UniCache,
 {
     storage: B,
     config_id: u32,
@@ -43,15 +45,18 @@ where
     #[cfg(feature = "logging")]
     logger: Logger,
     /// cache model
-    pub cache: Controller,
+    cache: C,
     use_caching: bool,
+    _u: PhantomData<U>,
 }
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, S, B, C, U> SequencePaxos<T, S, B, C, U>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: OmniCache<T, U>,
+    U: UniCache,
 {
     /*** User functions ***/
     /// Creates a Sequence Paxos replica.
@@ -108,8 +113,9 @@ where
                     create_logger(s.as_str())
                 })
             },
-            cache: Controller::new(500, 100, 100),
-            use_caching
+            cache: C::new(u8::MAX as usize),
+            use_caching,
+            _u: PhantomData,
         };
         paxos.storage.set_promise(n_leader);
         #[cfg(feature = "logging")]
@@ -620,7 +626,8 @@ where
             let ld = self.storage.get_decided_idx();
             let la = self.storage.get_log_len();
             let my_promise = Promise::with(n, na, None, ld, la, self.get_stopsign());
-            self.leader_state.set_promise(my_promise, self.pid);
+            let all = self.peers.len() + 1;
+            self.leader_state.set_promise(my_promise, self.pid, all);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
             let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
@@ -778,7 +785,7 @@ where
         let mut entry = entry;
         self.leader_state.set_accepted_idx(self.pid, la);
         if self.use_caching {
-            Self::compress_entry(&mut self.cache, &mut entry);
+            self.cache.encode(&mut entry);
         }
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -810,7 +817,7 @@ where
         let mut entries = entries;
         self.leader_state.set_accepted_idx(self.pid, la);
         if self.use_caching {
-            Self::compress_entries(&mut self.cache, &mut entries);
+            entries.iter_mut().for_each(|e| self.cache.encode(e));
         }
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -845,6 +852,8 @@ where
     }
 
     fn send_accsync_with_snapshot(&mut self) {
+        unimplemented!()
+        /*
         let current_snapshot = self.storage.get_snapshot();
         let (compacted_idx, snapshot) = match current_snapshot {
             Some(s) => (self.storage.get_compacted_idx(), s),
@@ -868,6 +877,7 @@ where
             let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync.clone()));
             self.outgoing.push(msg);
         }
+         */
     }
 
     fn send_accsync_with_entries(&mut self) {
@@ -901,14 +911,12 @@ where
                     .to_vec();
                 (sfx, ld)
             };
-            let cache = serde_json::to_string(&self.cache).unwrap();
             let acc_sync = AcceptSync::with(
                 self.leader_state.n_leader,
                 SyncItem::Entries(sfx),
                 sync_idx,
                 None,
                 self.get_stopsign(),
-                Some(cache),
             );
             let msg = Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
@@ -1032,8 +1040,9 @@ where
             "Handling promise from {} in Prepare phase", from
         );
         if prom.n == self.leader_state.n_leader {
-            let received_majority = self.leader_state.set_promise(prom, from);
-            if received_majority {
+            let all_nodes = self.peers.len() + 1; // NOTE: this is special implementation for testing UniCache with phantom storage. Waits for all nodes to promise rather than majority.
+            let all_promised = self.leader_state.set_promise(prom, from, all_nodes);
+            if all_promised {
                 self.handle_majority_promises();
             }
         }
@@ -1065,14 +1074,12 @@ where
                     let snapshot = self.create_snapshot(compact_idx);
                     (compact_idx, SnapshotType::Complete(snapshot))
                 };
-                let cache = serde_json::to_string(&self.cache).unwrap();
                 AcceptSync::with(
                     self.leader_state.n_leader,
                     SyncItem::Snapshot(snapshot),
                     compacted_idx,
                     None,
                     self.get_stopsign(),
-                    Some(cache),
                 ) // TODO decided_idx with snapshot?
             } else {
                 let sync_idx = if prom.n_accepted == self.leader_state.get_max_promise_meta().n
@@ -1092,14 +1099,12 @@ where
                 } else {
                     self.storage.get_decided_idx()
                 };
-                let cache = serde_json::to_string(&self.cache).unwrap();
                 AcceptSync::with(
                     self.leader_state.n_leader,
                     SyncItem::Entries(sfx),
                     sync_idx,
                     Some(ld),
                     self.get_stopsign(),
-                    Some(cache),
                 )
             };
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
@@ -1290,9 +1295,6 @@ where
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((accsync.n, cached_idx));
             }
-            if let Some(cache) = accsync.cache {
-                self.cache = serde_json::from_str(&cache).unwrap();
-            }
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
 
@@ -1345,7 +1347,7 @@ where
         if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
             if self.use_caching {
                 let mut entries = acc.entries;
-                Self::decompress_entries(&mut self.cache, &mut entries);
+                entries.iter_mut().for_each(|d| self.cache.decode(d));
                 self.accept_entries(acc.n, entries);
             } else {
                 self.accept_entries(acc.n, acc.entries);
@@ -1421,26 +1423,6 @@ where
 
     fn use_snapshots() -> bool {
         S::use_snapshots()
-    }
-
-    fn compress_entry(cache: &mut Controller, entry: &mut T) {
-        entry.encode(cache);
-    }
-
-    fn compress_entries(cache: &mut Controller, entries: &mut [T]) {
-        entries.into_iter()
-            .map(|e| Self::compress_entry(cache, e))
-            .collect()
-    }
-
-    fn decompress_entry(cache: &mut Controller, entry: &mut T) {
-        entry.decode(cache);
-    }
-
-    fn decompress_entries(cache: &mut Controller, entries: &mut [T]) {
-        entries.into_iter()
-            .map(|e| Self::decompress_entry(cache, e))
-            .collect()
     }
 }
 

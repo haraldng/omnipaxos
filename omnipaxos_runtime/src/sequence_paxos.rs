@@ -77,8 +77,7 @@ where
                     Some(idx) => self.seq_paxos.read_entries(r.from_idx..idx),
                     None => self.seq_paxos.read_entries(r.from_idx..),
                 };
-                let resp =
-                    ents.map(|entries| entries.into_iter().map(ReadEntry::from).collect());
+                let resp = ents.map(|entries| entries.into_iter().map(ReadEntry::from).collect());
                 sender
                     .send(resp)
                     .unwrap_or_else(|_| panic!("Failed to reply read"));
@@ -102,8 +101,7 @@ where
                 let sender = r.sender;
                 let idx = r.from_idx;
                 let ents = self.seq_paxos.read_decided_suffix(idx);
-                let resp =
-                    ents.map(|entries| entries.into_iter().map(ReadEntry::from).collect());
+                let resp = ents.map(|entries| entries.into_iter().map(ReadEntry::from).collect());
                 sender
                     .send(resp)
                     .unwrap_or_else(|_| panic!("Failed to reply read"));
