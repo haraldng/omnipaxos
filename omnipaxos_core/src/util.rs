@@ -99,7 +99,7 @@ where
         self.lds[Self::pid_to_idx(pid)] = idx;
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64) -> bool {
+    pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64, wait_for: usize) -> bool {
         let promise_meta = PromiseMetaData::with(prom.n_accepted, prom.la, from, prom.stopsign);
         if promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
@@ -108,7 +108,7 @@ where
         self.lds[Self::pid_to_idx(from)] = Some(prom.ld);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
         let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
-        num_promised >= self.majority
+        num_promised >= wait_for
     }
 
     pub fn take_max_promise(&mut self) -> SyncItem<T, S> {

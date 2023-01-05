@@ -11,7 +11,6 @@ slog = { version = "2.7.0", optional = true }
 slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 hocon = { version = "0.9.0", optional = true }
-lecar = { git = "https://github.com/Wkkkkk/lecar" }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = { version = "1.0" }
 

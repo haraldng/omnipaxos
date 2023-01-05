@@ -16,7 +16,6 @@ use hocon::Hocon;
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{collections::Bound, fmt::Debug, marker::PhantomData, ops::RangeBounds, vec};
-use lecar::controller::Controller;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
@@ -42,8 +41,6 @@ where
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
     logger: Logger,
-    /// cache model
-    pub cache: Controller,
 }
 
 impl<T, S, B> SequencePaxos<T, S, B>
@@ -107,7 +104,6 @@ where
                     create_logger(s.as_str())
                 })
             },
-            cache: Controller::new(500, 100, 100),
         };
         paxos.storage.set_promise(n_leader);
         #[cfg(feature = "logging")]
@@ -618,7 +614,8 @@ where
             let ld = self.storage.get_decided_idx();
             let la = self.storage.get_log_len();
             let my_promise = Promise::with(n, na, None, ld, la, self.get_stopsign());
-            self.leader_state.set_promise(my_promise, self.pid);
+            let all_nodes = self.peers.len() + 1; // NOTE: this is special implementation for testing UniCache with phantom storage. Waits for all nodes to promise rather than majority.
+            self.leader_state.set_promise(my_promise, self.pid, all_nodes);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
             let prep = Prepare::with(n, ld, self.storage.get_accepted_round(), la);
@@ -774,7 +771,6 @@ where
     fn send_accept(&mut self, entry: T) {
         let la = self.storage.append_entry(entry.clone());
         self.leader_state.set_accepted_idx(self.pid, la);
-        let entry = self.compress_entry(entry.clone());
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 #[cfg(feature = "batch_accept")]
@@ -803,7 +799,6 @@ where
     fn send_batch_accept(&mut self, entries: Vec<T>) {
         let la = self.storage.append_entries(entries.clone());
         self.leader_state.set_accepted_idx(self.pid, la);
-        let entries = self.compress_entries(entries.clone());
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
                 #[cfg(feature = "batch_accept")]
@@ -847,14 +842,12 @@ where
                 (compact_idx, snapshot)
             }
         };
-        let cache = serde_json::to_string(&self.cache).unwrap();
         let acc_sync = AcceptSync::with(
             self.leader_state.n_leader,
             SyncItem::Snapshot(SnapshotType::Complete(snapshot)),
             compacted_idx,
             None,
             self.get_stopsign(),
-            Some(cache),
         );
         for pid in self.leader_state.get_promised_followers() {
             let msg = Message::with(self.pid, pid, PaxosMsg::AcceptSync(acc_sync.clone()));
@@ -893,14 +886,12 @@ where
                     .to_vec();
                 (sfx, ld)
             };
-            let cache = serde_json::to_string(&self.cache).unwrap();
             let acc_sync = AcceptSync::with(
                 self.leader_state.n_leader,
                 SyncItem::Entries(sfx),
                 sync_idx,
                 None,
                 self.get_stopsign(),
-                Some(cache),
             );
             let msg = Message::with(self.pid, *pid, PaxosMsg::AcceptSync(acc_sync));
             self.outgoing.push(msg);
@@ -1024,8 +1015,9 @@ where
             "Handling promise from {} in Prepare phase", from
         );
         if prom.n == self.leader_state.n_leader {
-            let received_majority = self.leader_state.set_promise(prom, from);
-            if received_majority {
+            let all_nodes = self.peers.len() + 1; // NOTE: this is special implementation for testing UniCache with phantom storage. Waits for all nodes to promise rather than majority.
+            let received_all = self.leader_state.set_promise(prom, from, all_nodes);
+            if received_all {
                 self.handle_majority_promises();
             }
         }
@@ -1057,14 +1049,12 @@ where
                     let snapshot = self.create_snapshot(compact_idx);
                     (compact_idx, SnapshotType::Complete(snapshot))
                 };
-                let cache = serde_json::to_string(&self.cache).unwrap();
                 AcceptSync::with(
                     self.leader_state.n_leader,
                     SyncItem::Snapshot(snapshot),
                     compacted_idx,
                     None,
                     self.get_stopsign(),
-                    Some(cache),
                 ) // TODO decided_idx with snapshot?
             } else {
                 let sync_idx = if prom.n_accepted == self.leader_state.get_max_promise_meta().n
@@ -1084,14 +1074,12 @@ where
                 } else {
                     self.storage.get_decided_idx()
                 };
-                let cache = serde_json::to_string(&self.cache).unwrap();
                 AcceptSync::with(
                     self.leader_state.n_leader,
                     SyncItem::Entries(sfx),
                     sync_idx,
                     Some(ld),
                     self.get_stopsign(),
-                    Some(cache),
                 )
             };
             let msg = Message::with(self.pid, from, PaxosMsg::AcceptSync(acc_sync));
@@ -1282,9 +1270,6 @@ where
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((accsync.n, cached_idx));
             }
-            if let Some(cache) = accsync.cache {
-                self.cache = serde_json::from_str(&cache).unwrap();
-            }
             self.outgoing
                 .push(Message::with(self.pid, from, PaxosMsg::Accepted(accepted)));
 
@@ -1336,8 +1321,6 @@ where
     fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.storage.get_promise() == acc.n && self.state == (Role::Follower, Phase::Accept) {
             let entries = acc.entries;
-            let entries = self.decompress_entries(entries);
-
             self.accept_entries(acc.n, entries);
             // handle decide
             if acc.ld > self.storage.get_decided_idx() {
@@ -1410,30 +1393,6 @@ where
 
     fn use_snapshots() -> bool {
         S::use_snapshots()
-    }
-
-    fn compress_entry(&mut self, mut entry: T) -> T {
-        entry.encode(&mut self.cache);
-
-        entry
-    }
-
-    fn compress_entries(&mut self, entries: Vec<T>) -> Vec<T> {
-        entries.into_iter()
-            .map(|e| self.compress_entry(e))
-            .collect()
-    }
-
-    fn decompress_entry(&mut self, mut entry: T) -> T {
-        entry.decode(&mut self.cache);
-
-        entry
-    }
-
-    fn decompress_entries(&mut self, entries: Vec<T>) -> Vec<T> {
-        entries.into_iter()
-            .map(|e| self.decompress_entry(e))
-            .collect()
     }
 }
 
