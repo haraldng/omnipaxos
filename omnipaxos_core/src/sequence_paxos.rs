@@ -33,7 +33,8 @@ where
     config_id: u32,
     pid: u64,
     peers: Vec<u64>, // excluding self pid
-    state: (Role, Phase),
+    #[allow(missing_docs)]
+    pub state: (Role, Phase),
     leader: u64,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
@@ -1426,8 +1427,9 @@ where
     }
 }
 
+#[allow(missing_docs)]
 #[derive(PartialEq, Debug)]
-enum Phase {
+pub enum Phase {
     Prepare,
     FirstAccept,
     Accept,
@@ -1435,8 +1437,9 @@ enum Phase {
     None,
 }
 
+#[allow(missing_docs)]
 #[derive(PartialEq, Debug)]
-enum Role {
+pub enum Role {
     Follower,
     Leader,
 }
