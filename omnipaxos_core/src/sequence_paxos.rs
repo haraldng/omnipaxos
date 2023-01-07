@@ -870,6 +870,9 @@ where
                 pid,
                 ..
             } = self.leader_state.get_promise_meta(pid);
+            assert_eq!(self.storage.get_log_len(), 0);
+            let (sfx, sync_idx) = (vec![], 0);
+            /*
             let (sfx, sync_idx) = if (promise_n == max_promise_n) && (promise_la < max_la) {
                 let sfx = self
                     .storage
@@ -887,6 +890,7 @@ where
                     .to_vec();
                 (sfx, ld)
             };
+             */
             let acc_sync = AcceptSync::with(
                 self.leader_state.n_leader,
                 SyncItem::Entries(sfx),
@@ -1213,6 +1217,9 @@ where
                     stopsign,
                 )
             } else {
+                assert_eq!(self.storage.get_log_len(), 0);
+                let (sync_item, stopsign) = (None, None);
+                /*
                 let (sync_item, stopsign) = if na > prep.n_accepted {
                     let entries = self
                         .storage
@@ -1228,6 +1235,7 @@ where
                 } else {
                     (None, None)
                 };
+                 */
                 Promise::with(
                     prep.n,
                     na,
