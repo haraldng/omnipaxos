@@ -463,7 +463,11 @@ where
     fn forward_proposals(&mut self, mut entries: Vec<T>) {
         if self.leader.pid > 0 && self.leader.pid != self.pid {
             #[cfg(feature = "logging")]
-            trace!(self.logger, "Forwarding proposal to Leader {}", self.leader);
+            trace!(
+                self.logger,
+                "Forwarding proposal to Leader {:?}",
+                self.leader
+            );
             let pf = PaxosMsg::ProposalForward(entries);
             let msg = PaxosMessage {
                 from: self.pid,
@@ -479,7 +483,11 @@ where
     fn forward_stopsign(&mut self, ss: StopSign) {
         if self.leader.pid > 0 && self.leader.pid != self.pid {
             #[cfg(feature = "logging")]
-            trace!(self.logger, "Forwarding StopSign to Leader {}", self.leader);
+            trace!(
+                self.logger,
+                "Forwarding StopSign to Leader {:?}",
+                self.leader
+            );
             let fs = PaxosMsg::ForwardStopSign(ss);
             let msg = PaxosMessage {
                 from: self.pid,
