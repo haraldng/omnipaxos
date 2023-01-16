@@ -218,13 +218,15 @@ impl BallotLeaderElection {
         self.hb_current_delay = self.initial_delay.unwrap_or(self.hb_delay);
 
         for peer in &self.peers {
-            let hb_request = HeartbeatRequest::with(self.hb_round);
+            let hb_request = HeartbeatRequest {
+                round: self.hb_round,
+            };
 
-            self.outgoing.push(BLEMessage::with(
-                self.pid,
-                *peer,
-                HeartbeatMsg::Request(hb_request),
-            ));
+            self.outgoing.push(BLEMessage {
+                from: self.pid,
+                to: *peer,
+                msg: HeartbeatMsg::Request(hb_request),
+            });
         }
     }
 
@@ -255,18 +257,22 @@ impl BallotLeaderElection {
     }
 
     fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
-        let hb_reply = HeartbeatReply::with(req.round, self.current_ballot, self.quorum_connected);
+        let hb_reply = HeartbeatReply {
+            round: req.round,
+            ballot: self.current_ballot,
+            quorum_connected: self.quorum_connected,
+        };
 
-        self.outgoing.push(BLEMessage::with(
-            self.pid,
-            from,
-            HeartbeatMsg::Reply(hb_reply),
-        ));
+        self.outgoing.push(BLEMessage {
+            from: self.pid,
+            to: from,
+            msg: HeartbeatMsg::Reply(hb_reply),
+        });
     }
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round {
-            self.ballots.push((rep.ballot, rep.majority_connected));
+            self.ballots.push((rep.ballot, rep.quorum_connected));
         } else {
             #[cfg(feature = "logging")]
             warn!(

@@ -25,18 +25,6 @@ pub mod sequence_paxos {
         pub la: u64,
     }
 
-    impl Prepare {
-        /// Creates a [`Prepare`] message.
-        pub fn with(n: Ballot, ld: u64, n_accepted: Ballot, la: u64) -> Self {
-            Prepare {
-                n,
-                ld,
-                n_accepted,
-                la,
-            }
-        }
-    }
-
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
     #[derive(Clone, Debug)]
     pub struct Promise<T, S>
@@ -88,13 +76,6 @@ pub mod sequence_paxos {
         pub n: Ballot,
     }
 
-    impl FirstAccept {
-        /// Creates a [`FirstAccept`] message.
-        pub fn with(n: Ballot) -> Self {
-            FirstAccept { n }
-        }
-    }
-
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
     #[derive(Clone, Debug)]
     pub struct AcceptDecide<T>
@@ -109,16 +90,6 @@ pub mod sequence_paxos {
         pub entries: Vec<T>,
     }
 
-    impl<T> AcceptDecide<T>
-    where
-        T: Entry,
-    {
-        /// Creates an [`AcceptDecide`] message.
-        pub fn with(n: Ballot, ld: u64, entries: Vec<T>) -> Self {
-            AcceptDecide { n, ld, entries }
-        }
-    }
-
     /// Message sent by follower to leader when entries has been accepted.
     #[derive(Copy, Clone, Debug)]
     pub struct Accepted {
@@ -126,13 +97,6 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The accepted index.
         pub la: u64,
-    }
-
-    impl Accepted {
-        /// Creates an [`Accepted`] message.
-        pub fn with(n: Ballot, la: u64) -> Self {
-            Accepted { n, la }
-        }
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.
@@ -144,13 +108,6 @@ pub mod sequence_paxos {
         pub ld: u64,
     }
 
-    impl Decide {
-        /// Creates a [`Decide`] message.
-        pub fn with(n: Ballot, ld: u64) -> Self {
-            Decide { n, ld }
-        }
-    }
-
     /// Message sent by leader to followers to accept a StopSign
     #[derive(Clone, Debug)]
     pub struct AcceptStopSign {
@@ -160,13 +117,6 @@ pub mod sequence_paxos {
         pub ss: StopSign,
     }
 
-    impl AcceptStopSign {
-        /// Creates a [`AcceptStopSign`] message.
-        pub fn with(n: Ballot, ss: StopSign) -> Self {
-            AcceptStopSign { n, ss }
-        }
-    }
-
     /// Message sent by followers to leader when accepted StopSign
     #[derive(Copy, Clone, Debug)]
     pub struct AcceptedStopSign {
@@ -174,25 +124,11 @@ pub mod sequence_paxos {
         pub n: Ballot,
     }
 
-    impl AcceptedStopSign {
-        /// Creates a [`AcceptedStopSign`] message.
-        pub fn with(n: Ballot) -> Self {
-            AcceptedStopSign { n }
-        }
-    }
-
     /// Message sent by leader to decide a StopSign
     #[derive(Copy, Clone, Debug)]
     pub struct DecideStopSign {
         /// The current round.
         pub n: Ballot,
-    }
-
-    impl DecideStopSign {
-        /// Creates a [`DecideStopSign`] message.
-        pub fn with(n: Ballot) -> Self {
-            DecideStopSign { n }
-        }
     }
 
     /// Compaction Request
@@ -244,17 +180,6 @@ pub mod sequence_paxos {
         /// The message content.
         pub msg: PaxosMsg<T, S>,
     }
-
-    impl<T, S> PaxosMessage<T, S>
-    where
-        T: Entry,
-        S: Snapshot<T>,
-    {
-        /// Creates a message.
-        pub fn with(from: u64, to: u64, msg: PaxosMsg<T, S>) -> Self {
-            PaxosMessage { from, to, msg }
-        }
-    }
 }
 
 /// The different messages BLE uses to communicate with other replicas.
@@ -276,15 +201,6 @@ pub mod ballot_leader_election {
         pub round: u32,
     }
 
-    impl HeartbeatRequest {
-        /// Creates a new HeartbeatRequest
-        /// # Arguments
-        /// * `round` - number of the current round.
-        pub(crate) fn with(round: u32) -> HeartbeatRequest {
-            HeartbeatRequest { round }
-        }
-    }
-
     /// Replies
     #[derive(Clone, Debug)]
     pub struct HeartbeatReply {
@@ -293,22 +209,7 @@ pub mod ballot_leader_election {
         /// Ballot of a replica.
         pub ballot: Ballot,
         /// States if the replica is a candidate to become a leader.
-        pub majority_connected: bool,
-    }
-
-    impl HeartbeatReply {
-        /// Creates a new HeartbeatRequest
-        /// # Arguments
-        /// * `round` - Number of the current round.
-        /// * `ballot` -  Ballot of a replica.
-        /// * `majority_connected` -  States if the replica is majority_connected to become a leader.
-        pub(crate) fn with(round: u32, ballot: Ballot, majority_connected: bool) -> HeartbeatReply {
-            HeartbeatReply {
-                round,
-                ballot,
-                majority_connected,
-            }
-        }
+        pub quorum_connected: bool,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.
@@ -320,17 +221,6 @@ pub mod ballot_leader_election {
         pub to: u64,
         /// The message content.
         pub msg: HeartbeatMsg,
-    }
-
-    impl BLEMessage {
-        /// Creates a BLE message.
-        /// # Arguments
-        /// * `from` - Sender of `msg`.
-        /// * `to` -  Receiver of `msg`.
-        /// * `msg` -  The message content.
-        pub(crate) fn with(from: u64, to: u64, msg: HeartbeatMsg) -> Self {
-            BLEMessage { from, to, msg }
-        }
     }
 }
 
