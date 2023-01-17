@@ -2,9 +2,8 @@ use self::omnireplica::OmniPaxosComponent;
 use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
-    ballot_leader_election::{BLEConfig, Ballot},
+    ballot_leader_election::Ballot,
     messages::Message,
-    sequence_paxos::SequencePaxosConfig,
     storage::{Entry, Snapshot, StopSign, Storage},
 };
 use omnipaxos_storage::{
@@ -27,7 +26,7 @@ const MEMORY: &str = "memory";
 
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
-use omnipaxos_core::omni_paxos::OmniPaxos;
+use omnipaxos_core::omni_paxos::OmniPaxosConfig;
 use sled::Config;
 
 #[cfg(feature = "hocon_config")]
@@ -290,22 +289,16 @@ impl TestSystem {
 
         for pid in 1..=num_nodes as u64 {
             let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
-            let mut ble_config = BLEConfig::default();
-            ble_config.set_pid(pid);
-            ble_config.set_peers(peers.clone());
-            ble_config.set_hb_delay(ble_hb_delay);
-
-            let mut sp_config = SequencePaxosConfig::default();
-            sp_config.set_pid(pid);
-            sp_config.set_peers(peers);
+            let mut op_config = OmniPaxosConfig::default();
+            op_config.pid = pid;
+            op_config.peers = peers;
+            op_config.hb_delay = ble_hb_delay;
+            op_config.configuration_id = 1;
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
-            let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosComponent::with(pid, OmniPaxos::with(sp_config, ble_config, storage))
-            });
-
+            let (omni_replica, omni_reg_f) = system
+                .create_and_register(|| OmniPaxosComponent::with(pid, op_config.build(storage)));
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
-
             omni_refs.insert(pid, omni_replica.actor_ref());
             nodes.insert(pid, omni_replica);
         }
@@ -364,26 +357,18 @@ impl TestSystem {
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
-
-        // ble
-        let mut ble_config = BLEConfig::default();
-        ble_config.set_pid(pid);
-        ble_config.set_peers(peers.clone());
-        ble_config.set_hb_delay(ble_hb_delay);
-
-        // sp
-        let mut sp_config = SequencePaxosConfig::default();
-        sp_config.set_pid(pid);
-        sp_config.set_peers(peers);
+        let mut op_config = OmniPaxosConfig::default();
+        op_config.pid = pid;
+        op_config.peers = peers;
+        op_config.hb_delay = ble_hb_delay;
+        op_config.configuration_id = 1;
         let storage: StorageType<Value, LatestValue> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
-            .create_and_register(|| {
-                OmniPaxosComponent::with(pid, OmniPaxos::with(sp_config, ble_config, storage))
-            });
+            .create_and_register(|| OmniPaxosComponent::with(pid, op_config.build(storage)));
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 

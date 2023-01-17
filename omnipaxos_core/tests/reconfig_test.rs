@@ -2,8 +2,7 @@ pub mod utils;
 
 #[cfg(feature = "hocon_config")]
 use kompact::prelude::{promise, Ask, FutureCollection};
-#[cfg(feature = "hocon_config")]
-use omnipaxos_core::sequence_paxos::ReconfigurationRequest;
+use omnipaxos_core::omni_paxos::ReconfigurationRequest;
 #[cfg(feature = "hocon_config")]
 use serial_test::serial;
 #[cfg(feature = "hocon_config")]

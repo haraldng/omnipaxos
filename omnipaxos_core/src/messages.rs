@@ -18,11 +18,11 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The decided index of this leader.
-        pub ld: u64,
+        pub decided_idx: u64,
         /// The latest round in which an entry was accepted.
         pub n_accepted: Ballot,
         /// The log length of this leader.
-        pub la: u64,
+        pub accepted_idx: u64,
     }
 
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
@@ -41,9 +41,9 @@ pub mod sequence_paxos {
         /// The log suffix.
         pub suffix: Vec<T>,
         /// The decided index of this follower.
-        pub ld: u64,
+        pub decided_idx: u64,
         /// The log length of this follower.
-        pub la: u64,
+        pub accepted_idx: u64,
         /// The StopSign accepted by this follower
         pub stopsign: Option<StopSign>,
     }
@@ -85,7 +85,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The decided index.
-        pub ld: u64,
+        pub decided_idx: u64,
         /// Entries to be replicated.
         pub entries: Vec<T>,
     }
@@ -96,7 +96,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The accepted index.
-        pub la: u64,
+        pub accepted_idx: u64,
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.
@@ -105,7 +105,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The decided index.
-        pub ld: u64,
+        pub decided_idx: u64,
     }
 
     /// Message sent by leader to followers to accept a StopSign

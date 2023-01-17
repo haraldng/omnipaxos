@@ -14,6 +14,4 @@ pub const INITIAL_DELAY: &str = "initial_delay";
 /// Path where the default logger logs events.
 pub const LOG_FILE_PATH: &str = "log_file_path";
 /// Size of buffer for outgoing messages in `SequencePaxos`.
-pub const SP_BUFFER_SIZE: &str = "sp_buffer_size";
-/// Size of buffer for outgoing messages in `BallotLeaderElection`.
-pub const BLE_BUFFER_SIZE: &str = "ble_buffer_size";
+pub const BUFFER_SIZE: &str = "sp_buffer_size";

@@ -2,9 +2,7 @@ pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
-    ballot_leader_election::BLEConfig,
-    omni_paxos::OmniPaxos,
-    sequence_paxos::SequencePaxosConfig,
+    omni_paxos::OmniPaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
@@ -87,36 +85,38 @@ fn read_test() {
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
-    let mut sp_config = SequencePaxosConfig::default();
-    sp_config.set_pid(1);
-    sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = OmniPaxos::with(sp_config.clone(), BLEConfig::default(), storage);
+    let mut op_config = OmniPaxosConfig::default();
+    op_config.pid = 1;
+    op_config.peers = vec![2, 3];
+    op_config.hb_delay = 1;
+    op_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage);
 
     // read decided entries
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_decided_suffix(0)
         .expect("No decided entries");
     let expected_entries = log.get(0..decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
-    seq_paxos
+    omni_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entry
     let idx = snapshotted_idx;
-    let entry = seq_paxos.read(idx).expect("No entry");
+    let entry = omni_paxos.read(idx).expect("No entry");
     let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
     verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
 
     // read snapshot
-    let snapshot = seq_paxos.read(0).expect("No snapshot");
+    let snapshot = omni_paxos.read(0).expect("No snapshot");
     verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
 
     // read none
     let idx = log.len() as u64;
-    let entry = seq_paxos.read(idx);
+    let entry = omni_paxos.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -129,7 +129,7 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = OmniPaxos::with(sp_config, BLEConfig::default(), stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -160,24 +160,26 @@ fn read_entries_test() {
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
-    let mut sp_config = SequencePaxosConfig::default();
-    sp_config.set_pid(1);
-    sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = OmniPaxos::with(sp_config.clone(), BLEConfig::default(), storage);
-    seq_paxos
+    let mut op_config = OmniPaxosConfig::default();
+    op_config.pid = 1;
+    op_config.peers = vec![2, 3];
+    op_config.hb_delay = 1;
+    op_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage);
+    omni_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entries only
     let from_idx = snapshotted_idx + 1;
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(from_idx..=decided_idx)
         .expect("No entries");
     let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
 
     // read snapshot only
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(0..snapshotted_idx)
         .expect("No snapshot");
     verify_snapshot(entries.as_slice(), snapshotted_idx, &exp_snapshot);
@@ -185,7 +187,7 @@ fn read_entries_test() {
     // read snapshot + entries
     let from_idx = 3;
     let to_idx = decided_idx;
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
@@ -196,7 +198,7 @@ fn read_entries_test() {
     // read none
     let from_idx = 0;
     let to_idx = log.len() as u64;
-    let entries = seq_paxos.read_entries(from_idx..=to_idx);
+    let entries = omni_paxos.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -209,7 +211,7 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = OmniPaxos::with(sp_config, BLEConfig::default(), stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");

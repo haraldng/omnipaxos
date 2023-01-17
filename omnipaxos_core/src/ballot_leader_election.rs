@@ -1,10 +1,8 @@
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::defaults::{BLE_BUFFER_SIZE as DEFAULT_BUFFER_SIZE, *};
+use crate::util::defaults::*;
 #[cfg(feature = "hocon_config")]
 #[allow(unused_imports)]
 use crate::utils::hocon_kv::LOG_FILE_PATH;
-#[cfg(feature = "hocon_config")]
-use crate::utils::hocon_kv::{BLE_BUFFER_SIZE, HB_DELAY, INITIAL_DELAY, PEERS, PID, PRIORITY}; // only needed when using persistent storage
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -12,10 +10,9 @@ use crate::{
     messages::ballot_leader_election::{
         BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest,
     },
+    omni_paxos::OmniPaxosConfig,
     util::NodeId,
 };
-#[cfg(feature = "hocon_config")]
-use hocon::Hocon;
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 
@@ -86,7 +83,7 @@ impl BallotLeaderElection {
         let n = &peers.len() + 1;
         let initial_ballot = match &config.initial_leader {
             Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
-            _ => Ballot::with(0, config.priority.unwrap_or_default(), pid),
+            _ => Ballot::with(0, config.priority, pid),
         };
         let hb_delay = config.hb_delay;
         let mut ble = BallotLeaderElection {
@@ -102,7 +99,7 @@ impl BallotLeaderElection {
             hb_delay,
             initial_delay: config.initial_delay,
             ticks_elapsed: 0,
-            outgoing: vec![],
+            outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
                 let path = config.logger_file_path;
@@ -301,7 +298,7 @@ impl BallotLeaderElection {
 pub struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
-    priority: Option<u64>,
+    priority: u64,
     hb_delay: u64,
     initial_leader: Option<Ballot>,
     initial_delay: Option<u64>,
@@ -312,151 +309,20 @@ pub struct BLEConfig {
     logger_file_path: Option<String>,
 }
 
-#[allow(missing_docs)]
-impl BLEConfig {
-    pub fn set_pid(&mut self, pid: NodeId) {
-        self.pid = pid;
-    }
-
-    pub fn get_pid(&self) -> u64 {
-        self.pid
-    }
-
-    pub fn set_peers(&mut self, peers: Vec<u64>) {
-        self.peers = peers;
-    }
-
-    pub fn get_peers(&self) -> &[u64] {
-        self.peers.as_slice()
-    }
-
-    pub fn set_priority(&mut self, priority: u64) {
-        self.priority = Some(priority);
-    }
-
-    pub fn get_priority(&self) -> Option<u64> {
-        self.priority
-    }
-
-    pub fn set_hb_delay(&mut self, hb_delay: u64) {
-        self.hb_delay = hb_delay;
-    }
-
-    pub fn get_hb_delay(&self) -> u64 {
-        self.hb_delay
-    }
-
-    pub fn set_initial_leader(&mut self, b: Ballot) {
-        self.initial_leader = Some(b);
-    }
-
-    pub fn get_initial_leader(&self) -> Option<Ballot> {
-        self.initial_leader
-    }
-
-    pub fn set_initial_delay(&mut self, initial_delay: u64) {
-        self.initial_delay = Some(initial_delay);
-    }
-
-    pub fn get_initial_delay(&self) -> Option<u64> {
-        self.initial_delay
-    }
-
-    #[cfg(feature = "logging")]
-    pub fn set_logger(&mut self, l: Logger) {
-        self.logger = Some(l);
-    }
-
-    #[cfg(feature = "logging")]
-    pub fn get_logger(&self) -> Option<&Logger> {
-        self.logger.as_ref()
-    }
-
-    #[cfg(feature = "logging")]
-    pub fn set_logger_file_path(&mut self, s: String) {
-        self.logger_file_path = Some(s);
-    }
-
-    #[cfg(feature = "logging")]
-    pub fn get_logger_file_path(&self) -> Option<&String> {
-        self.logger_file_path.as_ref()
-    }
-
-    pub fn set_buffer_size(&mut self, size: usize) {
-        self.buffer_size = size;
-    }
-
-    pub fn get_buffer_size(&self) -> usize {
-        self.buffer_size
-    }
-
-    #[cfg(feature = "hocon_config")]
-    pub fn with_hocon(h: &Hocon) -> Self {
-        let mut config = Self::default();
-        config.set_pid(h[PID].as_i64().expect("Failed to load PID") as u64);
-        match &h[PEERS] {
-            Hocon::Array(v) => {
-                let peers = v
-                    .iter()
-                    .map(|x| x.as_i64().expect("Failed to load pid in Hocon array") as u64)
-                    .collect();
-                config.set_peers(peers);
-            }
-            _ => {
-                unimplemented!("Peers in Hocon should be parsed as array!")
-            }
-        }
-        #[cfg(feature = "logging")]
-        if let Some(p) = h[LOG_FILE_PATH].as_string() {
-            config.set_logger_file_path(p);
-        }
-        if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
-            config.set_priority(p);
-        }
-        if let Some(d) = h[INITIAL_DELAY].as_i64().map(|i| i as u64) {
-            config.set_initial_delay(d);
-        }
-        if let Some(b) = h[BLE_BUFFER_SIZE].as_i64() {
-            config.set_buffer_size(b as usize);
-        }
-        config.set_hb_delay(
-            h[HB_DELAY]
-                .as_i64()
-                .expect("Failed to load heartbeat delay") as u64,
-        );
-        config
-    }
-
-    pub fn build(self) -> BallotLeaderElection {
-        assert_ne!(self.pid, 0, "Pid cannot be 0");
-        assert!(!self.peers.is_empty(), "Peers cannot be empty");
-        assert!(
-            !self.peers.contains(&self.pid),
-            "Peers should not include self pid"
-        );
-        assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        assert!(self.hb_delay > 0, "hb_delay must be greater than 0");
-        if let Some(x) = self.initial_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
-        };
-        BallotLeaderElection::with(self)
-    }
-}
-
-impl Default for BLEConfig {
-    fn default() -> Self {
+impl From<OmniPaxosConfig> for BLEConfig {
+    fn from(config: OmniPaxosConfig) -> Self {
         Self {
-            pid: 0,
-            peers: vec![],
-            priority: None,
-            hb_delay: HB_TIMEOUT,
-            initial_leader: None,
-            initial_delay: None,
-            buffer_size: DEFAULT_BUFFER_SIZE,
+            pid: config.pid,
+            peers: config.peers,
+            priority: config.leader_priority,
+            hb_delay: config.hb_delay,
+            initial_leader: config.initial_leader,
+            initial_delay: config.initial_delay,
+            buffer_size: BLE_BUFFER_SIZE,
             #[cfg(feature = "logging")]
             logger: None,
             #[cfg(feature = "logging")]
-            logger_file_path: None,
+            logger_file_path: config.logger_file_path,
         }
     }
 }
