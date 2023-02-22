@@ -12,7 +12,7 @@ use crate::{
     util::{ConfigurationId, NodeId},
 };
 #[cfg(feature = "logging")]
-use slog::{debug, info, trace, warn, Logger};
+use slog::{debug, info, trace, Logger};
 use std::{fmt::Debug, marker::PhantomData, vec};
 
 pub mod follower;

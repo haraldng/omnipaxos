@@ -243,9 +243,8 @@ impl BallotLeaderElection {
             #[cfg(feature = "logging")]
             warn!(
                 self.logger,
-                "Got late response, round {}, current delay {}, ballot {:?}",
+                "Got late response, round {}, ballot {:?}",
                 self.hb_round,
-                self.hb_current_delay,
                 rep.ballot
             );
         }

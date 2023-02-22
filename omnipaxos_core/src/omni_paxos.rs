@@ -9,8 +9,6 @@ use crate::{
 };
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
-#[cfg(feature = "logging")]
-use slog::Logger;
 use std::ops::RangeBounds;
 
 /// Configuration for `OmniPaxos`.
