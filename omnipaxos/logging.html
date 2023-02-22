@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Communication - The OmniPaxos Book</title>
+        <title>Logging - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html" class="active"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.4.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.5.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.6.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../omnipaxos/leader_election.html"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/reconfiguration.html"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html" class="active"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,42 +148,22 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
-<p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user should interact with <code>SequencePaxos</code> and its incoming and outgoing messages.</p>
-<h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
-<p>When a message is received from the network layer intended for our node, we need to handle it in <code>SequencePaxos</code>.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::messages::Message;
-
-// handle incoming message from network layer
-let msg: Message&lt;KeyValue, KVSnapshot&gt; = ...;    // message to this node e.g. `msg.to = 2`
-seq_paxos.handle(msg);
-</code></pre>
-<p>By handling incoming messages and local calls such as <code>append()</code>, our local <code>seq_paxos</code> will produce outgoing messages for its peers. Thus, we must periodically send the outgoing messages on the network layer.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages. This should be called periodically, e.g. every ms
-for out_msg in seq_paxos.get_outgoings_msgs() {
-    let receiver = out_msg.to;
-    // send out_msg to receiver on network layer
-}
-</code></pre>
-<blockquote>
-<p><strong>Note:</strong> The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. Similarly, you have to periodically fetch these outgoing messages from <code>SequencePaxos</code>. </p>
-</blockquote>
-<h2 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h2>
-<p>One of the main advantages of Omni-Paxos is its resilience to partial connectivity. If one node loses connection to another and then reconnects (e.g. after a TCP-session drop), make sure to call <code>reconnected(pid)</code> before handling any incoming messages from that peer.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// network layer notifies of reconnecting to peer with pid = 3
-seq_paxos.reconnected(3);
-...
-</code></pre>
+                        <h1 id="logging"><a class="header" href="#logging">Logging</a></h1>
+<p>OmniPaxos uses the <a href="https://crates.io/crates/slog">slog</a> crate to provide system-wide logging facilities. Logging works out of the box with a default asynchronous console and file logger implementation.</p>
+<p>The actual logging levels are controlled via build features. The default features correspond to <code>max_level_trace</code> and <code>release_max_level_info</code>, that is in debug builds all levels are shown, while in the release profile only <code>info</code> and more severe message are shown.</p>
+<h2 id="custom-logger"><a class="header" href="#custom-logger">Custom Logger</a></h2>
+<p>Sometimes the default logging configuration is not sufficient for a particular application. For example, you might need a larger queue size in the <code>Async</code> drain, or you may want to write to a file instead of the terminal.</p>
+<p>The user can provide a custom implementation based on <a href="https://crates.io/crates/slog"><strong>slog</strong></a>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../sequencepaxos/storage.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/reconfiguration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../sequencepaxos/log.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../ble/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -193,11 +173,11 @@ seq_paxos.reconnected(3);
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../sequencepaxos/storage.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/reconfiguration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../sequencepaxos/log.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../ble/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

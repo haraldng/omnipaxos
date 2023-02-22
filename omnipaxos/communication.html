@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Storage - The OmniPaxos Book</title>
+        <title>Communication - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/storage.html" class="active"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.4.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.5.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.6.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/communication.html" class="active"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../omnipaxos/leader_election.html"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/reconfiguration.html"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,142 +148,42 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="storage"><a class="header" href="#storage">Storage</a></h1>
-<p>You are free to use any storage implementation with <code>SequencePaxos</code>. The only requirement is that it implements the <code>Storage</code> trait. OmniPaxos includes the package <code>omnipaxos_storage</code> which provides two types of storage implementation that work out of the box: <code>MemoryStorage</code> and <code>PersistentStorage</code>.</p>
-<h2 id="importing-omnipaxos_storage"><a class="header" href="#importing-omnipaxos_storage">Importing <code>omnipaxos_storage</code></a></h2>
-<p>To use the provided storage implementations, we need to add <code>omnipaxos_storage</code> to the dependencies in the cargo file.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">[dependencies]
-omnipaxos_storage = { git = &quot;https://github.com/haraldng/omnipaxos&quot;, default-features = true } 
+                        <h1 id="communication"><a class="header" href="#communication">Communication</a></h1>
+<p>As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user should interact with <code>OmniPaxos</code> and its incoming and outgoing messages.</p>
+<h2 id="incoming-and-outgoing"><a class="header" href="#incoming-and-outgoing">Incoming and Outgoing</a></h2>
+<p>When a message is received from the network layer intended for our node, we need to handle it in <code>OmniPaxos</code>.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::messages::Message;
+
+// handle incoming message from network layer
+let msg: Message&lt;KeyValue, KVSnapshot&gt; = ...;    // message to this node e.g. `msg.to = 2`
+omni_paxos.handle(msg);
 </code></pre>
-<p><strong>If</strong> you <strong>do</strong> decide to implement your own storage, we recommend taking a look at <code>MemoryStorage</code> as a reference for implementing the functions required by <code>Storage</code>.</p>
-<h2 id="memorystorage"><a class="header" href="#memorystorage">MemoryStorage</a></h2>
-<p>An in-memory storage implementation, <code>MemoryStorage</code> offers fast reads and writes. This storage type will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as <a href="../compaction.html">Snapshots</a>).</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">    // from the module omnipaxos_storage::memory_storage
-    #[derive(Clone)]
-    pub struct MemoryStorage&lt;T, S&gt;
-    where
-        T: Entry,
-        S: Snapshot&lt;T&gt;,
-    {
-        /// Vector which contains all the replicated entries in-memory.
-        log: Vec&lt;T&gt;,
-        /// Last promised round.
-        n_prom: Ballot,
-        /// Last accepted round.
-        acc_round: Ballot,
-        /// Length of the decided log.
-        ld: u64,
-        ...
-    }
-
-    impl&lt;T, S&gt; Storage&lt;T, S&gt; for MemoryStorage&lt;T, S&gt;
-    where
-        T: Entry,
-        S: Snapshot&lt;T&gt;,
-    {
-        fn append_entry(&amp;mut self, entry: T) -&gt; u64 {
-            self.log.push(entry);
-            self.get_log_len()
-        }
-
-        fn append_entries(&amp;mut self, entries: Vec&lt;T&gt;) -&gt; u64 {
-            let mut e = entries;
-            self.log.append(&amp;mut e);
-            self.get_log_len()
-        }
-
-        fn append_on_prefix(&amp;mut self, from_idx: u64, entries: Vec&lt;T&gt;) -&gt; u64 {
-            self.log.truncate(from_idx as usize);
-            self.append_entries(entries)
-        }
-
-        fn set_promise(&amp;mut self, n_prom: Ballot) {
-            self.n_prom = n_prom;
-        }
-
-        fn set_decided_idx(&amp;mut self, ld: u64) {
-            self.ld = ld;
-        }
-
-        fn get_decided_idx(&amp;self) -&gt; u64 {
-            self.ld
-        }
-
-        fn set_accepted_round(&amp;mut self, na: Ballot) {
-            self.acc_round = na;
-        }
-
-        fn get_accepted_round(&amp;self) -&gt; Ballot {
-            self.acc_round
-        }
-
-        fn get_entries(&amp;self, from: u64, to: u64) -&gt; Vec&lt;T&gt; {
-            self.log
-                .get(from as usize..to as usize)
-                .unwrap_or(&amp;[])
-                .to_vec()
-        }
-
-        fn get_log_len(&amp;self) -&gt; u64 {
-            self.log.len() as u64
-        }
-
-        fn get_suffix(&amp;self, from: u64) -&gt; Vec&lt;T&gt; {
-            match self.log.get(from as usize..) {
-                Some(s) =&gt; s.to_vec(),
-                None =&gt; vec![],
-            }
-        }
-
-        fn get_promise(&amp;self) -&gt; Ballot {
-            self.n_prom
-        }
-        ...
-    }
+<p>By handling incoming messages and local calls such as <code>append()</code>, our local <code>omni_paxos</code> will produce outgoing messages for its peers. Thus, we must periodically send the outgoing messages on the network layer.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages. This should be called periodically, e.g. every ms
+for out_msg in omni_paxos.outgoings_msgs() {
+    let receiver = out_msg.get_receiver();
+    // send out_msg to receiver on network layer
+}
 </code></pre>
-<h2 id="persistentstorage"><a class="header" href="#persistentstorage">PersistentStorage</a></h2>
-<p><code>PersistentStorage</code> is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses <a href="https://crates.io/crates/commitlog">Commitlog</a> to store the replicated log, and the state is stored on <a href="https://crates.io/crates/sled">sled</a> by default. The state can be changed to be stored on <a href="https://crates.io/crates/rocksdb">RocksDB</a> instead of sled by using the feature <code>rocksdb</code>. Users can configure the path to log entries and OmniPaxos state, and storage-related options through <code>PersistentStorageConfig</code>. The configuration struct features a <code>default()</code> constructor for generating default configuration, and the constructor <code>with()</code> that takes the storage path and options as arguments. </p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::{
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
-};
-use omnipaxos_storage::{
-    persistent_storage::{PersistentStorage, PersistentStorageConfig},
-};
-use commitlog::LogOptions;
-use sled::{Config};
-
-// user-defined configuration
-let my_path = &quot;my_storage&quot;
-let my_log_opts = LogOptions::new(my_path);
-let mut my_sled_opts = Config::new();
-my_sled_opts.path(self, my_path);
-
-// generate default configuration and set user-defined options
-let mut my_config = PersistentStorageConfig::default();
-my_config.set_path(my_path);
-my_config.set_commitlog_options(my_logopts);
-my_config.set_sled_options(my_sled_opts);
-</code></pre>
-<p>The same configuration can also be done with the constructor that takes arguments:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let my_path = &quot;another_storage&quot;
-let my_logopts = LogOptions::new(my_path);
-let mut my_sled_opts = Config::new();
-my_sled_opts.path(my_path);
-my_sled_opts.new(true);
-
-// create configuration with given arguments
-let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
+<blockquote>
+<p><strong>Note:</strong> The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. Similarly, you have to periodically fetch these outgoing messages from <code>OmniPaxos</code>. </p>
+</blockquote>
+<h2 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h2>
+<p>One of the main advantages of Omni-Paxos is its resilience to partial connectivity. If one node loses connection to another and then reconnects (e.g. after a TCP-session drop), make sure to call <code>reconnected(pid)</code> before handling any incoming messages from that peer.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// network layer notifies of reconnecting to peer with pid = 3
+omni_paxos.reconnected(3);
+...
 </code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../sequencepaxos/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/storage.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../sequencepaxos/communication.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/log.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -293,11 +193,11 @@ let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts)
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../sequencepaxos/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/storage.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../sequencepaxos/communication.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/log.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

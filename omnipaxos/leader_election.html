@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Compaction - The OmniPaxos Book</title>
+        <title>Leader Election - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html" class="active"><strong aria-hidden="true">2.4.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.5.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html"><strong aria-hidden="true">2.6.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../omnipaxos/leader_election.html" class="active"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/reconfiguration.html"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,111 +148,26 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="compaction"><a class="header" href="#compaction">Compaction</a></h1>
-<p>As time passes, the replicated log in <code>SequencePaxos</code> will grow large. To avoid letting the log growing infinitely large, we support two ways of compaction that can be initiated by users:</p>
-<h2 id="trim"><a class="header" href="#trim">Trim</a></h2>
-<p>Trimming the log removes all entries up to a certain index. Since the entries are deleted from the log, a trim operation can only be done if <strong>ALL</strong> nodes in the cluster have decided up to that index. Example:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::sequence_paxos::CompactionErr;
-
-// we will try trimming the first 100 entries of the log.
-let trim_idx = Some(100);  // using `None` will use the highest trimmable index
-match seq_paxos.trim(trim_idx) {
-    Ok(_) =&gt; {
-        // later, we can see that the trim succeeded with `seq_paxos.get_compacted_idx()`
-    }
-    Err(e) =&gt; {
-        match e {
-            CompactionErr::NotAllDecided(idx) =&gt; {
-                // Our provided trim index was not decided by all servers yet. All servers have currently only decided up to `idx`.
-                // If desired, users can retry with seq_paxos.trim(Some(idx)) which will then succeed.
-            }
-            ...
-        }
-    }
-}
+                        <h1 id="ballot-leader-election"><a class="header" href="#ballot-leader-election">Ballot Leader Election</a></h1>
+<p>A unique feature of Omni-Paxos is the guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos.</p>
+<p>To detect any leader failures and elect a new leader, you must call the function <code>election_timeout()</code> periodically (e.g., every 100ms).</p>
+<pre><code>// Call this periodically
+omni_paxos.election_timeout();
 </code></pre>
+<p>If a leader has failed, it will be detected in one election timeout and a new leader will be elected in the next timeout (if possible).</p>
 <blockquote>
-<p><strong>Note:</strong> Make sure your application really does not need the data that will be trimmed anymore. Once it is succeeded, the trimmed entries are lost and cannot be read or recovered.</p>
-</blockquote>
-<h2 id="snapshot"><a class="header" href="#snapshot">Snapshot</a></h2>
-<p>The disadvantage of trimming is that the data is lost after the trim and it requires all servers to have decided the trim index. If the entries in the log are such that they can be compacted into a snapshot, <code>SequencePaxos</code> supports snapshotting decided entries of the log. For instance, in our kv-store example application, we don’t need to keep every log entry that changes the kv-pairs. Instead, if we want to snapshot the log, it is sufficient to keep the latest value for every key. We implement our snapshot as a struct called <code>KVSnapshot</code> which is just a wrapper for a <code>HashMap</code> that will hold the latest value for every key in the log. To make it work with <code>SequencePaxos</code>, we need to implement the trait <code>Snapshot</code> for <code>KVSnapshot</code>:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::storage::Snapshot;
-
-#[derive(Clone, Debug)]
-pub struct KVSnapshot {
-    snapshotted: HashMap&lt;String, u64&gt;
-}
-
-impl Snapshot&lt;KeyValue&gt; for KVSnapshot {
-    fn create(entries: &amp;[KeyValue]) -&gt; Self {
-        let mut snapshotted = HashMap::new();
-        for e in entries {
-            let KeyValue { key, value } = e;
-            snapshotted.insert(key.clone(), *value);
-        }
-        Self { snapshotted }
-    }
-
-    fn merge(&amp;mut self, delta: Self) {
-        for (k, v) in delta.snapshotted {
-            self.snapshotted.insert(k, v);
-        }
-    }
-
-    fn use_snapshots() -&gt; bool {
-        true
-    }
-}
-</code></pre>
-<p>The <code>create_entries()</code> function tells <code>SequencePaxos</code> how to create a snapshot given a slice of entries of our <code>KeyValue</code> type. In our case, we simply want to insert the kv-pair into the hashmap. The <code>merge()</code> function defines how we can merge two snapshots. In our case, we will just insert/update the kv-pairs from the other snapshot. The <code>use_snapshots()</code> function simply tells <code>SequencePaxos</code> if snapshots should be used in the protocol. This is needed for users that does not want to use snapshots.</p>
-<p>With <code>KVSnapshot</code>, we would have instead created our <code>SequencePaxos</code> node as follows:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// ...same as shown before in the `SequencePaxos` chapter.
-let storage = MemoryStorage::&lt;KeyValue, KVSnapshot)&gt;::default();    // use KVSnapshot as type argument instead of ()
-let mut sp = SequencePaxos::with(sp_config, storage);
-</code></pre>
-<p>We can now create snapshots and read snapshots from <code>SequencePaxos</code>. Furthermore, snapshotting allows us to either just do the snapshot locally or request all nodes in the cluster to do it with the boolean parameter <code>local_only</code>.</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">// we will try snapshotting the first 100 entries of the log.
-let snapshot_idx = Some(100);  // using `None` will use the highest snapshottable index
-let local_only = false; // snapshots will be taken by all nodes.
-match seq_paxos.trim(snapshot_idx, local_only) {
-    Ok(_) =&gt; {
-        // later, we can see that the snapshot succeeded with `seq_paxos.get_compacted_idx()`
-    }
-    Err(e) =&gt; {
-        match e {
-            CompactionErr::UndecidedIndex(idx) =&gt; {
-                // Our provided snapshot index is not decided yet. The currently decided index is `idx`.
-            }
-            ...
-        }
-    }
-}
-
-// reading a snapshotted entry
-if let Some(e) = seq_paxos.read(20) {
-    match e {
-        LogEntry::Snapshotted(s) =&gt; {
-            // entry at idx 20 is snapshotted since we snapshotted idx 100
-            let snapshotted_idx = s.trimmed_idx;
-            let snapshot: KVSnapshot = s.snapshot;
-            // ...can query the latest value for a key in snapshot
-        }
-        ...
-}
-</code></pre>
-<blockquote>
-<p><strong>Note:</strong> If your <code>Entry</code> type is not snapshottable, simply use <code>()</code> as type argument for <code>Snapshot</code>.</p>
+<p><strong>Note:</strong> The <code>leader_priority</code> field in <code>OmniPaxosConfig</code> allows user to give desired servers a higher priority to get elected upon a leader change.</p>
 </blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../sequencepaxos/log.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/log.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../sequencepaxos/reconfiguration.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/compaction.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -262,11 +177,11 @@ if let Some(e) = seq_paxos.read(20) {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../sequencepaxos/log.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/log.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../sequencepaxos/reconfiguration.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/compaction.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

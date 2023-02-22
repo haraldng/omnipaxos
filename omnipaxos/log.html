@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Logging - The OmniPaxos Book</title>
+        <title>Reading and Writing - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/index.html"><strong aria-hidden="true">2.</strong> SequencePaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../sequencepaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/compaction.html"><strong aria-hidden="true">2.4.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/reconfiguration.html"><strong aria-hidden="true">2.5.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../sequencepaxos/logging.html" class="active"><strong aria-hidden="true">2.6.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/log.html" class="active"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../omnipaxos/leader_election.html"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/reconfiguration.html"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -148,25 +148,41 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="logging"><a class="header" href="#logging">Logging</a></h1>
-<p>OmniPaxos uses the <a href="https://crates.io/crates/slog">slog</a> crate to provide system-wide logging facilities. Logging works out of the box with a default asynchronous console and file logger implementation.</p>
-<p>The actual logging levels are controlled via build features. The default features correspond to <code>max_level_trace</code> and <code>release_max_level_info</code>, that is in debug builds all levels are shown, while in the release profile only <code>info</code> and more severe message are shown.</p>
-<h2 id="custom-logger"><a class="header" href="#custom-logger">Custom Logger</a></h2>
-<p>Sometimes the default logging configuration is not sufficient for a particular application. For example, you might need a larger queue size in the <code>Async</code> drain, or you may want to write to a file instead of the terminal.</p>
-<p>The user can provide a custom implementation based on <a href="https://crates.io/crates/slog"><strong>slog</strong></a>.</p>
-<blockquote>
-<p><strong>Note:</strong> This applies to <a href="../ble/index.html"><strong>Ballot Leader Election</strong></a> as well.</p>
-</blockquote>
+                        <h1 id="reading-and-writing"><a class="header" href="#reading-and-writing">Reading and Writing</a></h1>
+<p>We now show how to read and write the replicated log. The replicated log is <em>append-only</em>. To append an entry we call the following:</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let write_entry = KeyValue { key: String::from(&quot;a&quot;), value: 123 };
+
+omni_paxos.append(write_entry).expect(&quot;Failed to append&quot;);
+</code></pre>
+<p>This will cause our <code>write_entry</code> to be proposed to get decided in the replicated log. Appends can be pipelined without waiting for preceding entries to be decided. Furthermore, <code>append()</code> can be called on any node. If the calling node is not the leader, the entry will be forwarded. </p>
+<h2 id="reading-the-log"><a class="header" href="#reading-the-log">Reading the Log</a></h2>
+<p>Reads are also handled by calling various functions on <code>OmniPaxos</code>. To read the entry at a specific index <code>idx</code> of the log we call <code>omni_paxos.read_entry(idx)</code>. We can also read a specific range of log entries with <code>omni_paxos.read_entries()</code>. </p>
+<pre><code class="language-rust edition2018 no_run noplaypen">/*** Read a single entry ***/
+let idx = 5;
+let read_entry = omni_paxos.read(idx);
+
+/*** Read a range ***/
+let read_entries = omni_paxos.read_entries(2..5);
+</code></pre>
+<p>The read functions return <code>Option&lt;LogEntry&gt;</code> and <code>Option&lt;Vec&lt;LogEntry&gt;&gt;</code> respectively, where <code>None</code> is returned if the index or range is out of bounds. <code>LogEntry</code> is an enum with the following variants:</p>
+<ul>
+<li><code>Decided(T)</code>: The entry is decided and guaranteed to not be reverted. It is thus safe to apply a decided entry to the application state. For instance, in our case, it is safe to update our key-value store when we read a <code>Decided(KeyValue)</code> entry.</li>
+<li><code>Undecided(T)</code>: The entry is NOT decided and might be removed from the log at a later time. However, it could be useful in applications that allow speculative execution for example.</li>
+<li><code>Trimmed(TrimmedIndex)</code>: We tried to read an index where the entry has already been trimmed. </li>
+<li><code>Snapshotted(SnapshottedEntry&lt;T, S&gt;)</code>: The index we read has already been compacted into a snapshot. We can access the snapshot from the field <code>snapshot</code> in <code>SnapshottedEntry</code>. In our case our this will correspond to <code>KVSnapshot</code> that we defined <a href="../compaction.html">here</a>.</li>
+<li><code>StopSign(StopSign)</code>: This Sequence Paxos instance has been stopped for reconfiguration. This implies that this log will not be appended anymore and one should use the new Sequence Paxos instead for writing.</li>
+</ul>
+<p>It is also possible to only read decided entries or snapshot from a specific index using <code>read_decided_suffix(idx)</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="../sequencepaxos/reconfiguration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/communication.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="../ble/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/leader_election.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -176,11 +192,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="../sequencepaxos/reconfiguration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/communication.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="../ble/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/leader_election.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>

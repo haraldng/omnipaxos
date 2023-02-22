@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Getting Started - The OmniPaxos Book</title>
+        <title>Reconfiguration - The OmniPaxos Book</title>
                 
 
         <!-- Custom HTML head -->
@@ -14,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff" />
 
-                <link rel="icon" href="favicon.svg">
-                        <link rel="shortcut icon" href="favicon.png">
-                <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-                <link rel="stylesheet" href="css/print.css" media="print">
+                <link rel="icon" href="../favicon.svg">
+                        <link rel="shortcut icon" href="../favicon.png">
+                <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+                <link rel="stylesheet" href="../css/print.css" media="print">
         
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-                <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+                <link rel="stylesheet" href="../fonts/fonts.css">
         
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
         
@@ -38,7 +38,7 @@
     <body>
         <!-- Provide site root to javascript -->
         <script type="text/javascript">
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
         </script>
 
@@ -84,7 +84,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="getting-started.html" class="active">Getting Started</a></li><li class="chapter-item expanded "><a href="introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="omnipaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="omnipaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="omnipaxos/leader_election.html"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="omnipaxos/reconfiguration.html"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="omnipaxos/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="project.html">Project Info</a></li></ol>            </div>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="../foreword.html">Foreword</a></li><li class="chapter-item expanded affix "><a href="../getting-started.html">Getting Started</a></li><li class="chapter-item expanded "><a href="../introduction/index.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/index.html"><strong aria-hidden="true">2.</strong> OmniPaxos</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="../omnipaxos/storage.html"><strong aria-hidden="true">2.1.</strong> Storage</a></li><li class="chapter-item expanded "><a href="../omnipaxos/communication.html"><strong aria-hidden="true">2.2.</strong> Communication</a></li><li class="chapter-item expanded "><a href="../omnipaxos/log.html"><strong aria-hidden="true">2.3.</strong> Reading and Writing</a></li><li class="chapter-item expanded "><a href="../omnipaxos/leader_election.html"><strong aria-hidden="true">2.4.</strong> Leader Election</a></li><li class="chapter-item expanded "><a href="../omnipaxos/compaction.html"><strong aria-hidden="true">2.5.</strong> Compaction</a></li><li class="chapter-item expanded "><a href="../omnipaxos/reconfiguration.html" class="active"><strong aria-hidden="true">2.6.</strong> Reconfiguration</a></li><li class="chapter-item expanded "><a href="../omnipaxos/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li></ol></li><li class="chapter-item expanded "><a href="../ble/index.html"><strong aria-hidden="true">3.</strong> Ballot Leader Election</a></li><li class="chapter-item expanded "><a href="../runtime/index.html"><strong aria-hidden="true">4.</strong> Runtime</a></li><li class="chapter-item expanded affix "><a href="../project.html">Project Info</a></li></ol>            </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
 
@@ -116,7 +116,7 @@
                     <h1 class="menu-title">The OmniPaxos Book</h1>
 
                     <div class="right-buttons">
-                                                <a href="print.html" title="Print this book" aria-label="Print this book">
+                                                <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
                                                                         <a href="https://github.com/haraldng/omnipaxos" title="Git repository" aria-label="Git repository">
@@ -148,41 +148,52 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="getting-started"><a class="header" href="#getting-started">Getting Started</a></h1>
-<p>We aim to make a release on crates soon, but for now, the easiest way to use OmniPaxos is to have it as a GitHub dependency.</p>
-<!-- ## Setting up Rust
-It is recommended to run OmniPaxos on a *nightly* version of the Rust toolchain.
-
-We recommend using the [rustup](https://rustup.rs/) tool to easily install the latest nightly version of rust and keep it updated. Instructions should be on the screen once rustup is downloaded.
-
-> **Using the nightly toolchain:** Rustup can be configured to default to the nightly toolchain by running `rustup default nightly`. 
-
-## Cargo
-
-Add OmniPaxos to your cargo project as a dependency:
-
-```toml
-[dependencies]
-omnipaxos = "LATEST_VERSION"
-``` 
-The latest version can be found on [crates.io](https://crates.io/crates/omnipaxos). -->
-<h3 id="github-master"><a class="header" href="#github-master">Github master</a></h3>
-<!--You can also point cargo to the latest [Github](https://github.com/haraldng/omnipaxos) master version, instead of a release.  -->
-<p>To do so add the following to your Cargo.toml:</p>
-<pre><code class="language-toml">[dependencies]
-omnipaxos_core = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
+                        <h1 id="reconfiguration"><a class="header" href="#reconfiguration">Reconfiguration</a></h1>
+<p>To change the nodes in the cluster, we must first stop the current Omni-Paxos instance. This is done via the <code>reconfigure()</code> function, which has a <code>ReconfigurationRequest</code> that contains the nodes for the next Omni-Paxos instance and some optional metadata.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">// Node 3 seems to have crashed... let's replace it with a new node 4.
+let new_configuration = vec![1, 2, 4];
+let metadata = None;
+let rc = ReconfigurationRequest::with(new_configuration, metadata);
+omni_paxos_.reconfigure(rc).expect(&quot;Failed to propose reconfiguration&quot;);
 </code></pre>
-<p>In <code>omnipaxos_core/examples/kv_store</code>, we show a minimal example of how to use OmniPaxos to replicate KV operations using tokio.</p>
+<p>Calling <code>reconfigure()</code> will propose a <code>StopSign</code> entry to be appended. If it gets decided, the log is sealed and prevented from being further appended. From the <code>StopSign</code> entry, all nodes will be able to see the new configuration. When you, the user, read from a node and finds a <code>LogEntry::StopSign</code> in the log, you should start a new <code>OmniPaxos</code> instance at this node if it is also part of the new configuration.</p>
+<pre><code class="language-rust edition2018 no_run noplaypen">let idx: u64 = ...  // some index we last read from
+    let decided_entries: Option&lt;Vec&lt;LogEntry&lt;KeyValue, KVSnapshot&gt;&gt;&gt; = seq_paxos.read_decided_suffix(idx);
+    if let Some(de) = decided_entries {
+        for d in de {
+            match d {
+                LogEntry::StopSign(stopsign) =&gt; {
+                    let new_configuration = stopsign.nodes;
+                    if new_configuration.contains(&amp;my_pid) {
+                    // we are in new configuration, start new instance
+                        let mut new_op_conf = OmniPaxosConfig::default();
+                        new_sp_conf.set_configuration_id(stopsign.config_id);
+                        let new_storage = MemoryStorage::default();
+                        let mut new_op = new_op_conf.build(new_storage);
+                        
+                        ... // use new_sp
+                    }
+                }
+                _ =&gt; {
+                    todo!()
+                }
+            }
+        }
+    }
+</code></pre>
+<blockquote>
+<p><strong>Note:</strong> New nodes will not see the <code>StopSign</code> since they were not part of the old configuration. The user themselves must notify and start these new nodes. Furthermore,the user must ensure these new nodes have the application state or log up to the stopsign before starting their <code>OmniPaxos</code> instance.</p>
+</blockquote>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                                                    <a rel="prev" href="foreword.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                                    <a rel="prev" href="../omnipaxos/compaction.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
                         
-                                                    <a rel="next" href="introduction/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                                    <a rel="next" href="../omnipaxos/logging.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         
@@ -192,11 +203,11 @@ omnipaxos_core = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                                    <a rel="prev" href="foreword.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                    <a rel="prev" href="../omnipaxos/compaction.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
                 
-                                    <a rel="next" href="introduction/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                    <a rel="next" href="../omnipaxos/logging.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
                             </nav>
@@ -211,13 +222,13 @@ omnipaxos_core = { git = &quot;https://github.com/haraldng/omnipaxos&quot; }
         </script>
         
         
-                <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+                <script src="../elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../searcher.js" type="text/javascript" charset="utf-8"></script>
         
-        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
-        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
-        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="../book.js" type="text/javascript" charset="utf-8"></script>
 
         <!-- Custom JS scripts -->
         
