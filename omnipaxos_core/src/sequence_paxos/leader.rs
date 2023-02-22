@@ -429,7 +429,7 @@ where
             self.logger,
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
-            accepted.la,
+            accepted.accepted_idx,
             self.leader_state.get_chosen_idx()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {

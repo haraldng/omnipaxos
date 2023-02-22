@@ -99,11 +99,10 @@ where
             s: PhantomData,
             #[cfg(feature = "logging")]
             logger: {
-                let path = config.logger_file_path;
-                config.logger_file_path.unwrap_or_else(|| {
-                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(s.as_str())
-                })
+                let s = config.logger_file_path.unwrap_or_else(|| {
+                    format!("logs/paxos_{}.log", pid)
+                });
+                create_logger(s.as_str())
             },
         };
         paxos.internal_storage.set_promise(leader);
@@ -450,13 +449,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
             #[cfg(feature = "logging")]
-            logger_file_path: {
-                let path = config.logger_file_path;
-                config.logger.unwrap_or_else(|| {
-                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(s.as_str())
-                })
-            },
+            logger_file_path: config.logger_file_path
         }
     }
 }
