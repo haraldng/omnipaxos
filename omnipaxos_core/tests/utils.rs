@@ -1,13 +1,9 @@
-use self::{
-    ble::{BLEComponent, BallotLeaderElectionPort},
-    omnireplica::SequencePaxosComponent,
-};
+use self::omnireplica::OmniPaxosComponent;
 use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos_core::{
-    ballot_leader_election::{messages::BLEMessage, BLEConfig, Ballot, BallotLeaderElection},
+    ballot_leader_election::Ballot,
     messages::Message,
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
     storage::{Entry, Snapshot, StopSign, Storage},
 };
 use omnipaxos_storage::{
@@ -21,7 +17,7 @@ use tempfile::TempDir;
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
-const BLE_TIMER_TIMEOUT: Duration = Duration::from_millis(50);
+const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
@@ -29,6 +25,7 @@ const MEMORY: &str = "memory";
 
 #[cfg(feature = "hocon_config")]
 use hocon::{Error, Hocon, HoconLoader};
+use omnipaxos_core::omni_paxos::OmniPaxosConfig;
 use sled::Config;
 
 #[cfg(feature = "hocon_config")]
@@ -38,7 +35,7 @@ pub struct TestConfig {
     pub wait_timeout: Duration,
     pub num_threads: usize,
     pub num_nodes: usize,
-    pub ble_hb_delay: u64,
+    pub election_timeout: Duration,
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
@@ -58,7 +55,9 @@ impl TestConfig {
             wait_timeout: cfg["wait_timeout"].as_duration().unwrap_or_default(),
             num_threads: cfg["num_threads"].as_i64().unwrap_or_default() as usize,
             num_nodes: cfg["num_nodes"].as_i64().unwrap_or_default() as usize,
-            ble_hb_delay: cfg["ble_hb_delay"].as_i64().unwrap_or_default() as u64,
+            election_timeout: Duration::from_millis(
+                cfg["election_timeout_ms"].as_i64().unwrap_or_default() as u64,
+            ),
             num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
             num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
             gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
@@ -261,19 +260,13 @@ where
 pub struct TestSystem {
     pub temp_dir_path: String,
     pub kompact_system: Option<KompactSystem>,
-    ble_paxos_nodes: HashMap<
-        u64,
-        (
-            Arc<Component<BLEComponent>>,
-            Arc<Component<SequencePaxosComponent>>,
-        ),
-    >,
+    pub nodes: HashMap<u64, Arc<Component<OmniPaxosComponent>>>,
 }
 
 impl TestSystem {
     pub fn with(
         num_nodes: usize,
-        ble_hb_delay: u64,
+        election_timeout: Duration,
         num_threads: usize,
         storage_type: StorageTypeSelector,
     ) -> Self {
@@ -290,137 +283,85 @@ impl TestSystem {
         conf.system_components(DeadletterBox::new, net.build());
         let system = conf.build().expect("KompactSystem");
 
-        let mut ble_paxos_nodes: HashMap<
-            u64,
-            (
-                Arc<Component<BLEComponent>>,
-                Arc<Component<SequencePaxosComponent>>,
-            ),
-        > = HashMap::new();
+        let mut nodes = HashMap::new();
 
         let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
-        let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
             let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
-            let mut ble_config = BLEConfig::default();
-            ble_config.set_pid(pid);
-            ble_config.set_peers(peers.clone());
-            ble_config.set_hb_delay(ble_hb_delay);
-            // create components
-            let (ble_comp, ble_reg_f) = system
-                .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
-
-            let mut sp_config = SequencePaxosConfig::default();
-            sp_config.set_pid(pid);
-            sp_config.set_peers(peers);
+            let mut op_config = OmniPaxosConfig::default();
+            op_config.pid = pid;
+            op_config.peers = peers;
+            op_config.configuration_id = 1;
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
             });
-
-            biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
-                .expect("Could not connect BLE and OmniPaxosReplica!");
-
-            ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
-
-            ble_refs.insert(pid, ble_comp.actor_ref());
             omni_refs.insert(pid, omni_replica.actor_ref());
-            ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
+            nodes.insert(pid, omni_replica);
         }
 
-        for (ble, omni) in ble_paxos_nodes.values() {
-            ble.on_definition(|b| b.set_peers(ble_refs.clone()));
+        for omni in nodes.values() {
             omni.on_definition(|o| o.set_peers(omni_refs.clone()));
         }
 
         Self {
             kompact_system: Some(system),
-            ble_paxos_nodes,
+            nodes,
             temp_dir_path,
         }
     }
 
     pub fn start_all_nodes(&self) {
-        for (ble, omni) in self.ble_paxos_nodes.values() {
+        for node in self.nodes.values() {
             self.kompact_system
                 .as_ref()
                 .expect("No KompactSystem found!")
-                .start_notify(ble)
-                .wait_timeout(START_TIMEOUT)
-                .expect("BLEComp never started!");
-            self.kompact_system
-                .as_ref()
-                .expect("No KompactSystem found!")
-                .start_notify(omni)
+                .start_notify(node)
                 .wait_timeout(START_TIMEOUT)
                 .expect("ReplicaComp never started!");
         }
     }
 
     pub fn stop_all_nodes(&self) {
-        for (_pid, (ble, omni)) in &self.ble_paxos_nodes {
+        for node in self.nodes.values() {
             self.kompact_system
                 .as_ref()
                 .expect("No KompactSystem found!")
-                .stop_notify(ble)
-                .wait_timeout(STOP_COMPONENT_TIMEOUT)
-                .expect("BLEComp never died!");
-            self.kompact_system
-                .as_ref()
-                .expect("No KompactSystem found!")
-                .stop_notify(omni)
+                .stop_notify(node)
                 .wait_timeout(STOP_COMPONENT_TIMEOUT)
                 .expect("ReplicaComp replica never died!");
         }
     }
 
     pub fn kill_node(&mut self, id: u64) {
-        let (ble, omni) = self.ble_paxos_nodes.remove(&id).unwrap();
+        let node = self.nodes.remove(&id).unwrap();
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
-            .kill_notify(ble)
-            .wait_timeout(STOP_COMPONENT_TIMEOUT)
-            .expect("BLEComp never died!");
-        self.kompact_system
-            .as_ref()
-            .expect("No KompactSystem found!")
-            .kill_notify(omni)
+            .kill_notify(node)
             .wait_timeout(STOP_COMPONENT_TIMEOUT)
             .expect("ReplicaComp replica never died!");
+        println!("Killed node {}", id);
     }
 
     pub fn create_node(
         &mut self,
         pid: u64,
         num_nodes: usize,
-        ble_hb_delay: u64,
+        election_timeout: Duration,
         storage_type: StorageTypeSelector,
         storage_path: &str,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
-        let mut ble_refs: HashMap<u64, ActorRef<BLEMessage>> = HashMap::new();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value, LatestValue>>> = HashMap::new();
-
-        // ble
-        let mut ble_config = BLEConfig::default();
-        ble_config.set_pid(pid);
-        ble_config.set_peers(peers.clone());
-        ble_config.set_hb_delay(ble_hb_delay);
-        let (ble_comp, ble_reg_f) = self
-            .kompact_system
-            .as_ref()
-            .expect("No KompactSystem found!")
-            .create_and_register(|| BLEComponent::with(BallotLeaderElection::with(ble_config)));
-
-        // sp
-        let mut sp_config = SequencePaxosConfig::default();
-        sp_config.set_pid(pid);
-        sp_config.set_peers(peers);
+        let mut op_config = OmniPaxosConfig::default();
+        op_config.pid = pid;
+        op_config.peers = peers;
+        op_config.configuration_id = 1;
         let storage: StorageType<Value, LatestValue> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -428,63 +369,37 @@ impl TestSystem {
             .as_ref()
             .expect("No KompactSystem found!")
             .create_and_register(|| {
-                SequencePaxosComponent::with(SequencePaxos::with(sp_config, storage))
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
             });
 
-        biconnect_components::<BallotLeaderElectionPort, _, _>(&ble_comp, &omni_replica)
-            .expect("Could not connect BLE and OmniPaxosReplica!");
-        ble_reg_f.wait_expect(REGISTRATION_TIMEOUT, "BLEComp failed to register!");
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 
         // Insert the new node into vector of peers.
-        ble_refs.insert(pid, ble_comp.actor_ref());
         omni_refs.insert(pid, omni_replica.actor_ref());
 
-        for (other_pid, (ble, omni)) in self.ble_paxos_nodes.iter() {
+        for (other_pid, node) in self.nodes.iter() {
             // Insert each peer node into HashMap as peers to the new node
-            ble_refs.insert(*other_pid, ble.actor_ref());
-            omni_refs.insert(*other_pid, omni.actor_ref());
-
+            omni_refs.insert(*other_pid, node.actor_ref());
             // Also insert the new node as a peer into their Hashmaps
-            ble.on_definition(|b| b.peers.insert(pid, ble_comp.actor_ref()));
-            omni.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
+            node.on_definition(|o| o.peers.insert(pid, omni_replica.actor_ref()));
         }
 
         // Set the peers of the new node, add it to HashMaps of nodes
-        ble_comp.on_definition(|b| b.set_peers(ble_refs));
         omni_replica.on_definition(|o| o.set_peers(omni_refs));
-        self.ble_paxos_nodes.insert(pid, (ble_comp, omni_replica));
+        self.nodes.insert(pid, omni_replica);
     }
 
     pub fn start_node(&self, pid: u64) {
-        let (new_ble, new_px) = self
-            .ble_paxos_nodes
+        let node = self
+            .nodes
             .get(&pid)
             .expect(&format!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
-            .start_notify(new_ble)
-            .wait_timeout(START_TIMEOUT)
-            .expect("BLEComp never started!");
-        self.kompact_system
-            .as_ref()
-            .expect("No KompactSystem found!")
-            .start_notify(new_px)
+            .start_notify(node)
             .wait_timeout(START_TIMEOUT)
             .expect("ReplicaComp never started!");
-    }
-
-    pub fn ble_paxos_nodes(
-        &self,
-    ) -> &HashMap<
-        u64,
-        (
-            Arc<Component<BLEComponent>>,
-            Arc<Component<SequencePaxosComponent>>,
-        ),
-    > {
-        &self.ble_paxos_nodes
     }
 
     fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
@@ -498,176 +413,87 @@ impl TestSystem {
     }
 }
 
-pub mod ble {
-    use super::*;
-    use std::collections::LinkedList;
-
-    pub struct BallotLeaderElectionPort;
-
-    impl Port for BallotLeaderElectionPort {
-        type Indication = Ballot;
-        type Request = ();
-    }
-
-    #[derive(ComponentDefinition)]
-    pub struct BLEComponent {
-        ctx: ComponentContext<Self>,
-        ble_port: ProvidedPort<BallotLeaderElectionPort>,
-        pub peers: HashMap<u64, ActorRef<BLEMessage>>,
-        pub leader: Option<Ballot>,
-        timer: Option<ScheduledTimer>,
-        pub ble: BallotLeaderElection,
-        ask_vector: LinkedList<Ask<(), Ballot>>,
-    }
-
-    impl BLEComponent {
-        pub fn with(ble: BallotLeaderElection) -> BLEComponent {
-            BLEComponent {
-                ctx: ComponentContext::uninitialised(),
-                ble_port: ProvidedPort::uninitialised(),
-                peers: HashMap::new(),
-                leader: None,
-                timer: None,
-                ble,
-                ask_vector: LinkedList::new(),
-            }
-        }
-
-        pub fn add_ask(&mut self, ask: Ask<(), Ballot>) {
-            self.ask_vector.push_back(ask);
-        }
-
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<BLEMessage>>) {
-            self.peers = peers;
-        }
-
-        fn send_outgoing_msgs(&mut self) {
-            let outgoing = self.ble.get_outgoing_msgs();
-            for out in outgoing {
-                let receiver = self.peers.get(&out.to).unwrap();
-                receiver.tell(out);
-            }
-        }
-
-        fn answer_future(&mut self, l: Ballot) {
-            if !self.ask_vector.is_empty() {
-                match self.ask_vector.pop_front().unwrap().reply(l) {
-                    Ok(_) => {}
-                    Err(e) => println!("Error in promise {}", e),
-                }
-            }
-        }
-    }
-
-    impl ComponentLifecycle for BLEComponent {
-        fn on_start(&mut self) -> Handled {
-            self.ble.new_hb_round();
-            self.timer =
-                Some(
-                    self.schedule_periodic(BLE_TIMER_TIMEOUT, BLE_TIMER_TIMEOUT, move |c, _| {
-                        if let Some(l) = c.ble.tick() {
-                            c.answer_future(l);
-                            c.ble_port.trigger(l);
-                        }
-                        c.send_outgoing_msgs();
-                        Handled::Ok
-                    }),
-                );
-
-            Handled::Ok
-        }
-
-        fn on_kill(&mut self) -> Handled {
-            if let Some(timer) = self.timer.take() {
-                self.cancel_timer(timer);
-            }
-            Handled::Ok
-        }
-    }
-
-    impl Provide<BallotLeaderElectionPort> for BLEComponent {
-        fn handle(&mut self, _: <BallotLeaderElectionPort as Port>::Request) -> Handled {
-            // ignore
-            Handled::Ok
-        }
-    }
-
-    impl Actor for BLEComponent {
-        type Message = BLEMessage;
-
-        fn receive_local(&mut self, msg: Self::Message) -> Handled {
-            self.ble.handle(msg);
-            Handled::Ok
-        }
-
-        fn receive_network(&mut self, _: NetMessage) -> Handled {
-            unimplemented!()
-        }
-    }
-}
-
 pub mod omnireplica {
-    use super::{ble::BallotLeaderElectionPort, *};
+    use super::*;
     use omnipaxos_core::{
-        ballot_leader_election::Ballot, messages::Message, sequence_paxos::SequencePaxos,
-        util::LogEntry,
+        ballot_leader_election::Ballot,
+        messages::Message,
+        omni_paxos::OmniPaxos,
+        util::{LogEntry, NodeId},
     };
-    use std::{
-        collections::{HashMap, LinkedList},
-        time::Duration,
-    };
+    use std::collections::HashMap;
 
     #[derive(ComponentDefinition)]
-    pub struct SequencePaxosComponent {
+    pub struct OmniPaxosComponent {
         ctx: ComponentContext<Self>,
-        ble_port: RequiredPort<BallotLeaderElectionPort>,
+        #[allow(dead_code)]
+        pid: NodeId,
         pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
-        timer: Option<ScheduledTimer>,
-        pub paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
-        ask_vector: LinkedList<Ask<(), Value>>,
+        paxos_timer: Option<ScheduledTimer>,
+        tick_timer: Option<ScheduledTimer>,
+        pub paxos: OmniPaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
+        pub decided_futures: Vec<Ask<(), Value>>,
+        pub election_futures: Vec<Ask<(), Ballot>>,
+        current_leader_ballot: Ballot,
         decided_idx: u64,
+        election_timeout: Duration,
     }
 
-    impl ComponentLifecycle for SequencePaxosComponent {
+    impl ComponentLifecycle for OmniPaxosComponent {
         fn on_start(&mut self) -> Handled {
-            self.timer = Some(self.schedule_periodic(
-                Duration::from_millis(1),
-                Duration::from_millis(1),
+            self.paxos_timer = Some(self.schedule_periodic(
+                CHECK_DECIDED_TIMEOUT,
+                CHECK_DECIDED_TIMEOUT,
                 move |c, _| {
                     c.send_outgoing_msgs();
-                    c.answer_future();
+                    c.answer_decided_future();
                     Handled::Ok
                 },
             ));
-
+            self.tick_timer = Some(self.schedule_periodic(
+                self.election_timeout,
+                self.election_timeout,
+                move |c, _| {
+                    c.paxos.election_timeout();
+                    if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
+                        if leader_ballot != c.current_leader_ballot {
+                            c.current_leader_ballot = leader_ballot;
+                            c.answer_election_future(leader_ballot);
+                        }
+                    }
+                    Handled::Ok
+                },
+            ));
             Handled::Ok
         }
 
         fn on_kill(&mut self) -> Handled {
-            if let Some(timer) = self.timer.take() {
+            if let Some(timer) = self.paxos_timer.take() {
                 self.cancel_timer(timer);
             }
             Handled::Ok
         }
     }
 
-    impl SequencePaxosComponent {
+    impl OmniPaxosComponent {
         pub fn with(
-            paxos: SequencePaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
+            pid: NodeId,
+            paxos: OmniPaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
+            election_timeout: Duration,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
-                ble_port: RequiredPort::uninitialised(),
+                pid,
                 peers: HashMap::new(),
-                timer: None,
+                paxos_timer: None,
+                tick_timer: None,
                 paxos,
-                ask_vector: LinkedList::new(),
+                decided_futures: vec![],
+                election_futures: vec![],
+                current_leader_ballot: Ballot::default(),
                 decided_idx: 0,
+                election_timeout,
             }
-        }
-
-        pub fn add_ask(&mut self, ask: Ask<(), Value>) {
-            self.ask_vector.push_back(ask);
         }
 
         pub fn get_trimmed_suffix(&self) -> Vec<Value> {
@@ -690,11 +516,9 @@ pub mod omnireplica {
         }
 
         fn send_outgoing_msgs(&mut self) {
-            let outgoing = self.paxos.get_outgoing_msgs();
-
+            let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
-                let receiver = self.peers.get(&out.to).unwrap();
-
+                let receiver = self.peers.get(&out.get_receiver()).unwrap();
                 receiver.tell(out);
             }
         }
@@ -703,26 +527,32 @@ pub mod omnireplica {
             self.peers = peers;
         }
 
-        fn answer_future(&mut self) {
-            if !self.ask_vector.is_empty() {
+        fn answer_election_future(&mut self, l: Ballot) {
+            if !self.election_futures.is_empty() {
+                self.election_futures.pop().unwrap().reply(l).unwrap();
+            }
+        }
+
+        fn answer_decided_future(&mut self) {
+            if !self.decided_futures.is_empty() {
                 if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
                     for e in entries {
                         match e {
                             LogEntry::Decided(i) => self
-                                .ask_vector
-                                .pop_front()
+                                .decided_futures
+                                .pop()
                                 .unwrap()
                                 .reply(i)
                                 .expect("Failed to reply promise!"),
                             LogEntry::Snapshotted(s) => self
-                                .ask_vector
-                                .pop_front()
+                                .decided_futures
+                                .pop()
                                 .unwrap()
                                 .reply(s.snapshot.value)
                                 .expect("Failed to reply promise!"),
                             LogEntry::StopSign(ss) => self
-                                .ask_vector
-                                .pop_front()
+                                .decided_futures
+                                .pop()
                                 .unwrap()
                                 .reply(stopsign_meta_to_value(&ss))
                                 .expect("Failed to reply stopsign promise"),
@@ -735,23 +565,16 @@ pub mod omnireplica {
         }
     }
 
-    impl Actor for SequencePaxosComponent {
+    impl Actor for OmniPaxosComponent {
         type Message = Message<Value, LatestValue>;
 
         fn receive_local(&mut self, msg: Self::Message) -> Handled {
-            self.paxos.handle(msg);
+            self.paxos.handle_incoming(msg);
             Handled::Ok
         }
 
         fn receive_network(&mut self, _: NetMessage) -> Handled {
             unimplemented!()
-        }
-    }
-
-    impl Require<BallotLeaderElectionPort> for SequencePaxosComponent {
-        fn handle(&mut self, l: Ballot) -> Handled {
-            self.paxos.handle_leader(l);
-            Handled::Ok
         }
     }
 }

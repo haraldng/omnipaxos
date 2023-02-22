@@ -15,8 +15,11 @@
 pub mod ballot_leader_election;
 /// The different messages Omni-Paxos replicas can communicate to each other with.
 pub mod messages;
-/// The omnipaxos_core algorithm of Omni-Paxos.
-pub mod sequence_paxos;
+/// The user-facing Omni-Paxos struct.
+pub mod omni_paxos;
+pub(crate) mod sequence_paxos;
+/// The core replication algorithm of Omni-Paxos.
+// pub mod sequence_paxos;
 /// Traits and structs related to the backend storage of an Omni-Paxos replica.
 pub mod storage;
 /// A module containing helper functions and structs.

@@ -2,7 +2,7 @@ pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
-    sequence_paxos::{SequencePaxos, SequencePaxosConfig},
+    omni_paxos::OmniPaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
     util::LogEntry,
 };
@@ -18,21 +18,21 @@ fn consensus_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
     );
 
-    let (_, px) = sys.ble_paxos_nodes().get(&1).unwrap();
+    let first_node = sys.nodes.get(&1).unwrap();
 
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
-        px.on_definition(|x| {
+        first_node.on_definition(|x| {
             x.paxos.append(Value(i)).expect("Failed to append");
-            x.add_ask(Ask::new(kprom, ()))
+            x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
     }
@@ -44,11 +44,11 @@ fn consensus_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    let mut log: Vec<(&u64, Vec<Value>)> = vec![];
-    for (i, (_, px)) in sys.ble_paxos_nodes() {
-        log.push(px.on_definition(|comp| {
+    let mut log = vec![];
+    for (pid, node) in sys.nodes {
+        log.push(node.on_definition(|comp| {
             let log = comp.get_trimmed_suffix();
-            (i, log.to_vec())
+            (pid, log.to_vec())
         }));
     }
 
@@ -85,36 +85,37 @@ fn read_test() {
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
-    let mut sp_config = SequencePaxosConfig::default();
-    sp_config.set_pid(1);
-    sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
+    let mut op_config = OmniPaxosConfig::default();
+    op_config.pid = 1;
+    op_config.peers = vec![2, 3];
+    op_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage);
 
     // read decided entries
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_decided_suffix(0)
         .expect("No decided entries");
     let expected_entries = log.get(0..decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
-    seq_paxos
+    omni_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entry
     let idx = snapshotted_idx;
-    let entry = seq_paxos.read(idx).expect("No entry");
+    let entry = omni_paxos.read(idx).expect("No entry");
     let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
     verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
 
     // read snapshot
-    let snapshot = seq_paxos.read(0).expect("No snapshot");
+    let snapshot = omni_paxos.read(0).expect("No snapshot");
     verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
 
     // read none
     let idx = log.len() as u64;
-    let entry = seq_paxos.read(idx);
+    let entry = omni_paxos.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -127,7 +128,7 @@ fn read_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -158,24 +159,25 @@ fn read_entries_test() {
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
-    let mut sp_config = SequencePaxosConfig::default();
-    sp_config.set_pid(1);
-    sp_config.set_peers(vec![1, 2, 3]);
-    let mut seq_paxos = SequencePaxos::with(sp_config.clone(), storage);
-    seq_paxos
+    let mut op_config = OmniPaxosConfig::default();
+    op_config.pid = 1;
+    op_config.peers = vec![2, 3];
+    op_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage);
+    omni_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
 
     // read entries only
     let from_idx = snapshotted_idx + 1;
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(from_idx..=decided_idx)
         .expect("No entries");
     let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
 
     // read snapshot only
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(0..snapshotted_idx)
         .expect("No snapshot");
     verify_snapshot(entries.as_slice(), snapshotted_idx, &exp_snapshot);
@@ -183,7 +185,7 @@ fn read_entries_test() {
     // read snapshot + entries
     let from_idx = 3;
     let to_idx = decided_idx;
-    let entries = seq_paxos
+    let entries = omni_paxos
         .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
@@ -194,7 +196,7 @@ fn read_entries_test() {
     // read none
     let from_idx = 0;
     let to_idx = log.len() as u64;
-    let entries = seq_paxos.read_entries(from_idx..=to_idx);
+    let entries = omni_paxos.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
     // create stopped storage and SequencePaxos to test reading StopSign.
@@ -207,7 +209,7 @@ fn read_entries_test() {
     stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
     stopped_storage.set_decided_idx(log_len);
 
-    let mut stopped_op = SequencePaxos::with(sp_config, stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -235,7 +237,7 @@ fn read_entries_test() {
     let from_idx = 0;
     let entries = stopped_op
         .read_entries(from_idx..)
-        .expect("No StopSign and Entries");
+        .expect("No Snapshot, Entries and StopSign");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
     let (snapshot, ents) = prefix.split_at(1);
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
@@ -331,7 +333,7 @@ fn verify_entries(
 }
 /// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
-    log_responses: Vec<(&u64, Vec<Value>)>,
+    log_responses: Vec<(u64, Vec<Value>)>,
     quorum_size: usize,
     num_proposals: Vec<Value>,
 ) {
@@ -355,7 +357,7 @@ fn check_quorum(
 }
 
 /// Verifies that only proposed values are decided.
-fn check_validity(log_responses: Vec<(&u64, Vec<Value>)>, num_proposals: Vec<Value>) {
+fn check_validity(log_responses: Vec<(u64, Vec<Value>)>, num_proposals: Vec<Value>) {
     let invalid_nodes: Vec<_> = log_responses
         .iter()
         .filter(|(_, sr)| {
@@ -375,7 +377,7 @@ fn check_validity(log_responses: Vec<(&u64, Vec<Value>)>, num_proposals: Vec<Val
 }
 
 /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(log_responses: Vec<(&u64, Vec<Value>)>) {
+fn check_uniform_agreement(log_responses: Vec<(u64, Vec<Value>)>) {
     let (_, longest_log) = log_responses
         .iter()
         .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))

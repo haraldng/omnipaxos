@@ -1,0 +1,11 @@
+[package]
+name = "kv_store"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+omnipaxos_core = { path = "../../omnipaxos_core" }
+omnipaxos_storage = { path = "../../omnipaxos_storage" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }

@@ -23,13 +23,11 @@ rand = "0.8.4"
 
 [features]
 batch_accept = []
-latest_accepted = []
-latest_decide = []
 continued_leader_reconfiguration = []
 logging  = [ "slog", "slog-term", "slog-async"]
 hocon_config = [ "hocon" ]
 
-default = ["latest_accepted", "latest_decide", "continued_leader_reconfiguration", "batch_accept"]
+default = ["continued_leader_reconfiguration", "batch_accept"]
 
 #[profile.release]
 #lto = true

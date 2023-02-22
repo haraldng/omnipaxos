@@ -1,7 +1,12 @@
 pub mod utils;
 
+use crate::utils::LatestValue;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{ballot_leader_election::Ballot, util::NodeId};
+use omnipaxos_core::{
+    ballot_leader_election::Ballot,
+    storage::Snapshot,
+    util::{LogEntry, NodeId},
+};
 use serial_test::serial;
 use std::thread;
 use utils::{TestConfig, TestSystem, Value};
@@ -13,7 +18,7 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 /// if the first [`gc_index`] are removed.
 #[test]
 #[serial]
-fn trim_test() {
+fn snapshot_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
@@ -50,7 +55,9 @@ fn trim_test() {
     }
 
     elected_leader.on_definition(|x| {
-        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
+        x.paxos
+            .snapshot(Some(cfg.gc_idx), false)
+            .expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
@@ -58,12 +65,12 @@ fn trim_test() {
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
         seqs_after.push(px.on_definition(|comp| {
-            let seq = comp.get_trimmed_suffix();
-            (i, seq.to_vec())
+            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
+            (i, seq)
         }));
     }
 
-    check_trim(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
+    check_snapshot(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
 
     println!("Pass trim");
 
@@ -80,7 +87,7 @@ fn trim_test() {
 /// if the first [`gc_index`] + an increment are removed.
 #[test]
 #[serial]
-fn double_trim_test() {
+fn double_snapshot_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
@@ -117,14 +124,16 @@ fn double_trim_test() {
     }
 
     elected_leader.on_definition(|x| {
-        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
+        x.paxos
+            .snapshot(Some(cfg.gc_idx), false)
+            .expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .trim(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT))
+            .snapshot(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT), false)
             .expect("Failed to trim");
     });
 
@@ -133,12 +142,12 @@ fn double_trim_test() {
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {
         seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.get_trimmed_suffix();
-            (i, seq.to_vec())
+            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
+            (i, seq)
         }));
     }
 
-    check_trim(
+    check_snapshot(
         vec_proposals,
         seq_after_double,
         cfg.gc_idx + TRIM_INDEX_INCREMENT,
@@ -155,25 +164,50 @@ fn double_trim_test() {
     };
 }
 
-fn check_trim(
+fn check_snapshot(
     vec_proposals: Vec<Value>,
-    seq_after: Vec<(u64, Vec<Value>)>,
+    seq_after: Vec<(u64, Vec<LogEntry<Value, LatestValue>>)>,
     gc_idx: u64,
     leader: NodeId,
 ) {
+    let exp_snapshot = LatestValue::create(&vec_proposals[0..gc_idx as usize]);
     for (pid, after) in seq_after {
         if pid == leader {
+            let snapshot = after.first().unwrap();
+            match snapshot {
+                LogEntry::Snapshotted(s) => {
+                    assert_eq!(s.trimmed_idx, gc_idx);
+                    assert_eq!(&s.snapshot, &exp_snapshot);
+                }
+                l => panic!(
+                    "Leader's first entry is not snapshot. Node {}, {:?}",
+                    pid, l
+                ),
+            }
             // leader must have successfully trimmed
-            assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
-            assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
+            assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize)); // -1 as snapshot is one entry
         } else {
-            if after.len() + gc_idx as usize == vec_proposals.len() {
-                // successful trim
-                assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
+            if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
+                let snapshot = after.first().unwrap();
+                match snapshot {
+                    LogEntry::Snapshotted(s) => {
+                        assert_eq!(s.trimmed_idx, gc_idx);
+                        assert_eq!(&s.snapshot, &exp_snapshot);
+                    }
+                    _ => panic!("First entry is not a snapshot"),
+                }
             } else {
                 // must be prefix
                 for (entry_idx, entry) in after.iter().enumerate() {
-                    assert_eq!(Some(entry), vec_proposals.get(entry_idx));
+                    match entry {
+                        LogEntry::Decided(d) => {
+                            assert_eq!(d, &vec_proposals[entry_idx]);
+                        }
+                        l => panic!(
+                            "Unexpected entry for node {}, idx: {}: {:?}",
+                            pid, entry_idx, l
+                        ),
+                    }
                 }
             }
         }

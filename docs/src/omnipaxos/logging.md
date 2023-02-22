@@ -9,5 +9,3 @@ The actual logging levels are controlled via build features. The default feature
 Sometimes the default logging configuration is not sufficient for a particular application. For example, you might need a larger queue size in the `Async` drain, or you may want to write to a file instead of the terminal.
 
 The user can provide a custom implementation based on [**slog**](https://crates.io/crates/slog).
-
-> **Note:** This applies to [**Ballot Leader Election**](../ble/index.md) as well.
