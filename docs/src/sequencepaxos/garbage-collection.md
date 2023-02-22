@@ -1,3 +1,0 @@
-# Garbage Collection
-
-OmniPaxos offers a garbage collection feature that can be called to compact the replicated log. The `OmniPaxos::garbage_collect()` has an argument `Option<u64>` that specifies up to what index the log should be garbage collected. If `None`, then the minimum index accepted by ALL servers will be used as the index. The garbage collection is initiated by the leader and only completed if all servers respond that log entries up to that index has already been handled by the user. To determine if the garbage collection succeeded, the user can check the `garbage_collected_idx` field of `OmniPaxos`.

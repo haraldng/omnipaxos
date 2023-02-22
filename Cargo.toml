@@ -1,9 +1,8 @@
 [workspace]
 members = [
     "omnipaxos_core",
-    "omnipaxos_runtime",
     "omnipaxos_storage",
-    "examples"
+    "examples/kv_store"
 ]
 
 [profile.release]
