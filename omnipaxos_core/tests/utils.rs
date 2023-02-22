@@ -18,7 +18,6 @@ const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
-const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
@@ -36,7 +35,7 @@ pub struct TestConfig {
     pub wait_timeout: Duration,
     pub num_threads: usize,
     pub num_nodes: usize,
-    pub ble_hb_delay: u64,
+    pub election_timeout: Duration,
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
@@ -56,7 +55,9 @@ impl TestConfig {
             wait_timeout: cfg["wait_timeout"].as_duration().unwrap_or_default(),
             num_threads: cfg["num_threads"].as_i64().unwrap_or_default() as usize,
             num_nodes: cfg["num_nodes"].as_i64().unwrap_or_default() as usize,
-            ble_hb_delay: cfg["ble_hb_delay"].as_i64().unwrap_or_default() as u64,
+            election_timeout: Duration::from_millis(
+                cfg["election_timeout_ms"].as_i64().unwrap_or_default() as u64,
+            ),
             num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
             num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
             gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
@@ -265,7 +266,7 @@ pub struct TestSystem {
 impl TestSystem {
     pub fn with(
         num_nodes: usize,
-        ble_hb_delay: u64,
+        election_timeout: Duration,
         num_threads: usize,
         storage_type: StorageTypeSelector,
     ) -> Self {
@@ -292,12 +293,12 @@ impl TestSystem {
             let mut op_config = OmniPaxosConfig::default();
             op_config.pid = pid;
             op_config.peers = peers;
-            op_config.hb_delay = ble_hb_delay;
             op_config.configuration_id = 1;
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
-            let (omni_replica, omni_reg_f) = system
-                .create_and_register(|| OmniPaxosComponent::with(pid, op_config.build(storage)));
+            let (omni_replica, omni_reg_f) = system.create_and_register(|| {
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
+            });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
             omni_refs.insert(pid, omni_replica.actor_ref());
             nodes.insert(pid, omni_replica);
@@ -351,7 +352,7 @@ impl TestSystem {
         &mut self,
         pid: u64,
         num_nodes: usize,
-        ble_hb_delay: u64,
+        election_timeout: Duration,
         storage_type: StorageTypeSelector,
         storage_path: &str,
     ) {
@@ -360,7 +361,6 @@ impl TestSystem {
         let mut op_config = OmniPaxosConfig::default();
         op_config.pid = pid;
         op_config.peers = peers;
-        op_config.hb_delay = ble_hb_delay;
         op_config.configuration_id = 1;
         let storage: StorageType<Value, LatestValue> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
@@ -368,7 +368,9 @@ impl TestSystem {
             .kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
-            .create_and_register(|| OmniPaxosComponent::with(pid, op_config.build(storage)));
+            .create_and_register(|| {
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
+            });
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
 
@@ -434,6 +436,7 @@ pub mod omnireplica {
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: u64,
+        election_timeout: Duration,
     }
 
     impl ComponentLifecycle for OmniPaxosComponent {
@@ -447,19 +450,20 @@ pub mod omnireplica {
                     Handled::Ok
                 },
             ));
-            self.tick_timer =
-                Some(
-                    self.schedule_periodic(TICK_TIMEOUT, TICK_TIMEOUT, move |c, _| {
-                        c.paxos.tick();
-                        if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
-                            if leader_ballot != c.current_leader_ballot {
-                                c.current_leader_ballot = leader_ballot;
-                                c.answer_election_future(leader_ballot);
-                            }
+            self.tick_timer = Some(self.schedule_periodic(
+                self.election_timeout,
+                self.election_timeout,
+                move |c, _| {
+                    c.paxos.election_timeout();
+                    if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
+                        if leader_ballot != c.current_leader_ballot {
+                            c.current_leader_ballot = leader_ballot;
+                            c.answer_election_future(leader_ballot);
                         }
-                        Handled::Ok
-                    }),
-                );
+                    }
+                    Handled::Ok
+                },
+            ));
             Handled::Ok
         }
 
@@ -475,6 +479,7 @@ pub mod omnireplica {
         pub fn with(
             pid: NodeId,
             paxos: OmniPaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
+            election_timeout: Duration,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -487,6 +492,7 @@ pub mod omnireplica {
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
                 decided_idx: 0,
+                election_timeout,
             }
         }
 

@@ -287,7 +287,9 @@ where
                 .get_decided_idx(*pid)
                 .expect("Received PromiseMetaData but not found in ld");
             if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
-                let diff_entries = self.internal_storage.get_entries(follower_decided_idx, my_decided_idx);
+                let diff_entries = self
+                    .internal_storage
+                    .get_entries(follower_decided_idx, my_decided_idx);
                 let delta_snapshot = Some(SnapshotType::Delta(S::create(diff_entries.as_slice())));
                 let suffix = self.internal_storage.get_suffix(my_decided_idx);
                 (delta_snapshot, suffix, follower_decided_idx)

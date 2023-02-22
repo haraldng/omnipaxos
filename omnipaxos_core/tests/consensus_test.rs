@@ -18,7 +18,7 @@ fn consensus_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
     );
@@ -88,7 +88,6 @@ fn read_test() {
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
     op_config.peers = vec![2, 3];
-    op_config.hb_delay = 1;
     op_config.configuration_id = 1;
     let mut omni_paxos = op_config.clone().build(storage);
 
@@ -163,7 +162,6 @@ fn read_entries_test() {
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
     op_config.peers = vec![2, 3];
-    op_config.hb_delay = 1;
     op_config.configuration_id = 1;
     let mut omni_paxos = op_config.clone().build(storage);
     omni_paxos

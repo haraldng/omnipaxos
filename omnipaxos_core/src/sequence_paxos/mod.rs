@@ -7,7 +7,7 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    omni_paxos::{OmniPaxosConfig, ReconfigurationRequest},
+    omni_paxos::{CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest},
     storage::InternalStorage,
     util::{ConfigurationId, NodeId},
 };
@@ -99,9 +99,9 @@ where
             s: PhantomData,
             #[cfg(feature = "logging")]
             logger: {
-                let s = config.logger_file_path.unwrap_or_else(|| {
-                    format!("logs/paxos_{}.log", pid)
-                });
+                let s = config
+                    .logger_file_path
+                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
                 create_logger(s.as_str())
             },
         };
@@ -398,28 +398,6 @@ enum Role {
     Leader,
 }
 
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[allow(missing_docs)]
-#[derive(Debug)]
-pub enum ProposeErr<T>
-where
-    T: Entry,
-{
-    Normal(T),
-    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[derive(Copy, Clone, Debug)]
-pub enum CompactionErr {
-    /// Snapshot was called with an index that is not decided yet. Returns the currently decided index.
-    UndecidedIndex(u64),
-    /// Trim was called with an index that is not decided by all servers yet. Returns the index decided by ALL servers currently.
-    NotAllDecided(u64),
-    /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
-    NotCurrentLeader(NodeId),
-}
-
 /// Configuration for `SequencePaxos`.
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
@@ -449,7 +427,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
             #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path
+            logger_file_path: config.logger_file_path,
         }
     }
 }

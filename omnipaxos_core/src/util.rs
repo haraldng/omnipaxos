@@ -277,7 +277,6 @@ where
 
 pub(crate) mod defaults {
     pub(crate) const BUFFER_SIZE: usize = 100000;
-    pub(crate) const HB_TIMEOUT: u64 = 500;
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
 }
 

@@ -3,12 +3,9 @@ use crate::utils::hocon_kv::*;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
-    sequence_paxos::{CompactionErr, ProposeErr, SequencePaxos},
+    sequence_paxos::SequencePaxos,
     storage::{Entry, Snapshot, StopSign, Storage},
-    util::{
-        defaults::{BUFFER_SIZE, HB_TIMEOUT},
-        LogEntry, NodeId,
-    },
+    util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
@@ -36,9 +33,7 @@ pub struct OmniPaxosConfig {
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
     pub leader_priority: u64,
-    pub hb_delay: u64,
     pub initial_leader: Option<Ballot>,
-    pub initial_delay: Option<u64>,
     #[cfg(feature = "logging")]
     pub logger_path: Option<String>,
 }
@@ -68,10 +63,6 @@ impl OmniPaxosConfig {
         if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
             config.leader_priority = p;
         }
-        config.initial_delay = h[INITIAL_DELAY].as_i64().map(|i| i as u64);
-        config.hb_delay = h[HB_DELAY]
-            .as_i64()
-            .expect("Failed to load heartbeat delay") as u64;
 
         config.logger_file_path = h[LOG_FILE_PATH].as_string();
         config
@@ -112,9 +103,7 @@ impl Default for OmniPaxosConfig {
             skip_prepare_use_leader: None,
             logger_file_path: None,
             leader_priority: 0,
-            hb_delay: HB_TIMEOUT,
             initial_leader: None,
-            initial_delay: None,
             #[cfg(feature = "logging")]
             logger_path: None,
         }
@@ -261,11 +250,12 @@ where
         self.ble.set_priority(p)
     }
 
-    /// Tick is run by all servers to simulate the passage of time
-    /// If one wishes to have hb_delay of 500ms, one can set a periodic timer of 100ms to call tick(). After 5 calls to this function, the timeout will occur.
-    /// Returns an Option with the elected leader otherwise None
-    pub fn tick(&mut self) {
-        if let Some(b) = self.ble.tick() {
+    /// If the heartbeat of a leader is not received when election_timeout() is called, the server might attempt to become the leader.
+    /// It is also used for the election process, where the server checks if it can become the leader.
+    /// This function should be called periodically to detect leader failure and drive the election process.
+    /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
+    pub fn election_timeout(&mut self) {
+        if let Some(b) = self.ble.hb_timeout() {
             self.seq_paxos.handle_leader(b);
         }
     }
@@ -291,4 +281,26 @@ impl ReconfigurationRequest {
             metadata,
         }
     }
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[allow(missing_docs)]
+#[derive(Debug)]
+pub enum ProposeErr<T>
+where
+    T: Entry,
+{
+    Normal(T),
+    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
+}
+
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[derive(Copy, Clone, Debug)]
+pub enum CompactionErr {
+    /// Snapshot was called with an index that is not decided yet. Returns the currently decided index.
+    UndecidedIndex(u64),
+    /// Trim was called with an index that is not decided by all servers yet. Returns the index decided by ALL servers currently.
+    NotAllDecided(u64),
+    /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
+    NotCurrentLeader(NodeId),
 }

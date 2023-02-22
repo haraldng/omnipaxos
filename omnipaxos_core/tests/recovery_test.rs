@@ -18,7 +18,7 @@ fn leader_fail_follower_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
     );
@@ -71,7 +71,7 @@ fn leader_fail_leader_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
     );
@@ -120,7 +120,7 @@ fn follower_fail_leader_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
     );
@@ -173,7 +173,7 @@ fn follower_fail_follower_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
     );
@@ -385,7 +385,7 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     sys.create_node(
         pid,
         cfg.num_nodes,
-        cfg.ble_hb_delay,
+        cfg.election_timeout,
         PERSISTENT_STORAGE,
         &storage_path,
     );

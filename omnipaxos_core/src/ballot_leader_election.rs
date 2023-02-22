@@ -56,18 +56,8 @@ pub struct BallotLeaderElection {
     quorum_connected: bool,
     /// Current elected leader.
     leader: Option<Ballot>,
-    /// Internal delay used for timeout.
-    hb_current_delay: u64,
-    /// How long time is waited before timing out on a Heartbeat response and possibly resulting in a leader-change. Measured in number of times [`tick()`] is called.
-    hb_delay: u64,
     /// The majority of replicas inside a cluster. It is measured in ticks.
     majority: usize,
-    /// A factor used in the beginning for a shorter hb_delay.
-    /// Used to faster elect a leader when starting up.
-    /// If used, then hb_delay is set to hb_delay/initial_delay_factor until the first leader is elected.
-    initial_delay: Option<u64>,
-    /// Internal timer which simulates the passage of time.
-    ticks_elapsed: u64,
     /// Vector which holds all the outgoing messages of the BLE instance.
     outgoing: Vec<BLEMessage>,
     /// Logger used to output the status of the component.
@@ -85,7 +75,6 @@ impl BallotLeaderElection {
             Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
             _ => Ballot::with(0, config.priority, pid),
         };
-        let hb_delay = config.hb_delay;
         let mut ble = BallotLeaderElection {
             pid,
             majority: n / 2 + 1, // +1 because peers is exclusive ourselves
@@ -95,10 +84,6 @@ impl BallotLeaderElection {
             current_ballot: initial_ballot,
             quorum_connected: true,
             leader: config.initial_leader,
-            hb_current_delay: hb_delay,
-            hb_delay,
-            initial_delay: config.initial_delay,
-            ticks_elapsed: 0,
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
@@ -128,19 +113,6 @@ impl BallotLeaderElection {
     /// Returns outgoing messages
     pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
         std::mem::take(&mut self.outgoing)
-    }
-
-    /// Tick is run by all servers to simulate the passage of time
-    /// If one wishes to have hb_delay of 500ms, one can set a periodic timer of 100ms to call tick(). After 5 calls to this function, the timeout will occur.
-    /// Returns an Option with the elected leader otherwise None
-    pub(crate) fn tick(&mut self) -> Option<Ballot> {
-        self.ticks_elapsed += 1;
-        if self.ticks_elapsed >= self.hb_current_delay {
-            self.ticks_elapsed = 0;
-            self.hb_timeout()
-        } else {
-            None
-        }
     }
 
     /// Handle an incoming message.
@@ -190,7 +162,6 @@ impl BallotLeaderElection {
         } else if self.leader != Some(top_ballot) {
             // got a new leader with greater ballot
             self.leader = Some(top_ballot);
-            self.initial_delay = None;
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
@@ -212,8 +183,6 @@ impl BallotLeaderElection {
             self.hb_round
         );
 
-        self.hb_current_delay = self.initial_delay.unwrap_or(self.hb_delay);
-
         for peer in &self.peers {
             let hb_request = HeartbeatRequest {
                 round: self.hb_round,
@@ -227,7 +196,7 @@ impl BallotLeaderElection {
         }
     }
 
-    fn hb_timeout(&mut self) -> Option<Ballot> {
+    pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
             #[cfg(feature = "logging")]
             debug!(
@@ -299,9 +268,7 @@ pub struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
     priority: u64,
-    hb_delay: u64,
     initial_leader: Option<Ballot>,
-    initial_delay: Option<u64>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Option<Logger>,
@@ -315,9 +282,7 @@ impl From<OmniPaxosConfig> for BLEConfig {
             pid: config.pid,
             peers: config.peers,
             priority: config.leader_priority,
-            hb_delay: config.hb_delay,
             initial_leader: config.initial_leader,
-            initial_delay: config.initial_delay,
             buffer_size: BLE_BUFFER_SIZE,
             #[cfg(feature = "logging")]
             logger: None,

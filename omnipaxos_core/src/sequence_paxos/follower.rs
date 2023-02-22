@@ -4,7 +4,7 @@ use super::*;
 
 use crate::storage::SnapshotType;
 #[cfg(feature = "logging")]
-use slog::{debug};
+use slog::debug;
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where

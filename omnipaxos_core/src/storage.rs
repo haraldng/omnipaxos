@@ -1,6 +1,6 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    sequence_paxos::CompactionErr,
+    omni_paxos::CompactionErr,
     util::{ConfigurationId, IndexEntry, LogEntry, SnapshottedEntry},
 };
 use std::{
