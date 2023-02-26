@@ -12,7 +12,5 @@
     - [Compaction](omnipaxos/compaction.md)
     - [Reconfiguration](omnipaxos/reconfiguration.md)
     - [Logging](omnipaxos/logging.md)
-- [Ballot Leader Election](ble/index.md)
-- [Runtime](runtime/index.md)
 
 [Project Info](project.md)

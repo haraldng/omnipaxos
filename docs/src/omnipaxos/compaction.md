@@ -31,6 +31,7 @@ match omni_paxos.trim(trim_idx) {
 Trimming compacts the log and discards any data preceding the trim index. For safety, it therefore requires all servers to have decided the trim index. If you don't want to discard any data and the entries in the log are such that they can be compacted into a snapshot, `OmniPaxos` supports snapshotting decided entries of the log. For instance, in our kv-store example, we don't need to keep every log entry that changes the kv-pairs. Instead, if we want to snapshot the log, it is sufficient to keep the latest value for every key. We implement our snapshot as a struct called `KVSnapshot` which is just a wrapper for a `HashMap` that will hold the latest value for every key in the log. To make it work with `OmniPaxos`, we need to implement the trait `Snapshot` for `KVSnapshot`:
 
 ```rust,edition2018,no_run,noplaypen
+use std::collections::HashMap;
 use omnipaxos_core::storage::Snapshot;
 
 #[derive(Clone, Debug)]
