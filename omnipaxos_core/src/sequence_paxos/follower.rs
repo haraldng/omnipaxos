@@ -13,7 +13,7 @@ where
     B: Storage<T, S>,
 {
     /*** Follower ***/
-    pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: u64) {
+    pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
         if self.internal_storage.get_promise() <= prep.n {
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
@@ -55,7 +55,7 @@ where
         }
     }
 
-    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: u64) {
+    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: NodeId) {
         if self.internal_storage.get_promise() == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {

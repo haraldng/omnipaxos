@@ -135,7 +135,7 @@ where
 
     /// Trim the log and create a snapshot. ** Note: only up to the `decided_idx` can be snapshotted **
     /// # Arguments
-    /// `compact_idx` - Snapshots all entries < [`trim_index`], if the [`trim_index`] is None then the decided index will be used.
+    /// `compact_idx` - Snapshots all entries < [`compact_idx`], if the [`compact_idx`] is None then the decided index will be used.
     /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
     pub fn snapshot(
         &mut self,
@@ -263,7 +263,7 @@ where
 #[derive(Debug, Clone)]
 pub struct ReconfigurationRequest {
     /// The id of the servers in the new configuration.
-    pub(crate) new_configuration: Vec<u64>,
+    pub(crate) new_configuration: Vec<NodeId>,
     /// Optional metadata to be decided with the reconfiguration.
     pub(crate) metadata: Option<Vec<u8>>,
 }
@@ -271,9 +271,9 @@ pub struct ReconfigurationRequest {
 impl ReconfigurationRequest {
     /// create a `ReconfigurationRequest`.
     /// # Arguments
-    /// * new_configuration: The pids of the nodes in the new configuration.
-    /// * metadata: Some optional metadata in raw bytes. This could include some auxiliary data for the new configuration to start with.
-    pub fn with(new_configuration: Vec<u64>, metadata: Option<Vec<u8>>) -> Self {
+    /// * `new_configuration`: The pids of the nodes in the new configuration.
+    /// * `metadata`: Some optional metadata in raw bytes. This could include some auxiliary data for the new configuration to start with.
+    pub fn with(new_configuration: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
         Self {
             new_configuration,
             metadata,
@@ -289,7 +289,7 @@ where
     T: Entry,
 {
     Normal(T),
-    Reconfiguration(Vec<u64>), // TODO use a type for ProcessId
+    Reconfiguration(Vec<NodeId>),
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.

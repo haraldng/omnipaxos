@@ -67,7 +67,7 @@ where
         }
     }
 
-    pub(crate) fn handle_preparereq(&mut self, from: u64) {
+    pub(crate) fn handle_preparereq(&mut self, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
@@ -186,7 +186,7 @@ where
     }
 
     #[cfg(feature = "batch_accept")]
-    fn send_accept_and_cache(&mut self, to: u64, entries: Vec<T>) {
+    fn send_accept_and_cache(&mut self, to: NodeId, entries: Vec<T>) {
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
             decided_idx: self.leader_state.get_chosen_idx(),
@@ -396,7 +396,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T, S>, from: u64) {
+    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T, S>, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(
             self.logger,
@@ -410,7 +410,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T, S>, from: u64) {
+    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T, S>, from: NodeId) {
         #[cfg(feature = "logging")]
         {
             let (r, p) = &self.state;
@@ -425,7 +425,7 @@ where
         }
     }
 
-    pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: u64) {
+    pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: NodeId) {
         #[cfg(feature = "logging")]
         trace!(
             self.logger,
@@ -486,7 +486,11 @@ where
         }
     }
 
-    pub(crate) fn handle_accepted_stopsign(&mut self, acc_stopsign: AcceptedStopSign, from: u64) {
+    pub(crate) fn handle_accepted_stopsign(
+        &mut self,
+        acc_stopsign: AcceptedStopSign,
+        from: NodeId,
+    ) {
         if acc_stopsign.n == self.leader_state.n_leader
             && self.state == (Role::Leader, Phase::Accept)
         {

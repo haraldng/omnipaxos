@@ -9,6 +9,7 @@ pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, SnapshotType, StopSign},
+        util::NodeId,
     };
     use std::fmt::Debug;
 
@@ -174,9 +175,9 @@ pub mod sequence_paxos {
         S: Snapshot<T>,
     {
         /// Sender of `msg`.
-        pub from: u64,
+        pub from: NodeId,
         /// Receiver of `msg`.
-        pub to: u64,
+        pub to: NodeId,
         /// The message content.
         pub msg: PaxosMsg<T, S>,
     }
@@ -184,7 +185,7 @@ pub mod sequence_paxos {
 
 /// The different messages BLE uses to communicate with other replicas.
 pub mod ballot_leader_election {
-    use crate::ballot_leader_election::Ballot;
+    use crate::{ballot_leader_election::Ballot, util::NodeId};
 
     /// An enum for all the different BLE message types.
     #[allow(missing_docs)]
@@ -216,9 +217,9 @@ pub mod ballot_leader_election {
     #[derive(Clone, Debug)]
     pub struct BLEMessage {
         /// Sender of `msg`.
-        pub from: u64,
+        pub from: NodeId,
         /// Receiver of `msg`.
-        pub to: u64,
+        pub to: NodeId,
         /// The message content.
         pub msg: HeartbeatMsg,
     }
