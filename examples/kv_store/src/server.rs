@@ -15,7 +15,6 @@ pub struct OmniPaxosServer {
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
     pub incoming: mpsc::Receiver<Message<KeyValue, KVSnapshot>>,
     pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
-    // pub local_requests: mpsc::Receiver<Request>,
 }
 
 impl OmniPaxosServer {
