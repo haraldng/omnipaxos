@@ -194,7 +194,7 @@ let mut omni_paxos = omni_paxos_config.build(storage);
 }
 </code></pre>
 <p>This can then be loaded to construct <code>OmniPaxosConfig</code>:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let raw_cfg = HoconLoader::new()
+<pre><code class="language-rust edition2018 no_run noplaypen">let cfg = HoconLoader::new()
     .load_file(&quot;tests/config/node2.conf&quot;)
     .expect(&quot;Failed to load hocon file&quot;)
     .hocon()
@@ -207,7 +207,7 @@ let omni_paxos_config = OmniPaxosConfig::with_hocon(cfg);
 <pre><code class="language-rust edition2018 no_run noplaypen">/* Re-creating our node after a crash... */
 
 // Configuration from previous storage
-let my_path = &quot;/my_old_path/&quot;;
+let my_path = &quot;/my_path_before_crash/&quot;;
 let my_log_opts = LogOptions::new(my_path);
 let persist_conf = PersistentStorageConfig::default();
 

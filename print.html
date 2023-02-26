@@ -227,7 +227,7 @@ let mut omni_paxos = omni_paxos_config.build(storage);
 }
 </code></pre>
 <p>This can then be loaded to construct <code>OmniPaxosConfig</code>:</p>
-<pre><code class="language-rust edition2018 no_run noplaypen">let raw_cfg = HoconLoader::new()
+<pre><code class="language-rust edition2018 no_run noplaypen">let cfg = HoconLoader::new()
     .load_file(&quot;tests/config/node2.conf&quot;)
     .expect(&quot;Failed to load hocon file&quot;)
     .hocon()
@@ -240,7 +240,7 @@ let omni_paxos_config = OmniPaxosConfig::with_hocon(cfg);
 <pre><code class="language-rust edition2018 no_run noplaypen">/* Re-creating our node after a crash... */
 
 // Configuration from previous storage
-let my_path = &quot;/my_old_path/&quot;;
+let my_path = &quot;/my_path_before_crash/&quot;;
 let my_log_opts = LogOptions::new(my_path);
 let persist_conf = PersistentStorageConfig::default();
 
@@ -385,18 +385,18 @@ let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts)
 <pre><code class="language-rust edition2018 no_run noplaypen">use omnipaxos_core::messages::Message;
 
 // handle incoming message from network layer
-let msg: Message&lt;KeyValue, KVSnapshot&gt; = ...;    // message to this node e.g. `msg.to = 2`
-omni_paxos.handle(msg);
+let msg: Message&lt;KeyValue, KVSnapshot&gt; = ...;    // message to this node e.g. `msg.get_receiver() == 2`
+omni_paxos.handle_incoming(msg);
 </code></pre>
 <p>By handling incoming messages and local calls such as <code>append()</code>, our local <code>omni_paxos</code> will produce outgoing messages for its peers. Thus, we must periodically send the outgoing messages on the network layer.</p>
 <pre><code class="language-rust edition2018 no_run noplaypen">// send outgoing messages. This should be called periodically, e.g. every ms
-for out_msg in omni_paxos.outgoings_msgs() {
+for out_msg in omni_paxos.outgoing_messages() {
     let receiver = out_msg.get_receiver();
     // send out_msg to receiver on network layer
 }
 </code></pre>
 <blockquote>
-<p><strong>Note:</strong> The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. Similarly, you have to periodically fetch these outgoing messages from <code>OmniPaxos</code>. </p>
+<p><strong>Note:</strong> The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. You have to periodically fetch these outgoing messages from <code>OmniPaxos</code>. </p>
 </blockquote>
 <h2 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h2>
 <p>One of the main advantages of Omni-Paxos is its resilience to partial connectivity. If one node loses connection to another and then reconnects (e.g. after a TCP-session drop), make sure to call <code>reconnected(pid)</code> before handling any incoming messages from that peer.</p>
