@@ -53,7 +53,7 @@ For convenience, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig:
 This can then be loaded to construct `OmniPaxosConfig`:
 
 ```rust,edition2018,no_run,noplaypen
-let raw_cfg = HoconLoader::new()
+let cfg = HoconLoader::new()
     .load_file("tests/config/node2.conf")
     .expect("Failed to load hocon file")
     .hocon()
@@ -69,7 +69,7 @@ To support Fail-recovery, we must ensure that our storage implementation can per
 /* Re-creating our node after a crash... */
 
 // Configuration from previous storage
-let my_path = "/my_old_path/";
+let my_path = "/my_path_before_crash/";
 let my_log_opts = LogOptions::new(my_path);
 let persist_conf = PersistentStorageConfig::default();
 

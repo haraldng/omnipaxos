@@ -83,8 +83,8 @@ fn main() {
         .expect("Failed to get leader");
     println!("Elected leader: {}", leader);
 
-    let follower = SERVERS.iter().filter(|&&p| p != leader).next().unwrap();
-    let (follower_server, _) = op_server_handles.get(&follower).unwrap();
+    let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
+    let (follower_server, _) = op_server_handles.get(follower).unwrap();
     // append kv1 to the replicated log via follower
     let kv1 = KeyValue {
         key: "a".to_string(),

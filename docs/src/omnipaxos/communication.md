@@ -8,21 +8,21 @@ When a message is received from the network layer intended for our node, we need
 use omnipaxos_core::messages::Message;
 
 // handle incoming message from network layer
-let msg: Message<KeyValue, KVSnapshot> = ...;    // message to this node e.g. `msg.to = 2`
-omni_paxos.handle(msg);
+let msg: Message<KeyValue, KVSnapshot> = ...;    // message to this node e.g. `msg.get_receiver() == 2`
+omni_paxos.handle_incoming(msg);
 ```
 
 By handling incoming messages and local calls such as `append()`, our local `omni_paxos` will produce outgoing messages for its peers. Thus, we must periodically send the outgoing messages on the network layer.
 
 ```rust,edition2018,no_run,noplaypen
 // send outgoing messages. This should be called periodically, e.g. every ms
-for out_msg in omni_paxos.outgoings_msgs() {
+for out_msg in omni_paxos.outgoing_messages() {
     let receiver = out_msg.get_receiver();
     // send out_msg to receiver on network layer
 }
 ```
 
-> **Note:** The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. Similarly, you have to periodically fetch these outgoing messages from `OmniPaxos`. 
+> **Note:** The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. You have to periodically fetch these outgoing messages from `OmniPaxos`. 
 
 ## Handling Disconnections
 One of the main advantages of Omni-Paxos is its resilience to partial connectivity. If one node loses connection to another and then reconnects (e.g. after a TCP-session drop), make sure to call ``reconnected(pid)`` before handling any incoming messages from that peer.
