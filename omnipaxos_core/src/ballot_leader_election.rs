@@ -41,7 +41,7 @@ impl Ballot {
 /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
-pub struct BallotLeaderElection {
+pub(crate) struct BallotLeaderElection {
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
     /// Vector that holds all the other replicas.
@@ -261,7 +261,7 @@ impl BallotLeaderElection {
 /// * `logger_file_path`: The path where the default logger logs events.
 /// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
-pub struct BLEConfig {
+pub(crate) struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
     priority: u64,

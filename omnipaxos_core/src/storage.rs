@@ -1,7 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
     omni_paxos::CompactionErr,
-    util::{ConfigurationId, IndexEntry, LogEntry, SnapshottedEntry},
+    util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
 };
 use std::{
     fmt::Debug,
@@ -35,14 +35,14 @@ pub struct StopSign {
     /// The identifier for the new configuration.
     pub config_id: ConfigurationId,
     /// The process ids of the new configuration.
-    pub nodes: Vec<u64>,
+    pub nodes: Vec<NodeId>,
     /// Metadata for the reconfiguration. Can be used for pre-electing leader for the new configuration and skip prepare phase when starting the new configuration with the given leader.
     pub metadata: Option<Vec<u8>>,
 }
 
 impl StopSign {
     /// Creates a [`StopSign`].
-    pub fn with(config_id: ConfigurationId, nodes: Vec<u64>, metadata: Option<Vec<u8>>) -> Self {
+    pub fn with(config_id: ConfigurationId, nodes: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
         StopSign {
             config_id,
             nodes,
