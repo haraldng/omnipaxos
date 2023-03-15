@@ -33,8 +33,18 @@ where
                     (None, suffix)
                 }
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
-                let suffix = self.internal_storage.get_suffix(prep.accepted_idx);
-                (None, suffix)
+                if self.internal_storage.get_compacted_idx() > prep.accepted_idx
+                    && Self::use_snapshots()
+                {
+                    let delta_snapshot = self
+                        .internal_storage
+                        .create_diff_snapshot(prep.decided_idx, decided_idx);
+                    let suffix = self.internal_storage.get_suffix(decided_idx);
+                    (Some(delta_snapshot), suffix)
+                } else {
+                    let suffix = self.internal_storage.get_suffix(prep.accepted_idx);
+                    (None, suffix)
+                }
             } else {
                 (None, vec![])
             };

@@ -398,11 +398,7 @@ where
 
     pub(crate) fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
         let compacted_idx = self.storage.get_compacted_idx();
-        println!(
-            "from: {}, to: {}, compacted_idx: {}",
-            from, to, compacted_idx
-        );
-        self.get_entries_with_real_idx(from - compacted_idx, to - compacted_idx)
+        self.get_entries_with_real_idx(from - compacted_idx.min(from), to - compacted_idx.min(to))
     }
 
     /// Get entries with real physical log indexes i.e. the index with the compacted offset.
@@ -422,7 +418,7 @@ where
 
     pub(crate) fn get_suffix(&self, from: u64) -> Vec<T> {
         self.storage
-            .get_suffix(from - self.storage.get_compacted_idx())
+            .get_suffix(from - self.storage.get_compacted_idx().min(from))
     }
 
     pub(crate) fn get_promise(&self) -> Ballot {
@@ -456,8 +452,12 @@ where
         from_idx: u64,
         to_idx: u64,
     ) -> SnapshotType<T, S> {
-        let diff_entries = self.get_entries(from_idx, to_idx);
-        SnapshotType::Delta(S::create(diff_entries.as_slice()))
+        if self.get_compacted_idx() >= from_idx {
+            SnapshotType::Complete(self.create_snapshot(to_idx))
+        } else {
+            let diff_entries = self.get_entries(from_idx, to_idx);
+            SnapshotType::Delta(S::create(diff_entries.as_slice()))
+        }
     }
 
     pub(crate) fn set_snapshot(&mut self, idx: u64, snapshot: S) {

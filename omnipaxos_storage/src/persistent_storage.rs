@@ -281,7 +281,7 @@ where
     }
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-        if from_idx > 0 {
+        if from_idx > 0 && from_idx < self.get_log_len() {
             self.commitlog
                 .truncate(from_idx)
                 .expect("Failed to truncate log");
@@ -291,7 +291,7 @@ where
 
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
         // Check if the commit log has entries up to the requested endpoint.
-        if to > self.commitlog.next_offset() {
+        if to > self.commitlog.next_offset() || from >= to {
             return vec![]; // Do an early return
         }
 

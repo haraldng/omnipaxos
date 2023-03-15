@@ -97,7 +97,8 @@ where
     }
 
     fn trim(&mut self, trimmed_idx: u64) {
-        self.log.drain(0..trimmed_idx as usize);
+        self.log
+            .drain(0..(trimmed_idx as usize).min(self.log.len()));
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) {
