@@ -276,28 +276,36 @@ where
             pid,
             ..
         } = self.leader_state.get_promise_meta(to);
-        let (delta_snapshot, suffix, sync_idx) = if (promise_n == max_promise_n)
-            && (promise_accepted_idx < max_accepted_idx)
-        {
-            let sfx = self.internal_storage.get_suffix(*promise_accepted_idx);
-            (None, sfx, *promise_accepted_idx)
-        } else {
-            let follower_decided_idx = self
-                .leader_state
-                .get_decided_idx(*pid)
-                .expect("Received PromiseMetaData but not found in ld");
-            if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
-                let diff_entries = self
-                    .internal_storage
-                    .get_entries(follower_decided_idx, my_decided_idx);
-                let delta_snapshot = Some(SnapshotType::Delta(S::create(diff_entries.as_slice())));
-                let suffix = self.internal_storage.get_suffix(my_decided_idx);
-                (delta_snapshot, suffix, follower_decided_idx)
+        let follower_decided_idx = self
+            .leader_state
+            .get_decided_idx(*pid)
+            .expect("Received PromiseMetaData but not found in ld");
+        let (delta_snapshot, suffix, sync_idx) =
+            if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
+                if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
+                    && Self::use_snapshots()
+                {
+                    let delta_snapshot = self
+                        .internal_storage
+                        .create_diff_snapshot(follower_decided_idx, my_decided_idx);
+                    let suffix = self.internal_storage.get_suffix(my_decided_idx);
+                    (Some(delta_snapshot), suffix, follower_decided_idx)
+                } else {
+                    let sfx = self.internal_storage.get_suffix(*promise_accepted_idx);
+                    (None, sfx, *promise_accepted_idx)
+                }
             } else {
-                let suffix = self.internal_storage.get_suffix(follower_decided_idx);
-                (None, suffix, follower_decided_idx)
-            }
-        };
+                if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
+                    let delta_snapshot = self
+                        .internal_storage
+                        .create_diff_snapshot(follower_decided_idx, my_decided_idx);
+                    let suffix = self.internal_storage.get_suffix(my_decided_idx);
+                    (Some(delta_snapshot), suffix, follower_decided_idx)
+                } else {
+                    let suffix = self.internal_storage.get_suffix(follower_decided_idx);
+                    (None, suffix, follower_decided_idx)
+                }
+            };
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
             decided_snapshot: delta_snapshot,
