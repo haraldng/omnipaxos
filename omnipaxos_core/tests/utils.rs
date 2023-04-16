@@ -402,6 +402,19 @@ impl TestSystem {
             .expect("ReplicaComp never started!");
     }
 
+    pub fn stop_node(&self, pid: u64) {
+        let node = self
+            .nodes
+            .get(&pid)
+            .expect(&format!("Cannot find node {pid}"));
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .stop_notify(node)
+            .wait_timeout(STOP_COMPONENT_TIMEOUT)
+            .expect("ReplicaComp never started!");
+    }
+
     fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
         if threads <= 32 {
             conf.executor(|t| crossbeam_workstealing_pool::small_pool(t))
@@ -534,8 +547,8 @@ pub mod omnireplica {
         }
 
         fn answer_decided_future(&mut self) {
-            if !self.decided_futures.is_empty() {
-                if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+            if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+                if !self.decided_futures.is_empty() {
                     for e in entries {
                         match e {
                             LogEntry::Decided(i) => self
@@ -559,8 +572,8 @@ pub mod omnireplica {
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
                     }
-                    self.decided_idx = self.paxos.get_decided_idx();
                 }
+                self.decided_idx = self.paxos.get_decided_idx();
             }
         }
     }
