@@ -1,4 +1,3 @@
-/*
 pub mod utils;
 
 use kompact::prelude::{promise, Ask};
@@ -21,10 +20,10 @@ fn forward_proposal_test() {
         cfg.storage_type,
     );
 
-    let (ble, _) = sys.nodes.get(&1).unwrap();
+    let first_node = sys.nodes.get(&1).unwrap();
 
     let (kprom_ble, kfuture_ble) = promise::<Ballot>();
-    ble.on_definition(|x| x.add_ask(Ask::new(kprom_ble, ())));
+    first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom_ble, ())));
 
     sys.start_all_nodes();
 
@@ -44,16 +43,21 @@ fn forward_proposal_test() {
 
     let px = sys.nodes.get(&proposal_node).unwrap();
 
+    let v = Value(1);
     let (kprom_px, kfuture_px) = promise::<Value>();
     px.on_definition(|x| {
-        x.add_ask(Ask::new(kprom_px, ()));
-        x.paxos.append(Value(123)).expect("Failed to append");
+        x.decided_futures.push(Ask::new(kprom_px, ()));
+        x.paxos.append(v).expect("Failed to call Append");
     });
 
-    kfuture_px
+    let decided = kfuture_px
         .wait_timeout(cfg.wait_timeout)
         .expect("The message was not proposed in the allocated time!");
 
+    assert_eq!(
+        v, decided,
+        "The decided value is not the same as the forwarded proposal"
+    );
     println!("Pass forward_proposal");
 
     let kompact_system =
@@ -63,4 +67,3 @@ fn forward_proposal_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-*/
