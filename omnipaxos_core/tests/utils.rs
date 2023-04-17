@@ -434,7 +434,7 @@ pub mod omnireplica {
         omni_paxos::OmniPaxos,
         util::{LogEntry, NodeId},
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosComponent {
@@ -442,6 +442,7 @@ pub mod omnireplica {
         #[allow(dead_code)]
         pid: NodeId,
         pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
+        pub peer_disconnections: HashSet<u64>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
         pub paxos: OmniPaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
@@ -498,13 +499,14 @@ pub mod omnireplica {
                 ctx: ComponentContext::uninitialised(),
                 pid,
                 peers: HashMap::new(),
+                peer_disconnections: HashSet::new(),
                 paxos_timer: None,
                 tick_timer: None,
+                decided_idx: paxos.get_decided_idx(),
                 paxos,
                 decided_futures: vec![],
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
-                decided_idx: 0,
                 election_timeout,
             }
         }
@@ -531,13 +533,27 @@ pub mod omnireplica {
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
-                let receiver = self.peers.get(&out.get_receiver()).unwrap();
-                receiver.tell(out);
+                if self.is_connected_to(&out.get_receiver()) {
+                    let receiver = self.peers.get(&out.get_receiver()).unwrap();
+                    receiver.tell(out);
+                }
             }
         }
 
         pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>) {
             self.peers = peers;
+        }
+
+        // Used to simulate a network fault to Component `pid`.
+        pub fn set_connection(&mut self, pid: u64, is_connected: bool) {
+            match is_connected {
+                true => self.peer_disconnections.remove(&pid),
+                false => self.peer_disconnections.insert(pid),
+            };
+        }
+
+        pub fn is_connected_to(&self, pid: &u64) -> bool {
+            self.peer_disconnections.get(pid).is_none()
         }
 
         fn answer_election_future(&mut self, l: Ballot) {
@@ -557,12 +573,21 @@ pub mod omnireplica {
                                 .unwrap()
                                 .reply(i)
                                 .expect("Failed to reply promise!"),
-                            LogEntry::Snapshotted(s) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(s.snapshot.value)
-                                .expect("Failed to reply promise!"),
+                            LogEntry::Snapshotted(s) => {
+                                // Reply with dummy value for futures which were trimmed away
+                                for _ in 1..(s.trimmed_idx - self.decided_idx) {
+                                    self.decided_futures
+                                        .pop()
+                                        .unwrap()
+                                        .reply(Value(0))
+                                        .expect("Failed to reply promise!");
+                                }
+                                self.decided_futures
+                                    .pop()
+                                    .unwrap()
+                                    .reply(s.snapshot.value)
+                                    .expect("Failed to reply promise!");
+                            }
                             LogEntry::StopSign(ss) => self
                                 .decided_futures
                                 .pop()
