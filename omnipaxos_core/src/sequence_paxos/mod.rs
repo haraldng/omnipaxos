@@ -38,7 +38,8 @@ where
     outgoing: Vec<PaxosMessage<T, S>>,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
-    accept_sequence_number: Option<u64>, // Keeps track of sequence of accepts from leader
+    // Keeps track of sequence of accepts from leader where AcceptSync = 1
+    accept_sequence: u64,
     buffer_size: usize,
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
@@ -96,7 +97,7 @@ where
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
-            accept_sequence_number: None,
+            accept_sequence: 0,
             buffer_size: config.buffer_size,
             s: PhantomData,
             #[cfg(feature = "logging")]
@@ -356,7 +357,7 @@ where
             return;
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
-            self.accept_sequence_number = None;
+            self.accept_sequence = 0;
         }
         self.outgoing.push(PaxosMessage {
             from: self.pid,

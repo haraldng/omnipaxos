@@ -59,8 +59,8 @@ fn ascending_accept_sequence_test() {
         accept_seq_nums.extend(seq_nums);
     }
 
-    // We skip seq# 0 and 1 due to AcceptSync and batched proposal 1..5
-    let expected_seq_nums: Vec<u64> = (2..7).collect();
+    // We skip seq#1 and 2 due to AcceptSync and batched proposal 1..5
+    let expected_seq_nums: Vec<u64> = (3..8).collect();
     assert_eq!(accept_seq_nums, expected_seq_nums);
     println!("Passed ascending_accept_sequence_test!");
 
