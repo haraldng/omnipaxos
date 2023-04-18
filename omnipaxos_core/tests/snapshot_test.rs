@@ -185,7 +185,8 @@ fn check_snapshot(
                 ),
             }
             // leader must have successfully trimmed
-            assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize)); // -1 as snapshot is one entry
+            // -1 as snapshot is one entry
+            assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize));
         } else {
             if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
                 let snapshot = after.first().unwrap();
