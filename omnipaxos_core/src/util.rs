@@ -45,6 +45,8 @@ where
 {
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
+    pub accept_sequences: Vec<Option<u64>>, // the sequence number of accepts for each follower
+                                            // where AcceptSync has sequence number = 0
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
@@ -71,6 +73,7 @@ where
         Self {
             n_leader,
             promises_meta: vec![None; max_pid],
+            accept_sequences: vec![None; max_pid],
             accepted_indexes: vec![0; max_pid],
             decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
             chosen_idx: 0,
@@ -86,6 +89,29 @@ where
 
     fn pid_to_idx(pid: NodeId) -> usize {
         (pid - 1) as usize
+    }
+
+    // Resets `pid`'s accept sequence (called on receiving a PrepareReq)
+    pub fn reset_accept_sequence(&mut self, pid: NodeId) {
+        self.accept_sequences[Self::pid_to_idx(pid)] = None;
+    }
+
+    pub fn get_acceptsync_sequence_num(&mut self, pid: NodeId) -> u64 {
+        match self.accept_sequences[Self::pid_to_idx(pid)] {
+            Some(_) => panic!("AcceptSync must be first message in accept sequence"),
+            None => self.accept_sequences[Self::pid_to_idx(pid)] = Some(0)
+        }
+        0
+    }
+
+    pub fn next_acceptdecide_sequence_num(&mut self, pid: NodeId) -> u64 {
+        match self.accept_sequences[Self::pid_to_idx(pid)] {
+            None => panic!("AcceptDecide cannot be first in accept sequence."),
+            Some(num) => {
+                self.accept_sequences[Self::pid_to_idx(pid)] = Some(num + 1);
+                return num + 1;
+            }
+        }
     }
 
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {

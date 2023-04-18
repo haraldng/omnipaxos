@@ -58,6 +58,8 @@ pub mod sequence_paxos {
     {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: u64,
         /// The decided snapshot.
         pub decided_snapshot: Option<SnapshotType<T, S>>,
         /// The log suffix.
@@ -85,6 +87,8 @@ pub mod sequence_paxos {
     {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: u64,
         /// The decided index.
         pub decided_idx: u64,
         /// Entries to be replicated.

@@ -18,6 +18,7 @@ where
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
+            self.accept_sequence_number = None;
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_log_len();
             let decided_idx = self.get_decided_idx();
@@ -100,6 +101,12 @@ where
             self.internal_storage.set_accepted_round(accsync.n);
             self.internal_storage.set_decided_idx(accsync.decided_idx);
             self.state = (Role::Follower, Phase::Accept);
+            // Begin accept sequence
+            match self.accept_sequence_number {
+                Some(_) => panic!("AcceptSync must be first message in accept sequence!"),
+                None => self.accept_sequence_number = Some(0)
+            };
+
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
             self.outgoing.push(PaxosMessage {
@@ -156,6 +163,16 @@ where
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
+            // If accept sequence is broken reconnect to leader instead
+            match self.accept_sequence_number {
+                None => panic!("AcceptDecide cannot be first message in accept sequence!"),
+                Some(num) if num + 1 == acc.seq_num => self.accept_sequence_number = Some(acc.seq_num),
+                _ => {
+                    self.reconnected(acc.n.pid);
+                    return;
+                }
+            }
+
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
             // handle decide
