@@ -45,8 +45,8 @@ where
 {
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
-    pub accept_sequences: Vec<Option<u64>>, // the sequence number of accepts for each follower
-                                            // where AcceptSync has sequence number = 0
+    // the sequence number of accepts for each follower where AcceptSync has sequence number = 0
+    pub accept_sequences: Vec<Option<u64>>,
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
@@ -99,7 +99,7 @@ where
     pub fn get_acceptsync_sequence_num(&mut self, pid: NodeId) -> u64 {
         match self.accept_sequences[Self::pid_to_idx(pid)] {
             Some(_) => panic!("AcceptSync must be first message in accept sequence"),
-            None => self.accept_sequences[Self::pid_to_idx(pid)] = Some(0)
+            None => self.accept_sequences[Self::pid_to_idx(pid)] = Some(0),
         }
         0
     }

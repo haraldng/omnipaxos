@@ -1,13 +1,17 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{ballot_leader_election::Ballot, storage::Snapshot, util::LogEntry, messages::{Message, sequence_paxos::PaxosMsg}};
+use omnipaxos_core::{
+    ballot_leader_election::Ballot,
+    messages::{sequence_paxos::PaxosMsg, Message},
+    storage::Snapshot,
+    util::LogEntry,
+};
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{LatestValue, TestConfig, TestSystem, Value};
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
-
 
 /// Verifies that a leader sends out AcceptSync messages
 /// with increasing sequence numbers.
@@ -32,7 +36,7 @@ fn ascending_accept_sequence_test() {
         .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
- 
+
     // Get leader to propose more values and then collect cooresponding AcceptDecide messages
     let mut accept_seq_nums = vec![];
     for i in 5..10 {
@@ -45,16 +49,16 @@ fn ascending_accept_sequence_test() {
             .iter()
             .filter_map(|msg| match msg {
                 Message::SequencePaxos(m) => Some(m),
-                _ => None
+                _ => None,
             })
             .filter(|msg| msg.to == follower_id)
             .filter_map(|paxos_message| match &paxos_message.msg {
-               PaxosMsg::AcceptDecide(m)  => Some(m.seq_num),
-                _ => None
+                PaxosMsg::AcceptDecide(m) => Some(m.seq_num),
+                _ => None,
             });
         accept_seq_nums.extend(seq_nums);
     }
- 
+
     // We skip seq# 0 and 1 due to AcceptSync and batched proposal 1..5
     let expected_seq_nums: Vec<u64> = (2..7).collect();
     assert_eq!(accept_seq_nums, expected_seq_nums);
@@ -86,13 +90,13 @@ fn reconnect_to_leader_test() {
     // Propose some values so that a leader is elected
     make_proposals(&sys, &cfg, 2, 1, 5);
     let leader_id = get_elected_leader(&sys, cfg.wait_timeout);
-    let leader = sys.nodes.get(&leader_id).unwrap(); 
+    let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
-    let follower = sys.nodes.get(&follower_id).unwrap(); 
-    
+    let follower = sys.nodes.get(&follower_id).unwrap();
+
     // Decide entries during omission period
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
@@ -109,17 +113,14 @@ fn reconnect_to_leader_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let expected_log = (1..15)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let expected_log = (1..15).into_iter().map(|v| Value(v)).collect();
     let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
     verify_log_after_recovery(followers_log, expected_log, 14);
-    
+
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
     let kompact_system =
@@ -129,7 +130,6 @@ fn reconnect_to_leader_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-
 
 /// Return the elected leader. If there is no leader yet then
 /// wait until a leader is elected in the allocated time.
@@ -154,7 +154,10 @@ fn get_elected_leader(sys: &TestSystem, wait_timeout: Duration) -> u64 {
 /// Use node `proposer` to propose values in the range `from..to`, then waits for the proposals
 /// to be decided.
 fn make_proposals(sys: &TestSystem, cfg: &TestConfig, proposer: u64, from: u64, to: u64) {
-    let proposer = sys.nodes.get(&proposer).expect("No SequencePaxos component found");
+    let proposer = sys
+        .nodes
+        .get(&proposer)
+        .expect("No SequencePaxos component found");
 
     let mut proposal_futures = vec![];
     for i in from..to {

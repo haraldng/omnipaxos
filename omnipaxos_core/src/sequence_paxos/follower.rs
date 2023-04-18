@@ -104,7 +104,7 @@ where
             // Begin accept sequence
             match self.accept_sequence_number {
                 Some(_) => panic!("AcceptSync must be first message in accept sequence!"),
-                None => self.accept_sequence_number = Some(0)
+                None => self.accept_sequence_number = Some(0),
             };
 
             let cached_idx = self.outgoing.len();
@@ -166,7 +166,9 @@ where
             // If accept sequence is broken reconnect to leader instead
             match self.accept_sequence_number {
                 None => panic!("AcceptDecide cannot be first message in accept sequence!"),
-                Some(num) if num + 1 == acc.seq_num => self.accept_sequence_number = Some(acc.seq_num),
+                Some(num) if num + 1 == acc.seq_num => {
+                    self.accept_sequence_number = Some(acc.seq_num)
+                }
                 _ => {
                     self.reconnected(acc.n.pid);
                     return;
