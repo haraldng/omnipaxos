@@ -73,7 +73,7 @@ where
         Self {
             n_leader,
             promises_meta: vec![None; max_pid],
-            accept_sequences: vec![0; max_pid],
+            follower_seq_nums: vec![0; max_pid],
             accepted_indexes: vec![0; max_pid],
             decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
             chosen_idx: 0,
@@ -93,23 +93,23 @@ where
 
     // Resets `pid`'s accept sequence to indicate they are in prepare phase
     pub fn reset_accept_sequence(&mut self, pid: NodeId) {
-        self.accept_sequences[Self::pid_to_idx(pid)] = 0;
+        self.follower_seq_nums[Self::pid_to_idx(pid)] = 0;
     }
 
     pub fn get_acceptsync_sequence_num(&mut self, pid: NodeId) -> u64 {
-        if self.accept_sequences[Self::pid_to_idx(pid)] != 0 {
+        if self.follower_seq_nums[Self::pid_to_idx(pid)] != 0 {
             panic!("AcceptSync must be first message in accept sequence");
         }
-        self.accept_sequences[Self::pid_to_idx(pid)] = 1;
+        self.follower_seq_nums[Self::pid_to_idx(pid)] = 1;
         1
     }
 
     pub fn next_acceptdecide_sequence_num(&mut self, pid: NodeId) -> u64 {
-        if self.accept_sequences[Self::pid_to_idx(pid)] == 0 {
+        if self.follower_seq_nums[Self::pid_to_idx(pid)] == 0 {
             panic!("AcceptDecide cannot be first in accept sequence.");
         }
-        self.accept_sequences[Self::pid_to_idx(pid)] += 1;
-        self.accept_sequences[Self::pid_to_idx(pid)]
+        self.follower_seq_nums[Self::pid_to_idx(pid)] += 1;
+        self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
