@@ -71,7 +71,7 @@ where
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
-            self.leader_state.reset_accept_sequence(from);
+            self.leader_state.reset_seq_num(from);
             self.leader_state.set_decided_idx(from, None);
             #[cfg(feature = "batch_accept")]
             {
@@ -190,7 +190,7 @@ where
     fn send_accept_and_cache(&mut self, to: NodeId, entries: Vec<T>) {
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
-            seq_num: self.leader_state.next_acceptdecide_sequence_num(to),
+            seq_num: self.leader_state.next_seq_num(to),
             decided_idx: self.leader_state.get_chosen_idx(),
             entries,
         };
@@ -222,7 +222,7 @@ where
             } else {
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_acceptdecide_sequence_num(pid),
+                    seq_num: self.leader_state.next_seq_num(pid),
                     decided_idx: self.leader_state.get_chosen_idx(),
                     entries: vec![entry.clone()],
                 };
@@ -254,7 +254,7 @@ where
             } else {
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_acceptdecide_sequence_num(pid),
+                    seq_num: self.leader_state.next_seq_num(pid),
                     decided_idx: self.leader_state.get_chosen_idx(),
                     entries: entries.clone(),
                 };
@@ -310,9 +310,10 @@ where
                     (None, suffix, follower_decided_idx)
                 }
             };
+        self.leader_state.reset_seq_num(to);
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
-            seq_num: self.leader_state.get_acceptsync_sequence_num(to),
+            seq_num: self.leader_state.next_seq_num(to),
             decided_snapshot: delta_snapshot,
             suffix,
             sync_idx,

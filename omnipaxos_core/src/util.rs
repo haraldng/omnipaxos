@@ -92,22 +92,11 @@ where
     }
 
     // Resets `pid`'s accept sequence to indicate they are in prepare phase
-    pub fn reset_accept_sequence(&mut self, pid: NodeId) {
+    pub fn reset_seq_num(&mut self, pid: NodeId) {
         self.follower_seq_nums[Self::pid_to_idx(pid)] = 0;
     }
 
-    pub fn get_acceptsync_sequence_num(&mut self, pid: NodeId) -> u64 {
-        if self.follower_seq_nums[Self::pid_to_idx(pid)] != 0 {
-            panic!("AcceptSync must be first message in accept sequence");
-        }
-        self.follower_seq_nums[Self::pid_to_idx(pid)] = 1;
-        1
-    }
-
-    pub fn next_acceptdecide_sequence_num(&mut self, pid: NodeId) -> u64 {
-        if self.follower_seq_nums[Self::pid_to_idx(pid)] == 0 {
-            panic!("AcceptDecide cannot be first in accept sequence.");
-        }
+    pub fn next_seq_num(&mut self, pid: NodeId) -> u64 {
         self.follower_seq_nums[Self::pid_to_idx(pid)] += 1;
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }

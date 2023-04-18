@@ -101,12 +101,7 @@ where
             self.internal_storage.set_accepted_round(accsync.n);
             self.internal_storage.set_decided_idx(accsync.decided_idx);
             self.state = (Role::Follower, Phase::Accept);
-            // Begin accept sequence
-            if self.current_seq_num != 0 {
-                panic!("AcceptSync must be first message in accept sequence!");
-            }
             self.current_seq_num = accsync.seq_num;
-
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
             self.outgoing.push(PaxosMessage {
