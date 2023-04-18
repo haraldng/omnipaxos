@@ -46,7 +46,7 @@ where
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
-    pub accept_sequences: Vec<u64>,
+    pub follower_seq_nums: Vec<u64>,
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
