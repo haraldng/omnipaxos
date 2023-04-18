@@ -101,10 +101,6 @@ where
             self.internal_storage.set_accepted_round(accsync.n);
             self.internal_storage.set_decided_idx(accsync.decided_idx);
             self.state = (Role::Follower, Phase::Accept);
-            // Begin accept sequence
-            if self.accept_sequence != 0 {
-                panic!("AcceptSync must be first message in accept sequence!");
-            }
             self.accept_sequence = accsync.seq_num;
 
             let cached_idx = self.outgoing.len();
