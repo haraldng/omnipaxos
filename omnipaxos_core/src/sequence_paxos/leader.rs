@@ -139,10 +139,6 @@ where
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.send_batch_accept(entries),
-                (Role::Leader, Phase::FirstAccept) => {
-                    self.send_first_accept();
-                    self.send_batch_accept(entries);
-                }
                 _ => self.forward_proposals(entries),
             }
         }
@@ -162,28 +158,9 @@ where
                         self.send_accept_stopsign(ss);
                     }
                 }
-                (Role::Leader, Phase::FirstAccept) => {
-                    self.send_first_accept();
-                    self.accept_stopsign(ss.clone());
-                    self.send_accept_stopsign(ss);
-                }
                 _ => self.forward_stopsign(ss),
             }
         }
-    }
-
-    pub(crate) fn send_first_accept(&mut self) {
-        let f = FirstAccept {
-            n: self.leader_state.n_leader,
-        };
-        for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: PaxosMsg::FirstAccept(f.clone()),
-            });
-        }
-        self.state.1 = Phase::Accept;
     }
 
     #[cfg(feature = "batch_accept")]

@@ -142,26 +142,23 @@ where
         }
     }
 
-    pub(crate) fn handle_firstaccept(&mut self, f: FirstAccept) {
-        #[cfg(feature = "logging")]
-        debug!(self.logger, "Incoming message First Accept");
-        if self.internal_storage.get_promise() == f.n
-            && self.state == (Role::Follower, Phase::FirstAccept)
-        {
-            self.internal_storage.set_accepted_round(f.n);
-            self.state.1 = Phase::Accept;
-            self.forward_pending_proposals();
-        }
-    }
-
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            // If accept sequence is broken reconnect to leader instead
             if self.current_seq_num == 0 {
                 panic!("AcceptDecide cannot be first message in accept sequence!");
+            } else if acc.seq_num == 1 {
+                // psuedo-AcceptSync for reconfigurations
+                #[cfg(feature = "logging")]
+                debug!(
+                    self.logger,
+                    "Incoming message first Accept of reconfiguration"
+                );
+                self.internal_storage.set_accepted_round(acc.n);
+                self.forward_pending_proposals();
             } else if self.current_seq_num + 1 != acc.seq_num {
+                // If accept sequence is broken reconnect to leader instead
                 self.reconnected(acc.n.pid);
                 return;
             }

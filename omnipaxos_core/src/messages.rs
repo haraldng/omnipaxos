@@ -72,13 +72,6 @@ pub mod sequence_paxos {
         pub stopsign: Option<StopSign>,
     }
 
-    /// The first accept message sent. Only used by a pre-elected leader after reconfiguration.
-    #[derive(Clone, Debug)]
-    pub struct FirstAccept {
-        /// The current round.
-        pub n: Ballot,
-    }
-
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
     #[derive(Clone, Debug)]
     pub struct AcceptDecide<T>
@@ -158,7 +151,6 @@ pub mod sequence_paxos {
         Prepare(Prepare),
         Promise(Promise<T, S>),
         AcceptSync(AcceptSync<T, S>),
-        FirstAccept(FirstAccept),
         AcceptDecide(AcceptDecide<T>),
         Accepted(Accepted),
         Decide(Decide),
