@@ -146,9 +146,7 @@ where
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            if self.current_seq_num == 0 {
-                panic!("AcceptDecide cannot be first message in accept sequence!");
-            } else if acc.seq_num == 1 {
+            if acc.seq_num == 1 {
                 // psuedo-AcceptSync for reconfigurations
                 #[cfg(feature = "logging")]
                 debug!(
