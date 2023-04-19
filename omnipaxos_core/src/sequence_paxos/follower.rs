@@ -6,6 +6,8 @@ use crate::storage::SnapshotType;
 #[cfg(feature = "logging")]
 use slog::debug;
 
+const ACCSYNC_SEQ_NUM: u64 = 1;
+
 impl<T, S, B> SequencePaxos<T, S, B>
 where
     T: Entry,
@@ -146,7 +148,7 @@ where
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            if acc.seq_num == 1 {
+            if acc.seq_num == ACCSYNC_SEQ_NUM {
                 // psuedo-AcceptSync for reconfigurations
                 #[cfg(feature = "logging")]
                 debug!(

@@ -305,6 +305,19 @@ where
         self.outgoing.push(msg);
     }
 
+    fn send_decide(&mut self, to: NodeId) {
+        let d = Decide {
+            n: self.leader_state.n_leader,
+            seq_num: self.leader_state.next_seq_num(to),
+            decided_idx: self.leader_state.get_chosen_idx(),
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::Decide(d),
+        });
+    }
+
     fn adopt_pending_stopsign(&mut self) {
         if let Some(ss) = self.pending_stopsign.take() {
             self.accept_stopsign(ss);
@@ -426,19 +439,14 @@ where
             self.leader_state.get_chosen_idx()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
-            self.leader_state
-                .set_accepted_idx(from, accepted.accepted_idx);
+            self.leader_state.set_accepted_idx(from, accepted.accepted_idx);
             if accepted.accepted_idx > self.leader_state.get_chosen_idx()
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 self.leader_state.set_chosen_idx(accepted.accepted_idx);
                 self.internal_storage.set_decided_idx(accepted.accepted_idx);
+                // Send Decides to followers or batch with previous AcceptDecide
                 for pid in self.leader_state.get_promised_followers() {
-                    let d = Decide {
-                        n: self.leader_state.n_leader,
-                        seq_num: self.leader_state.next_seq_num(pid),
-                        decided_idx: self.leader_state.get_chosen_idx(),
-                    };
                     if cfg!(feature = "batch_accept") {
                         #[cfg(feature = "batch_accept")]
                         match self.leader_state.get_batch_accept_meta(pid) {
@@ -449,29 +457,13 @@ where
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.decided_idx = self.leader_state.get_chosen_idx()
                                     }
-                                    _ => {
-                                        self.outgoing.push(PaxosMessage {
-                                            from: self.pid,
-                                            to: pid,
-                                            msg: PaxosMsg::Decide(d),
-                                        });
-                                    }
+                                    _ => self.send_decide(pid),
                                 }
                             }
-                            _ => {
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: pid,
-                                    msg: PaxosMsg::Decide(d),
-                                });
-                            }
+                            _ => self.send_decide(pid),
                         }
                     } else {
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: pid,
-                            msg: PaxosMsg::Decide(d),
-                        });
+                       self.send_decide(pid); 
                     }
                 }
             }
