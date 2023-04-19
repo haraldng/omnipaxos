@@ -5,7 +5,7 @@ use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::util::LogEntry;
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{util_functions::verify_log, LatestValue, TestConfig, TestSystem, Value};
+use utils::{verification::verify_log, LatestValue, TestConfig, TestSystem, Value};
 
 const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);

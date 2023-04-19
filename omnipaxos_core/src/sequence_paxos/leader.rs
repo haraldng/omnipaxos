@@ -439,7 +439,8 @@ where
             self.leader_state.get_chosen_idx()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
-            self.leader_state.set_accepted_idx(from, accepted.accepted_idx);
+            self.leader_state
+                .set_accepted_idx(from, accepted.accepted_idx);
             if accepted.accepted_idx > self.leader_state.get_chosen_idx()
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
@@ -463,7 +464,7 @@ where
                             _ => self.send_decide(pid),
                         }
                     } else {
-                       self.send_decide(pid); 
+                        self.send_decide(pid);
                     }
                 }
             }

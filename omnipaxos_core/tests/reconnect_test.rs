@@ -6,9 +6,12 @@ use omnipaxos_core::{
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{util_functions::verify_log, LatestValue, TestConfig, TestSystem, Value};
+use utils::{verification::verify_log, LatestValue, TestConfig, TestSystem, Value};
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
+const INITIAL_PROPOSALS: u64 = 5;
+const DROPPED_PROPOSALS: u64 = 5;
+const SECOND_PROPOSALS: u64 = 5;
 
 /// Verifies that a leader sends out AcceptSync messages
 /// with increasing sequence numbers.
@@ -25,10 +28,16 @@ fn increasing_accept_seq_num_test() {
     );
     sys.start_all_nodes();
 
-    let initial_proposals: Vec<Value> = (0..5).into_iter().map(|v| Value(v)).collect();
-    let leaders_proposals: Vec<Value> = (5..10).into_iter().map(|v| Value(v)).collect();
+    let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let leaders_proposals: Vec<Value> = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + SECOND_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
-    let expected_seq_nums: Vec<u64> = (4..9).collect();
+    let expected_seq_nums: Vec<u64> = (4..4 + SECOND_PROPOSALS).collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
@@ -89,10 +98,23 @@ fn reconnect_to_leader_test() {
     );
     sys.start_all_nodes();
 
-    let initial_proposals = (1..5).into_iter().map(|v| Value(v)).collect();
-    let unseen_by_follower_proposals = (5..10).into_iter().map(|v| Value(v)).collect();
-    let seen_by_follower_proposals = (10..15).into_iter().map(|v| Value(v)).collect();
-    let expected_log = (1..15).into_iter().map(|v| Value(v)).collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
+        ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);

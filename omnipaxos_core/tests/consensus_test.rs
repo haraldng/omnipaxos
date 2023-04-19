@@ -8,7 +8,7 @@ use omnipaxos_core::{
 use serial_test::serial;
 use utils::{
     create_temp_dir,
-    util_functions::{verify_entries, verify_snapshot, verify_stopsign},
+    verification::{verify_entries, verify_snapshot, verify_stopsign},
     LatestValue, StorageType, TestConfig, TestSystem, Value,
 };
 
