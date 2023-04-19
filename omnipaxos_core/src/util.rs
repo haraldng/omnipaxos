@@ -97,8 +97,9 @@ where
     }
 
     pub fn next_seq_num(&mut self, pid: NodeId) -> u64 {
-        self.follower_seq_nums[Self::pid_to_idx(pid)] += 1;
-        self.follower_seq_nums[Self::pid_to_idx(pid)]
+        let idx = Self::pid_to_idx(pid);
+        self.follower_seq_nums[idx] += 1;
+        self.follower_seq_nums[idx]
     }
 
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
