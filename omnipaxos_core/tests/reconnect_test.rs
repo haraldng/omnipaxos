@@ -14,7 +14,7 @@ const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 /// with increasing sequence numbers.
 #[test]
 #[serial]
-fn increasing_accept_sequence_test() {
+fn increasing_accept_seq_num_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
     let mut sys = TestSystem::with(
