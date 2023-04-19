@@ -187,6 +187,12 @@ where
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
+            if self.current_seq_num + 1 != dec.seq_num {
+                // If accept sequence is broken reconnect to leader instead
+                self.reconnected(dec.n.pid);
+                return;
+            }
+            self.current_seq_num = dec.seq_num;
             self.internal_storage.set_decided_idx(dec.decided_idx);
         }
     }

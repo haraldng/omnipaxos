@@ -27,8 +27,8 @@ fn increasing_accept_sequence_test() {
 
     let initial_proposals: Vec<Value> = (0..5).into_iter().map(|v| Value(v)).collect();
     let leaders_proposals: Vec<Value> = (5..10).into_iter().map(|v| Value(v)).collect();
-    // We skip seq#1 and 2 due to AcceptSync and batched initial_proposals
-    let expected_seq_nums: Vec<u64> = (3..8).collect();
+    // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
+    let expected_seq_nums: Vec<u64> = (4..9).collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
@@ -55,7 +55,9 @@ fn increasing_accept_sequence_test() {
             })
             .filter(|msg| msg.to == follower_id)
             .filter_map(|paxos_message| match &paxos_message.msg {
+                PaxosMsg::AcceptSync(m) => Some(m.seq_num),
                 PaxosMsg::AcceptDecide(m) => Some(m.seq_num),
+                PaxosMsg::Decide(m) => Some(m.seq_num),
                 _ => None,
             });
         accept_seq_nums.extend(seq_nums);

@@ -102,6 +102,8 @@ pub mod sequence_paxos {
     pub struct Decide {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: u64,
         /// The decided index.
         pub decided_idx: u64,
     }

@@ -432,11 +432,13 @@ where
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 self.leader_state.set_chosen_idx(accepted.accepted_idx);
-                let d = Decide {
-                    n: self.leader_state.n_leader,
-                    decided_idx: self.leader_state.get_chosen_idx(),
-                };
+                self.internal_storage.set_decided_idx(accepted.accepted_idx);
                 for pid in self.leader_state.get_promised_followers() {
+                    let d = Decide {
+                        n: self.leader_state.n_leader,
+                        seq_num: self.leader_state.next_seq_num(pid),
+                        decided_idx: self.leader_state.get_chosen_idx(),
+                    };
                     if cfg!(feature = "batch_accept") {
                         #[cfg(feature = "batch_accept")]
                         match self.leader_state.get_batch_accept_meta(pid) {
@@ -472,7 +474,6 @@ where
                         });
                     }
                 }
-                self.handle_decide(d);
             }
         }
     }
