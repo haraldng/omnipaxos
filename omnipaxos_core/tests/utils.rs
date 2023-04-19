@@ -704,7 +704,7 @@ pub fn create_temp_dir() -> String {
     dir_path.to_string_lossy().to_string()
 }
 
-pub mod util_functions {
+pub mod verification {
     use super::{LatestValue, Value};
     use omnipaxos_core::storage::Snapshot;
     use omnipaxos_core::{storage::StopSign, util::LogEntry};
