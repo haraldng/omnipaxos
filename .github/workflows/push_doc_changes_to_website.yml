@@ -1,0 +1,31 @@
+name: Push docs to omnipaxos-website
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+    types: [opened, reopened, synchronize]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set SSH key
+        run: echo "$SSH_DEPLOY_KEY" > ssh_deploy_key.pem
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+
+      - name: Checkout omnipaxos-website repository
+        uses: actions/checkout@v3
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          repository: haraldng/omnipaxos-website
+          ssh-key: ${{ secrets.SSH_DEPLOY_KEY }}
+
+      - name: Update docs
+        run: |
+          bash utils/fetch_docs_from_omnipaxos.sh
