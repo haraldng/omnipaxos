@@ -1,0 +1,43 @@
+Foreword:
+  Foreword:
+    path: "foreword.md"
+  Getting Started:
+    path: "getting-started.md"
+  Introduction:
+    path: "introduction/index.md"
+  Project Info:
+    path: "project.md"
+
+OmniPaxos:
+  OmniPaxos:
+    path: "omnipaxos/index.md"
+  Storage:
+    path: "omnipaxos/storage.md"
+  Communication:
+    path: "omnipaxos/communication.md"
+  Reading and Writing:
+    path: "omnipaxos/log.md"
+  Leader Election:
+    path: "omnipaxos/leader_election.md"
+  Compaction:
+    path: "omnipaxos/compaction.md"
+  Reconfiguration:
+    path: "omnipaxos/reconfiguration.md"
+  Logging:
+    path: "omnipaxos/logging.md"
+
+##Des: how to define nested structure
+Temp1:
+  T1:
+    path: "foreword.md"
+  T2:
+    T2-1:
+      path: "foreword.md"
+    T2-2:
+      path: "foreword.md"
+  T3:
+    path: "foreword.md"
+Temp2:
+  T4:
+    path: "foreword.md"
+
