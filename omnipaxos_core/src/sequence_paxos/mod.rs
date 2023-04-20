@@ -9,7 +9,7 @@ use crate::utils::logger::create_logger;
 use crate::{
     omni_paxos::{CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest},
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId},
+    util::{ConfigurationId, NodeId, SequenceNumber},
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
@@ -39,7 +39,7 @@ where
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
-    current_seq_num: u64,
+    current_seq_num: SequenceNumber,
     buffer_size: usize,
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
@@ -97,7 +97,7 @@ where
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
-            current_seq_num: 0,
+            current_seq_num: SequenceNumber::default(),
             buffer_size: config.buffer_size,
             s: PhantomData,
             #[cfg(feature = "logging")]
@@ -346,7 +346,7 @@ where
             return;
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
-            self.current_seq_num = 0;
+            self.current_seq_num.next_round();
         }
         self.outgoing.push(PaxosMessage {
             from: self.pid,

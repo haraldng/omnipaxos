@@ -2,7 +2,7 @@ pub mod utils;
 
 use omnipaxos_core::{
     messages::{sequence_paxos::PaxosMsg, Message},
-    util::LogEntry,
+    util::{LogEntry, SequenceNumber},
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
@@ -37,7 +37,9 @@ fn increasing_accept_seq_num_test() {
         .map(|v| Value(v))
         .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
-    let expected_seq_nums: Vec<u64> = (4..4 + SECOND_PROPOSALS).collect();
+    let expected_seq_nums: Vec<SequenceNumber> = (4..4 + SECOND_PROPOSALS)
+        .map(|counter| SequenceNumber { round: 1, counter })
+        .collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);

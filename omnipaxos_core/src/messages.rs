@@ -9,7 +9,7 @@ pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, SnapshotType, StopSign},
-        util::NodeId,
+        util::{NodeId, SequenceNumber},
     };
     use std::fmt::Debug;
 
@@ -59,7 +59,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: u64,
+        pub seq_num: SequenceNumber,
         /// The decided snapshot.
         pub decided_snapshot: Option<SnapshotType<T, S>>,
         /// The log suffix.
@@ -81,7 +81,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: u64,
+        pub seq_num: SequenceNumber,
         /// The decided index.
         pub decided_idx: u64,
         /// Entries to be replicated.
@@ -103,7 +103,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: u64,
+        pub seq_num: SequenceNumber,
         /// The decided index.
         pub decided_idx: u64,
     }

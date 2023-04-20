@@ -46,7 +46,7 @@ where
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
-    pub follower_seq_nums: Vec<u64>,
+    pub follower_seq_nums: Vec<SequenceNumber>,
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
@@ -73,7 +73,7 @@ where
         Self {
             n_leader,
             promises_meta: vec![None; max_pid],
-            follower_seq_nums: vec![0; max_pid],
+            follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
             decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
             chosen_idx: 0,
@@ -91,14 +91,14 @@ where
         (pid - 1) as usize
     }
 
-    // Resets `pid`'s accept sequence to indicate they are in prepare phase
-    pub fn reset_seq_num(&mut self, pid: NodeId) {
-        self.follower_seq_nums[Self::pid_to_idx(pid)] = 0;
+    // Resets `pid`'s accept sequence to indicate they are in the next round of accepts
+    pub fn next_seq_num_round(&mut self, pid: NodeId) {
+        self.follower_seq_nums[Self::pid_to_idx(pid)].next_round();
     }
 
-    pub fn next_seq_num(&mut self, pid: NodeId) -> u64 {
+    pub fn next_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
         let idx = Self::pid_to_idx(pid);
-        self.follower_seq_nums[idx] += 1;
+        self.follower_seq_nums[idx].counter += 1;
         self.follower_seq_nums[idx]
     }
 
@@ -301,3 +301,23 @@ pub type TrimmedIndex = u64;
 pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
+
+#[allow(missing_docs)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct SequenceNumber {
+    pub round: u64,
+    pub counter: u64,
+}
+
+impl SequenceNumber {
+    /// If the sequence number is the successor of `seq_num` returns true else false
+    pub fn is_successor_of(&self, seq_num: SequenceNumber) -> bool {
+        self.round == seq_num.round && self.counter == seq_num.counter + 1
+    }
+
+    /// Goes to the next round of accepts
+    pub fn next_round(&mut self) {
+        self.round += 1;
+        self.counter = 0;
+    }
+}

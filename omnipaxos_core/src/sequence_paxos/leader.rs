@@ -71,7 +71,6 @@ where
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader {
-            self.leader_state.reset_seq_num(from);
             self.leader_state.set_decided_idx(from, None);
             #[cfg(feature = "batch_accept")]
             {
@@ -287,7 +286,7 @@ where
                     (None, suffix, follower_decided_idx)
                 }
             };
-        self.leader_state.reset_seq_num(to);
+        self.leader_state.next_seq_num_round(to);
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
