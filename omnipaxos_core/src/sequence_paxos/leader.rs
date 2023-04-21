@@ -167,7 +167,7 @@ where
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: self.leader_state.get_chosen_idx(),
+            decided_idx: self.internal_storage.get_decided_idx(),
             entries,
         };
         self.outgoing.push(PaxosMessage {
@@ -199,7 +199,7 @@ where
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
                     seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.leader_state.get_chosen_idx(),
+                    decided_idx: self.internal_storage.get_decided_idx(),
                     entries: vec![entry.clone()],
                 };
                 self.outgoing.push(PaxosMessage {
@@ -231,7 +231,7 @@ where
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
                     seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.leader_state.get_chosen_idx(),
+                    decided_idx: self.internal_storage.get_decided_idx(),
                     entries: entries.clone(),
                 };
                 self.outgoing.push(PaxosMessage {
@@ -306,7 +306,7 @@ where
         let d = Decide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: self.leader_state.get_chosen_idx(),
+            decided_idx: self.internal_storage.get_decided_idx(),
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
@@ -436,15 +436,14 @@ where
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
             accepted.accepted_idx,
-            self.leader_state.get_chosen_idx()
+            self.internal_storage.get_decided_idx()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
-            if accepted.accepted_idx > self.leader_state.get_chosen_idx()
+            if accepted.accepted_idx > self.internal_storage.get_decided_idx()
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
-                self.leader_state.set_chosen_idx(accepted.accepted_idx);
                 self.internal_storage.set_decided_idx(accepted.accepted_idx);
                 // Send Decides to followers or batch with previous AcceptDecide
                 for pid in self.leader_state.get_promised_followers() {
@@ -456,7 +455,7 @@ where
                                     self.outgoing.get_mut(outgoing_idx).unwrap();
                                 match msg {
                                     PaxosMsg::AcceptDecide(a) => {
-                                        a.decided_idx = self.leader_state.get_chosen_idx()
+                                        a.decided_idx = self.internal_storage.get_decided_idx()
                                     }
                                     _ => self.send_decide(pid),
                                 }
