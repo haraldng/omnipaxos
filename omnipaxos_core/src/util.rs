@@ -56,7 +56,6 @@ where
     pub follower_seq_nums: Vec<SequenceNumber>,
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
-    pub chosen_idx: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
     pub max_promise: Option<PromiseData<T, S>>,
     #[cfg(feature = "batch_accept")]
@@ -83,7 +82,6 @@ where
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
             decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
-            chosen_idx: 0,
             max_promise_meta: PromiseMetaData::default(),
             max_promise: None,
             #[cfg(feature = "batch_accept")]
@@ -163,14 +161,6 @@ where
     #[cfg(feature = "batch_accept")]
     pub fn reset_batch_accept_meta(&mut self) {
         self.batch_accept_meta = vec![None; self.max_pid];
-    }
-
-    pub fn set_chosen_idx(&mut self, idx: u64) {
-        self.chosen_idx = idx;
-    }
-
-    pub fn get_chosen_idx(&self) -> u64 {
-        self.chosen_idx
     }
 
     pub fn get_promised_followers(&self) -> Vec<u64> {
