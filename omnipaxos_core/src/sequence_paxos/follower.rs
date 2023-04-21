@@ -190,7 +190,11 @@ where
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
             let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
             match msg_status {
-                MessageStatus::First => panic!("Decide cannot be the first message in a sequence!"),
+                MessageStatus::First => {
+                    #[cfg(feature = "logging")]
+                    warn!("Decide cannot be the first message in a sequence!");
+                    return;
+                }
                 MessageStatus::Expected => self.current_seq_num = dec.seq_num,
                 MessageStatus::DroppedPreceding => {
                     self.reconnected(dec.n.pid);

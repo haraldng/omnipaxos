@@ -304,7 +304,7 @@ pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
 
-#[allow(missing_docs)]
+/// Used for checking the ordering of message sequences in the accept phase
 pub enum MessageStatus {
     /// Beginning of a message sequence
     First,
@@ -316,16 +316,17 @@ pub enum MessageStatus {
     Outdated,
 }
 
-#[allow(missing_docs)]
+/// Keeps track of the ordering of messages in the accept phase
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct SequenceNumber {
-    // Meant to refer to a TCP session
+    /// Meant to refer to a TCP session
     pub session: u64,
+    /// The sequence number with respect to a session
     pub counter: u64,
 }
 
 impl SequenceNumber {
-    // Used as a pseudo-AcceptSync for prepare-less reconfigurations
+    /// Used as a pseudo-AcceptSync for prepare-less reconfigurations
     const PREDEFINED_LEADER_FIRST_ACCEPT: SequenceNumber = SequenceNumber {
         session: 0,
         counter: 1,
