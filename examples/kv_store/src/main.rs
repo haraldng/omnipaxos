@@ -23,6 +23,7 @@ type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, MemoryStorage<KeyValue, KVSna
 
 const SERVERS: [u64; 3] = [1, 2, 3];
 
+#[allow(clippy::type_complexity)]
 fn initialise_channels() -> (
     HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
     HashMap<NodeId, mpsc::Receiver<Message<KeyValue, KVSnapshot>>>,
@@ -118,12 +119,10 @@ fn main() {
 
     let mut simple_kv_store = HashMap::new();
     for ent in committed_ents {
-        match ent {
-            LogEntry::Decided(kv) => {
-                simple_kv_store.insert(kv.key, kv.value);
-            }
-            _ => {} // ignore not committed entries
+        if let LogEntry::Decided(kv) = ent {
+            simple_kv_store.insert(kv.key, kv.value);
         }
+        // ignore uncommitted entries
     }
     println!("KV store: {:?}", simple_kv_store);
     println!("Killing leader: {}...", leader);
@@ -155,12 +154,10 @@ fn main() {
         .read_decided_suffix(2)
         .expect("Failed to read expected entries");
     for ent in committed_ents {
-        match ent {
-            LogEntry::Decided(kv) => {
-                simple_kv_store.insert(kv.key, kv.value);
-            }
-            _ => {} // ignore not committed entries
+        if let LogEntry::Decided(kv) = ent {
+            simple_kv_store.insert(kv.key, kv.value);
         }
+        // ignore uncommitted entries
     }
     println!("KV store: {:?}", simple_kv_store);
 }
