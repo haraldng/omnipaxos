@@ -286,7 +286,7 @@ where
                     (None, suffix, follower_decided_idx)
                 }
             };
-        self.leader_state.next_seq_num_round(to);
+        self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),

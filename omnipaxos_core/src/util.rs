@@ -91,9 +91,9 @@ where
         (pid - 1) as usize
     }
 
-    // Resets `pid`'s accept sequence to indicate they are in the next round of accepts
-    pub fn next_seq_num_round(&mut self, pid: NodeId) {
-        self.follower_seq_nums[Self::pid_to_idx(pid)].next_round();
+    // Resets `pid`'s accept sequence to indicate they are in the next session of accepts
+    pub fn increment_seq_num_session(&mut self, pid: NodeId) {
+        self.follower_seq_nums[Self::pid_to_idx(pid)].increment_session();
     }
 
     pub fn next_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
@@ -303,21 +303,48 @@ pub type NodeId = u64;
 pub type ConfigurationId = u32;
 
 #[allow(missing_docs)]
+pub enum MessageStatus {
+    // Beginning of a message sequence
+    First,
+    // Expected message sequence progression
+    Expected,
+    // Identified a message sequence break
+    DroppedPreceding,
+    // An already identified message sequence break
+    Outdated,
+}
+
+#[allow(missing_docs)]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct SequenceNumber {
-    pub round: u64,
+    pub session: u64,
     pub counter: u64,
 }
 
 impl SequenceNumber {
-    /// If the sequence number is the successor of `seq_num` returns true else false
-    pub fn is_successor_of(&self, seq_num: SequenceNumber) -> bool {
-        self.round == seq_num.round && self.counter == seq_num.counter + 1
+    // Used as a pseudo-AcceptSync for prepare-less reconfigurations
+    const PREDEFINED_LEADER_FIRST_ACCEPT: SequenceNumber = SequenceNumber {
+        session: 0,
+        counter: 1,
+    };
+
+    /// Goes to the next session of accepts.
+    /// Session is meant to refer to a TCP session.
+    pub fn increment_session(&mut self) {
+        self.session += 1;
+        self.counter = 0;
     }
 
-    /// Goes to the next round of accepts
-    pub fn next_round(&mut self) {
-        self.round += 1;
-        self.counter = 0;
+    /// Compares this sequence number with the sequence number of an incoming message.
+    pub fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
+        if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
+            MessageStatus::First
+        } else if msg_seq_num.session < self.session {
+            MessageStatus::Outdated
+        } else if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
+            MessageStatus::Expected
+        } else {
+            MessageStatus::DroppedPreceding
+        }
     }
 }

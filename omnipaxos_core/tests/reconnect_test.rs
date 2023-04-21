@@ -38,7 +38,10 @@ fn increasing_accept_seq_num_test() {
         .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
     let expected_seq_nums: Vec<SequenceNumber> = (4..4 + SECOND_PROPOSALS)
-        .map(|counter| SequenceNumber { round: 1, counter })
+        .map(|counter| SequenceNumber {
+            session: 1,
+            counter,
+        })
         .collect();
 
     // Propose some values so that a leader is elected

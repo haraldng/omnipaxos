@@ -3,10 +3,9 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::storage::SnapshotType;
+use crate::util::MessageStatus;
 #[cfg(feature = "logging")]
 use slog::debug;
-
-const PREDEFINED_LEADER_FIRST_ACCEPT: u64 = 1;
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where
@@ -148,16 +147,21 @@ where
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            if acc.seq_num.counter == PREDEFINED_LEADER_FIRST_ACCEPT {
-                // psuedo-AcceptSync for reconfigurations
-                self.internal_storage.set_accepted_round(acc.n);
-                self.forward_pending_proposals();
-            } else if !acc.seq_num.is_successor_of(self.current_seq_num) {
-                // If accept sequence is broken reconnect to leader instead
-                self.reconnected(acc.n.pid);
-                return;
+            let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    // psuedo-AcceptSync for reconfigurations
+                    self.internal_storage.set_accepted_round(acc.n);
+                    self.forward_pending_proposals();
+                    self.current_seq_num = acc.seq_num;
+                }
+                MessageStatus::Expected => self.current_seq_num = acc.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(acc.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
             }
-            self.current_seq_num = acc.seq_num;
 
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
@@ -184,12 +188,17 @@ where
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            if !dec.seq_num.is_successor_of(self.current_seq_num) {
-                // If accept sequence is broken reconnect to leader instead
-                self.reconnected(dec.n.pid);
-                return;
+            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
+            match msg_status {
+                MessageStatus::First => panic!("Decide cannot be the first message in a sequence!"),
+                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(dec.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
             }
-            self.current_seq_num = dec.seq_num;
+
             self.internal_storage.set_decided_idx(dec.decided_idx);
         }
     }
