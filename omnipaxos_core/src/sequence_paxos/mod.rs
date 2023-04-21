@@ -346,7 +346,6 @@ where
             return;
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
-            self.current_seq_num.increment_session();
         }
         self.outgoing.push(PaxosMessage {
             from: self.pid,

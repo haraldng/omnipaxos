@@ -93,7 +93,9 @@ where
 
     // Resets `pid`'s accept sequence to indicate they are in the next session of accepts
     pub fn increment_seq_num_session(&mut self, pid: NodeId) {
-        self.follower_seq_nums[Self::pid_to_idx(pid)].increment_session();
+        let idx = Self::pid_to_idx(pid);
+        self.follower_seq_nums[idx].session += 1;
+        self.follower_seq_nums[idx].counter = 0;
     }
 
     pub fn next_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
@@ -317,6 +319,7 @@ pub enum MessageStatus {
 #[allow(missing_docs)]
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct SequenceNumber {
+    // Meant to refer to a TCP session
     pub session: u64,
     pub counter: u64,
 }
@@ -327,13 +330,6 @@ impl SequenceNumber {
         session: 0,
         counter: 1,
     };
-
-    /// Goes to the next session of accepts.
-    /// Session is meant to refer to a TCP session.
-    pub fn increment_session(&mut self) {
-        self.session += 1;
-        self.counter = 0;
-    }
 
     /// Compares this sequence number with the sequence number of an incoming message.
     pub fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
