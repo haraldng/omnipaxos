@@ -138,10 +138,6 @@ where
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.send_batch_accept(entries),
-                (Role::Leader, Phase::FirstAccept) => {
-                    self.send_first_accept();
-                    self.send_batch_accept(entries);
-                }
                 _ => self.forward_proposals(entries),
             }
         }
@@ -161,34 +157,16 @@ where
                         self.send_accept_stopsign(ss);
                     }
                 }
-                (Role::Leader, Phase::FirstAccept) => {
-                    self.send_first_accept();
-                    self.accept_stopsign(ss.clone());
-                    self.send_accept_stopsign(ss);
-                }
                 _ => self.forward_stopsign(ss),
             }
         }
-    }
-
-    pub(crate) fn send_first_accept(&mut self) {
-        let f = FirstAccept {
-            n: self.leader_state.n_leader,
-        };
-        for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: PaxosMsg::FirstAccept(f.clone()),
-            });
-        }
-        self.state.1 = Phase::Accept;
     }
 
     #[cfg(feature = "batch_accept")]
     fn send_accept_and_cache(&mut self, to: NodeId, entries: Vec<T>) {
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
+            seq_num: self.leader_state.next_seq_num(to),
             decided_idx: self.leader_state.get_chosen_idx(),
             entries,
         };
@@ -220,6 +198,7 @@ where
             } else {
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
+                    seq_num: self.leader_state.next_seq_num(pid),
                     decided_idx: self.leader_state.get_chosen_idx(),
                     entries: vec![entry.clone()],
                 };
@@ -251,6 +230,7 @@ where
             } else {
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
+                    seq_num: self.leader_state.next_seq_num(pid),
                     decided_idx: self.leader_state.get_chosen_idx(),
                     entries: entries.clone(),
                 };
@@ -306,8 +286,10 @@ where
                     (None, suffix, follower_decided_idx)
                 }
             };
+        self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
+            seq_num: self.leader_state.next_seq_num(to),
             decided_snapshot: delta_snapshot,
             suffix,
             sync_idx,
@@ -316,10 +298,23 @@ where
         };
         let msg = PaxosMessage {
             from: self.pid,
-            to: *pid,
+            to,
             msg: PaxosMsg::AcceptSync(acc_sync),
         };
         self.outgoing.push(msg);
+    }
+
+    fn send_decide(&mut self, to: NodeId) {
+        let d = Decide {
+            n: self.leader_state.n_leader,
+            seq_num: self.leader_state.next_seq_num(to),
+            decided_idx: self.leader_state.get_chosen_idx(),
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::Decide(d),
+        });
     }
 
     fn adopt_pending_stopsign(&mut self) {
@@ -449,10 +444,8 @@ where
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 self.leader_state.set_chosen_idx(accepted.accepted_idx);
-                let d = Decide {
-                    n: self.leader_state.n_leader,
-                    decided_idx: self.leader_state.get_chosen_idx(),
-                };
+                self.internal_storage.set_decided_idx(accepted.accepted_idx);
+                // Send Decides to followers or batch with previous AcceptDecide
                 for pid in self.leader_state.get_promised_followers() {
                     if cfg!(feature = "batch_accept") {
                         #[cfg(feature = "batch_accept")]
@@ -464,32 +457,15 @@ where
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.decided_idx = self.leader_state.get_chosen_idx()
                                     }
-                                    _ => {
-                                        self.outgoing.push(PaxosMessage {
-                                            from: self.pid,
-                                            to: pid,
-                                            msg: PaxosMsg::Decide(d),
-                                        });
-                                    }
+                                    _ => self.send_decide(pid),
                                 }
                             }
-                            _ => {
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: pid,
-                                    msg: PaxosMsg::Decide(d),
-                                });
-                            }
+                            _ => self.send_decide(pid),
                         }
                     } else {
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: pid,
-                            msg: PaxosMsg::Decide(d),
-                        });
+                        self.send_decide(pid);
                     }
                 }
-                self.handle_decide(d);
             }
         }
     }

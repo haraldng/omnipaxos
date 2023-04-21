@@ -402,6 +402,63 @@ impl TestSystem {
             .expect("ReplicaComp never started!");
     }
 
+    pub fn stop_node(&self, pid: u64) {
+        let node = self
+            .nodes
+            .get(&pid)
+            .expect(&format!("Cannot find node {pid}"));
+        self.kompact_system
+            .as_ref()
+            .expect("No KompactSystem found!")
+            .stop_notify(node)
+            .wait_timeout(STOP_COMPONENT_TIMEOUT)
+            .expect("ReplicaComp never stopped!");
+    }
+
+    /// Return the elected leader from `node`'s viewpoint. If there is no leader yet then
+    /// wait until a leader is elected in the allocated time.
+    pub fn get_elected_leader(&self, node: u64, wait_timeout: Duration) -> u64 {
+        let node = self.nodes.get(&node).expect("No BLE component found");
+
+        node.on_definition(|x| {
+            let leader_pid = x.paxos.get_current_leader();
+            leader_pid.unwrap_or_else(|| {
+                // Leader is not elected yet
+                let (kprom, kfuture) = promise::<Ballot>();
+                x.election_futures.push(Ask::new(kprom, ()));
+
+                let ballot = kfuture
+                    .wait_timeout(wait_timeout)
+                    .expect("No leader has been elected in the allocated time!");
+                ballot.pid
+            })
+        })
+    }
+
+    /// Use node `proposer` to propose `proposals` then waits for the proposals
+    /// to be decided.
+    pub fn make_proposals(&self, proposer: u64, proposals: Vec<Value>, timeout: Duration) {
+        let proposer = self
+            .nodes
+            .get(&proposer)
+            .expect("No SequencePaxos component found");
+
+        let mut proposal_futures = vec![];
+        for val in proposals {
+            let (kprom, kfuture) = promise::<Value>();
+            proposer.on_definition(|x| {
+                x.paxos.append(val).expect("Failed to append");
+                x.decided_futures.push(Ask::new(kprom, ()));
+            });
+            proposal_futures.push(kfuture);
+        }
+
+        match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, timeout) {
+            Ok(_) => {}
+            Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+        }
+    }
+
     fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
         if threads <= 32 {
             conf.executor(|t| crossbeam_workstealing_pool::small_pool(t))
@@ -421,7 +478,9 @@ pub mod omnireplica {
         omni_paxos::OmniPaxos,
         util::{LogEntry, NodeId},
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
+
+    const SNAPSHOTTED_DECIDE: Value = Value(0);
 
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosComponent {
@@ -429,6 +488,7 @@ pub mod omnireplica {
         #[allow(dead_code)]
         pid: NodeId,
         pub peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>,
+        pub peer_disconnections: HashSet<u64>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
         pub paxos: OmniPaxos<Value, LatestValue, StorageType<Value, LatestValue>>,
@@ -485,13 +545,14 @@ pub mod omnireplica {
                 ctx: ComponentContext::uninitialised(),
                 pid,
                 peers: HashMap::new(),
+                peer_disconnections: HashSet::new(),
                 paxos_timer: None,
                 tick_timer: None,
+                decided_idx: paxos.get_decided_idx(),
                 paxos,
                 decided_futures: vec![],
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
-                decided_idx: 0,
                 election_timeout,
             }
         }
@@ -518,13 +579,27 @@ pub mod omnireplica {
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
-                let receiver = self.peers.get(&out.get_receiver()).unwrap();
-                receiver.tell(out);
+                if self.is_connected_to(&out.get_receiver()) {
+                    let receiver = self.peers.get(&out.get_receiver()).unwrap();
+                    receiver.tell(out);
+                }
             }
         }
 
         pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Value, LatestValue>>>) {
             self.peers = peers;
+        }
+
+        // Used to simulate a network fault to Component `pid`.
+        pub fn set_connection(&mut self, pid: u64, is_connected: bool) {
+            match is_connected {
+                true => self.peer_disconnections.remove(&pid),
+                false => self.peer_disconnections.insert(pid),
+            };
+        }
+
+        pub fn is_connected_to(&self, pid: &u64) -> bool {
+            self.peer_disconnections.get(pid).is_none()
         }
 
         fn answer_election_future(&mut self, l: Ballot) {
@@ -534,8 +609,8 @@ pub mod omnireplica {
         }
 
         fn answer_decided_future(&mut self) {
-            if !self.decided_futures.is_empty() {
-                if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+            if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
+                if !self.decided_futures.is_empty() {
                     for e in entries {
                         match e {
                             LogEntry::Decided(i) => self
@@ -544,12 +619,21 @@ pub mod omnireplica {
                                 .unwrap()
                                 .reply(i)
                                 .expect("Failed to reply promise!"),
-                            LogEntry::Snapshotted(s) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(s.snapshot.value)
-                                .expect("Failed to reply promise!"),
+                            LogEntry::Snapshotted(s) => {
+                                // Reply with dummy value for futures which were trimmed away
+                                for _ in 1..(s.trimmed_idx - self.decided_idx) {
+                                    self.decided_futures
+                                        .pop()
+                                        .unwrap()
+                                        .reply(SNAPSHOTTED_DECIDE)
+                                        .expect("Failed to reply promise!");
+                                }
+                                self.decided_futures
+                                    .pop()
+                                    .unwrap()
+                                    .reply(s.snapshot.value)
+                                    .expect("Failed to reply promise!");
+                            }
                             LogEntry::StopSign(ss) => self
                                 .decided_futures
                                 .pop()
@@ -559,8 +643,8 @@ pub mod omnireplica {
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
                     }
-                    self.decided_idx = self.paxos.get_decided_idx();
                 }
+                self.decided_idx = self.paxos.get_decided_idx();
             }
         }
     }
@@ -618,4 +702,114 @@ pub fn create_temp_dir() -> String {
     let dir = TempDir::new().expect("Failed to create temporary directory");
     let dir_path = dir.path().to_path_buf();
     dir_path.to_string_lossy().to_string()
+}
+
+pub mod verification {
+    use super::{LatestValue, Value};
+    use omnipaxos_core::{
+        storage::{Snapshot, StopSign},
+        util::LogEntry,
+    };
+
+    /// Verify that the log matches the proposed values, Depending on
+    /// the timing the log should match one of the following cases.
+    /// * All entries are decided, verify the decided entries
+    /// * Only a snapshot was taken, verify the snapshot
+    /// * A snapshot was taken and entries decided on afterwards, verify both the snapshot and entries
+    pub fn verify_log(
+        read_log: Vec<LogEntry<Value, LatestValue>>,
+        proposals: Vec<Value>,
+        num_proposals: u64,
+    ) {
+        match &read_log[..] {
+            [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
+            [LogEntry::Snapshotted(s)] => {
+                let exp_snapshot = LatestValue::create(proposals.as_slice());
+                verify_snapshot(&read_log, s.trimmed_idx, &exp_snapshot);
+            }
+            [LogEntry::Snapshotted(s), LogEntry::Decided(_), ..] => {
+                let (snapshotted_proposals, last_proposals) =
+                    proposals.split_at(s.trimmed_idx as usize);
+                let (snapshot_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
+                let exp_snapshot = LatestValue::create(snapshotted_proposals);
+                verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);
+                verify_entries(decided_entries, last_proposals, 0, num_proposals);
+            }
+            _ => panic!("Unexpected entries in the log: {:?} ", read_log),
+        }
+    }
+
+    /// Verify that the log has a single snapshot of the latest entry.
+    pub fn verify_snapshot(
+        read_entries: &[LogEntry<Value, LatestValue>],
+        exp_compacted_idx: u64,
+        exp_snapshot: &LatestValue,
+    ) {
+        assert_eq!(
+            read_entries.len(),
+            1,
+            "Expected snapshot, got: {:?}",
+            read_entries
+        );
+        match read_entries
+            .first()
+            .expect("Expected entry from first element")
+        {
+            LogEntry::Snapshotted(s) => {
+                assert_eq!(s.trimmed_idx, exp_compacted_idx);
+                assert_eq!(&s.snapshot, exp_snapshot);
+            }
+            e => {
+                panic!("{}", format!("Not a snapshot: {:?}", e));
+            }
+        }
+    }
+
+    /// Verify that all log entries are decided and matches the proposed entries.
+    pub fn verify_entries(
+        read_entries: &[LogEntry<Value, LatestValue>],
+        exp_entries: &[Value],
+        offset: u64,
+        decided_idx: u64,
+    ) {
+        assert_eq!(
+            read_entries.len(),
+            exp_entries.len(),
+            "read: {:?}, expected: {:?}",
+            read_entries,
+            exp_entries
+        );
+        for (idx, entry) in read_entries.iter().enumerate() {
+            let log_idx = idx as u64 + offset;
+            match entry {
+                LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
+                LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
+                e => panic!(
+                    "{}",
+                    format!(
+                        "Unexpected entry at idx {}: {:?}, decided_idx: {}",
+                        idx, e, decided_idx
+                    )
+                ),
+            }
+        }
+    }
+
+    /// Verify that the log entry contains only a stopsign matching `exp_stopsign`
+    pub fn verify_stopsign(read_entries: &[LogEntry<Value, LatestValue>], exp_stopsign: &StopSign) {
+        assert_eq!(
+            read_entries.len(),
+            1,
+            "Expected StopSign, read: {:?}",
+            read_entries
+        );
+        match read_entries.first().unwrap() {
+            LogEntry::StopSign(ss) => {
+                assert_eq!(ss, exp_stopsign);
+            }
+            e => {
+                panic!("{}", format!("Not a StopSign: {:?}", e))
+            }
+        }
+    }
 }

@@ -9,7 +9,7 @@ use crate::utils::logger::create_logger;
 use crate::{
     omni_paxos::{CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest},
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId},
+    util::{ConfigurationId, NodeId, SequenceNumber},
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
@@ -38,6 +38,8 @@ where
     outgoing: Vec<PaxosMessage<T, S>>,
     leader_state: LeaderState<T, S>,
     latest_accepted_meta: Option<(Ballot, usize)>,
+    // Keeps track of sequence of accepts from leader where AcceptSync = 1
+    current_seq_num: SequenceNumber,
     buffer_size: usize,
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
@@ -73,7 +75,7 @@ where
                 } else {
                     (Role::Follower, None)
                 };
-                let state = (role, Phase::FirstAccept);
+                let state = (role, Phase::Accept);
                 (state, *l, lds)
             }
             None => {
@@ -95,6 +97,7 @@ where
             outgoing: Vec::with_capacity(BUFFER_SIZE),
             leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
+            current_seq_num: SequenceNumber::default(),
             buffer_size: config.buffer_size,
             s: PhantomData,
             #[cfg(feature = "logging")]
@@ -238,7 +241,6 @@ where
                 _ => {}
             },
             PaxosMsg::AcceptSync(acc_sync) => self.handle_acceptsync(acc_sync, m.from),
-            PaxosMsg::FirstAccept(f) => self.handle_firstaccept(f),
             PaxosMsg::AcceptDecide(acc) => self.handle_acceptdecide(acc),
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
@@ -306,16 +308,6 @@ where
                         return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
                 }
-                (Role::Leader, Phase::FirstAccept) => {
-                    if !self.stopped() {
-                        self.send_first_accept();
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
-                        self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
-                    } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
-                    }
-                }
                 _ => {
                     let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                     self.forward_stopsign(ss);
@@ -366,10 +358,6 @@ where
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.send_accept(entry),
-            (Role::Leader, Phase::FirstAccept) => {
-                self.send_first_accept();
-                self.send_accept(entry);
-            }
             _ => self.forward_proposals(vec![entry]),
         }
     }
@@ -386,7 +374,6 @@ where
 #[derive(PartialEq, Debug)]
 enum Phase {
     Prepare,
-    FirstAccept,
     Accept,
     Recover,
     None,

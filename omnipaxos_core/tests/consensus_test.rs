@@ -4,10 +4,13 @@ use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
     omni_paxos::OmniPaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
-    util::LogEntry,
 };
 use serial_test::serial;
-use utils::{create_temp_dir, LatestValue, StorageType, TestConfig, TestSystem, Value};
+use utils::{
+    create_temp_dir,
+    verification::{verify_entries, verify_snapshot, verify_stopsign},
+    LatestValue, StorageType, TestConfig, TestSystem, Value,
+};
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -264,73 +267,6 @@ fn read_entries_test() {
     verify_stopsign(stopsign, &ss);
 }
 
-fn verify_snapshot(
-    read_entries: &[LogEntry<Value, LatestValue>],
-    exp_compacted_idx: u64,
-    exp_snapshot: &LatestValue,
-) {
-    assert_eq!(
-        read_entries.len(),
-        1,
-        "Expected only snapshot, got: {:?}",
-        read_entries
-    );
-    match read_entries.first().unwrap() {
-        LogEntry::Snapshotted(s) => {
-            assert_eq!(s.trimmed_idx, exp_compacted_idx);
-            assert_eq!(&s.snapshot, exp_snapshot);
-        }
-        e => {
-            panic!("{}", format!("Not a snapshot: {:?}", e))
-        }
-    }
-}
-
-fn verify_stopsign(read_entries: &[LogEntry<Value, LatestValue>], exp_stopsign: &StopSign) {
-    assert_eq!(
-        read_entries.len(),
-        1,
-        "Expected StopSign, read: {:?}",
-        read_entries
-    );
-    match read_entries.first().unwrap() {
-        LogEntry::StopSign(ss) => {
-            assert_eq!(ss, exp_stopsign);
-        }
-        e => {
-            panic!("{}", format!("Not a StopSign: {:?}", e))
-        }
-    }
-}
-
-fn verify_entries(
-    read_entries: &[LogEntry<Value, LatestValue>],
-    exp_entries: &[Value],
-    offset: u64,
-    decided_idx: u64,
-) {
-    assert_eq!(
-        read_entries.len(),
-        exp_entries.len(),
-        "read: {:?}, expected: {:?}",
-        read_entries,
-        exp_entries
-    );
-    for (idx, entry) in read_entries.iter().enumerate() {
-        let log_idx = idx as u64 + offset;
-        match entry {
-            LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
-            LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
-            e => panic!(
-                "{}",
-                format!(
-                    "Unexpected entry at idx {}: {:?}, decided_idx: {}",
-                    idx, e, decided_idx
-                )
-            ),
-        }
-    }
-}
 /// Verifies that there is a majority when an entry is proposed.
 fn check_quorum(
     log_responses: Vec<(u64, Vec<Value>)>,

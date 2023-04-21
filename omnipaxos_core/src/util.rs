@@ -45,6 +45,8 @@ where
 {
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
+    // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
+    pub follower_seq_nums: Vec<SequenceNumber>,
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
@@ -71,6 +73,7 @@ where
         Self {
             n_leader,
             promises_meta: vec![None; max_pid],
+            follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
             decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
             chosen_idx: 0,
@@ -86,6 +89,19 @@ where
 
     fn pid_to_idx(pid: NodeId) -> usize {
         (pid - 1) as usize
+    }
+
+    // Resets `pid`'s accept sequence to indicate they are in the next session of accepts
+    pub fn increment_seq_num_session(&mut self, pid: NodeId) {
+        let idx = Self::pid_to_idx(pid);
+        self.follower_seq_nums[idx].session += 1;
+        self.follower_seq_nums[idx].counter = 0;
+    }
+
+    pub fn next_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
+        let idx = Self::pid_to_idx(pid);
+        self.follower_seq_nums[idx].counter += 1;
+        self.follower_seq_nums[idx]
     }
 
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
@@ -287,3 +303,45 @@ pub type TrimmedIndex = u64;
 pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
+
+/// Used for checking the ordering of message sequences in the accept phase
+pub enum MessageStatus {
+    /// Beginning of a message sequence
+    First,
+    /// Expected message sequence progression
+    Expected,
+    /// Identified a message sequence break
+    DroppedPreceding,
+    /// An already identified message sequence break
+    Outdated,
+}
+
+/// Keeps track of the ordering of messages in the accept phase
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct SequenceNumber {
+    /// Meant to refer to a TCP session
+    pub session: u64,
+    /// The sequence number with respect to a session
+    pub counter: u64,
+}
+
+impl SequenceNumber {
+    /// Used as a pseudo-AcceptSync for prepare-less reconfigurations
+    const PREDEFINED_LEADER_FIRST_ACCEPT: SequenceNumber = SequenceNumber {
+        session: 0,
+        counter: 1,
+    };
+
+    /// Compares this sequence number with the sequence number of an incoming message.
+    pub fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
+        if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
+            MessageStatus::First
+        } else if msg_seq_num.session < self.session {
+            MessageStatus::Outdated
+        } else if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
+            MessageStatus::Expected
+        } else {
+            MessageStatus::DroppedPreceding
+        }
+    }
+}

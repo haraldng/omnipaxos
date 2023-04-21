@@ -2,9 +2,9 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
-use crate::storage::SnapshotType;
+use crate::{storage::SnapshotType, util::MessageStatus};
 #[cfg(feature = "logging")]
-use slog::debug;
+use slog::warn;
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where
@@ -18,6 +18,7 @@ where
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
+            self.current_seq_num = SequenceNumber::default();
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_log_len();
             let decided_idx = self.get_decided_idx();
@@ -100,6 +101,7 @@ where
             self.internal_storage.set_accepted_round(accsync.n);
             self.internal_storage.set_decided_idx(accsync.decided_idx);
             self.state = (Role::Follower, Phase::Accept);
+            self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
             self.outgoing.push(PaxosMessage {
@@ -140,22 +142,26 @@ where
         }
     }
 
-    pub(crate) fn handle_firstaccept(&mut self, f: FirstAccept) {
-        #[cfg(feature = "logging")]
-        debug!(self.logger, "Incoming message First Accept");
-        if self.internal_storage.get_promise() == f.n
-            && self.state == (Role::Follower, Phase::FirstAccept)
-        {
-            self.internal_storage.set_accepted_round(f.n);
-            self.state.1 = Phase::Accept;
-            self.forward_pending_proposals();
-        }
-    }
-
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
+            let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    // psuedo-AcceptSync for reconfigurations
+                    self.internal_storage.set_accepted_round(acc.n);
+                    self.forward_pending_proposals();
+                    self.current_seq_num = acc.seq_num;
+                }
+                MessageStatus::Expected => self.current_seq_num = acc.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(acc.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
             // handle decide
@@ -181,6 +187,24 @@ where
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
+            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    #[cfg(feature = "logging")]
+                    warn!(
+                        self.logger,
+                        "Decide cannot be the first message in a sequence!"
+                    );
+                    return;
+                }
+                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(dec.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             self.internal_storage.set_decided_idx(dec.decided_idx);
         }
     }
