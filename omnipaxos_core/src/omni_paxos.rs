@@ -40,9 +40,12 @@ impl OmniPaxosConfig {
     /// Creates a new `OmniPaxosConfig` from a `Hocon` object.
     #[cfg(feature = "hocon_config")]
     pub fn with_hocon(h: &Hocon) -> Self {
-        let mut config = Self::default();
-        config.configuration_id = h[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32;
-        config.pid = h[PID].as_i64().expect("Failed to load PID") as u64;
+        let mut config = OmniPaxosConfig {
+            pid: h[PID].as_i64().expect("Failed to load PID") as u64,
+            configuration_id: h[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
+            logger_file_path: h[LOG_FILE_PATH].as_string(),
+            ..Default::default()
+        };
         match &h[PEERS] {
             Hocon::Array(v) => {
                 let peers = v
@@ -61,8 +64,6 @@ impl OmniPaxosConfig {
         if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
             config.leader_priority = p;
         }
-
-        config.logger_file_path = h[LOG_FILE_PATH].as_string();
         config
     }
 
