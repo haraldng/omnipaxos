@@ -27,17 +27,17 @@ OmniPaxos:
     path: "omnipaxos/logging.md"
 
 ##Des: how to define nested structure
-Temp1:
-  T1:
-    path: "foreword.md"
-  T2:
-    T2-1:
-      path: "foreword.md"
-    T2-2:
-      path: "foreword.md"
-  T3:
-    path: "foreword.md"
-Temp2:
-  T4:
-    path: "foreword.md"
+#Temp1:
+#  T1:
+#    path: "foreword.md"
+#  T2:
+#    T2-1:
+#      path: "foreword.md"
+#    T2-2:
+#      path: "foreword.md"
+#  T3:
+#    path: "foreword.md"
+#Temp2:
+#  T4:
+#    path: "foreword.md"
 
