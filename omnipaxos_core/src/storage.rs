@@ -3,6 +3,7 @@ use crate::{
     omni_paxos::CompactionErr,
     util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
 };
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     marker::PhantomData,
@@ -10,9 +11,9 @@ use std::{
 };
 
 /// Type of the entries stored in the log.
-pub trait Entry: Clone + Debug {}
+pub trait Entry: Clone + Debug + Serialize + for<'a> Deserialize<'a> {}
 
-impl<T> Entry for T where T: Clone + Debug {}
+impl<T> Entry for T where T: Clone + Debug + Serialize + for<'a> Deserialize<'a> {}
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
