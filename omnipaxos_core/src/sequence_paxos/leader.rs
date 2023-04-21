@@ -1,6 +1,6 @@
 use super::super::{
     ballot_leader_election::Ballot,
-    util::{LeaderState, PromiseMetaData},
+    util::{LeaderState, PromiseData, PromiseMetaData},
 };
 use crate::storage::SnapshotType;
 
@@ -274,17 +274,15 @@ where
                     let sfx = self.internal_storage.get_suffix(*promise_accepted_idx);
                     (None, sfx, *promise_accepted_idx)
                 }
+            } else if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
+                let delta_snapshot = self
+                    .internal_storage
+                    .create_diff_snapshot(follower_decided_idx, my_decided_idx);
+                let suffix = self.internal_storage.get_suffix(my_decided_idx);
+                (Some(delta_snapshot), suffix, follower_decided_idx)
             } else {
-                if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
-                    let delta_snapshot = self
-                        .internal_storage
-                        .create_diff_snapshot(follower_decided_idx, my_decided_idx);
-                    let suffix = self.internal_storage.get_suffix(my_decided_idx);
-                    (Some(delta_snapshot), suffix, follower_decided_idx)
-                } else {
-                    let suffix = self.internal_storage.get_suffix(follower_decided_idx);
-                    (None, suffix, follower_decided_idx)
-                }
+                let suffix = self.internal_storage.get_suffix(follower_decided_idx);
+                (None, suffix, follower_decided_idx)
             };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
@@ -345,7 +343,10 @@ where
             .unwrap()
             .unwrap();
         match max_promise {
-            Some((decided_snapshot, suffix)) => {
+            Some(PromiseData {
+                decided_snapshot,
+                suffix,
+            }) => {
                 match decided_snapshot {
                     Some(s) => {
                         let decided_idx = self

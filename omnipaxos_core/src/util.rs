@@ -38,6 +38,13 @@ impl PartialEq for PromiseMetaData {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Actual data of a promise i.e., the decided snapshot and/or the suffix.
+pub(crate) struct PromiseData<T: Entry, S: Snapshot<T>> {
+    pub decided_snapshot: Option<SnapshotType<T, S>>,
+    pub suffix: Vec<T>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) struct LeaderState<T, S>
 where
     T: Entry,
@@ -51,7 +58,7 @@ where
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
-    pub max_promise: Option<(Option<SnapshotType<T, S>>, Vec<T>)>, // (decided_snapshot, suffix)
+    pub max_promise: Option<PromiseData<T, S>>,
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
@@ -117,7 +124,10 @@ where
         };
         if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
-            self.max_promise = Some((prom.decided_snapshot, prom.suffix))
+            self.max_promise = Some(PromiseData {
+                decided_snapshot: prom.decided_snapshot,
+                suffix: prom.suffix,
+            })
         }
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
@@ -125,7 +135,7 @@ where
         num_promised >= self.majority
     }
 
-    pub fn take_max_promise(&mut self) -> Option<(Option<SnapshotType<T, S>>, Vec<T>)> {
+    pub fn take_max_promise(&mut self) -> Option<PromiseData<T, S>> {
         std::mem::take(&mut self.max_promise)
     }
 
@@ -213,31 +223,6 @@ where
     }
 }
 
-/*
-/// Item used for log synchronization in the Prepare phase.
-#[allow(missing_docs)]
-#[derive(Debug, Clone)]
-pub enum SyncItem<T, S>
-where
-    T: Entry,
-    S: Snapshot<T>,
-{
-    Entries(Vec<T>),
-    Snapshot(SnapshotType<T, S>),
-    None,
-}
-
-impl<T, S> Default for SyncItem<T, S>
-where
-    T: Entry,
-    S: Snapshot<T>,
-{
-    fn default() -> Self {
-        SyncItem::None
-    }
-}
-*/
-
 /// The entry read in the log.
 #[derive(Debug, Clone)]
 pub enum LogEntry<T, S>
@@ -317,7 +302,7 @@ pub enum MessageStatus {
 }
 
 /// Keeps track of the ordering of messages in the accept phase
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct SequenceNumber {
     /// Meant to refer to a TCP session
     pub session: u64,
