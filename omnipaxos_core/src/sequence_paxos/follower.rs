@@ -2,10 +2,9 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
-use crate::storage::SnapshotType;
-use crate::util::MessageStatus;
+use crate::{storage::SnapshotType, util::MessageStatus};
 #[cfg(feature = "logging")]
-use slog::debug;
+use slog::warn;
 
 impl<T, S, B> SequencePaxos<T, S, B>
 where
@@ -192,7 +191,10 @@ where
             match msg_status {
                 MessageStatus::First => {
                     #[cfg(feature = "logging")]
-                    warn!("Decide cannot be the first message in a sequence!");
+                    warn!(
+                        self.logger,
+                        "Decide cannot be the first message in a sequence!"
+                    );
                     return;
                 }
                 MessageStatus::Expected => self.current_seq_num = dec.seq_num,

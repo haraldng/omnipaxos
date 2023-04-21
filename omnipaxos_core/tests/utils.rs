@@ -706,8 +706,10 @@ pub fn create_temp_dir() -> String {
 
 pub mod verification {
     use super::{LatestValue, Value};
-    use omnipaxos_core::storage::Snapshot;
-    use omnipaxos_core::{storage::StopSign, util::LogEntry};
+    use omnipaxos_core::{
+        storage::{Snapshot, StopSign},
+        util::LogEntry,
+    };
 
     /// Verify that the log matches the proposed values, Depending on
     /// the timing the log should match one of the following cases.
