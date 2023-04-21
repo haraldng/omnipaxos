@@ -306,13 +306,13 @@ pub type ConfigurationId = u32;
 
 #[allow(missing_docs)]
 pub enum MessageStatus {
-    // Beginning of a message sequence
+    /// Beginning of a message sequence
     First,
-    // Expected message sequence progression
+    /// Expected message sequence progression
     Expected,
-    // Identified a message sequence break
+    /// Identified a message sequence break
     DroppedPreceding,
-    // An already identified message sequence break
+    /// An already identified message sequence break
     Outdated,
 }
 
