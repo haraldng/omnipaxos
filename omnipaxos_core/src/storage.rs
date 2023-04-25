@@ -3,13 +3,13 @@ use crate::{
     omni_paxos::CompactionErr,
     util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
 };
+#[cfg(feature = "serde")]
+use serde_crate::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     marker::PhantomData,
     ops::{Bound, RangeBounds},
 };
-#[cfg(feature = "serde")]
-use serde_crate::{Deserialize, Serialize};
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {}
