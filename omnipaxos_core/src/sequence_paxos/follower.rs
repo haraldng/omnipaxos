@@ -6,11 +6,10 @@ use crate::{storage::SnapshotType, util::MessageStatus};
 #[cfg(feature = "logging")]
 use slog::warn;
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
@@ -66,7 +65,7 @@ where
         }
     }
 
-    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: NodeId) {
+    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.internal_storage.get_promise() == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {

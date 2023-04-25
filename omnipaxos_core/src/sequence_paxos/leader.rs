@@ -6,11 +6,10 @@ use crate::storage::SnapshotType;
 
 use super::*;
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
@@ -400,7 +399,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T, S>, from: NodeId) {
+    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T>, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(
             self.logger,
@@ -414,7 +413,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T, S>, from: NodeId) {
+    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T>, from: NodeId) {
         #[cfg(feature = "logging")]
         {
             let (r, p) = &self.state;

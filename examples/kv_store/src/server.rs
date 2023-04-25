@@ -1,4 +1,4 @@
-use crate::kv::{KVSnapshot, KeyValue};
+use crate::kv::KeyValue;
 use omnipaxos_core::{messages::Message, util::NodeId};
 use std::{
     collections::HashMap,
@@ -13,8 +13,8 @@ use tokio::{sync::mpsc, time};
 
 pub struct OmniPaxosServer {
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
-    pub incoming: mpsc::Receiver<Message<KeyValue, KVSnapshot>>,
-    pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
+    pub incoming: mpsc::Receiver<Message<KeyValue>>,
+    pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
 }
 
 impl OmniPaxosServer {

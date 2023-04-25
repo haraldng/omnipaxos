@@ -1,7 +1,7 @@
 use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::*,
-    storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
+    storage::{Entry, StopSign, StopSignEntry, Storage},
     util::{defaults::BUFFER_SIZE, LeaderState},
 };
 #[cfg(feature = "logging")]
@@ -13,7 +13,7 @@ use crate::{
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
-use std::{fmt::Debug, marker::PhantomData, vec};
+use std::{fmt::Debug, vec};
 
 pub mod follower;
 pub mod leader;
@@ -21,13 +21,12 @@ pub mod leader;
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 /// If snapshots are not desired to be used, use `()` for the type parameter `S`.
-pub(crate) struct SequencePaxos<T, S, B>
+pub(crate) struct SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
-    pub(crate) internal_storage: InternalStorage<B, T, S>,
+    pub(crate) internal_storage: InternalStorage<B, T>,
     config_id: ConfigurationId,
     pid: NodeId,
     peers: Vec<u64>, // excluding self pid
@@ -35,22 +34,20 @@ where
     leader: Ballot,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
-    outgoing: Vec<PaxosMessage<T, S>>,
-    leader_state: LeaderState<T, S>,
+    outgoing: Vec<PaxosMessage<T>>,
+    leader_state: LeaderState<T>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
     buffer_size: usize,
-    s: PhantomData<S>,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /*** User functions ***/
     /// Creates a Sequence Paxos replica.
@@ -95,11 +92,10 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
+            leader_state: LeaderState::<T>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
             buffer_size: config.buffer_size,
-            s: PhantomData,
             #[cfg(feature = "logging")]
             logger: {
                 let s = config
@@ -219,7 +215,7 @@ where
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
-    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T, S>> {
+    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T>> {
         let mut outgoing = Vec::with_capacity(self.buffer_size);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
         #[cfg(feature = "batch_accept")]
@@ -231,7 +227,7 @@ where
     }
 
     /// Handle an incoming message.
-    pub(crate) fn handle(&mut self, m: PaxosMessage<T, S>) {
+    pub(crate) fn handle(&mut self, m: PaxosMessage<T>) {
         match m.msg {
             PaxosMsg::PrepareReq => self.handle_preparereq(m.from),
             PaxosMsg::Prepare(prep) => self.handle_prepare(prep, m.from),
@@ -367,7 +363,7 @@ where
     }
 
     pub(crate) fn use_snapshots() -> bool {
-        S::use_snapshots()
+        todo!()
     }
 }
 
