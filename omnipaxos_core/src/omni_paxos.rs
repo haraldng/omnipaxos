@@ -3,13 +3,14 @@ use crate::utils::hocon_kv::*;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
-    sequence_paxos::SequencePaxos,
+    sequence_paxos::{SequencePaxos, ShadowEntry},
     storage::{Entry, Snapshot, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
 #[cfg(feature = "hocon_config")]
 use hocon::Hocon;
 use std::ops::RangeBounds;
+use std::time::Duration;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -34,6 +35,8 @@ pub struct OmniPaxosConfig {
     pub initial_leader: Option<Ballot>,
     #[cfg(feature = "logging")]
     pub logger_path: Option<String>,
+    #[cfg(feature = "async")]
+    election_timeout: Duration,
 }
 
 impl OmniPaxosConfig {
@@ -67,11 +70,12 @@ impl OmniPaxosConfig {
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, S, B>(self, storage: B) -> OmniPaxos<T, S, B>
+    pub fn build<T, S, B, C>(self, storage: B) -> OmniPaxos<T, S, B, C>
     where
         T: Entry,
         S: Snapshot<T>,
         B: Storage<T, S>,
+        C: Storage<ShadowEntry, ()>,
     {
         assert_ne!(self.pid, 0, "Pid cannot be 0");
         assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
@@ -104,27 +108,31 @@ impl Default for OmniPaxosConfig {
             initial_leader: None,
             #[cfg(feature = "logging")]
             logger_path: None,
+            #[cfg(feature = "async")]
+            election_timeout: Duration::from_millis(100),
         }
     }
 }
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
-pub struct OmniPaxos<T, S, B>
+pub struct OmniPaxos<T, S, B, C>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: Storage<ShadowEntry, ()>, // TODO: remove this generic somehow!
 {
-    seq_paxos: SequencePaxos<T, S, B>,
+    seq_paxos: SequencePaxos<T, S, B, C>,
     ble: BallotLeaderElection,
 }
 
-impl<T, S, B> OmniPaxos<T, S, B>
+impl<T, S, B, C> OmniPaxos<T, S, B, C>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: Storage<ShadowEntry, ()>,
 {
     /// Initiates the trim process.
     /// # Arguments
@@ -231,6 +239,13 @@ where
         self.seq_paxos.append(entry)
     }
 
+    /// Append an entry to the replicated log.
+    /// The returned future resolves when the appended entry is decided.
+    #[cfg(feature = "async")]
+    pub async fn append_async(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
+        self.seq_paxos.append_async(entry).await
+    }
+
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
     pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
         self.seq_paxos.reconfigure(rc)
@@ -252,6 +267,7 @@ where
     /// It is also used for the election process, where the server checks if it can become the leader.
     /// This function should be called periodically to detect leader failure and drive the election process.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
+    #[cfg(not(feature = "async"))]
     pub fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
             self.seq_paxos.handle_leader(b);

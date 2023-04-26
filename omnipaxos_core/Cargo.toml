@@ -10,6 +10,7 @@ slog = { version = "2.7.0", optional = true }
 slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 hocon = { version = "0.9.0", optional = true }
+tokio = { version = "1", optional = true, features = ["time", "sync"] }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
@@ -26,8 +27,9 @@ batch_accept = []
 continued_leader_reconfiguration = []
 logging  = [ "slog", "slog-term", "slog-async"]
 hocon_config = [ "hocon" ]
+async = [ "dep:tokio" ]
 
-default = ["continued_leader_reconfiguration", "batch_accept"]
+default = ["continued_leader_reconfiguration", "batch_accept", "async"]
 
 #[profile.release]
 #lto = true

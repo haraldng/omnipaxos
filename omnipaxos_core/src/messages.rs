@@ -7,6 +7,7 @@ use crate::{
 /// Internal component for log replication
 pub mod sequence_paxos {
     use crate::{
+        sequence_paxos::ShadowEntry,
         ballot_leader_election::Ballot,
         storage::{Entry, Snapshot, SnapshotType, StopSign},
         util::NodeId,
@@ -41,6 +42,9 @@ pub mod sequence_paxos {
         pub decided_snapshot: Option<SnapshotType<T, S>>,
         /// The log suffix.
         pub suffix: Vec<T>,
+        /// The shadow_log suffix.
+        #[cfg(feature = "async")]
+        pub shadow_suffix: Vec<Option<ShadowEntry>>,
         /// The decided index of this follower.
         pub decided_idx: u64,
         /// The log length of this follower.
@@ -62,6 +66,9 @@ pub mod sequence_paxos {
         pub decided_snapshot: Option<SnapshotType<T, S>>,
         /// The log suffix.
         pub suffix: Vec<T>,
+        /// The shadow_log suffix. Always starts at sync_idx.
+        #[cfg(feature = "async")]
+        pub shadow_suffix: Vec<Option<ShadowEntry>>,
         /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
         pub sync_idx: u64,
         /// The decided index
@@ -89,6 +96,9 @@ pub mod sequence_paxos {
         pub decided_idx: u64,
         /// Entries to be replicated.
         pub entries: Vec<T>,
+        /// ShadowEntries, used to uniquely identify entries on decide.
+        #[cfg(feature = "async")]
+        pub shadow_entries: Vec<Option<ShadowEntry>>,
     }
 
     /// Message sent by follower to leader when entries has been accepted.
@@ -159,7 +169,10 @@ pub mod sequence_paxos {
         Accepted(Accepted),
         Decide(Decide),
         /// Forward client proposals to the leader.
+        #[cfg(not(feature = "async"))]
         ProposalForward(Vec<T>),
+        #[cfg(feature = "async")]
+        ProposalForward(Vec<T>, Vec<Option<ShadowEntry>>),
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         AcceptedStopSign(AcceptedStopSign),

@@ -13,19 +13,45 @@ use crate::{
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
-use std::{fmt::Debug, marker::PhantomData, vec};
+use std::{fmt::Debug, marker::PhantomData, vec, future::Future};
+#[cfg(feature = "async")]
+use std::sync::Arc;
+#[cfg(feature = "async")]
+use tokio::sync::broadcast;
 
 pub mod follower;
 pub mod leader;
 
+/// Contains metadata about entries that is used to resolve
+/// or cancel waiting futures in the async API.
+#[cfg(feature = "async")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShadowEntry {
+    /// The proposer's PID
+    pub(crate) proposer: NodeId,
+    /// a proposal counter, locally unique to the proposer
+    pub(crate) counter: u64,
+    /// The proposer's promised ballot at the time of proposal
+    pub(crate) ballot: Ballot,
+    /// indicates if this entry was proposed by the async API or not
+    pub(crate) has_future: bool,
+}
+
+impl ShadowEntry {
+    fn generate(ballot: Ballot, has_future: bool) -> Self {
+        todo!()
+    }
+}
+
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 /// If snapshots are not desired to be used, use `()` for the type parameter `S`.
-pub(crate) struct SequencePaxos<T, S, B>
+pub(crate) struct SequencePaxos<T, S, B, C>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: Storage<Option<ShadowEntry>, ()>,
 {
     pub(crate) internal_storage: InternalStorage<B, T, S>,
     config_id: ConfigurationId,
@@ -34,6 +60,7 @@ where
     state: (Role, Phase),
     leader: Ballot,
     pending_proposals: Vec<T>,
+    pending_shadow_proposals: Vec<Option<ShadowEntry>>,
     pending_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T, S>>,
     leader_state: LeaderState<T, S>,
@@ -42,17 +69,24 @@ where
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
     logger: Logger,
+    // #[cfg(feature = "async")]
+    // send_msg_callback: dyn Fn(PaxosMessage<T, S>) -> dyn Future<Output = ()>,
+    #[cfg(feature = "async")]
+    shadow_log: InternalStorage<C, Option<ShadowEntry>, ()>,
+    #[cfg(feature = "async")]
+    shadow_broadcast: Arc<broadcast::Sender<ShadowEntry>>,
 }
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, S, B, C> SequencePaxos<T, S, B, C>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: Storage<Option<ShadowEntry>, ()>,
 {
     /*** User functions ***/
     /// Creates a Sequence Paxos replica.
-    pub(crate) fn with(config: SequencePaxosConfig, storage: B) -> Self {
+    pub(crate) fn with(config: SequencePaxosConfig, storage: B, shadow_storage: C) -> Self {
         let pid = config.pid;
         let peers = config.peers;
         let config_id = config.configuration_id;
@@ -82,14 +116,20 @@ where
                 (state, Ballot::default(), lds)
             }
         };
+        
+        let (bcast, _) = broadcast::channel(1000); // TODO: pick better buffer size
 
+        let internal_storage = InternalStorage::with(storage);
+        let shadow_log = InternalStorage::with(shadow_storage);
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage),
+            shadow_log,
+            internal_storage,
             config_id,
             pid,
             peers,
             state,
             pending_proposals: vec![],
+            pending_shadow_proposals: vec![],
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
@@ -104,6 +144,8 @@ where
                     .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
                 create_logger(s.as_str())
             },
+            #[cfg(feature = "async")]
+            shadow_broadcast: Arc::new(bcast),
         };
         paxos.internal_storage.set_promise(leader);
         #[cfg(feature = "logging")]
@@ -137,11 +179,11 @@ where
                 };
                 let result = self.internal_storage.try_trim(trimmed_idx);
                 if result.is_ok() {
-                    for pid in &self.peers {
+                    for pid in self.peers.clone() {
                         let msg = PaxosMsg::Compaction(Compaction::Trim(trimmed_idx));
-                        self.outgoing.push(PaxosMessage {
+                        self.send_msg(PaxosMessage {
                             from: self.pid,
-                            to: *pid,
+                            to: pid,
                             msg,
                         });
                     }
@@ -164,11 +206,11 @@ where
         let result = self.internal_storage.try_snapshot(idx);
         if !local_only && result.is_ok() {
             // since it is decided, it is ok even for a follower to send this
-            for pid in &self.peers {
+            for pid in self.peers.clone() {
                 let msg = PaxosMsg::Compaction(Compaction::Snapshot(idx));
-                self.outgoing.push(PaxosMessage {
+                self.send_msg(PaxosMessage {
                     from: self.pid,
-                    to: *pid,
+                    to: pid,
                     msg,
                 });
             }
@@ -189,10 +231,10 @@ where
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
     pub(crate) fn fail_recovery(&mut self) {
         self.state = (Role::Follower, Phase::Recover);
-        for pid in &self.peers {
-            self.outgoing.push(PaxosMessage {
+        for pid in self.peers.clone() {
+            self.send_msg(PaxosMessage {
                 from: self.pid,
-                to: *pid,
+                to: pid,
                 msg: PaxosMsg::PrepareReq,
             });
         }
@@ -207,6 +249,18 @@ where
             Compaction::Snapshot(idx) => {
                 let _ = self.snapshot(idx, true);
             }
+        }
+    }
+
+    /// Constructs a shadow_log suffix, prefixed by [None] if some entries are not available.
+    fn construct_shadow_log_suffix(&self, idx: usize) -> Vec<Option<ShadowEntry>> {
+        let compacted_idx = self.shadow_log.get_compacted_idx();
+        if compacted_idx > idx {
+            let suffix = vec![None; compacted_idx - idx];
+            suffix.append(&mut self.shadow_log.get_suffix(compacted_idx));
+            suffix
+        } else {
+            self.shadow_log.get_suffix(idx)
         }
     }
 
@@ -227,6 +281,15 @@ where
         outgoing
     }
 
+    fn send_msg(&mut self, msg: PaxosMessage<T, S>) {
+        // #[cfg(feature = "async")]
+        // {
+        //     todo!()
+        // }
+        // #[cfg(not(feature = "async"))]
+        self.outgoing.push(msg);
+    }
+
     /// Handle an incoming message.
     pub(crate) fn handle(&mut self, m: PaxosMessage<T, S>) {
         match m.msg {
@@ -242,7 +305,7 @@ where
             PaxosMsg::AcceptDecide(acc) => self.handle_acceptdecide(acc),
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
-            PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
+            PaxosMsg::ProposalForward(entries, shadow_entries) => self.handle_forwarded_proposal(entries, shadow_entries),
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
@@ -269,8 +332,49 @@ where
         if self.stopped() {
             Err(ProposeErr::Normal(entry))
         } else {
-            self.propose_entry(entry);
+            let shadow_entry = ShadowEntry::generate(self.internal_storage.get_promise(), false);
+            self.propose_entry(entry, shadow_entry);
             Ok(())
+        }
+    }
+
+    /// Append an entry to the replicated log.
+    /// The returned future resolves when the appended entry is decided.
+    #[cfg(feature = "async")]
+    pub(crate) async fn append_async(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
+        if self.stopped() {
+            return Err(ProposeErr::Normal(entry))
+        }
+        let shadow_entry = ShadowEntry::generate(self.internal_storage.get_promise(), true);
+
+        // we need to start listening before the actual proposal, so we cannot miss the decision
+        let mut receiver = self.shadow_broadcast.clone().subscribe();
+        self.propose_entry(entry, shadow_entry);
+        loop {
+            if let Ok(decided) = receiver.recv().await {
+                todo!("resolve or cancel logic")
+            }
+        }
+    }
+
+    #[cfg(feature = "async")]
+    fn notify_on_decided(&mut self, entry_id: ShadowEntry) {
+        let sender = self.shadow_broadcast.clone();
+        sender.send(entry_id);
+    }
+
+    fn update_decided_idx(&mut self, decided_idx: u64) {
+        self.internal_storage.set_decided_idx(decided_idx);
+        #[cfg(feature = "async")]
+        {
+            let range = 0..(decided_idx-self.shadow_log.offset) as usize;
+            for i in range.clone() {
+                if let Some(id) = self.shadow_log.log[i] {
+                    self.notify_on_decided(id);
+                }
+            }
+            self.shadow_log.log.drain(range);
+            self.shadow_log.offset = self.shadow_log.offset.max(decided_idx);
         }
     }
 
@@ -331,7 +435,7 @@ where
             ss,
         });
         for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
+            self.send_msg(PaxosMessage {
                 from: self.pid,
                 to: pid,
                 msg: acc_ss.clone(),
@@ -355,23 +459,24 @@ where
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
         }
-        self.outgoing.push(PaxosMessage {
+        self.send_msg(PaxosMessage {
             from: self.pid,
             to: pid,
             msg: PaxosMsg::PrepareReq,
         });
     }
 
-    fn propose_entry(&mut self, entry: T) {
+    fn propose_entry(&mut self, entry: T, shadow_entry: ShadowEntry) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.send_accept(entry),
+            (Role::Leader, Phase::Accept) => self.send_accept(entry, Some(shadow_entry)),
             (Role::Leader, Phase::FirstAccept) => {
                 self.send_first_accept();
-                self.send_accept(entry);
+                self.send_accept(entry, Some(shadow_entry));
             }
-            _ => self.forward_proposals(vec![entry]),
+            _ => self.forward_proposals(vec![entry], vec![Some(shadow_entry)]),
         }
+        todo!("use shadow entry")
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {

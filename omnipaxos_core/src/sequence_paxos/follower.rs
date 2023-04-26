@@ -6,11 +6,12 @@ use crate::storage::SnapshotType;
 #[cfg(feature = "logging")]
 use slog::debug;
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, S, B, C> SequencePaxos<T, S, B, C>
 where
     T: Entry,
     S: Snapshot<T>,
     B: Storage<T, S>,
+    C: Storage<Option<ShadowEntry>, ()>,
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
@@ -48,16 +49,26 @@ where
             } else {
                 (None, vec![])
             };
+            #[cfg(feature = "async")]
+            let shadow_suffix = if na > prep.n_accepted {
+                self.construct_shadow_log_suffix(prep.decided_idx)
+            } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
+                self.construct_shadow_log_suffix(prep.accepted_idx)
+            } else {
+                vec![]
+            };
             let promise = Promise {
                 n: prep.n,
                 n_accepted: na,
                 decided_snapshot,
                 suffix,
+                #[cfg(feature = "async")]
+                shadow_suffix,
                 decided_idx,
                 accepted_idx,
                 stopsign: self.get_stopsign(),
             };
-            self.outgoing.push(PaxosMessage {
+            self.send_msg(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Promise(promise),
@@ -97,12 +108,14 @@ where
                     }
                 }
             };
+            #[cfg(feature = "async")]
+            self.shadow_log.append_on_prefix(accsync.sync_idx, accsync.shadow_suffix);
             self.internal_storage.set_accepted_round(accsync.n);
             self.internal_storage.set_decided_idx(accsync.decided_idx);
             self.state = (Role::Follower, Phase::Accept);
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
-            self.outgoing.push(PaxosMessage {
+            self.send_msg(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Accepted(accepted),
@@ -121,7 +134,7 @@ where
                         self.accept_stopsign(ss);
                     }
                     let a = AcceptedStopSign { n: accsync.n };
-                    self.outgoing.push(PaxosMessage {
+                    self.send_msg(PaxosMessage {
                         from: self.pid,
                         to: from,
                         msg: PaxosMsg::AcceptedStopSign(a),
@@ -134,9 +147,14 @@ where
     }
 
     fn forward_pending_proposals(&mut self) {
-        let proposals = std::mem::take(&mut self.pending_proposals);
-        if !proposals.is_empty() {
-            self.forward_proposals(proposals);
+        let entries = std::mem::take(&mut self.pending_proposals);
+        #[cfg(feature = "async")]
+        let shadow_entries = std::mem::take(&mut self.pending_shadow_proposals);
+        if !entries.is_empty() {
+            #[cfg(not(feature = "async"))]
+            self.forward_proposals(entries);
+            #[cfg(feature = "async")]
+            self.forward_proposals(entries, shadow_entries);
         }
     }
 
@@ -156,11 +174,13 @@ where
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            let entries = acc.entries;
-            self.accept_entries(acc.n, entries);
+            #[cfg(not(feature = "async"))]
+            self.accept_entries(acc.n, acc.entries);
+            #[cfg(feature = "async")]
+            self.accept_entries(acc.n, acc.entries, acc.shadow_entries);
             // handle decide
             if acc.decided_idx > self.internal_storage.get_decided_idx() {
-                self.internal_storage.set_decided_idx(acc.decided_idx);
+                self.update_decided_idx(acc.decided_idx);
             }
         }
     }
@@ -171,7 +191,7 @@ where
         {
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign { n: acc_ss.n };
-            self.outgoing.push(PaxosMessage {
+            self.send_msg(PaxosMessage {
                 from: self.pid,
                 to: self.leader.pid,
                 msg: PaxosMsg::AcceptedStopSign(a),
@@ -181,7 +201,7 @@ where
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            self.internal_storage.set_decided_idx(dec.decided_idx);
+            self.update_decided_idx(dec.decided_idx);
         }
     }
 
@@ -198,8 +218,10 @@ where
         }
     }
 
-    fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) {
+    fn accept_entries(&mut self, n: Ballot, entries: Vec<T>, #[cfg(feature = "async")] mut shadow_entries: Vec<Option<ShadowEntry>>) {
         let accepted_idx = self.internal_storage.append_entries(entries);
+        #[cfg(feature = "async")]
+        self.shadow_log.append_entries(shadow_entries);
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
                 let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
@@ -212,7 +234,7 @@ where
                 let accepted = Accepted { n, accepted_idx };
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
-                self.outgoing.push(PaxosMessage {
+                self.send_msg(PaxosMessage {
                     from: self.pid,
                     to: self.leader.pid,
                     msg: PaxosMsg::Accepted(accepted),

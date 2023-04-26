@@ -45,7 +45,7 @@ pub(crate) struct BallotLeaderElection {
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
     /// Vector that holds all the other replicas.
-    peers: Vec<u64>,
+    peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
     /// Vector which holds all the received ballots.

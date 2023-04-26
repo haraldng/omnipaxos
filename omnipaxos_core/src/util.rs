@@ -4,6 +4,8 @@ use super::{
     storage::{Entry, Snapshot, SnapshotType, StopSign},
 };
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+#[cfg(feature = "async")]
+use crate::sequence_paxos::ShadowEntry;
 
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
@@ -49,7 +51,10 @@ where
     pub decided_indexes: Vec<Option<u64>>,
     pub chosen_idx: u64, // length of longest chosen seq
     pub max_promise_meta: PromiseMetaData,
+    #[cfg(not(feature = "async"))]
     pub max_promise: Option<(Option<SnapshotType<T, S>>, Vec<T>)>, // (decided_snapshot, suffix)
+    #[cfg(feature = "async")]
+    pub max_promise: Option<(Option<SnapshotType<T, S>>, Vec<T>, Vec<Option<ShadowEntry>>)>, // (decided_snapshot, suffix, shadow_suffix)
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
@@ -99,9 +104,15 @@ where
             pid: from,
             stopsign: prom.stopsign,
         };
+        #[cfg(not(feature = "async"))]
         if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
-            self.max_promise = Some((prom.decided_snapshot, prom.suffix))
+            self.max_promise = Some((prom.decided_snapshot, prom.suffix));
+        }
+        #[cfg(feature = "async")]
+        if check_max_prom && promise_meta > self.max_promise_meta {
+            self.max_promise_meta = promise_meta.clone();
+            self.max_promise = Some((prom.decided_snapshot, prom.suffix, prom.shadow_suffix));
         }
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
@@ -109,7 +120,13 @@ where
         num_promised >= self.majority
     }
 
+    #[cfg(not(feature = "async"))]
     pub fn take_max_promise(&mut self) -> Option<(Option<SnapshotType<T, S>>, Vec<T>)> {
+        std::mem::take(&mut self.max_promise)
+    }
+
+    #[cfg(feature = "async")]
+    pub fn take_max_promise(&mut self) -> Option<(Option<SnapshotType<T, S>>, Vec<T>, Vec<Option<ShadowEntry>>)> {
         std::mem::take(&mut self.max_promise)
     }
 
