@@ -3,8 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{ballot_leader_election::Ballot, util::NodeId};
 use serial_test::serial;
-use std::thread;
-use std::time::Duration;
+use std::{thread, time::Duration};
 use utils::{TestConfig, TestSystem, Value};
 
 const TRIM_INDEX_INCREMENT: u64 = 10;

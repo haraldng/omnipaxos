@@ -5,9 +5,9 @@ use crate::{
     storage::{Entry, Snapshot, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
-use std::ops::RangeBounds;
 #[cfg(feature = "toml-config")]
 use serde::Deserialize;
+use std::ops::RangeBounds;
 #[cfg(feature = "toml-config")]
 use std::{error::Error, fs};
 #[cfg(feature = "toml-config")]
