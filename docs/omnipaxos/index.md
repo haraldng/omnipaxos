@@ -41,7 +41,7 @@ let omnipaxos_config = OmniPaxosConfig {
 let storage = MemoryStorage::<KeyValue, ()>::default();
 let mut omni_paxos = omni_paxos_config.build(storage);
 ```
-For convenience, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
+With the toml_config feature enabled, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
 
 ```toml
 configuration_id = 1

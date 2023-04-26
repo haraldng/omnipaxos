@@ -34,7 +34,7 @@ use sled::Config;
 pub struct TestConfig {
     pub num_threads: usize,
     pub num_nodes: usize,
-    pub wait_timeout_sec: u64,
+    pub wait_timeout_ms: u64,
     pub election_timeout_ms: u64,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
@@ -59,7 +59,7 @@ impl Default for TestConfig {
         Self {
             num_threads: 3,
             num_nodes: 3,
-            wait_timeout_sec: 1,
+            wait_timeout_ms: 3000,
             election_timeout_ms: 50,
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,

@@ -48,9 +48,9 @@ fn increasing_accept_seq_num_test() {
     sys.make_proposals(
         1,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader_id = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -129,9 +129,9 @@ fn reconnect_to_leader_test() {
     sys.make_proposals(
         2,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader_id = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -146,7 +146,7 @@ fn reconnect_to_leader_test() {
     sys.make_proposals(
         leader_id,
         unseen_by_follower_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
 
     // Decide entries after omission period so follower finds seq break
@@ -156,7 +156,7 @@ fn reconnect_to_leader_test() {
     sys.make_proposals(
         leader_id,
         seen_by_follower_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
 
     // Wait for Re-sync with leader to finish

@@ -31,9 +31,9 @@ fn leader_fail_follower_propose_test() {
     sys.make_proposals(
         1,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -89,9 +89,9 @@ fn leader_fail_leader_propose_test() {
     sys.make_proposals(
         1,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
 
     kill_and_recover_node(&mut sys, &cfg, leader);
     check_last_proposals(leader, leader, &sys, &cfg);
@@ -143,9 +143,9 @@ fn follower_fail_leader_propose_test() {
     sys.make_proposals(
         1,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -201,9 +201,9 @@ fn follower_fail_follower_propose_test() {
     sys.make_proposals(
         1,
         initial_proposals,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     );
-    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
+    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -266,7 +266,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(
         futures,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),

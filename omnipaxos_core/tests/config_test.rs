@@ -1,4 +1,4 @@
-#![cfg(feature = "toml-config")]
+#![cfg(feature = "toml_config")]
 
 use omnipaxos_core::{ballot_leader_election::Ballot, omni_paxos::OmniPaxosConfig};
 use serial_test::serial;
@@ -20,7 +20,7 @@ fn config_all_fields_test() {
             #[cfg(feature = "logging")]
             assert_eq!(
                 omnipaxos_config.logger_file_path,
-                Some("/sequencepaxos/logs".to_string())
+                Some("/omnipaxos/logs".to_string())
             );
             assert_eq!(omnipaxos_config.leader_priority, 2);
             assert_eq!(

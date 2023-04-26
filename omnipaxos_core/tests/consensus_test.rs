@@ -45,7 +45,7 @@ fn consensus_test() {
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(
         futures,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),

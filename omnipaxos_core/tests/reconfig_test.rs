@@ -37,7 +37,7 @@ fn reconfig_test() {
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(
         futures,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
@@ -54,7 +54,7 @@ fn reconfig_test() {
     });
 
     let decided_ss_metadata = reconfig_f
-        .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("Failed to collect reconfiguration future");
     assert_eq!(decided_ss_metadata, Value(SS_METADATA as u64));
 

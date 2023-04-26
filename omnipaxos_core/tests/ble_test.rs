@@ -39,7 +39,7 @@ fn ble_test() {
 
     for (i, fr) in futures.into_iter().enumerate() {
         let elected_leader = fr
-            .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+            .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
             .expect(format!("No leader in election {}", i + 1).as_str());
         println!("elected: {:?}", elected_leader);
         sys.kill_node(elected_leader.pid);

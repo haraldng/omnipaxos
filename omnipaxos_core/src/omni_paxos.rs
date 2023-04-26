@@ -1,3 +1,5 @@
+#[cfg(feature = "toml_config")]
+use crate::errors::ConfigError;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
@@ -5,12 +7,12 @@ use crate::{
     storage::{Entry, Snapshot, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
-#[cfg(feature = "toml-config")]
+#[cfg(feature = "toml_config")]
 use serde::Deserialize;
+#[cfg(feature = "toml_config")]
+use std::fs;
 use std::ops::RangeBounds;
-#[cfg(feature = "toml-config")]
-use std::{error::Error, fs};
-#[cfg(feature = "toml-config")]
+#[cfg(feature = "toml_config")]
 use toml;
 
 /// Configuration for `OmniPaxos`.
@@ -24,7 +26,7 @@ use toml;
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "toml-config", derive(Deserialize), serde(default))]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
     pub configuration_id: u32,
     pub pid: NodeId,
@@ -40,8 +42,8 @@ pub struct OmniPaxosConfig {
 
 impl OmniPaxosConfig {
     /// Creates a new `OmniPaxosConfig` from a `toml` file.
-    #[cfg(feature = "toml-config")]
-    pub fn with_toml(file_path: &str) -> Result<Self, Box<dyn Error>> {
+    #[cfg(feature = "toml_config")]
+    pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
         let config_file = fs::read_to_string(file_path)?;
         let config: OmniPaxosConfig = toml::from_str(&config_file)?;
         Ok(config)

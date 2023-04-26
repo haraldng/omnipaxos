@@ -27,8 +27,8 @@ rand = "0.8.4"
 batch_accept = []
 continued_leader_reconfiguration = []
 logging  = ["slog", "slog-term", "slog-async"]
-toml-config = ["serde", "toml"]
+toml_config = ["serde", "toml"]
 default = ["continued_leader_reconfiguration", "batch_accept"]
 
-#[profile.release]
-#lto = true
+[profile.release]
+lto = true

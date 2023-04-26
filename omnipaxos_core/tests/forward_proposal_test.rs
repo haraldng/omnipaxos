@@ -29,7 +29,7 @@ fn forward_proposal_test() {
     sys.start_all_nodes();
 
     let elected_leader = kfuture_ble
-        .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("No leader has been elected in the allocated time!");
     println!("elected: {:?}", elected_leader);
 
@@ -52,7 +52,7 @@ fn forward_proposal_test() {
     });
 
     let decided = kfuture_px
-        .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("The message was not proposed in the allocated time!");
 
     assert_eq!(

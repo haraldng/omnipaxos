@@ -27,7 +27,7 @@ fn trim_test() {
     sys.start_all_nodes();
 
     let elected_pid = kfuture
-        .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
@@ -46,7 +46,7 @@ fn trim_test() {
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(
         futures,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
@@ -56,7 +56,7 @@ fn trim_test() {
         x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_secs(cfg.wait_timeout_sec));
+    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
 
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
@@ -97,7 +97,7 @@ fn double_trim_test() {
     sys.start_all_nodes();
 
     let elected_pid = kfuture
-        .wait_timeout(Duration::from_secs(cfg.wait_timeout_sec))
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
@@ -116,7 +116,7 @@ fn double_trim_test() {
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(
         futures,
-        Duration::from_secs(cfg.wait_timeout_sec),
+        Duration::from_millis(cfg.wait_timeout_ms),
     ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
@@ -126,7 +126,7 @@ fn double_trim_test() {
         x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_secs(cfg.wait_timeout_sec));
+    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
 
     elected_leader.on_definition(|x| {
         x.paxos
@@ -134,7 +134,7 @@ fn double_trim_test() {
             .expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_secs(cfg.wait_timeout_sec));
+    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
 
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {
