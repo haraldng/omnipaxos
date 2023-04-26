@@ -14,17 +14,13 @@ use crate::{
     util::NodeId,
 };
 #[cfg(feature = "serde")]
-use serde_crate::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 
 /// Used to define an epoch
 #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ballot {
     /// Ballot number
     pub n: u32,

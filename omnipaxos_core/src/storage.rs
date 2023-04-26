@@ -4,7 +4,7 @@ use crate::{
     util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
 };
 #[cfg(feature = "serde")]
-use serde_crate::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     marker::PhantomData,
@@ -32,11 +32,7 @@ impl StopSignEntry {
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSign {
     /// The identifier for the new configuration.
     pub config_id: ConfigurationId,
@@ -66,11 +62,7 @@ impl PartialEq for StopSign {
 /// Snapshot type. A `Complete` snapshot contains all snapshotted data while `Delta` has snapshotted changes since an earlier snapshot.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SnapshotType<T, S>
 where
     T: Entry,
