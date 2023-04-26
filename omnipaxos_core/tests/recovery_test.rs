@@ -1,13 +1,11 @@
 pub mod utils;
 
-use crate::utils::StorageTypeSelector;
 use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos_core::util::LogEntry;
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{verification::verify_log, LatestValue, TestConfig, TestSystem, Value};
 
-const PERSISTENT_STORAGE: StorageTypeSelector = StorageTypeSelector::Persistent;
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[test]
@@ -18,9 +16,9 @@ fn leader_fail_follower_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
-        PERSISTENT_STORAGE,
+        cfg.storage_type,
     );
 
     sys.start_all_nodes();
@@ -30,8 +28,12 @@ fn leader_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
-    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        initial_proposals,
+        Duration::from_secs(cfg.wait_timeout_sec),
+    );
+    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -72,9 +74,9 @@ fn leader_fail_leader_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
-        PERSISTENT_STORAGE,
+        cfg.storage_type,
     );
 
     sys.start_all_nodes();
@@ -84,8 +86,12 @@ fn leader_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
-    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        initial_proposals,
+        Duration::from_secs(cfg.wait_timeout_sec),
+    );
+    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
 
     kill_and_recover_node(&mut sys, &cfg, leader);
     check_last_proposals(leader, leader, &sys, &cfg);
@@ -122,9 +128,9 @@ fn follower_fail_leader_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
-        PERSISTENT_STORAGE,
+        cfg.storage_type,
     );
 
     sys.start_all_nodes();
@@ -134,8 +140,12 @@ fn follower_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
-    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        initial_proposals,
+        Duration::from_secs(cfg.wait_timeout_sec),
+    );
+    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -176,9 +186,9 @@ fn follower_fail_follower_propose_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
-        PERSISTENT_STORAGE,
+        cfg.storage_type,
     );
 
     sys.start_all_nodes();
@@ -188,8 +198,12 @@ fn follower_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
-    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        initial_proposals,
+        Duration::from_secs(cfg.wait_timeout_sec),
+    );
+    let leader = sys.get_elected_leader(1, Duration::from_secs(cfg.wait_timeout_sec));
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -250,7 +264,10 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         });
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(
+        futures,
+        Duration::from_secs(cfg.wait_timeout_sec),
+    ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -265,8 +282,8 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     sys.create_node(
         pid,
         cfg.num_nodes,
-        cfg.election_timeout,
-        PERSISTENT_STORAGE,
+        cfg.election_timeout_ms,
+        cfg.storage_type,
         &storage_path,
     );
     sys.start_node(pid);
