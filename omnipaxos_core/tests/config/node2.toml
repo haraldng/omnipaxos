@@ -1,2 +1,2 @@
-# This file is used for tests in /tests/config_test.rs 
+# This file is used for testing that unspecified fields are deserialized to default values
 configuration_id = 2
