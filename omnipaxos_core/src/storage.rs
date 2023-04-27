@@ -169,6 +169,72 @@ impl<T: Entry> Snapshot<T> for () {
     }
 }
 
+#[derive(Clone)]
+struct StateCache<T>
+    where
+        T: Entry,
+{
+    /// Vector which contains all the logged entries in-memory.
+    log: Vec<T>,
+    /// Last promised round.
+    n_prom: Ballot,
+    /// Last accepted round.
+    acc_round: Ballot,
+    /// Length of the decided log.
+    ld: u64,
+    /// Garbage collected index.
+    trimmed_idx: u64,
+}
+
+
+impl<T> StateCache<T>
+    where
+        T: Entry
+{
+    pub fn new() -> Self {
+        StateCache {
+            log: Vec::new(),
+            n_prom: Ballot::default(),
+            acc_round: Ballot::default(),
+            ld: 0,
+            trimmed_idx: 0,
+        }
+    }
+    // Getters
+    pub fn get_logs(&self) -> &Vec<T> {
+        &self.log
+    }
+    pub fn get_promise(&self) -> Ballot {
+        self.n_prom
+    }
+    pub fn get_accepted_round(&self) -> Ballot {
+        self.acc_round
+    }
+    pub fn get_decided_idx(&self) -> u64 {
+        self.ld
+    }
+    pub fn get_trimmed_idx(&self) -> u64 {
+        self.trimmed_idx
+    }
+
+    // Setters
+    pub fn set_logs(&mut self, log: Vec<T>) {
+        self.log = log;
+    }
+    pub fn set_promise(&mut self, n_prom: Ballot) {
+        self.n_prom = n_prom;
+    }
+    pub fn set_accepted_round(&mut self, acc_round: Ballot) {
+        self.acc_round = acc_round;
+    }
+    pub fn set_decided_idx(&mut self, ld: u64) {
+        self.ld = ld;
+    }
+    pub fn set_trimmed_idx(&mut self, trimmed_idx: u64) {
+        self.trimmed_idx = trimmed_idx;
+    }
+}
+
 /// Internal representation of storage. Hides all complexities with the compacted index
 /// such that Sequence Paxos accesses the log with the uncompacted index.
 pub(crate) struct InternalStorage<I, T, S>
@@ -178,6 +244,7 @@ where
     S: Snapshot<T>,
 {
     storage: I,
+    state_cache: StateCache<T>,
     _t: PhantomData<T>,
     _i: PhantomData<S>,
 }
@@ -189,11 +256,14 @@ where
     S: Snapshot<T>,
 {
     pub(crate) fn with(storage: I) -> Self {
-        InternalStorage {
+        let mut internal_store = InternalStorage {
             storage,
+            state_cache: StateCache::new(),
             _t: Default::default(),
             _i: Default::default(),
-        }
+        };
+        internal_store.load_cache();
+        internal_store
     }
 
     fn get_entry_type(
@@ -353,6 +423,12 @@ where
         }
     }
 
+    fn load_cache(&mut self) {
+        self.state_cache.set_decided_idx(self.storage.get_decided_idx());
+        self.state_cache.set_accepted_round(self.storage.get_accepted_round());
+        self.state_cache.set_promise(self.storage.get_promise());
+    }
+
     /*** Writing ***/
     pub(crate) fn append_entry(&mut self, entry: T) -> u64 {
         self.storage.append_entry(entry) + self.storage.get_compacted_idx()
@@ -378,23 +454,27 @@ where
     }
 
     pub(crate) fn set_promise(&mut self, n_prom: Ballot) {
+        self.state_cache.set_promise(n_prom);
         self.storage.set_promise(n_prom)
     }
 
     pub(crate) fn set_decided_idx(&mut self, ld: u64) {
+        self.state_cache.set_decided_idx(ld);
         self.storage.set_decided_idx(ld)
     }
 
     pub(crate) fn get_decided_idx(&self) -> u64 {
-        self.storage.get_decided_idx()
+        self.state_cache.get_decided_idx()
+        // self.storage.get_decided_idx()
     }
 
     pub(crate) fn set_accepted_round(&mut self, na: Ballot) {
+        self.state_cache.set_accepted_round(na);
         self.storage.set_accepted_round(na)
     }
 
     pub(crate) fn get_accepted_round(&self) -> Ballot {
-        self.storage.get_accepted_round()
+        self.state_cache.get_accepted_round()
     }
 
     pub(crate) fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
@@ -423,7 +503,7 @@ where
     }
 
     pub(crate) fn get_promise(&self) -> Ballot {
-        self.storage.get_promise()
+        self.state_cache.get_promise()
     }
 
     pub(crate) fn set_stopsign(&mut self, s: StopSignEntry) {
