@@ -11,7 +11,11 @@ use crate::{
 use serde::Deserialize;
 #[cfg(feature = "toml_config")]
 use std::fs;
-use std::ops::RangeBounds;
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+    ops::RangeBounds,
+};
 #[cfg(feature = "toml_config")]
 use toml;
 
@@ -171,7 +175,12 @@ where
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
     pub fn read(&self, idx: u64) -> Option<LogEntry<T>> {
-        match self.seq_paxos.internal_storage.read(idx..idx + 1) {
+        match self
+            .seq_paxos
+            .internal_storage
+            .read(idx..idx + 1)
+            .expect("storage error")
+        {
             Some(mut v) => v.pop(),
             None => None,
         }
@@ -182,7 +191,10 @@ where
     where
         R: RangeBounds<u64>,
     {
-        self.seq_paxos.internal_storage.read(r)
+        self.seq_paxos
+            .internal_storage
+            .read(r)
+            .expect("storage error")
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
@@ -190,6 +202,7 @@ where
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
+            .expect("storage error")
     }
 
     /// Handle an incoming message.
@@ -280,4 +293,11 @@ pub enum CompactionErr {
     NotAllDecided(u64),
     /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
     NotCurrentLeader(NodeId),
+}
+
+impl Error for CompactionErr {}
+impl Display for CompactionErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(self, f)
+    }
 }
