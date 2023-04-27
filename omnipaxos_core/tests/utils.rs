@@ -11,8 +11,9 @@ use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str, sync::Arc, time::Duration};
+use std::{collections::HashMap, error::Error, fs, str, sync::Arc, time::Duration};
 use tempfile::TempDir;
+use toml;
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -23,56 +24,53 @@ const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
 
-#[cfg(feature = "hocon_config")]
-use hocon::{Error, Hocon, HoconLoader};
 use omnipaxos_core::omni_paxos::OmniPaxosConfig;
 use sled::Config;
 
-#[cfg(feature = "hocon_config")]
 /// Configuration for `TestSystem`. TestConfig loads the values from
-/// the configuration file `test.conf` using hocon
+/// the configuration file `/tests/config/test.toml` using toml
+#[derive(Deserialize)]
+#[serde(default)]
 pub struct TestConfig {
-    pub wait_timeout: Duration,
     pub num_threads: usize,
     pub num_nodes: usize,
-    pub election_timeout: Duration,
+    pub wait_timeout_ms: u64,
+    pub election_timeout_ms: u64,
+    pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
-    pub storage_type: StorageTypeSelector,
 }
 
-#[cfg(feature = "hocon_config")]
 impl TestConfig {
-    pub fn load(name: &str) -> Result<TestConfig, Error> {
-        let raw_cfg = HoconLoader::new()
-            .load_file("tests/config/test.conf")?
-            .hocon()?;
-
-        let cfg: &Hocon = &raw_cfg[name];
-
-        Ok(TestConfig {
-            wait_timeout: cfg["wait_timeout"].as_duration().unwrap_or_default(),
-            num_threads: cfg["num_threads"].as_i64().unwrap_or_default() as usize,
-            num_nodes: cfg["num_nodes"].as_i64().unwrap_or_default() as usize,
-            election_timeout: Duration::from_millis(
-                cfg["election_timeout_ms"].as_i64().unwrap_or_default() as u64,
-            ),
-            num_proposals: cfg["num_proposals"].as_i64().unwrap_or_default() as u64,
-            num_elections: cfg["num_elections"].as_i64().unwrap_or_default() as u64,
-            gc_idx: cfg["gc_idx"].as_i64().unwrap_or_default() as u64,
-            storage_type: StorageTypeSelector::with(
-                &cfg["storage_type"]
-                    .as_string()
-                    .unwrap_or(MEMORY.to_string()),
-            ),
-        })
+    pub fn load(name: &str) -> Result<TestConfig, Box<dyn Error>> {
+        let config_file =
+            fs::read_to_string("tests/config/test.toml").expect("Couldn't find config file.");
+        let mut configs: HashMap<String, TestConfig> = toml::from_str(&config_file)?;
+        let config = configs
+            .remove(name)
+            .expect(&format!("Couldnt find config for {}", name));
+        Ok(config)
     }
 }
 
+impl Default for TestConfig {
+    fn default() -> Self {
+        Self {
+            num_threads: 3,
+            num_nodes: 3,
+            wait_timeout_ms: 3000,
+            election_timeout_ms: 50,
+            storage_type: StorageTypeSelector::Memory,
+            num_proposals: 100,
+            num_elections: 0,
+            gc_idx: 0,
+        }
+    }
+}
 /// An enum for selecting storage type. The type
 /// can be set in `config/test.conf` at `storage_type`
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize)]
 pub enum StorageTypeSelector {
     Persistent,
     Memory,
@@ -266,7 +264,7 @@ pub struct TestSystem {
 impl TestSystem {
     pub fn with(
         num_nodes: usize,
-        election_timeout: Duration,
+        election_timeout_ms: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
     ) -> Self {
@@ -297,7 +295,11 @@ impl TestSystem {
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
+                OmniPaxosComponent::with(
+                    pid,
+                    op_config.build(storage),
+                    Duration::from_millis(election_timeout_ms),
+                )
             });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
             omni_refs.insert(pid, omni_replica.actor_ref());
@@ -352,7 +354,7 @@ impl TestSystem {
         &mut self,
         pid: u64,
         num_nodes: usize,
-        election_timeout: Duration,
+        election_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
     ) {
@@ -369,7 +371,11 @@ impl TestSystem {
             .as_ref()
             .expect("No KompactSystem found!")
             .create_and_register(|| {
-                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout)
+                OmniPaxosComponent::with(
+                    pid,
+                    op_config.build(storage),
+                    Duration::from_millis(election_timeout_ms),
+                )
             });
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");

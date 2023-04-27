@@ -3,6 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask};
 use omnipaxos_core::ballot_leader_election::Ballot;
 use serial_test::serial;
+use std::time::Duration;
 use utils::{TestConfig, TestSystem};
 
 /// Test Ballot Election Leader module.
@@ -16,7 +17,7 @@ fn ble_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );
@@ -38,7 +39,7 @@ fn ble_test() {
 
     for (i, fr) in futures.into_iter().enumerate() {
         let elected_leader = fr
-            .wait_timeout(cfg.wait_timeout)
+            .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
             .expect(format!("No leader in election {}", i + 1).as_str());
         println!("elected: {:?}", elected_leader);
         sys.kill_node(elected_leader.pid);

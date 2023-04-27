@@ -41,7 +41,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --features default,logging,hocon_config
+          args: --verbose --features default,logging,toml_config
 
   format:
     name: cargo fmt
