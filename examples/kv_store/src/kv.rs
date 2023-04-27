@@ -1,18 +1,31 @@
+#[cfg(not(feature = "derive_entry"))]
+use omnipaxos_core::storage::Entry;
 use omnipaxos_core::storage::Snapshot;
+#[cfg(feature = "derive_entry")]
+use omnipaxos_macros::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "derive_entry", derive(Entry))]
+// if we do not want to use snapshots, we can simply derive the Entry trait for KeyValue.
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
 }
 
+#[cfg(not(feature = "derive_entry"))]
+impl Entry for KeyValue {
+    // we can also use snapshots by implementing the Entry trait and manually setting the Snapshot type.
+    type Snapshot = KVSnapshot;
+}
+
+#[cfg(not(feature = "derive_entry"))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KVSnapshot {
     snapshotted: HashMap<String, u64>,
 }
-
+#[cfg(not(feature = "derive_entry"))]
 impl Snapshot<KeyValue> for KVSnapshot {
     fn create(entries: &[KeyValue]) -> Self {
         let mut snapshotted = HashMap::new();
