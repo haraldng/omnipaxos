@@ -1,0 +1,2 @@
+# This file is used for testing that unspecified fields are deserialized to default values
+configuration_id = 2

@@ -41,25 +41,19 @@ let omnipaxos_config = OmniPaxosConfig {
 let storage = MemoryStorage::<KeyValue, ()>::default();
 let mut omni_paxos = omni_paxos_config.build(storage);
 ```
-For convenience, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_hocon()` that loads the values using [hocon](https://vleue.com/hocon.rs/hocon/index.html). One could then instead have the parameters in a file `config/node2.conf`
+With the toml_config feature enabled, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
 
-```json
-{
-    config_id: 1,
-    pid: 2,
-    log_file_path: "/omnipaxos/logs"
-}
+```toml
+configuration_id = 1
+pid = 2
+peers = [1, 3]
+logger_file_path = "/omnipaxos/logs"
 ```
 This can then be loaded to construct `OmniPaxosConfig`:
 
 ```rust,edition2018,no_run,noplaypen
-let cfg = HoconLoader::new()
-    .load_file("tests/config/node2.conf")
-    .expect("Failed to load hocon file")
-    .hocon()
-    .unwrap();
-
-let omni_paxos_config = OmniPaxosConfig::with_hocon(cfg);
+let config_file_path = "config/node1.toml"; 
+let omni_paxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 
 ## Fail-recovery
