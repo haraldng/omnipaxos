@@ -6,7 +6,7 @@ use omnipaxos_core::{
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{verification::verify_log, LatestValue, TestConfig, TestSystem, Value};
+use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 const INITIAL_PROPOSALS: u64 = 5;
@@ -163,7 +163,7 @@ fn reconnect_to_leader_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
