@@ -17,6 +17,7 @@ fn forward_proposal_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );

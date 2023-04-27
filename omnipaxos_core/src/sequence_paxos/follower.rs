@@ -175,7 +175,11 @@ where
         if self.internal_storage.get_promise() == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
         {
-            self.accept_stopsign(acc_ss.ss);
+            match self.internal_storage.get_stopsign() {
+                Some(ss_entry) if ss_entry.stopsign != acc_ss.ss => self.accept_stopsign(acc_ss.ss),
+                None => self.accept_stopsign(acc_ss.ss),
+                _ => (),
+            }
             let a = AcceptedStopSign { n: acc_ss.n };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,

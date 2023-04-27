@@ -21,6 +21,9 @@ use toml;
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
+/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
+/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered
+/// dropped and thus resent.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
@@ -32,6 +35,8 @@ pub struct OmniPaxosConfig {
     pub pid: NodeId,
     pub peers: Vec<u64>,
     pub buffer_size: usize,
+    pub election_tick_timeout: u64,
+    pub resend_message_tick_timeout: u64,
     pub skip_prepare_use_leader: Option<Ballot>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
@@ -69,7 +74,10 @@ impl OmniPaxosConfig {
         };
         OmniPaxos {
             seq_paxos: SequencePaxos::with(self.clone().into(), storage),
-            ble: BallotLeaderElection::with(self.into()),
+            ble: BallotLeaderElection::with(self.clone().into()),
+            election_tick_timeout: self.election_tick_timeout,
+            resend_message_tick_timeout: self.resend_message_tick_timeout,
+            tick: 0,
         }
     }
 }
@@ -81,6 +89,8 @@ impl Default for OmniPaxosConfig {
             pid: 0,
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
+            election_tick_timeout: 100,
+            resend_message_tick_timeout: 500,
             skip_prepare_use_leader: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
@@ -100,6 +110,9 @@ where
 {
     seq_paxos: SequencePaxos<T, S, B>,
     ble: BallotLeaderElection,
+    election_tick_timeout: u64,
+    resend_message_tick_timeout: u64,
+    tick: u64,
 }
 
 impl<T, S, B> OmniPaxos<T, S, B>
@@ -222,6 +235,22 @@ where
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub fn reconnected(&mut self, pid: NodeId) {
         self.seq_paxos.reconnected(pid)
+    }
+
+    /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
+    /// ticks. Also drives the detection and resending of dropped omnipaxos messages every `resend_message_tick_timeout` ticks.
+    pub fn tick(&mut self) {
+        self.tick += 1;
+        if self.tick % self.election_tick_timeout == 0 {
+            self.election_timeout();
+        }
+        if self.tick % self.resend_message_tick_timeout == 0 {
+            self.seq_paxos.resend_message_timeout();
+        }
+        // Reset tick so it never overflows
+        if self.tick == (self.election_tick_timeout * self.resend_message_tick_timeout) {
+            self.tick = 0;
+        }
     }
 
     /*** BLE calls ***/
