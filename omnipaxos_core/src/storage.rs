@@ -169,6 +169,7 @@ impl<T: Entry> Snapshot<T> for () {
     }
 }
 
+/// A simple in-memory storage for simple state values of OmniPaxos.
 #[derive(Clone)]
 struct StateCache<T>
     where
@@ -201,6 +202,7 @@ impl<T> StateCache<T>
         }
     }
     // Getters
+    #[allow(dead_code)]
     pub fn get_logs(&self) -> &Vec<T> {
         &self.log
     }
@@ -213,11 +215,13 @@ impl<T> StateCache<T>
     pub fn get_decided_idx(&self) -> u64 {
         self.ld
     }
+    #[allow(dead_code)]
     pub fn get_trimmed_idx(&self) -> u64 {
         self.trimmed_idx
     }
 
     // Setters
+    #[allow(dead_code)]
     pub fn set_logs(&mut self, log: Vec<T>) {
         self.log = log;
     }
@@ -230,6 +234,7 @@ impl<T> StateCache<T>
     pub fn set_decided_idx(&mut self, ld: u64) {
         self.ld = ld;
     }
+    #[allow(dead_code)]
     pub fn set_trimmed_idx(&mut self, trimmed_idx: u64) {
         self.trimmed_idx = trimmed_idx;
     }
