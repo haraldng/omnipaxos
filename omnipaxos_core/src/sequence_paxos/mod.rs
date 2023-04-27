@@ -361,10 +361,6 @@ where
     fn get_stopsign(&self) -> Option<StopSign> {
         self.internal_storage.get_stopsign().map(|x| x.stopsign)
     }
-
-    pub(crate) fn use_snapshots() -> bool {
-        todo!()
-    }
 }
 
 #[derive(PartialEq, Debug)]

@@ -17,13 +17,6 @@ pub trait Entry: Clone + Debug {
     type Snapshot: Snapshot<Self>;
 }
 
-impl<T> Entry for T
-where
-    T: Clone + Debug,
-{
-    type Snapshot = ();
-}
-
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
@@ -162,15 +155,17 @@ where
     fn get_snapshot(&self) -> Option<T::Snapshot>;
 }
 
-#[allow(missing_docs)]
+/// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.
+#[derive(Clone, Debug)]
+pub struct NoSnapshot;
 
-impl<T: Entry> Snapshot<T> for () {
-    fn create(_: &[T]) -> Self {
-        unimplemented!()
+impl<T: Entry> Snapshot<T> for NoSnapshot {
+    fn create(_entries: &[T]) -> Self {
+        panic!("NoSnapshot should not be created");
     }
 
-    fn merge(&mut self, _: Self) {
-        unimplemented!()
+    fn merge(&mut self, _delta: Self) {
+        panic!("NoSnapshot should not be merged");
     }
 
     fn use_snapshots() -> bool {

@@ -2,7 +2,10 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
-use crate::{storage::SnapshotType, util::MessageStatus};
+use crate::{
+    storage::{Snapshot, SnapshotType},
+    util::MessageStatus,
+};
 #[cfg(feature = "logging")]
 use slog::warn;
 
@@ -23,7 +26,7 @@ where
             let decided_idx = self.get_decided_idx();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
-                if ld < decided_idx && Self::use_snapshots() {
+                if ld < decided_idx && T::Snapshot::use_snapshots() {
                     let delta_snapshot =
                         self.internal_storage.create_diff_snapshot(ld, decided_idx);
                     let suffix = self.internal_storage.get_suffix(decided_idx);
@@ -34,7 +37,7 @@ where
                 }
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 if self.internal_storage.get_compacted_idx() > prep.accepted_idx
-                    && Self::use_snapshots()
+                    && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
                         .internal_storage
