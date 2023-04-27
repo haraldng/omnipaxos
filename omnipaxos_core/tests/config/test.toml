@@ -25,6 +25,7 @@ wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
 election_timeout_ms = 50
+resend_message_timeout_ms = 500
 storage_type = "Memory"
 
 [recovery_test]

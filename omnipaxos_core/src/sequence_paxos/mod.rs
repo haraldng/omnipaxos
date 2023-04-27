@@ -40,6 +40,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
+
     buffer_size: usize,
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
@@ -213,6 +214,42 @@ where
         }
     }
 
+    /// Detects if a Prepare, AcceptStopSign, or PrepareReq message has been sent but not received a reply.
+    /// If so resends them.
+    pub(crate) fn resend_message_timeout(&mut self) {
+        // Resend Prepare
+        if self.state.0 == Role::Leader {
+            let unpromised_peers = self.leader_state.get_unpromised_peers();
+            for peer in unpromised_peers {
+                self.send_prepare(peer);
+            }
+        }
+
+        // Resend AcceptStopSign
+        if self.state == (Role::Leader, Phase::Accept) {
+            // TODO: This is slow. Get stopsign from cache instead.
+            match self.internal_storage.get_stopsign() {
+                Some(ss) if !ss.decided => {
+                    for follower in self.leader_state.get_promised_followers() {
+                        if !self.leader_state.get_accepted_stopsign(follower) {
+                            self.send_accept_stopsign(follower, ss.stopsign.clone());
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        // Resend PrepareReq
+        if self.state == (Role::Follower, Phase::Recover) {
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: self.leader.pid,
+                msg: PaxosMsg::PrepareReq,
+            });
+        }
+    }
+
     /// Returns the id of the current leader.
     pub(crate) fn get_current_leader(&self) -> Ballot {
         self.leader
@@ -303,7 +340,9 @@ where
                     if !self.stopped() {
                         let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                         self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
+                        for pid in self.leader_state.get_promised_followers() {
+                            self.send_accept_stopsign(pid, ss.clone());
+                        }
                     } else {
                         return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
@@ -317,18 +356,16 @@ where
         }
     }
 
-    fn send_accept_stopsign(&mut self, ss: StopSign) {
+    fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign) {
         let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
             n: self.leader_state.n_leader,
             ss,
         });
-        for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: acc_ss.clone(),
-            });
-        }
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: acc_ss,
+        });
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {

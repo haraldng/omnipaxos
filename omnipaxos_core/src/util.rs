@@ -147,6 +147,10 @@ where
         self.accepted_stopsign[Self::pid_to_idx(from)] = true;
     }
 
+    pub fn get_accepted_stopsign(&mut self, from: u64) -> bool {
+        self.accepted_stopsign[Self::pid_to_idx(from)]
+    }
+
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
         self.promises_meta[Self::pid_to_idx(pid)]
             .as_ref()
@@ -170,6 +174,15 @@ where
             .iter()
             .enumerate()
             .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
+            .map(|(idx, _)| (idx + 1) as u64)
+            .collect()
+    }
+
+    pub fn get_unpromised_peers(&self) -> Vec<u64> {
+        self.decided_indexes
+            .iter()
+            .enumerate()
+            .filter(|(pid, x)| x.is_none() && *pid != Self::pid_to_idx(self.n_leader.pid))
             .map(|(idx, _)| (idx + 1) as u64)
             .collect()
     }

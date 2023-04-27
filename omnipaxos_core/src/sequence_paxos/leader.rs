@@ -48,19 +48,8 @@ where
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
-            let prep = Prepare {
-                n,
-                decided_idx,
-                n_accepted: self.internal_storage.get_accepted_round(),
-                accepted_idx,
-            };
-            /* send prepare */
-            for pid in &self.peers {
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: *pid,
-                    msg: PaxosMsg::Prepare(prep),
-                });
+            for pid in self.peers.clone() {
+                self.send_prepare(pid);
             }
         } else {
             self.state.0 = Role::Follower;
@@ -76,20 +65,7 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            let decided_idx = self.internal_storage.get_decided_idx();
-            let n_accepted = self.internal_storage.get_accepted_round();
-            let accepted_idx = self.internal_storage.get_log_len();
-            let prep = Prepare {
-                n: self.leader_state.n_leader,
-                decided_idx,
-                n_accepted,
-                accepted_idx,
-            };
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: from,
-                msg: PaxosMsg::Prepare(prep),
-            });
+            self.send_prepare(from);
         }
     }
 
@@ -154,12 +130,28 @@ where
                 (Role::Leader, Phase::Accept) => {
                     if self.pending_stopsign.is_none() {
                         self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
+                        for pid in self.leader_state.get_promised_followers() {
+                            self.send_accept_stopsign(pid, ss.clone());
+                        }
                     }
                 }
                 _ => self.forward_stopsign(ss),
             }
         }
+    }
+
+    pub(crate) fn send_prepare(&mut self, to: NodeId) {
+        let prep = Prepare {
+            n: self.leader_state.n_leader,
+            decided_idx: self.internal_storage.get_decided_idx(),
+            n_accepted: self.internal_storage.get_accepted_round(),
+            accepted_idx: self.internal_storage.get_log_len(),
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::Prepare(prep),
+        });
     }
 
     #[cfg(feature = "batch_accept")]
