@@ -13,8 +13,13 @@ use std::{
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {
+    #[cfg(not(feature = "serde"))]
     /// The snapshot type for this entry type.
     type Snapshot: Snapshot<Self>;
+
+    #[cfg(feature = "serde")]
+    /// The snapshot type for this entry type.
+    type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -157,6 +162,7 @@ where
 
 /// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NoSnapshot;
 
 impl<T: Entry> Snapshot<T> for NoSnapshot {
