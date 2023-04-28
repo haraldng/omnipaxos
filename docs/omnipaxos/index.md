@@ -6,7 +6,7 @@ As a guide for this tutorial, we will use OmniPaxos to implement a replicated lo
 
 We begin by defining the type that we want our log entries to consist of:
 ```rust,edition2018,no_run,noplaypen
-use omnipaxos_macros::Entry;
+use omnipaxos_core::macros::Entry;
 
 #[derive(Clone, Debug, Entry)] // Clone and Debug are required traits.
 pub struct KeyValue {
@@ -15,9 +15,9 @@ pub struct KeyValue {
 }
 ``` 
 
-`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro imported from `omnipaxos_macros`. We will also show how to implement the trait manually when we discuss [`Snapshots`](compaction.md#snapshot).
+`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](compaction.md#snapshot).
 
-> **Note** To use the #[derive(Entry)] macro, please make sure to add the `omnipaxos_macros` dependency to your Cargo.toml.
+> **Note** To use the #[derive(Entry)] macro, please make sure to enable the `macros` feature.
 
 ## Creating a Node
 With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance.  Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following: 

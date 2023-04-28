@@ -30,3 +30,15 @@ pub mod storage;
 /// A module containing helper functions and structs.
 pub mod util;
 pub(crate) mod utils;
+
+#[cfg(feature = "macros")]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate omnipaxos_macros;
+
+#[cfg(feature = "macros")]
+/// Macros in the omnipaxos crate
+pub mod macros {
+    #[doc(hidden)]
+    pub use omnipaxos_macros::*;
+}

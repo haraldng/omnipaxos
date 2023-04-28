@@ -1,8 +1,7 @@
-#[macro_use]
-extern crate omnipaxos_macros;
-
 #[test]
 fn derive_entry_test() {
+    use omnipaxos_core::macros::Entry;
+
     #[derive(Clone, Debug, Entry)]
     struct TestEntry {
         pub _field1: u64,
@@ -12,7 +11,10 @@ fn derive_entry_test() {
 
 #[test]
 fn build_op_test() {
-    use omnipaxos_core::omni_paxos::{OmniPaxos, OmniPaxosConfig};
+    use omnipaxos_core::{
+        macros::Entry,
+        omni_paxos::{OmniPaxos, OmniPaxosConfig},
+    };
     use omnipaxos_storage::memory_storage::MemoryStorage;
 
     #[derive(Clone, Debug, Entry)]

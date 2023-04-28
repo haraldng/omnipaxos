@@ -13,5 +13,5 @@ syn = "1.0"
 quote = "1.0"
 
 [dev-dependencies]
-omnipaxos_core = { path = "../omnipaxos_core" }
+omnipaxos_core = { path = "../omnipaxos_core", features = ["macros"] }
 omnipaxos_storage = { path = "../omnipaxos_storage" }

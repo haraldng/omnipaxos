@@ -2,6 +2,18 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
+/// Derive macro for declaring an OmniPaxos log entry type that does not use snapshots.
+///
+/// ## Usage
+///
+/// ```rust
+/// use omnipaxos_core::macros::Entry;
+/// #[derive(Clone, Debug, Entry)]
+/// pub struct KeyValue {
+///     pub key: String,
+///     pub value: u64,
+/// }
+/// ```
 #[proc_macro_derive(Entry)]
 pub fn entry_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
