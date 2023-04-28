@@ -448,37 +448,31 @@ where
     }
 
     /*** Writing ***/
+    // Append entry, if the batch size is reached, flush the batch and return the actual
+    // accepted index (not including the batched entries)
     pub(crate) fn append_entry(&mut self, entry: T) -> u64 {
         self.state_cache.append_entry(entry);
         if self.state_cache.get_batching_size() >= self.batch_size as u64 {
             self.flush_batch();
         }
-        println!("appended entry {:?}",self.get_log_len());
         self.get_log_len()
-
-        // self.storage.append_entry(entry);
-        // self.get_log_len()
     }
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
     // accepted index
-    pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+    pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> Option<u64> {
         self.state_cache.append_entries(entries);
         if self.state_cache.get_batching_size() >= self.batch_size as u64 {
             self.flush_batch();
+            return Some(self.get_log_len());
         }
-        println!("appended entries {:?}",self.get_log_len());
-        self.get_log_len()
-
-        // self.storage.append_entries(entries);
-        // self.get_log_len()
+        None
     }
 
     fn flush_batch(&mut self) {
         while self.state_cache.get_batching_size() >= self.batch_size as u64 {
             let entries = self.state_cache.pop_front_batched_entries(self.batch_size);
             self.storage.append_entries(entries);
-            // println!("flushed {:?}",self.get_log_len());
         }
     }
 
@@ -503,7 +497,6 @@ where
     }
 
     pub(crate) fn set_decided_idx(&mut self, ld: u64) {
-        println!("decided {:?}",ld);
         self.state_cache.set_decided_idx(ld);
         self.storage.set_decided_idx(ld)
     }

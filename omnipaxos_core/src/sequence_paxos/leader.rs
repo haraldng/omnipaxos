@@ -212,7 +212,8 @@ where
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
-        let accepted_idx = self.internal_storage.append_entries(entries.clone());
+        self.internal_storage.append_entries(entries.clone());
+        let accepted_idx = self.internal_storage.get_log_len();
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -325,7 +326,8 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            let accepted_idx = self.internal_storage.append_entries(new_entries);
+            self.internal_storage.append_entries(new_entries);
+            let accepted_idx = self.internal_storage.get_log_len();
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }

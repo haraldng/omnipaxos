@@ -18,6 +18,8 @@ use utils::{
 #[test]
 #[serial]
 fn batching_test() {
+    let wait_time_between_propose = Duration::from_millis(2);
+
     let cfg = TestConfig::load("batching_test").expect("Test config loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
@@ -26,7 +28,6 @@ fn batching_test() {
         cfg.storage_type,
         cfg.batch_size,
     );
-
     let first_node = sys.nodes.get(&1).unwrap();
     sys.start_all_nodes();
 
@@ -40,8 +41,13 @@ fn batching_test() {
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
+        thread::sleep(wait_time_between_propose);
+        // check batching
+        first_node.on_definition(|x| {
+            let decided_idx = x.paxos.get_decided_idx();
+            check_batching(decided_idx, cfg.batch_size as u64);
+        });
 
-        thread::sleep(Duration::from_millis(50));
     }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
@@ -57,8 +63,6 @@ fn batching_test() {
         }));
     }
 
-    check_uniform_agreement(log);
-
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
     match kompact_system.shutdown() {
@@ -67,6 +71,6 @@ fn batching_test() {
     };
 }
 
-fn check_uniform_agreement(log_responses: Vec<(u64, u64)>) {
-    println!("{:?}",log_responses);
+fn check_batching(decided_idx: u64, batch_size: u64) {
+    assert_eq!(decided_idx % batch_size, 0);
 }
