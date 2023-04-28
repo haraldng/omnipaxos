@@ -266,9 +266,7 @@ where
 {
     fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
         let entry_bytes = bincode::serialize(&entry)?;
-        let offset = self
-            .commitlog
-            .append_msg(entry_bytes)?;
+        let offset = self.commitlog.append_msg(entry_bytes)?;
         self.commitlog.flush()?; // ensure durable writes
         Ok(offset + 1) // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
@@ -287,8 +285,7 @@ where
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
         if from_idx > 0 && from_idx < self.get_log_len()? {
-            self.commitlog
-                .truncate(from_idx)?;
+            self.commitlog.truncate(from_idx)?;
         }
         self.append_entries(entries)
     }
@@ -299,16 +296,12 @@ where
             return Ok(vec![]); // Do an early return
         }
 
-        let buffer = self
-            .commitlog
-            .read(from, ReadLimit::default())?;
+        let buffer = self.commitlog.read(from, ReadLimit::default())?;
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
-            let msg = iter.next().ok_or(ErrHelper{})?;
-            entries.push(
-                bincode::deserialize(msg.payload())?,
-            );
+            let msg = iter.next().ok_or(ErrHelper {})?;
+            entries.push(bincode::deserialize(msg.payload())?);
         }
         Ok(entries)
     }
@@ -327,7 +320,8 @@ where
             let promised = self.rocksdb.get(NPROM)?;
             match promised {
                 Some(prom_bytes) => {
-                    let b_store = BallotStorage::read_from(prom_bytes.as_slice()).ok_or(ErrHelper{})?;
+                    let b_store =
+                        BallotStorage::read_from(prom_bytes.as_slice()).ok_or(ErrHelper {})?;
                     Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
                 None => Ok(Ballot::default()),
@@ -338,7 +332,8 @@ where
             let promised = self.sled.get(NPROM)?;
             match promised {
                 Some(prom_bytes) => {
-                    let b_store = BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper{})?;
+                    let b_store =
+                        BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper {})?;
                     Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
                 None => Ok(Ballot::default()),
@@ -365,7 +360,7 @@ where
         {
             let decided = self.rocksdb.get(DECIDE)?;
             match decided {
-                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_slice()).ok_or(ErrHelper{})?),
+                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_slice()).ok_or(ErrHelper {})?),
                 None => Ok(0),
             }
         }
@@ -373,7 +368,7 @@ where
         {
             let decided = self.sled.get(DECIDE)?;
             match decided {
-                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper{})?),
+                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
                 None => Ok(0),
             }
         }
@@ -398,7 +393,8 @@ where
             let accepted = self.rocksdb.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store = BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper{})?;
+                    let b_store =
+                        BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper {})?;
                     Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
                 None => Ok(Ballot::default()),
@@ -409,7 +405,8 @@ where
             let accepted = self.sled.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store = BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper{})?;
+                    let b_store =
+                        BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper {})?;
                     Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
                 None => Ok(Ballot::default()),
@@ -436,7 +433,7 @@ where
         {
             let trim = self.rocksdb.get(TRIM)?;
             match trim {
-                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_slice()).ok_or(ErrHelper{})?),
+                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_slice()).ok_or(ErrHelper {})?),
                 None => Ok(0),
             }
         }
@@ -444,7 +441,7 @@ where
         {
             let trim = self.sled.get(TRIM)?;
             match trim {
-                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper{})?),
+                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
                 None => Ok(0),
             }
         }

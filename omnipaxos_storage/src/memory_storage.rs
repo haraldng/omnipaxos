@@ -68,7 +68,8 @@ where
     }
 
     fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        Ok(self.log
+        Ok(self
+            .log
             .get(from as usize..to as usize)
             .unwrap_or(&[])
             .to_vec())

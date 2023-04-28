@@ -70,7 +70,6 @@ where
                 if T::Snapshot::use_snapshots()
                     && compacted_idx.expect("storage error") > prep.accepted_idx
                 {
-                    // >>>>>>> 72af6d7 (add error handling to storage API)
                     let delta_snapshot = self
                         .internal_storage
                         .create_diff_snapshot(prep.decided_idx, decided_idx);
@@ -238,8 +237,8 @@ where
                     self.internal_storage
                         .set_accepted_round(old_accepted_round)
                         .expect("storage error");
-                    result.expect("storage error");
                 }
+                result.expect("storage error");
             }
             let result = self.accept_entries(acc.n, entries);
             if result.is_err() {
@@ -249,8 +248,8 @@ where
                 self.internal_storage
                     .set_decided_idx(old_decided_idx)
                     .expect("storage error");
-                result.expect("storage error");
             }
+            result.expect("storage error");
         }
     }
 

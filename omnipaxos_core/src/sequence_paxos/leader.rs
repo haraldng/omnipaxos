@@ -503,7 +503,7 @@ where
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
             accepted.accepted_idx,
-            self.internal_storage.get_decided_idx()
+            self.internal_storage.get_decided_idx().unwrap()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             let mut decided_idx = self
