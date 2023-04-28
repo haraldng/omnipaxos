@@ -359,7 +359,6 @@ where
                             SnapshotType::Delta(d) => {
                                 self.internal_storage.merge_snapshot(decided_idx, d);
                             }
-                            _ => unimplemented!(),
                         }
                         self.internal_storage.append_entries(suffix);
                         if let Some(ss) = max_stopsign {

@@ -16,7 +16,9 @@ where
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        if self.internal_storage.get_promise() <= prep.n {
+        if self.internal_storage.get_promise() < prep.n
+            || (self.internal_storage.get_promise() == prep.n && self.state.1 == Phase::Recover)
+        {
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
@@ -81,7 +83,6 @@ where
                         SnapshotType::Delta(d) => {
                             self.internal_storage.merge_snapshot(accsync.decided_idx, d);
                         }
-                        _ => unimplemented!(),
                     }
                     let accepted_idx = self.internal_storage.append_entries(accsync.suffix);
                     Accepted {

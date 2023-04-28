@@ -76,10 +76,9 @@ where
 {
     Complete(T::Snapshot),
     Delta(T::Snapshot),
-    _Phantom(PhantomData<T>),
 }
 
-/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, use the unit type `()` as the Snapshot parameter in `SequencePaxos`.
+/// Trait for implementing snapshot operations for log entries of type `T` in OmniPaxos.
 pub trait Snapshot<T>: Clone + Debug
 where
     T: Entry,
