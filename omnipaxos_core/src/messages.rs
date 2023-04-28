@@ -3,6 +3,8 @@ use crate::{
     storage::{Entry, Snapshot},
     util::NodeId,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Internal component for log replication
 pub mod sequence_paxos {
@@ -11,10 +13,13 @@ pub mod sequence_paxos {
         storage::{Entry, Snapshot, SnapshotType, StopSign},
         util::{NodeId, SequenceNumber},
     };
+    #[cfg(feature = "serde")]
+    use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
 
     /// Prepare message sent by a newly-elected leader to initiate the Prepare phase.
     #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct Prepare {
         /// The current round.
         pub n: Ballot,
@@ -28,6 +33,7 @@ pub mod sequence_paxos {
 
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct Promise<T, S>
     where
         T: Entry,
@@ -51,6 +57,7 @@ pub mod sequence_paxos {
 
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct AcceptSync<T, S>
     where
         T: Entry,
@@ -74,6 +81,7 @@ pub mod sequence_paxos {
 
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct AcceptDecide<T>
     where
         T: Entry,
@@ -90,6 +98,7 @@ pub mod sequence_paxos {
 
     /// Message sent by follower to leader when entries has been accepted.
     #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct Accepted {
         /// The current round.
         pub n: Ballot,
@@ -99,6 +108,7 @@ pub mod sequence_paxos {
 
     /// Message sent by leader to followers to decide up to a certain index in the log.
     #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct Decide {
         /// The current round.
         pub n: Ballot,
@@ -110,6 +120,7 @@ pub mod sequence_paxos {
 
     /// Message sent by leader to followers to accept a StopSign
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct AcceptStopSign {
         /// The current round.
         pub n: Ballot,
@@ -119,6 +130,7 @@ pub mod sequence_paxos {
 
     /// Message sent by followers to leader when accepted StopSign
     #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct AcceptedStopSign {
         /// The current round.
         pub n: Ballot,
@@ -126,6 +138,7 @@ pub mod sequence_paxos {
 
     /// Message sent by leader to decide a StopSign
     #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct DecideStopSign {
         /// The current round.
         pub n: Ballot,
@@ -134,6 +147,7 @@ pub mod sequence_paxos {
     /// Compaction Request
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub enum Compaction {
         Trim(u64),
         Snapshot(Option<u64>),
@@ -142,6 +156,7 @@ pub mod sequence_paxos {
     /// An enum for all the different message types.
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub enum PaxosMsg<T, S>
     where
         T: Entry,
@@ -167,6 +182,7 @@ pub mod sequence_paxos {
 
     /// A struct for a Paxos message that also includes sender and receiver.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct PaxosMessage<T, S>
     where
         T: Entry,
@@ -184,10 +200,13 @@ pub mod sequence_paxos {
 /// The different messages BLE uses to communicate with other replicas.
 pub mod ballot_leader_election {
     use crate::{ballot_leader_election::Ballot, util::NodeId};
+    #[cfg(feature = "serde")]
+    use serde::{Deserialize, Serialize};
 
     /// An enum for all the different BLE message types.
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub enum HeartbeatMsg {
         Request(HeartbeatRequest),
         Reply(HeartbeatReply),
@@ -195,6 +214,7 @@ pub mod ballot_leader_election {
 
     /// Requests a reply from all the other replicas.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatRequest {
         /// Number of the current round.
         pub round: u32,
@@ -202,6 +222,7 @@ pub mod ballot_leader_election {
 
     /// Replies
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatReply {
         /// Number of the current round.
         pub round: u32,
@@ -213,6 +234,7 @@ pub mod ballot_leader_election {
 
     /// A struct for a Paxos message that also includes sender and receiver.
     #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct BLEMessage {
         /// Sender of `msg`.
         pub from: NodeId,
@@ -226,6 +248,7 @@ pub mod ballot_leader_election {
 #[allow(missing_docs)]
 /// Message in OmniPaxos. Can be either a `SequencePaxos` message (for log replication) or `BLE` message (for leader election)
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Message<T, S>
 where
     T: Entry,

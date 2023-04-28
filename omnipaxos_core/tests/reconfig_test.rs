@@ -1,14 +1,11 @@
 pub mod utils;
 
-#[cfg(feature = "hocon_config")]
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::omni_paxos::ReconfigurationRequest;
-#[cfg(feature = "hocon_config")]
 use serial_test::serial;
-#[cfg(feature = "hocon_config")]
+use std::time::Duration;
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};
 
-#[cfg(feature = "hocon_config")]
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
 #[serial]
@@ -17,7 +14,7 @@ fn reconfig_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
         cfg.batch_size
@@ -39,7 +36,10 @@ fn reconfig_test() {
 
     sys.start_all_nodes();
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(
+        futures,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -55,7 +55,7 @@ fn reconfig_test() {
     });
 
     let decided_ss_metadata = reconfig_f
-        .wait_timeout(cfg.wait_timeout)
+        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("Failed to collect reconfiguration future");
     assert_eq!(decided_ss_metadata, Value(SS_METADATA as u64));
 

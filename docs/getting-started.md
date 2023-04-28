@@ -8,7 +8,6 @@ We recommend using the [rustup](https://rustup.rs/) tool to easily install the l
 > **Using the nightly toolchain:** Rustup can be configured to default to the nightly toolchain by running `rustup default nightly`. 
 
 ## Cargo
-
 Add OmniPaxos to your cargo project as a dependency:
 
 ```toml
@@ -18,7 +17,6 @@ omnipaxos = "LATEST_VERSION"
 The latest version can be found on [crates.io](https://crates.io/crates/omnipaxos). -->
 
 ### Github master
-
 <!--You can also point cargo to the latest [Github](https://github.com/haraldng/omnipaxos) master version, instead of a release.  -->
 To do so add the following to your Cargo.toml:
 

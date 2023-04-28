@@ -1,8 +1,5 @@
 /// Ballot Leader Election algorithm for electing new leaders
 use crate::util::defaults::*;
-#[cfg(feature = "hocon_config")]
-#[allow(unused_imports)]
-use crate::utils::hocon_kv::LOG_FILE_PATH;
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -13,11 +10,14 @@ use crate::{
     omni_paxos::OmniPaxosConfig,
     util::NodeId,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 
 /// Used to define an epoch
 #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ballot {
     /// Ballot number
     pub n: u32,

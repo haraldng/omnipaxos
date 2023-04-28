@@ -3,6 +3,8 @@ use super::{
     messages::sequence_paxos::Promise,
     storage::{Entry, Snapshot, SnapshotType, StopSign},
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Default)]
@@ -293,6 +295,7 @@ pub enum MessageStatus {
 
 /// Keeps track of the ordering of messages in the accept phase
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SequenceNumber {
     /// Meant to refer to a TCP session
     pub session: u64,

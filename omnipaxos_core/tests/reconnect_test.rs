@@ -22,7 +22,7 @@ fn increasing_accept_seq_num_test() {
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
         cfg.batch_size
@@ -46,8 +46,12 @@ fn increasing_accept_seq_num_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
-    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        initial_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
+    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -98,7 +102,7 @@ fn reconnect_to_leader_test() {
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
         cfg.batch_size
@@ -124,8 +128,12 @@ fn reconnect_to_leader_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
-    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
+    sys.make_proposals(
+        2,
+        initial_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
+    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -137,13 +145,21 @@ fn reconnect_to_leader_test() {
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
     });
-    sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
+    sys.make_proposals(
+        leader_id,
+        unseen_by_follower_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
 
     // Decide entries after omission period so follower finds seq break
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, true);
     });
-    sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
+    sys.make_proposals(
+        leader_id,
+        seen_by_follower_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
 
     // Wait for Re-sync with leader to finish
     thread::sleep(SLEEP_TIMEOUT);

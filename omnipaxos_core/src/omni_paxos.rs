@@ -1,5 +1,5 @@
-#[cfg(feature = "hocon_config")]
-use crate::utils::hocon_kv::*;
+#[cfg(feature = "toml_config")]
+use crate::errors::ConfigError;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
@@ -7,9 +7,13 @@ use crate::{
     storage::{Entry, Snapshot, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
-#[cfg(feature = "hocon_config")]
-use hocon::Hocon;
+#[cfg(feature = "toml_config")]
+use serde::Deserialize;
+#[cfg(feature = "toml_config")]
+use std::fs;
 use std::ops::RangeBounds;
+#[cfg(feature = "toml_config")]
+use toml;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -23,6 +27,7 @@ use std::ops::RangeBounds;
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
     pub configuration_id: u32,
     pub pid: NodeId,
@@ -30,43 +35,20 @@ pub struct OmniPaxosConfig {
     pub batch_size: usize,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
+    #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
     pub leader_priority: u64,
     pub initial_leader: Option<Ballot>,
-    #[cfg(feature = "logging")]
-    pub logger_path: Option<String>,
 }
 
 impl OmniPaxosConfig {
-    /// Creates a new `OmniPaxosConfig` from a `Hocon` object.
-    #[cfg(feature = "hocon_config")]
-    pub fn with_hocon(h: &Hocon) -> Self {
-        let mut config = OmniPaxosConfig {
-            pid: h[PID].as_i64().expect("Failed to load PID") as u64,
-            configuration_id: h[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
-            logger_file_path: h[LOG_FILE_PATH].as_string(),
-            ..Default::default()
-        };
-        match &h[PEERS] {
-            Hocon::Array(v) => {
-                let peers = v
-                    .iter()
-                    .map(|x| x.as_i64().expect("Failed to load pid in Hocon array") as u64)
-                    .collect();
-                config.peers = peers;
-            }
-            _ => {
-                unimplemented!("Peers in Hocon should be parsed as array!")
-            }
-        }
-        if let Some(b) = h[BUFFER_SIZE].as_i64() {
-            config.buffer_size = b as usize;
-        }
-        if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
-            config.leader_priority = p;
-        }
-        config
+    /// Creates a new `OmniPaxosConfig` from a `toml` file.
+    #[cfg(feature = "toml_config")]
+    pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
+        let config_file = fs::read_to_string(file_path)?;
+        let config: OmniPaxosConfig = toml::from_str(&config_file)?;
+        Ok(config)
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
@@ -103,12 +85,11 @@ impl Default for OmniPaxosConfig {
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
+            #[cfg(feature = "logging")]
             logger_file_path: None,
             batch_size: 1,
             leader_priority: 0,
             initial_leader: None,
-            #[cfg(feature = "logging")]
-            logger_path: None,
         }
     }
 }
