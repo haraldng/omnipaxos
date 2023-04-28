@@ -28,6 +28,7 @@ fn config_all_fields_test() {
             assert_eq!(
                 omnipaxos_config.skip_prepare_use_leader,
                 Some(Ballot {
+                    config_id: 3,
                     n: 5,
                     priority: 2,
                     pid: 2,
@@ -36,6 +37,7 @@ fn config_all_fields_test() {
             assert_eq!(
                 omnipaxos_config.initial_leader,
                 Some(Ballot {
+                    config_id: 3,
                     n: 1,
                     priority: 1,
                     pid: 1,

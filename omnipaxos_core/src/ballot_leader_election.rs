@@ -37,7 +37,12 @@ impl Ballot {
     /// * `priority` - Custom priority parameter.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
     pub fn with(config_id: u32, n: u32, priority: u64, pid: NodeId) -> Ballot {
-        Ballot { config_id, n, priority, pid }
+        Ballot {
+            config_id,
+            n,
+            priority,
+            pid,
+        }
     }
 }
 

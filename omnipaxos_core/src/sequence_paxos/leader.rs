@@ -307,6 +307,18 @@ where
         });
     }
 
+    fn send_decide_stopsign(&mut self, to: NodeId) {
+        let d = DecideStopSign {
+            seq_num: self.leader_state.next_seq_num(to),
+            n: self.leader_state.n_leader,
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::DecideStopSign(d),
+        });
+    }
+
     fn adopt_pending_stopsign(&mut self) {
         if let Some(ss) = self.pending_stopsign.take() {
             self.accept_stopsign(ss);
@@ -472,16 +484,16 @@ where
         {
             self.leader_state.set_accepted_stopsign(from);
             if self.leader_state.is_stopsign_chosen() {
-                let d = DecideStopSign {
-                    n: self.leader_state.n_leader,
-                };
-                self.handle_decide_stopsign(d);
+                let mut ss = self
+                    .internal_storage
+                    .get_stopsign()
+                    .expect("No stopsign found when deciding!");
+                ss.decided = true;
+                self.internal_storage.set_stopsign(ss);
+                self.internal_storage
+                    .set_decided_idx(self.internal_storage.get_log_len() + 1);
                 for pid in self.leader_state.get_promised_followers() {
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: pid,
-                        msg: PaxosMsg::DecideStopSign(d),
-                    });
+                    self.send_decide_stopsign(pid);
                 }
             }
         }
