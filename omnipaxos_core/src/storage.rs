@@ -156,7 +156,7 @@ where
 }
 
 /// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct NoSnapshot;
 
 impl<T: Entry> Snapshot<T> for NoSnapshot {

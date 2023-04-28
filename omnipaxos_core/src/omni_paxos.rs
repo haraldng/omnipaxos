@@ -53,7 +53,6 @@ impl OmniPaxosConfig {
     pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
     where
         T: Entry,
-
         B: Storage<T>,
     {
         assert_ne!(self.pid, 0, "Pid cannot be 0");
@@ -104,7 +103,6 @@ where
 impl<T, B> OmniPaxos<T, B>
 where
     T: Entry,
-
     B: Storage<T>,
 {
     /// Initiates the trim process.
