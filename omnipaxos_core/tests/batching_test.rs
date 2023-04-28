@@ -23,7 +23,7 @@ fn batching_test() {
     let cfg = TestConfig::load("batching_test").expect("Test config loaded");
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
         cfg.batch_size,
@@ -50,7 +50,7 @@ fn batching_test() {
 
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, Duration::from_millis(cfg.wait_timeout_ms)) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }

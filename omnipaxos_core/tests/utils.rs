@@ -40,6 +40,7 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
+    pub batch_size: usize,
 }
 
 impl TestConfig {
@@ -65,6 +66,7 @@ impl Default for TestConfig {
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
+            batch_size: 1,
         }
     }
 }
@@ -267,6 +269,7 @@ impl TestSystem {
         election_timeout_ms: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
+        batch_size: usize,
     ) -> Self {
         let temp_dir_path = create_temp_dir();
 
@@ -292,6 +295,7 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
+            op_config.batch_size = batch_size;
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
