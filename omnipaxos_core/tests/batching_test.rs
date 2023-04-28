@@ -1,5 +1,7 @@
 pub mod utils;
 
+use std::thread;
+use std::time::Duration;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos_core::{
     omni_paxos::OmniPaxosConfig,
@@ -26,8 +28,10 @@ fn batching_test() {
     );
 
     let first_node = sys.nodes.get(&1).unwrap();
-    let mut vec_proposals = vec![];
+    sys.start_all_nodes();
+
     let mut futures = vec![];
+    let mut vec_proposals = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
@@ -36,9 +40,9 @@ fn batching_test() {
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
-    }
 
-    sys.start_all_nodes();
+        thread::sleep(Duration::from_millis(50));
+    }
 
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
