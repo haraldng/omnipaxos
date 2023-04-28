@@ -25,6 +25,7 @@ fn increasing_accept_seq_num_test() {
         cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size
     );
     sys.start_all_nodes();
 
@@ -100,6 +101,7 @@ fn reconnect_to_leader_test() {
         cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size
     );
     sys.start_all_nodes();
 

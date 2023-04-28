@@ -19,6 +19,7 @@ fn ble_test() {
         cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size
     );
 
     let num_elections = cfg.num_nodes / 2;

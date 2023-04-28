@@ -25,6 +25,7 @@ fn snapshot_test() {
         cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
@@ -94,6 +95,7 @@ fn double_snapshot_test() {
         cfg.election_timeout,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size
     );
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();

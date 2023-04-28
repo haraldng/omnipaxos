@@ -40,6 +40,7 @@ pub struct TestConfig {
     pub num_elections: u64,
     pub gc_idx: u64,
     pub storage_type: StorageTypeSelector,
+    pub batch_size: usize,
 }
 
 #[cfg(feature = "hocon_config")]
@@ -66,6 +67,7 @@ impl TestConfig {
                     .as_string()
                     .unwrap_or(MEMORY.to_string()),
             ),
+            batch_size: cfg["batch_size"].as_i64().unwrap_or_default() as usize,
         })
     }
 }
@@ -269,6 +271,7 @@ impl TestSystem {
         election_timeout: Duration,
         num_threads: usize,
         storage_type: StorageTypeSelector,
+        batch_size: usize,
     ) -> Self {
         let temp_dir_path = create_temp_dir();
 
@@ -294,6 +297,7 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
+            op_config.batch_size = batch_size;
             let storage: StorageType<Value, LatestValue> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {

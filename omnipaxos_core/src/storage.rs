@@ -176,7 +176,7 @@ struct StateCache<T>
         T: Entry,
 {
     /// Vector which contains all the logged entries in-memory.
-    log: Vec<T>,
+    batched_entries: Vec<T>,
     /// Last promised round.
     n_prom: Ballot,
     /// Last accepted round.
@@ -194,7 +194,7 @@ impl<T> StateCache<T>
 {
     pub fn new() -> Self {
         StateCache {
-            log: Vec::new(),
+            batched_entries: Vec::new(),
             n_prom: Ballot::default(),
             acc_round: Ballot::default(),
             ld: 0,
@@ -202,38 +202,50 @@ impl<T> StateCache<T>
         }
     }
     // Getters
-    #[allow(dead_code)]
-    pub fn get_logs(&self) -> &Vec<T> {
-        &self.log
+    fn get_batching_size(&self) -> u64 {
+        self.batched_entries.len() as u64
     }
-    pub fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> Ballot {
         self.n_prom
     }
-    pub fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> Ballot {
         self.acc_round
     }
-    pub fn get_decided_idx(&self) -> u64 {
+    fn get_decided_idx(&self) -> u64 {
         self.ld
     }
-    pub fn get_compacted_idx(&self) -> u64 {
+    fn get_compacted_idx(&self) -> u64 {
         self.compacted_idx
     }
 
     // Setters
-    #[allow(dead_code)]
-    pub fn set_logs(&mut self, log: Vec<T>) {
-        self.log = log;
+    fn append_entry(&mut self, entry: T) {
+        self.batched_entries.push(entry);
     }
-    pub fn set_promise(&mut self, n_prom: Ballot) {
+    fn append_entries(&mut self, entries: Vec<T>) {
+        self.batched_entries.extend(entries);
+    }
+    // Pop entries from the front of the batched_entries with size of `batch_size`.
+    fn pop_front_batched_entries(&mut self, batch_size: usize) -> Vec<T> {
+        let mut entries = Vec::new();
+        for _ in 0..batch_size {
+            entries.push(self.batched_entries.remove(0));
+        }
+        entries
+    }
+    // fn clear_batched_entries(&mut self) {
+    //     self.batched_entries.clear();
+    // }
+    fn set_promise(&mut self, n_prom: Ballot) {
         self.n_prom = n_prom;
     }
-    pub fn set_accepted_round(&mut self, acc_round: Ballot) {
+    fn set_accepted_round(&mut self, acc_round: Ballot) {
         self.acc_round = acc_round;
     }
-    pub fn set_decided_idx(&mut self, ld: u64) {
+    fn set_decided_idx(&mut self, ld: u64) {
         self.ld = ld;
     }
-    pub fn set_compacted_idx(&mut self, compacted_idx: u64) {
+    fn set_compacted_idx(&mut self, compacted_idx: u64) {
         self.compacted_idx = compacted_idx;
     }
 }
@@ -248,6 +260,7 @@ where
 {
     storage: I,
     state_cache: StateCache<T>,
+    batch_size: usize,
     _t: PhantomData<T>,
     _i: PhantomData<S>,
 }
@@ -258,10 +271,11 @@ where
     T: Entry,
     S: Snapshot<T>,
 {
-    pub(crate) fn with(storage: I) -> Self {
+    pub(crate) fn with(storage: I, batch_size: usize) -> Self {
         let mut internal_store = InternalStorage {
             storage,
             state_cache: StateCache::new(),
+            batch_size,
             _t: Default::default(),
             _i: Default::default(),
         };
@@ -435,11 +449,28 @@ where
 
     /*** Writing ***/
     pub(crate) fn append_entry(&mut self, entry: T) -> u64 {
-        self.storage.append_entry(entry) + self.get_compacted_idx()
+        self.state_cache.append_entry(entry);
+        if self.state_cache.get_batching_size() >= self.batch_size as u64 {
+            self.flush_batch();
+        }
+        self.get_log_len()
     }
 
-    pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-        self.storage.append_entries(entries) + self.get_compacted_idx()
+    // Append entries in batch, if the batch size is reached, flush the batch and return the
+    // accepted index
+    pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> Option<u64> {
+        self.state_cache.append_entries(entries);
+        if self.state_cache.get_batching_size() >= self.batch_size as u64 {
+            println!("flush batch {:?}",self.get_log_len());
+            self.flush_batch();
+            return Some(self.get_log_len());
+        }
+        None
+    }
+
+    fn flush_batch(&mut self) {
+        let entries = self.state_cache.pop_front_batched_entries(self.batch_size);
+        self.storage.append_entries(entries);
     }
 
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> u64 {

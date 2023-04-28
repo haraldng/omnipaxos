@@ -86,7 +86,7 @@ where
         };
 
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage),
+            internal_storage: InternalStorage::with(storage, config.batch_size),
             config_id,
             pid,
             peers,
@@ -399,6 +399,7 @@ pub struct SequencePaxosConfig {
     configuration_id: u32,
     pid: NodeId,
     peers: Vec<u64>,
+    batch_size: usize,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
     #[cfg(feature = "logging")]
@@ -411,6 +412,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             configuration_id: config.configuration_id,
             pid: config.pid,
             peers: config.peers,
+            batch_size: config.batch_size,
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
             #[cfg(feature = "logging")]

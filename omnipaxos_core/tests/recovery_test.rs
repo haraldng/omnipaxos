@@ -21,6 +21,7 @@ fn leader_fail_follower_propose_test() {
         cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
+        cfg.batch_size,
     );
 
     sys.start_all_nodes();
@@ -75,6 +76,7 @@ fn leader_fail_leader_propose_test() {
         cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
+        cfg.batch_size
     );
 
     sys.start_all_nodes();
@@ -125,6 +127,7 @@ fn follower_fail_leader_propose_test() {
         cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
+        cfg.batch_size
     );
 
     sys.start_all_nodes();
@@ -179,6 +182,7 @@ fn follower_fail_follower_propose_test() {
         cfg.election_timeout,
         cfg.num_threads,
         PERSISTENT_STORAGE,
+        cfg.batch_size
     );
 
     sys.start_all_nodes();

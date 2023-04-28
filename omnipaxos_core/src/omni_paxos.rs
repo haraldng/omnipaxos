@@ -16,6 +16,7 @@ use std::ops::RangeBounds;
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `batch_size`: The size of the buffer for log batching. 1 means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
@@ -26,6 +27,7 @@ pub struct OmniPaxosConfig {
     pub configuration_id: u32,
     pub pid: NodeId,
     pub peers: Vec<u64>,
+    pub batch_size: usize,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
     pub logger_file_path: Option<String>,
@@ -81,6 +83,7 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
+        assert!(self.batch_size >= 1, "Batch size must be greater than or equal to 1");
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
@@ -101,6 +104,7 @@ impl Default for OmniPaxosConfig {
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
             logger_file_path: None,
+            batch_size: 1,
             leader_priority: 0,
             initial_leader: None,
             #[cfg(feature = "logging")]
