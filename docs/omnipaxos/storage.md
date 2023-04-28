@@ -15,10 +15,9 @@ omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-fea
 ```rust,edition2018,no_run,noplaypen
     // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]
-    pub struct MemoryStorage<T, S>
+    pub struct MemoryStorage<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         /// Vector which contains all the replicated entries in-memory.
         log: Vec<T>,
@@ -31,10 +30,9 @@ omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-fea
         ...
     }
 
-    impl<T, S> Storage<T, S> for MemoryStorage<T, S>
+    impl<T> Storage<T> for MemoryStorage<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         fn append_entry(&mut self, entry: T) -> u64 {
             self.log.push(entry);
