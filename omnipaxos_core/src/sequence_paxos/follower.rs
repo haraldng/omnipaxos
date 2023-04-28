@@ -2,19 +2,23 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
-use crate::{storage::SnapshotType, util::MessageStatus};
+use crate::{
+    storage::{Snapshot, SnapshotType},
+    util::MessageStatus,
+};
 #[cfg(feature = "logging")]
 use slog::warn;
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        if self.internal_storage.get_promise() <= prep.n {
+        if self.internal_storage.get_promise() < prep.n
+            || (self.internal_storage.get_promise() == prep.n && self.state.1 == Phase::Recover)
+        {
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
@@ -24,7 +28,7 @@ where
             let decided_idx = self.get_decided_idx();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
-                if ld < decided_idx && Self::use_snapshots() {
+                if ld < decided_idx && T::Snapshot::use_snapshots() {
                     let delta_snapshot =
                         self.internal_storage.create_diff_snapshot(ld, decided_idx);
                     let suffix = self.internal_storage.get_suffix(decided_idx);
@@ -35,7 +39,7 @@ where
                 }
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 if self.internal_storage.get_compacted_idx() > prep.accepted_idx
-                    && Self::use_snapshots()
+                    && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
                         .internal_storage
@@ -66,7 +70,7 @@ where
         }
     }
 
-    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T, S>, from: NodeId) {
+    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.internal_storage.get_promise() == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {
@@ -79,7 +83,6 @@ where
                         SnapshotType::Delta(d) => {
                             self.internal_storage.merge_snapshot(accsync.decided_idx, d);
                         }
-                        _ => unimplemented!(),
                     }
                     let accepted_idx = self.internal_storage.append_entries(accsync.suffix);
                     Accepted {

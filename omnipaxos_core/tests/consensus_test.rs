@@ -88,7 +88,7 @@ fn read_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let temp_dir = create_temp_dir();
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -127,8 +127,7 @@ fn read_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
-    let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
+    let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -162,7 +161,7 @@ fn read_entries_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let temp_dir = create_temp_dir();
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -208,8 +207,7 @@ fn read_entries_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
-    let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
+    let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());

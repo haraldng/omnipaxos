@@ -5,12 +5,17 @@ authors = ["Harald Ng <hng@kth.se>"]
 edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 slog = { version = "2.7.0", optional = true }
 slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 toml = { version = "0.7.3", optional = true }
+omnipaxos_macros = { path = "../omnipaxos_macros", optional = true }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
@@ -29,6 +34,7 @@ continued_leader_reconfiguration = []
 logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
 default = ["continued_leader_reconfiguration", "batch_accept"]
+macros = ["omnipaxos_macros"]
 
 [profile.release]
 lto = true

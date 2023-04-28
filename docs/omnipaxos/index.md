@@ -1,17 +1,23 @@
 # OmniPaxos
-Each server in the cluster should have a local instance of the  `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`.
+Each server in the cluster should have a local instance of the `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`.
 
 ## Example: Key-Value store
 As a guide for this tutorial, we will use OmniPaxos to implement a replicated log for the purpose of building a consistent Key-Value store. 
 
 We begin by defining the type that we want our log entries to consist of:
 ```rust,edition2018,no_run,noplaypen
-#[derive(Clone, Debug)] // Clone and Debug are required traits.
+use omnipaxos_core::macros::Entry;
+
+#[derive(Clone, Debug, Entry)] // Clone and Debug are required traits.
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
 }
 ``` 
+
+`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](compaction.md#snapshot).
+
+> **Note** To use the #[derive(Entry)] macro, please make sure to enable the `macros` feature.
 
 ## Creating a Node
 With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance.  Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following: 
@@ -38,8 +44,8 @@ let omnipaxos_config = OmniPaxosConfig {
     ..Default::default()
 }
 
-let storage = MemoryStorage::<KeyValue, ()>::default();
-let mut omni_paxos = omni_paxos_config.build(storage);
+let storage = MemoryStorage::default();
+let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omni_paxos_config.build(storage);
 ```
 With the toml_config feature enabled, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
 

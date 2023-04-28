@@ -1,8 +1,4 @@
-use crate::{
-    kv::{KVSnapshot, KeyValue},
-    server::OmniPaxosServer,
-    util::*,
-};
+use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos_core::{
     messages::Message,
     omni_paxos::*,
@@ -19,14 +15,14 @@ mod kv;
 mod server;
 mod util;
 
-type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, MemoryStorage<KeyValue, KVSnapshot>>;
+type OmniPaxosKV = OmniPaxos<KeyValue, MemoryStorage<KeyValue>>;
 
 const SERVERS: [u64; 3] = [1, 2, 3];
 
 #[allow(clippy::type_complexity)]
 fn initialise_channels() -> (
-    HashMap<NodeId, mpsc::Sender<Message<KeyValue, KVSnapshot>>>,
-    HashMap<NodeId, mpsc::Receiver<Message<KeyValue, KVSnapshot>>>,
+    HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
+    HashMap<NodeId, mpsc::Receiver<Message<KeyValue>>>,
 ) {
     let mut sender_channels = HashMap::new();
     let mut receiver_channels = HashMap::new();

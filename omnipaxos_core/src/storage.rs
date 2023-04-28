@@ -12,8 +12,15 @@ use std::{
 };
 
 /// Type of the entries stored in the log.
-pub trait Entry: Clone + Debug {}
-impl<T> Entry for T where T: Clone + Debug {}
+pub trait Entry: Clone + Debug {
+    #[cfg(not(feature = "serde"))]
+    /// The snapshot type for this entry type.
+    type Snapshot: Snapshot<Self>;
+
+    #[cfg(feature = "serde")]
+    /// The snapshot type for this entry type.
+    type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
+}
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
@@ -63,18 +70,16 @@ impl PartialEq for StopSign {
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum SnapshotType<T, S>
+pub enum SnapshotType<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
-    Complete(S),
-    Delta(S),
-    _Phantom(PhantomData<T>),
+    Complete(T::Snapshot),
+    Delta(T::Snapshot),
 }
 
-/// Functions required by Sequence Paxos to implement snapshot operations for `T`. If snapshot is not desired to be used, use the unit type `()` as the Snapshot parameter in `SequencePaxos`.
-pub trait Snapshot<T>: Clone
+/// Trait for implementing snapshot operations for log entries of type `T` in OmniPaxos.
+pub trait Snapshot<T>: Clone + Debug
 where
     T: Entry,
 {
@@ -91,10 +96,9 @@ where
 }
 
 /// Trait for implementing the storage backend of Sequence Paxos.
-pub trait Storage<T, S>
+pub trait Storage<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     /// Appends an entry to the end of the log and returns the log length.
     fn append_entry(&mut self, entry: T) -> u64;
@@ -149,21 +153,24 @@ where
     fn get_compacted_idx(&self) -> u64;
 
     /// Sets the snapshot.
-    fn set_snapshot(&mut self, snapshot: S);
+    fn set_snapshot(&mut self, snapshot: T::Snapshot);
 
     /// Returns the stored snapshot.
-    fn get_snapshot(&self) -> Option<S>;
+    fn get_snapshot(&self) -> Option<T::Snapshot>;
 }
 
-#[allow(missing_docs)]
+/// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NoSnapshot;
 
-impl<T: Entry> Snapshot<T> for () {
-    fn create(_: &[T]) -> Self {
-        unimplemented!()
+impl<T: Entry> Snapshot<T> for NoSnapshot {
+    fn create(_entries: &[T]) -> Self {
+        panic!("NoSnapshot should not be created");
     }
 
-    fn merge(&mut self, _: Self) {
-        unimplemented!()
+    fn merge(&mut self, _delta: Self) {
+        panic!("NoSnapshot should not be merged");
     }
 
     fn use_snapshots() -> bool {
@@ -173,28 +180,24 @@ impl<T: Entry> Snapshot<T> for () {
 
 /// Internal representation of storage. Hides all complexities with the compacted index
 /// such that Sequence Paxos accesses the log with the uncompacted index.
-pub(crate) struct InternalStorage<I, T, S>
+pub(crate) struct InternalStorage<I, T>
 where
-    I: Storage<T, S>,
+    I: Storage<T>,
     T: Entry,
-    S: Snapshot<T>,
 {
     storage: I,
     _t: PhantomData<T>,
-    _i: PhantomData<S>,
 }
 
-impl<I, T, S> InternalStorage<I, T, S>
+impl<I, T> InternalStorage<I, T>
 where
-    I: Storage<T, S>,
+    I: Storage<T>,
     T: Entry,
-    S: Snapshot<T>,
 {
     pub(crate) fn with(storage: I) -> Self {
         InternalStorage {
             storage,
             _t: Default::default(),
-            _i: Default::default(),
         }
     }
 
@@ -219,7 +222,7 @@ where
     }
 
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
-    pub(crate) fn read<R>(&self, r: R) -> Option<Vec<LogEntry<T, S>>>
+    pub(crate) fn read<R>(&self, r: R) -> Option<Vec<LogEntry<T>>>
     where
         R: RangeBounds<u64>,
     {
@@ -323,7 +326,7 @@ where
         to_sfx_idx: u64,
         compacted_idx: u64,
         decided_idx: u64,
-    ) -> Vec<LogEntry<T, S>> {
+    ) -> Vec<LogEntry<T>> {
         self.get_entries_with_real_idx(from_sfx_idx, to_sfx_idx)
             .into_iter()
             .enumerate()
@@ -339,7 +342,7 @@ where
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
-    pub(crate) fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+    pub(crate) fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T>>> {
         let decided_idx = self.get_decided_idx();
         if from_idx < decided_idx {
             self.read(from_idx..decided_idx)
@@ -348,7 +351,7 @@ where
         }
     }
 
-    fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T, S> {
+    fn create_compacted_entry(&self, compacted_idx: u64) -> LogEntry<T> {
         match self.storage.get_snapshot() {
             Some(s) => LogEntry::Snapshotted(SnapshottedEntry::with(compacted_idx, s)),
             None => LogEntry::Trimmed(compacted_idx),
@@ -436,11 +439,11 @@ where
         self.storage.get_stopsign()
     }
 
-    pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> S {
+    pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> T::Snapshot {
         let entries = self
             .storage
             .get_entries(0, compact_idx - self.storage.get_compacted_idx());
-        let delta = S::create(entries.as_slice());
+        let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot() {
             Some(mut s) => {
                 s.merge(delta);
@@ -450,20 +453,16 @@ where
         }
     }
 
-    pub(crate) fn create_diff_snapshot(
-        &mut self,
-        from_idx: u64,
-        to_idx: u64,
-    ) -> SnapshotType<T, S> {
+    pub(crate) fn create_diff_snapshot(&mut self, from_idx: u64, to_idx: u64) -> SnapshotType<T> {
         if self.get_compacted_idx() >= from_idx {
             SnapshotType::Complete(self.create_snapshot(to_idx))
         } else {
             let diff_entries = self.get_entries(from_idx, to_idx);
-            SnapshotType::Delta(S::create(diff_entries.as_slice()))
+            SnapshotType::Delta(T::Snapshot::create(diff_entries.as_slice()))
         }
     }
 
-    pub(crate) fn set_snapshot(&mut self, idx: u64, snapshot: S) {
+    pub(crate) fn set_snapshot(&mut self, idx: u64, snapshot: T::Snapshot) {
         let compacted_idx = self.storage.get_compacted_idx();
         if idx > compacted_idx {
             self.storage.trim(idx - compacted_idx);
@@ -472,7 +471,7 @@ where
         }
     }
 
-    pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: S) {
+    pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: T::Snapshot) {
         let mut snapshot = self
             .storage
             .get_snapshot()

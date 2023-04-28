@@ -2,15 +2,14 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::SnapshotType;
+use crate::storage::{Snapshot, SnapshotType};
 
 use super::*;
 
-impl<T, S, B> SequencePaxos<T, S, B>
+impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
@@ -263,7 +262,7 @@ where
         let (delta_snapshot, suffix, sync_idx) =
             if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
                 if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
-                    && Self::use_snapshots()
+                    && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
                         .internal_storage
@@ -274,7 +273,7 @@ where
                     let sfx = self.internal_storage.get_suffix(*promise_accepted_idx);
                     (None, sfx, *promise_accepted_idx)
                 }
-            } else if follower_decided_idx < my_decided_idx && Self::use_snapshots() {
+            } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
                 let delta_snapshot = self
                     .internal_storage
                     .create_diff_snapshot(follower_decided_idx, my_decided_idx);
@@ -360,7 +359,6 @@ where
                             SnapshotType::Delta(d) => {
                                 self.internal_storage.merge_snapshot(decided_idx, d);
                             }
-                            _ => unimplemented!(),
                         }
                         self.internal_storage.append_entries(suffix);
                         if let Some(ss) = max_stopsign {
@@ -400,7 +398,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T, S>, from: NodeId) {
+    pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T>, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(
             self.logger,
@@ -414,7 +412,7 @@ where
         }
     }
 
-    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T, S>, from: NodeId) {
+    pub(crate) fn handle_promise_accept(&mut self, prom: Promise<T>, from: NodeId) {
         #[cfg(feature = "logging")]
         {
             let (r, p) = &self.state;
