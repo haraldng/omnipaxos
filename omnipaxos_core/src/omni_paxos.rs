@@ -247,10 +247,6 @@ where
         if self.tick % self.resend_message_tick_timeout == 0 {
             self.seq_paxos.resend_message_timeout();
         }
-        // Reset tick so it never overflows
-        if self.tick == (self.election_tick_timeout * self.resend_message_tick_timeout) {
-            self.tick = 0;
-        }
     }
 
     /*** BLE calls ***/

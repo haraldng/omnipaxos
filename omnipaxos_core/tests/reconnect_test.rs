@@ -239,7 +239,10 @@ fn reconnect_after_dropped_prepare_test() {
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
     let new_leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
-    assert_ne!(leader_id, new_leader_id, "reconnect_after_dropped_prepare_test failed to elect a different leader");
+    assert_ne!(
+        leader_id, new_leader_id,
+        "reconnect_after_dropped_prepare_test failed to elect a different leader"
+    );
 
     // Decide new entries while follower is still disconnected
     sys.make_proposals(

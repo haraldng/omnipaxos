@@ -232,6 +232,7 @@ where
                 Some(ss) if !ss.decided => {
                     for follower in self.leader_state.get_promised_followers() {
                         if !self.leader_state.get_accepted_stopsign(follower) {
+                            // TODO: subtract 1 from seq_num to show duplicated?
                             self.send_accept_stopsign(follower, ss.stopsign.clone());
                         }
                     }
@@ -358,6 +359,7 @@ where
 
     fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign) {
         let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
+            seq_num: self.leader_state.next_seq_num(to),
             n: self.leader_state.n_leader,
             ss,
         });
