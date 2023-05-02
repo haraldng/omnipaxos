@@ -392,6 +392,24 @@ where
             .max()
             .unwrap()
             .unwrap();
+        let old_decided_idx = self
+            .internal_storage
+            .get_decided_idx()
+            .expect("storage error");
+        let old_accepted_round = self
+            .internal_storage
+            .get_accepted_round()
+            .expect("storage error");
+        self.internal_storage
+            .set_accepted_round(self.leader_state.n_leader)
+            .expect("storage error");
+        let result = self.internal_storage.set_decided_idx(decided_idx);
+        if result.is_err() {
+            self.internal_storage
+                .set_accepted_round(old_accepted_round)
+                .expect("storage error");
+        }
+        result.expect("storage error");
         match max_promise {
             Some(PromiseData {
                 decided_snapshot,
@@ -403,21 +421,32 @@ where
                             .leader_state
                             .get_decided_idx(max_promise_meta.pid)
                             .unwrap();
-                        match s {
+                        let result = match s {
                             SnapshotType::Complete(c) => {
-                                self.internal_storage
-                                    .set_snapshot(decided_idx, c)
-                                    .expect("storage error");
-                            }
+                                self.internal_storage.set_snapshot(decided_idx, c)
+                            },
                             SnapshotType::Delta(d) => {
-                                self.internal_storage
-                                    .merge_snapshot(decided_idx, d)
-                                    .expect("storage error");
-                            }
+                                self.internal_storage.merge_snapshot(decided_idx, d)
+                            },
+                            _ => unimplemented!(),
+                        };
+                        if result.is_err() {
+                            self.internal_storage
+                                .set_accepted_round(old_accepted_round)
+                                .expect("storage error");
+                            self.internal_storage
+                                .set_decided_idx(old_decided_idx)
+                                .expect("storage error");
                         }
-                        self.internal_storage
-                            .append_entries(suffix)
-                            .expect("storage error");
+                        result.expect("storage error");
+                        let result = self.internal_storage.append_entries(suffix);
+                        if result.is_err() {
+                            // we set the decided snapshot successfully, so no need to rollback decided_idx
+                            self.internal_storage
+                                .set_accepted_round(old_accepted_round)
+                                .expect("storage error");
+                        }
+                        result.expect("storage error");
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -427,20 +456,20 @@ where
                     }
                     None => {
                         // no snapshot, only suffix
-                        if max_promise_meta.n
-                            == self
-                                .internal_storage
-                                .get_accepted_round()
-                                .expect("storage error")
-                        {
-                            self.internal_storage
-                                .append_entries(suffix)
-                                .expect("storage error");
+                        let result = if max_promise_meta.n == old_accepted_round {
+                            self.internal_storage.append_entries(suffix)
                         } else {
+                            self.internal_storage.append_on_decided_prefix(suffix)
+                        };
+                        if result.is_err() {
                             self.internal_storage
-                                .append_on_decided_prefix(suffix)
+                                .set_accepted_round(old_accepted_round)
+                                .expect("storage error");
+                            self.internal_storage
+                                .set_decided_idx(old_decided_idx)
                                 .expect("storage error");
                         }
+                        result.expect("storage error");
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -456,12 +485,6 @@ where
                 self.adopt_pending_stopsign();
             }
         }
-        self.internal_storage
-            .set_accepted_round(self.leader_state.n_leader)
-            .expect("storage error");
-        self.internal_storage
-            .set_decided_idx(decided_idx)
-            .expect("storage error");
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }

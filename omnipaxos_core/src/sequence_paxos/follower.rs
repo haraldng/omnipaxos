@@ -28,73 +28,50 @@ where
             let accepted_idx = self.internal_storage.get_log_len().expect("storage error");
             let decided_idx = self.get_decided_idx();
             let stopsign = self.get_stopsign();
-            self.internal_storage
-                .set_promise(prep.n)
-                .expect("storage error");
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
                 if ld < decided_idx && T::Snapshot::use_snapshots() {
-                    let delta_snapshot =
-                        self.internal_storage.create_diff_snapshot(ld, decided_idx);
-                    let suffix = self.internal_storage.get_suffix(decided_idx);
-                    if delta_snapshot.is_err() || suffix.is_err() {
-                        self.internal_storage
-                            .set_promise(old_promise)
-                            .expect("storage error");
-                    }
-                    (
-                        Some(delta_snapshot.expect("storage error")),
-                        suffix.expect("storage error"),
-                    )
-                } else {
-                    let suffix = self.internal_storage.get_suffix(ld);
-                    if suffix.is_err() {
-                        self.internal_storage
-                            .set_promise(old_promise)
-                            .expect("storage error");
-                    }
-                    (None, suffix.expect("storage error"))
-                }
-            } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
-                // <<<<<<< HEAD
-                //                 if self.internal_storage.get_compacted_idx() > prep.accepted_idx
-                //                     && T::Snapshot::use_snapshots()
-                //                 {
-                // =======
-                let compacted_idx = self.internal_storage.get_compacted_idx();
-                if compacted_idx.is_err() {
-                    self.internal_storage
-                        .set_promise(old_promise)
-                        .expect("storage error");
-                }
-                if T::Snapshot::use_snapshots()
-                    && compacted_idx.expect("storage error") > prep.accepted_idx
-                {
                     let delta_snapshot = self
                         .internal_storage
-                        .create_diff_snapshot(prep.decided_idx, decided_idx);
-                    let suffix = self.internal_storage.get_suffix(decided_idx);
-                    if delta_snapshot.is_err() || suffix.is_err() {
-                        self.internal_storage
-                            .set_promise(old_promise)
-                            .expect("storage error");
-                    }
-                    (
-                        Some(delta_snapshot.expect("storage error")),
-                        suffix.expect("storage error"),
-                    )
+                        .create_diff_snapshot(ld, decided_idx)
+                        .expect("storage error");
+                    let suffix = self
+                        .internal_storage
+                        .get_suffix(decided_idx)
+                        .expect("storage error");
+                    (Some(delta_snapshot), suffix)
                 } else {
-                    let suffix = self.internal_storage.get_suffix(prep.accepted_idx);
-                    if suffix.is_err() {
-                        self.internal_storage
-                            .set_promise(old_promise)
-                            .expect("storage error");
-                    }
-                    (None, suffix.expect("storage error"))
+                    let suffix = self.internal_storage.get_suffix(ld).expect("storage error");
+                    (None, suffix)
+                }
+            } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
+                let compacted_idx = self
+                    .internal_storage
+                    .get_compacted_idx()
+                    .expect("storage error");
+                if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
+                    let delta_snapshot = self
+                        .internal_storage
+                        .create_diff_snapshot(prep.decided_idx, decided_idx)
+                        .expect("storage error");
+                    let suffix = self
+                        .internal_storage
+                        .get_suffix(decided_idx)
+                        .expect("storage error");
+                    (Some(delta_snapshot), suffix)
+                } else {
+                    let suffix = self
+                        .internal_storage
+                        .get_suffix(prep.accepted_idx)
+                        .expect("storage error");
+                    (None, suffix)
                 }
             } else {
                 (None, vec![])
             };
+            self.internal_storage
+                .set_promise(prep.n)
+                .expect("storage error");
             let promise = Promise {
                 n: prep.n,
                 n_accepted: na,
@@ -118,47 +95,75 @@ where
         if self.internal_storage.get_promise().expect("storage error") == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {
+            let old_decided_idx = self
+                .internal_storage
+                .get_decided_idx()
+                .expect("storage error");
+            let old_accepted_round = self
+                .internal_storage
+                .get_accepted_round()
+                .expect("storage error");
+            self.internal_storage
+                .set_accepted_round(accsync.n)
+                .expect("storage error");
+            let result = self.internal_storage.set_decided_idx(accsync.decided_idx);
+            if result.is_err() {
+                self.internal_storage
+                    .set_accepted_round(old_accepted_round)
+                    .expect("storage error");
+            }
+            result.expect("storage error");
             let accepted = match accsync.decided_snapshot {
                 Some(s) => {
-                    match s {
+                    let result = match s {
                         SnapshotType::Complete(c) => {
-                            self.internal_storage
-                                .set_snapshot(accsync.decided_idx, c)
-                                .expect("storage error");
+                            self.internal_storage.set_snapshot(accsync.decided_idx, c)
                         }
                         SnapshotType::Delta(d) => {
-                            self.internal_storage
-                                .merge_snapshot(accsync.decided_idx, d)
-                                .expect("storage error");
+                            self.internal_storage.merge_snapshot(accsync.decided_idx, d)
                         }
+                        _ => unimplemented!(),
+                    };
+                    if result.is_err() {
+                        self.internal_storage
+                            .set_accepted_round(old_accepted_round)
+                            .expect("storage error");
+                        self.internal_storage
+                            .set_decided_idx(old_decided_idx)
+                            .expect("storage error");
                     }
-                    let accepted_idx = self
-                        .internal_storage
-                        .append_entries(accsync.suffix)
-                        .expect("storage error");
+                    result.expect("storage error");
+                    let accepted_idx = self.internal_storage.append_entries(accsync.suffix);
+                    if accepted_idx.is_err() {
+                        // we set the decided snapshot successfully, so no need to rollback decided_idx
+                        self.internal_storage
+                            .set_accepted_round(old_accepted_round)
+                            .expect("storage error");
+                    }
                     Accepted {
                         n: accsync.n,
-                        accepted_idx,
+                        accepted_idx: accepted_idx.expect("storage error"),
                     }
                 }
                 None => {
                     // no snapshot, only suffix
                     let accepted_idx = self
                         .internal_storage
-                        .append_on_prefix(accsync.sync_idx, accsync.suffix)
-                        .expect("storage error");
+                        .append_on_prefix(accsync.sync_idx, accsync.suffix);
+                    if accepted_idx.is_err() {
+                        self.internal_storage
+                            .set_accepted_round(old_accepted_round)
+                            .expect("storage error");
+                        self.internal_storage
+                            .set_decided_idx(old_decided_idx)
+                            .expect("storage error");
+                    }
                     Accepted {
                         n: accsync.n,
-                        accepted_idx,
+                        accepted_idx: accepted_idx.expect("storage error"),
                     }
                 }
             };
-            self.internal_storage
-                .set_accepted_round(accsync.n)
-                .expect("storage error");
-            self.internal_storage
-                .set_decided_idx(accsync.decided_idx)
-                .expect("storage error");
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
@@ -208,43 +213,51 @@ where
         {
             let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
             let old_decided_idx = self.get_decided_idx();
-            let old_accepted_round = self
-                .internal_storage
-                .get_accepted_round()
-                .expect("storage error");
-            match msg_status {
+            let old_accepted_round = match msg_status {
                 MessageStatus::First => {
                     // psuedo-AcceptSync for reconfigurations
+                    let old_accepted_round = self
+                        .internal_storage
+                        .get_accepted_round()
+                        .expect("storage error");
                     self.internal_storage
                         .set_accepted_round(acc.n)
                         .expect("storage error");
                     self.forward_pending_proposals();
                     self.current_seq_num = acc.seq_num;
+                    Some(old_accepted_round)
                 }
-                MessageStatus::Expected => self.current_seq_num = acc.seq_num,
+                MessageStatus::Expected => {
+                    self.current_seq_num = acc.seq_num;
+                    None
+                }
                 MessageStatus::DroppedPreceding => {
                     self.reconnected(acc.n.pid);
                     return;
                 }
                 MessageStatus::Outdated => return,
-            }
+            };
 
             let entries = acc.entries;
             // handle decide
             if acc.decided_idx > old_decided_idx {
                 let result = self.internal_storage.set_decided_idx(acc.decided_idx);
                 if result.is_err() {
-                    self.internal_storage
-                        .set_accepted_round(old_accepted_round)
-                        .expect("storage error");
+                    if let Some(r) = old_accepted_round {
+                        self.internal_storage
+                            .set_accepted_round(r)
+                            .expect("storage error");
+                    }
                 }
                 result.expect("storage error");
             }
             let result = self.accept_entries(acc.n, entries);
             if result.is_err() {
-                self.internal_storage
-                    .set_accepted_round(old_accepted_round)
-                    .expect("storage error");
+                if let Some(r) = old_accepted_round {
+                    self.internal_storage
+                        .set_accepted_round(r)
+                        .expect("storage error");
+                }
                 self.internal_storage
                     .set_decided_idx(old_decided_idx)
                     .expect("storage error");
