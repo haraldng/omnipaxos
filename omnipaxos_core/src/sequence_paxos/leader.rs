@@ -428,7 +428,6 @@ where
                             SnapshotType::Delta(d) => {
                                 self.internal_storage.merge_snapshot(decided_idx, d)
                             }
-                            _ => unimplemented!(),
                         };
                         if result.is_err() {
                             self.internal_storage
