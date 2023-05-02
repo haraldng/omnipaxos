@@ -424,10 +424,10 @@ where
                         let result = match s {
                             SnapshotType::Complete(c) => {
                                 self.internal_storage.set_snapshot(decided_idx, c)
-                            },
+                            }
                             SnapshotType::Delta(d) => {
                                 self.internal_storage.merge_snapshot(decided_idx, d)
-                            },
+                            }
                             _ => unimplemented!(),
                         };
                         if result.is_err() {

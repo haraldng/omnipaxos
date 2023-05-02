@@ -547,25 +547,6 @@ where
         Ok(())
     }
 
-//     fn set_snapshot(&mut self, snapshot: T::Snapshot) {
-//         let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
-//         #[cfg(feature = "rocksdb")]
-//         {
-//             self.rocksdb
-//                 .put(SNAPSHOT, stopsign)
-//                 .expect("Failed to set 'SNAPSHOT'");
-//         }
-//         #[cfg(feature = "sled")]
-//         {
-//             self.sled
-//                 .insert(SNAPSHOT, stopsign)
-//                 .expect("Failed to set 'SNAPSHOT'");
-// =======
-// >>>>>>> 70a9155 (implement storage API changes in omnipaxos_storage)
-//         }
-//         Ok(())
-//     }
-
     // TODO: A way to trim the commitlog without deleting and recreating the log
     fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
         let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset())?; // get the log entries from 'trimmed_idx' to latest
