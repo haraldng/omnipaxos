@@ -17,7 +17,10 @@ where
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
         if n <= self.leader_state.n_leader
-            || n <= self.internal_storage.get_promise().expect("storage error")
+            || n <= self
+                .internal_storage
+                .get_promise()
+                .expect("storage error while trying to read promise")
         {
             return;
         }
@@ -36,9 +39,12 @@ where
             let na = self
                 .internal_storage
                 .get_accepted_round()
-                .expect("storage error");
+                .expect("storage error while trying to read accepted round");
             let decided_idx = self.get_decided_idx();
-            let accepted_idx = self.internal_storage.get_log_len().expect("storage error");
+            let accepted_idx = self
+                .internal_storage
+                .get_log_len()
+                .expect("storage error while trying to read log length");
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -57,7 +63,9 @@ where
                 n_accepted: na,
                 accepted_idx,
             };
-            self.internal_storage.set_promise(n).expect("storage error");
+            self.internal_storage
+                .set_promise(n)
+                .expect("storage error while trying to write promise");
             /* send prepare */
             for pid in &self.peers {
                 self.outgoing.push(PaxosMessage {
@@ -83,12 +91,15 @@ where
             let decided_idx = self
                 .internal_storage
                 .get_decided_idx()
-                .expect("storage error");
+                .expect("storage error while trying to read decided index");
             let n_accepted = self
                 .internal_storage
                 .get_accepted_round()
-                .expect("storage error");
-            let accepted_idx = self.internal_storage.get_log_len().expect("storage error");
+                .expect("storage error while trying to read accepted round");
+            let accepted_idx = self
+                .internal_storage
+                .get_log_len()
+                .expect("storage error while trying to read log length");
             let prep = Prepare {
                 n: self.leader_state.n_leader,
                 decided_idx,
@@ -180,7 +191,7 @@ where
             decided_idx: self
                 .internal_storage
                 .get_decided_idx()
-                .expect("storage error"),
+                .expect("storage error while trying to read decided index"),
             entries,
         };
         self.outgoing.push(PaxosMessage {
@@ -196,11 +207,11 @@ where
         let decided_idx = self
             .internal_storage
             .get_decided_idx()
-            .expect("storage error");
+            .expect("storage error while trying to read decided index");
         let accepted_idx = self
             .internal_storage
             .append_entry(entry.clone())
-            .expect("storage error");
+            .expect("storage error while trying to write an entry");
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -235,11 +246,11 @@ where
         let decided_idx = self
             .internal_storage
             .get_decided_idx()
-            .expect("storage error");
+            .expect("storage error while trying to read decided index");
         let accepted_idx = self
             .internal_storage
             .append_entries(entries.clone())
-            .expect("storage error");
+            .expect("storage error while trying to write log entries");
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -292,41 +303,41 @@ where
                 if self
                     .internal_storage
                     .get_compacted_idx()
-                    .expect("storage error")
+                    .expect("storage error while trying to read compacted index")
                     > *promise_accepted_idx
                     && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
                         .internal_storage
                         .create_diff_snapshot(follower_decided_idx, my_decided_idx)
-                        .expect("storage error");
+                        .expect("storage error while trying to read diff snapshot");
                     let suffix = self
                         .internal_storage
                         .get_suffix(my_decided_idx)
-                        .expect("storage error");
+                        .expect("storage error while trying to read log suffix");
                     (Some(delta_snapshot), suffix, follower_decided_idx)
                 } else {
                     let sfx = self
                         .internal_storage
                         .get_suffix(*promise_accepted_idx)
-                        .expect("storage error");
+                        .expect("storage error while trying to read log suffix");
                     (None, sfx, *promise_accepted_idx)
                 }
             } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
                 let delta_snapshot = self
                     .internal_storage
                     .create_diff_snapshot(follower_decided_idx, my_decided_idx)
-                    .expect("storage error");
+                    .expect("storage error while trying to read diff snapshot");
                 let suffix = self
                     .internal_storage
                     .get_suffix(my_decided_idx)
-                    .expect("storage error");
+                    .expect("storage error while trying to read log suffix");
                 (Some(delta_snapshot), suffix, follower_decided_idx)
             } else {
                 let suffix = self
                     .internal_storage
                     .get_suffix(follower_decided_idx)
-                    .expect("storage error");
+                    .expect("storage error while trying to read log suffix");
                 (None, suffix, follower_decided_idx)
             };
         self.leader_state.increment_seq_num_session(to);
@@ -373,7 +384,7 @@ where
             let accepted_idx = self
                 .internal_storage
                 .append_entries(new_entries)
-                .expect("storage error");
+                .expect("storage error while trying to write log entries");
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }
@@ -395,21 +406,24 @@ where
         let old_decided_idx = self
             .internal_storage
             .get_decided_idx()
-            .expect("storage error");
+            .expect("storage error while trying to read decided index");
         let old_accepted_round = self
             .internal_storage
             .get_accepted_round()
-            .expect("storage error");
+            .expect("storage error while trying to read accepted round");
         self.internal_storage
             .set_accepted_round(self.leader_state.n_leader)
-            .expect("storage error");
+            .expect("storage error while trying to write accepted round");
         let result = self.internal_storage.set_decided_idx(decided_idx);
         if result.is_err() {
             self.internal_storage
                 .set_accepted_round(old_accepted_round)
-                .expect("storage error");
+                .expect("storage error while trying to write accepted round");
+            panic!(
+                "storage error while trying to write decided index: {}",
+                result.unwrap_err()
+            );
         }
-        result.expect("storage error");
         match max_promise {
             Some(PromiseData {
                 decided_snapshot,
@@ -432,20 +446,26 @@ where
                         if result.is_err() {
                             self.internal_storage
                                 .set_accepted_round(old_accepted_round)
-                                .expect("storage error");
+                                .expect("storage error while trying to write accepted round");
                             self.internal_storage
                                 .set_decided_idx(old_decided_idx)
-                                .expect("storage error");
+                                .expect("storage error while trying to write decided index");
+                            panic!(
+                                "storage error while trying to write snapshot: {}",
+                                result.unwrap_err()
+                            );
                         }
-                        result.expect("storage error");
                         let result = self.internal_storage.append_entries(suffix);
                         if result.is_err() {
                             // we set the decided snapshot successfully, so no need to rollback decided_idx
                             self.internal_storage
                                 .set_accepted_round(old_accepted_round)
-                                .expect("storage error");
+                                .expect("storage error while trying to write accepted round");
+                            panic!(
+                                "storage error while trying to write log entries: {}",
+                                result.unwrap_err()
+                            );
                         }
-                        result.expect("storage error");
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -463,12 +483,15 @@ where
                         if result.is_err() {
                             self.internal_storage
                                 .set_accepted_round(old_accepted_round)
-                                .expect("storage error");
+                                .expect("storage error while trying to write accepted round");
                             self.internal_storage
                                 .set_decided_idx(old_decided_idx)
-                                .expect("storage error");
+                                .expect("storage error while trying to write decided index");
+                            panic!(
+                                "storage error while trying to write log entries: {}",
+                                result.unwrap_err()
+                            );
                         }
-                        result.expect("storage error");
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -525,22 +548,24 @@ where
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
             accepted.accepted_idx,
-            self.internal_storage.get_decided_idx().unwrap()
+            self.internal_storage
+                .get_decided_idx()
+                .expect("storage error while trying to read decided index")
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
-            let mut decided_idx = self
+            let old_decided_idx = self
                 .internal_storage
                 .get_decided_idx()
-                .expect("storage error");
+                .expect("storage error while trying to read decided index");
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
-            if accepted.accepted_idx > decided_idx
+            if accepted.accepted_idx > old_decided_idx
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
+                let decided_idx = accepted.accepted_idx;
                 self.internal_storage
-                    .set_decided_idx(accepted.accepted_idx)
-                    .expect("storage error");
-                decided_idx = accepted.accepted_idx;
+                    .set_decided_idx(decided_idx)
+                    .expect("storage error while trying to write decided index");
                 // Send Decides to followers or batch with previous AcceptDecide
                 for pid in self.leader_state.get_promised_followers() {
                     if cfg!(feature = "batch_accept") {

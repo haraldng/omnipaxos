@@ -179,7 +179,7 @@ where
             .seq_paxos
             .internal_storage
             .read(idx..idx + 1)
-            .expect("storage error")
+            .expect("storage error while trying to read log entries")
         {
             Some(mut v) => v.pop(),
             None => None,
@@ -194,7 +194,7 @@ where
         self.seq_paxos
             .internal_storage
             .read(r)
-            .expect("storage error")
+            .expect("storage error while trying to read log entries")
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
@@ -202,7 +202,7 @@ where
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
-            .expect("storage error")
+            .expect("storage error while trying to read decided log suffix")
     }
 
     /// Handle an incoming message.

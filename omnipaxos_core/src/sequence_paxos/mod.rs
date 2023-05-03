@@ -107,7 +107,7 @@ where
         paxos
             .internal_storage
             .set_promise(leader)
-            .expect("storage error");
+            .expect("storage error while trying to write promise");
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -148,7 +148,10 @@ where
                         });
                     }
                 }
-                result.map_err(|e| *e.downcast().expect("storage error"))
+                result.map_err(|e| {
+                    *e.downcast()
+                        .expect("storage error while trying to trim log")
+                })
             }
             _ => Err(CompactionErr::NotCurrentLeader(self.leader.pid)),
         }
@@ -175,21 +178,24 @@ where
                 });
             }
         }
-        result.map_err(|e| *e.downcast().expect("storage error"))
+        result.map_err(|e| {
+            *e.downcast()
+                .expect("storage error while trying to snapshot log")
+        })
     }
 
     /// Return the decided index.
     pub(crate) fn get_decided_idx(&self) -> u64 {
         self.internal_storage
             .get_decided_idx()
-            .expect("storage error")
+            .expect("storage error while trying to read decided index")
     }
 
     /// Return trim index from storage.
     pub(crate) fn get_compacted_idx(&self) -> u64 {
         self.internal_storage
             .get_compacted_idx()
-            .expect("storage error")
+            .expect("storage error while trying to read compacted index")
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
@@ -258,7 +264,11 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        match self.internal_storage.get_stopsign().expect("storage error") {
+        match self
+            .internal_storage
+            .get_stopsign()
+            .expect("storage error while trying to read stopsign")
+        {
             Some(ss) if ss.decided => Some(ss.stopsign),
             _ => None,
         }
@@ -337,7 +347,7 @@ where
     fn accept_stopsign(&mut self, ss: StopSign) {
         self.internal_storage
             .set_stopsign(StopSignEntry::with(ss, false))
-            .expect("storage error");
+            .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
             self.leader_state.set_accepted_stopsign(self.pid);
         }
@@ -369,7 +379,7 @@ where
     fn get_stopsign(&self) -> Option<StopSign> {
         self.internal_storage
             .get_stopsign()
-            .expect("storage error")
+            .expect("storage error while trying to read stopsign")
             .map(|x| x.stopsign)
     }
 }
