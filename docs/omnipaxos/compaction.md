@@ -1,4 +1,3 @@
-# Compaction
 As time passes, the replicated log in `OmniPaxos` will grow large. To avoid letting the log growing infinitely large, we support two ways of compaction that can be initiated by users:
 
 ## Trim

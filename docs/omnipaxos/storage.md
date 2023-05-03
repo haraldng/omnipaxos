@@ -1,4 +1,3 @@
-# Storage
 You are free to use any storage implementation with `OmniPaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation that work out of the box: `MemoryStorage` and `PersistentStorage`.
 
 ## Importing `omnipaxos_storage`

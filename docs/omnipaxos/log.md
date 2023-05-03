@@ -1,4 +1,3 @@
-# Reading and Writing
 We now show how to read and write the replicated log. The replicated log is *append-only*. To append an entry we call the following:
 
 ```rust,edition2018,no_run,noplaypen
