@@ -1,4 +1,3 @@
-# Communication
 As previously mentioned, the user has to send/receive messages between servers themselves. In this section, we show how the user should interact with `OmniPaxos` and its incoming and outgoing messages.
 
 ## Incoming and Outgoing
