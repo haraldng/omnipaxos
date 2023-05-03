@@ -1,8 +1,5 @@
 /// Ballot Leader Election algorithm for electing new leaders
 use crate::util::defaults::*;
-#[cfg(feature = "hocon_config")]
-#[allow(unused_imports)]
-use crate::utils::hocon_kv::LOG_FILE_PATH;
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;

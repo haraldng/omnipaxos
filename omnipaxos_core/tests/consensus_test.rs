@@ -6,6 +6,7 @@ use omnipaxos_core::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
 };
 use serial_test::serial;
+use std::time::Duration;
 use utils::{
     create_temp_dir,
     verification::{verify_entries, verify_snapshot, verify_stopsign},
@@ -21,7 +22,7 @@ fn consensus_test() {
 
     let mut sys = TestSystem::with(
         cfg.num_nodes,
-        cfg.election_timeout,
+        cfg.election_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );
@@ -42,7 +43,10 @@ fn consensus_test() {
 
     sys.start_all_nodes();
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(
+        futures,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -84,7 +88,7 @@ fn read_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let temp_dir = create_temp_dir();
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -123,8 +127,7 @@ fn read_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
-    let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
+    let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());
@@ -158,7 +161,7 @@ fn read_entries_test() {
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let temp_dir = create_temp_dir();
-    let mut storage = StorageType::<Value, LatestValue>::with(cfg.storage_type, &temp_dir);
+    let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
     storage.append_entries(log.clone());
     storage.set_decided_idx(decided_idx);
 
@@ -204,8 +207,7 @@ fn read_entries_test() {
 
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
-    let mut stopped_storage =
-        StorageType::<Value, LatestValue>::with(cfg.storage_type, &ss_temp_dir);
+    let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
     stopped_storage.append_entries(log.clone());

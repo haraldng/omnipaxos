@@ -2,6 +2,7 @@
 members = [
     "omnipaxos_core",
     "omnipaxos_storage",
+    "omnipaxos_macros",
     "examples/kv_store"
 ]
 

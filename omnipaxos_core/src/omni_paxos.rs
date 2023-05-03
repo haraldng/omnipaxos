@@ -1,15 +1,19 @@
-#[cfg(feature = "hocon_config")]
-use crate::utils::hocon_kv::*;
+#[cfg(feature = "toml_config")]
+use crate::errors::ConfigError;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{Entry, Snapshot, StopSign, Storage},
+    storage::{Entry, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
-#[cfg(feature = "hocon_config")]
-use hocon::Hocon;
+#[cfg(feature = "toml_config")]
+use serde::Deserialize;
+#[cfg(feature = "toml_config")]
+use std::fs;
 use std::ops::RangeBounds;
+#[cfg(feature = "toml_config")]
+use toml;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -22,57 +26,34 @@ use std::ops::RangeBounds;
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
     pub configuration_id: u32,
     pub pid: NodeId,
     pub peers: Vec<u64>,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
+    #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
     pub leader_priority: u64,
     pub initial_leader: Option<Ballot>,
-    #[cfg(feature = "logging")]
-    pub logger_path: Option<String>,
 }
 
 impl OmniPaxosConfig {
-    /// Creates a new `OmniPaxosConfig` from a `Hocon` object.
-    #[cfg(feature = "hocon_config")]
-    pub fn with_hocon(h: &Hocon) -> Self {
-        let mut config = OmniPaxosConfig {
-            pid: h[PID].as_i64().expect("Failed to load PID") as u64,
-            configuration_id: h[CONFIG_ID].as_i64().expect("Failed to load config ID") as u32,
-            logger_file_path: h[LOG_FILE_PATH].as_string(),
-            ..Default::default()
-        };
-        match &h[PEERS] {
-            Hocon::Array(v) => {
-                let peers = v
-                    .iter()
-                    .map(|x| x.as_i64().expect("Failed to load pid in Hocon array") as u64)
-                    .collect();
-                config.peers = peers;
-            }
-            _ => {
-                unimplemented!("Peers in Hocon should be parsed as array!")
-            }
-        }
-        if let Some(b) = h[BUFFER_SIZE].as_i64() {
-            config.buffer_size = b as usize;
-        }
-        if let Some(p) = h[PRIORITY].as_i64().map(|p| p as u64) {
-            config.leader_priority = p;
-        }
-        config
+    /// Creates a new `OmniPaxosConfig` from a `toml` file.
+    #[cfg(feature = "toml_config")]
+    pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
+        let config_file = fs::read_to_string(file_path)?;
+        let config: OmniPaxosConfig = toml::from_str(&config_file)?;
+        Ok(config)
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, S, B>(self, storage: B) -> OmniPaxos<T, S, B>
+    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
     where
         T: Entry,
-        S: Snapshot<T>,
-        B: Storage<T, S>,
+        B: Storage<T>,
     {
         assert_ne!(self.pid, 0, "Pid cannot be 0");
         assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
@@ -100,32 +81,29 @@ impl Default for OmniPaxosConfig {
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
+            #[cfg(feature = "logging")]
             logger_file_path: None,
             leader_priority: 0,
             initial_leader: None,
-            #[cfg(feature = "logging")]
-            logger_path: None,
         }
     }
 }
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
-pub struct OmniPaxos<T, S, B>
+pub struct OmniPaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
-    seq_paxos: SequencePaxos<T, S, B>,
+    seq_paxos: SequencePaxos<T, B>,
     ble: BallotLeaderElection,
 }
 
-impl<T, S, B> OmniPaxos<T, S, B>
+impl<T, B> OmniPaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /// Initiates the trim process.
     /// # Arguments
@@ -177,7 +155,7 @@ where
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
-    pub fn outgoing_messages(&mut self) -> Vec<Message<T, S>> {
+    pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
         let paxos_msgs = self
             .seq_paxos
             .get_outgoing_msgs()
@@ -192,7 +170,7 @@ where
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
-    pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
+    pub fn read(&self, idx: u64) -> Option<LogEntry<T>> {
         match self.seq_paxos.internal_storage.read(idx..idx + 1) {
             Some(mut v) => v.pop(),
             None => None,
@@ -200,7 +178,7 @@ where
     }
 
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
-    pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T, S>>>
+    pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T>>>
     where
         R: RangeBounds<u64>,
     {
@@ -208,14 +186,14 @@ where
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
-    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T>>> {
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
     }
 
     /// Handle an incoming message.
-    pub fn handle_incoming(&mut self, m: Message<T, S>) {
+    pub fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
             Message::BLE(b) => self.ble.handle(b),

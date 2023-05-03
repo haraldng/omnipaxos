@@ -23,6 +23,8 @@ OmniPaxos:
     path: "omnipaxos/compaction.md"
   Reconfiguration:
     path: "omnipaxos/reconfiguration.md"
+  Features:
+    path: "omnipaxos/features.md"
   Logging:
     path: "omnipaxos/logging.md"
 

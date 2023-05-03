@@ -7,7 +7,7 @@ use commitlog::{
 };
 use omnipaxos_core::{
     ballot_leader_election::Ballot,
-    storage::{Entry, Snapshot, StopSign, StopSignEntry, Storage},
+    storage::{Entry, StopSign, StopSignEntry, Storage},
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -184,10 +184,9 @@ impl Default for PersistentStorageConfig {
 /// A persistent storage implementation, lets sequence paxos write the log
 /// and current state to disk. Log entries are serialized and de-serialized
 /// into slice of bytes when read or written from the log.
-pub struct PersistentStorage<T, S>
+pub struct PersistentStorage<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     /// Disk-based commit log for entries
     commitlog: CommitLog,
@@ -201,11 +200,9 @@ where
     sled: Db,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
-    /// A placeholder for the S: Snapshot<T>
-    s: PhantomData<S>,
 }
 
-impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
+impl<T: Entry> PersistentStorage<T> {
     /// Creates or opens an existing storage
     pub fn open(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config.path.expect("No path found in config");
@@ -229,7 +226,6 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
                 Config::open(&opts).expect("Failed to create sled database")
             },
             t: PhantomData::default(),
-            s: PhantomData::default(),
         }
     }
 
@@ -253,10 +249,10 @@ impl<T: Entry, S: Snapshot<T>> PersistentStorage<T, S> {
     }
 }
 
-impl<T, S> Storage<T, S> for PersistentStorage<T, S>
+impl<T: Entry> Storage<T> for PersistentStorage<T>
 where
-    T: Entry + Serialize + for<'a> Deserialize<'a>,
-    S: Snapshot<T> + Serialize + for<'a> Deserialize<'a>,
+    T: Serialize + for<'a> Deserialize<'a>,
+    T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> u64 {
         let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize log entry");
@@ -547,7 +543,7 @@ where
         }
     }
 
-    fn get_snapshot(&self) -> Option<S> {
+    fn get_snapshot(&self) -> Option<T::Snapshot> {
         #[cfg(feature = "rocksdb")]
         {
             let snapshot = self
@@ -572,7 +568,7 @@ where
         }
     }
 
-    fn set_snapshot(&mut self, snapshot: S) {
+    fn set_snapshot(&mut self, snapshot: T::Snapshot) {
         let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
         #[cfg(feature = "rocksdb")]
         {
