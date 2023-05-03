@@ -346,6 +346,7 @@ where
             return;
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
+            self.internal_storage.flush_batch();
         }
         self.outgoing.push(PaxosMessage {
             from: self.pid,

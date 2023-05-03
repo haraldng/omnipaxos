@@ -180,66 +180,69 @@ where
     }
 
     pub(crate) fn send_accept(&mut self, entry: T) {
-        let accepted_idx = self.internal_storage.append_entry(entry.clone());
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
-            if cfg!(feature = "batch_accept") {
-                #[cfg(feature = "batch_accept")]
-                match self.leader_state.get_batch_accept_meta(pid) {
-                    Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
-                        let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
-                        match msg {
-                            PaxosMsg::AcceptDecide(a) => a.entries.push(entry.clone()),
-                            _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
+        let accepted_res = self.internal_storage.append_entry(entry.clone());
+        if let Some(accepted_idx) = accepted_res {
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            for pid in self.leader_state.get_promised_followers() {
+                if cfg!(feature = "batch_accept") {
+                    #[cfg(feature = "batch_accept")]
+                    match self.leader_state.get_batch_accept_meta(pid) {
+                        Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
+                            let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
+                            match msg {
+                                PaxosMsg::AcceptDecide(a) => a.entries.push(entry.clone()),
+                                _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
+                            }
                         }
+                        _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
                     }
-                    _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
+                } else {
+                    let acc = AcceptDecide {
+                        n: self.leader_state.n_leader,
+                        seq_num: self.leader_state.next_seq_num(pid),
+                        decided_idx: self.internal_storage.get_decided_idx(),
+                        entries: vec![entry.clone()],
+                    };
+                    self.outgoing.push(PaxosMessage {
+                        from: self.pid,
+                        to: pid,
+                        msg: PaxosMsg::AcceptDecide(acc),
+                    });
                 }
-            } else {
-                let acc = AcceptDecide {
-                    n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.internal_storage.get_decided_idx(),
-                    entries: vec![entry.clone()],
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: pid,
-                    msg: PaxosMsg::AcceptDecide(acc),
-                });
             }
         }
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
-        self.internal_storage.append_entries(entries.clone());
-        let accepted_idx = self.internal_storage.get_log_len();
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
-            if cfg!(feature = "batch_accept") {
-                #[cfg(feature = "batch_accept")]
-                match self.leader_state.get_batch_accept_meta(pid) {
-                    Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
-                        let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
-                        match msg {
-                            PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
-                            _ => self.send_accept_and_cache(pid, entries.clone()),
+        let append_res = self.internal_storage.append_entries(entries.clone());
+        if let Some(accepted_idx) = append_res {
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            for pid in self.leader_state.get_promised_followers() {
+                if cfg!(feature = "batch_accept") {
+                    #[cfg(feature = "batch_accept")]
+                    match self.leader_state.get_batch_accept_meta(pid) {
+                        Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
+                            let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
+                            match msg {
+                                PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
+                                _ => self.send_accept_and_cache(pid, entries.clone()),
+                            }
                         }
+                        _ => self.send_accept_and_cache(pid, entries.clone()),
                     }
-                    _ => self.send_accept_and_cache(pid, entries.clone()),
+                } else {
+                    let acc = AcceptDecide {
+                        n: self.leader_state.n_leader,
+                        seq_num: self.leader_state.next_seq_num(pid),
+                        decided_idx: self.internal_storage.get_decided_idx(),
+                        entries: entries.clone(),
+                    };
+                    self.outgoing.push(PaxosMessage {
+                        from: self.pid,
+                        to: pid,
+                        msg: PaxosMsg::AcceptDecide(acc),
+                    });
                 }
-            } else {
-                let acc = AcceptDecide {
-                    n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.internal_storage.get_decided_idx(),
-                    entries: entries.clone(),
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: pid,
-                    msg: PaxosMsg::AcceptDecide(acc),
-                });
             }
         }
     }
@@ -326,9 +329,10 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            self.internal_storage.append_entries(new_entries);
-            let accepted_idx = self.internal_storage.get_log_len();
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            let append_res = self.internal_storage.append_entries(new_entries);
+            if let Some(accepted_idx)  = append_res {
+                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            }
         }
     }
 

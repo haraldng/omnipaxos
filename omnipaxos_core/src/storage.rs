@@ -177,6 +177,8 @@ struct StateCache<T>
     where
         T: Entry,
 {
+    /// The maximum number of entries to batch.
+    batch_size: usize,
     /// Vector which contains all the logged entries in-memory.
     batched_entries: Vec<T>,
     /// Last promised round.
@@ -194,8 +196,9 @@ impl<T> StateCache<T>
     where
         T: Entry
 {
-    pub fn new() -> Self {
+    pub fn new(batch_size: usize) -> Self {
         StateCache {
+            batch_size,
             batched_entries: Vec::new(),
             n_prom: Ballot::default(),
             acc_round: Ballot::default(),
@@ -219,25 +222,7 @@ impl<T> StateCache<T>
     fn get_compacted_idx(&self) -> u64 {
         self.compacted_idx
     }
-
     // Setters
-    fn append_entry(&mut self, entry: T) {
-        self.batched_entries.push(entry);
-    }
-    fn append_entries(&mut self, entries: Vec<T>) {
-        self.batched_entries.extend(entries);
-    }
-    // Pop entries from the front of the batched_entries with size of `batch_size`.
-    fn pop_front_batched_entries(&mut self, batch_size: usize) -> Vec<T> {
-        let mut entries = Vec::new();
-        for _ in 0..batch_size {
-            entries.push(self.batched_entries.remove(0));
-        }
-        entries
-    }
-    // fn clear_batched_entries(&mut self) {
-    //     self.batched_entries.clear();
-    // }
     fn set_promise(&mut self, n_prom: Ballot) {
         self.n_prom = n_prom;
     }
@@ -249,6 +234,40 @@ impl<T> StateCache<T>
     }
     fn set_compacted_idx(&mut self, compacted_idx: u64) {
         self.compacted_idx = compacted_idx;
+    }
+
+    // Appends an entry to the end of the `batched_entries`. If the batch is full, the
+    // batch is flushed and return flushed entries. Else, return None.
+    fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
+        self.batched_entries.push(entry);
+        self.flush_if_batch_full()
+    }
+    // Appends entries to the end of the `batched_entries`. If the batch is full, the
+    // batch is flushed and return flushed entries. Else, return None.
+    fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
+        self.batched_entries.extend(entries);
+        self.flush_if_batch_full()
+    }
+    // Flushes the batched entries if the batch is full, and returns the flushed entries.
+    fn flush_if_batch_full(&mut self) -> Option<Vec<T>> {
+        let mut flushed_entries = Vec::new();
+        while self.batched_entries.len() >= self.batch_size {
+            flushed_entries.extend(self.pop_front_batched_entries());
+        }
+        return if flushed_entries.len() >= 0 {
+            Some(flushed_entries)
+        } else {
+            None
+        };
+    }
+    // Pop entries from the front of the batched_entries with size of `batch_size`.
+    fn pop_front_batched_entries(&mut self) -> Vec<T> {
+        self.batched_entries.drain(0..self.batch_size).collect()
+    }
+    // Clears the batched entries and returns the cleared entries. If the batch is empty,
+    // return an empty vector.
+    fn clear_batch(&mut self) -> Vec<T> {
+        std::mem::take(&mut self.batched_entries)
     }
 }
 
@@ -262,7 +281,6 @@ where
 {
     storage: I,
     state_cache: StateCache<T>,
-    batch_size: usize,
     _t: PhantomData<T>,
     _i: PhantomData<S>,
 }
@@ -276,8 +294,7 @@ where
     pub(crate) fn with(storage: I, batch_size: usize) -> Self {
         let mut internal_store = InternalStorage {
             storage,
-            state_cache: StateCache::new(),
-            batch_size,
+            state_cache: StateCache::new(batch_size),
             _t: Default::default(),
             _i: Default::default(),
         };
@@ -452,30 +469,31 @@ where
     /*** Writing ***/
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
-    pub(crate) fn append_entry(&mut self, entry: T) -> u64 {
-        self.state_cache.append_entry(entry);
-        if self.state_cache.get_batching_size() >= self.batch_size as u64 {
-            self.flush_batch();
+    pub(crate) fn append_entry(&mut self, entry: T) -> Option<u64> {
+        let append_res = self.state_cache.append_entry(entry);
+        return if let Some(flushed_entries) = append_res {
+            self.storage.append_entries(flushed_entries);
+            Some(self.get_log_len())
+        } else {
+            None
         }
-        self.get_log_len()
     }
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
     // accepted index
     pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> Option<u64> {
-        self.state_cache.append_entries(entries);
-        if self.state_cache.get_batching_size() >= self.batch_size as u64 {
-            self.flush_batch();
-            return Some(self.get_log_len());
+        let append_res = self.state_cache.append_entries(entries);
+        return if let Some(flushed_entries) = append_res {
+            self.storage.append_entries(flushed_entries);
+            Some(self.get_log_len())
+        } else {
+            None
         }
-        None
     }
 
-    fn flush_batch(&mut self) {
-        while self.state_cache.get_batching_size() >= self.batch_size as u64 {
-            let entries = self.state_cache.pop_front_batched_entries(self.batch_size);
-            self.storage.append_entries(entries);
-        }
+    pub(crate) fn flush_batch(&mut self) {
+        let flushed_entries = self.state_cache.clear_batch();
+        self.storage.append_entries(flushed_entries);
     }
 
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> u64 {

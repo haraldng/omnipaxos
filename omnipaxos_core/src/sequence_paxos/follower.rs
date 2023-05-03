@@ -16,6 +16,7 @@ where
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
         if self.internal_storage.get_promise() <= prep.n {
             self.leader = prep.n;
+            self.internal_storage.flush_batch();
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
