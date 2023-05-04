@@ -2,8 +2,12 @@
 name = "omnipaxos"
 version = "0.1.0"
 authors = ["Harald Ng <hng@kth.se>"]
-edition = "2018"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2021"
+description = "A distributed log library written in Rust"
+readme = "../README.md"
+license = "Apache-2.0"
+repository = "https://github.com/haraldng/omnipaxos"
+homepage = "https://omnipaxos.com/"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -15,7 +19,7 @@ slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 toml = { version = "0.7.3", optional = true }
-omnipaxos_macros = { path = "../omnipaxos_macros", optional = true }
+omnipaxos_macros = { version = "0.1.0", path = "../omnipaxos_macros", optional = true }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
