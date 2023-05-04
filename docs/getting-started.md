@@ -21,7 +21,7 @@ To do so add the following to your Cargo.toml:
 
 ```toml
 [dependencies]
-omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos" }
+omnipaxos = { git = "https://github.com/haraldng/omnipaxos" }
 ```
 
-In ``omnipaxos_core/examples/kv_store``, we show a minimal example of how to use OmniPaxos to replicate KV operations using tokio.
+In ``omnipaxos/examples/kv_store``, we show a minimal example of how to use OmniPaxos to replicate KV operations using tokio.

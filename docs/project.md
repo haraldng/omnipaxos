@@ -21,7 +21,7 @@ This tutorial is built off the `master` branch on GitHub and thus tends to be a 
 If you would like to try out new features before they are released, you can add the following to your `Cargo.toml`:
 
 ```toml
-omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos", branch = "master" }
+omnipaxos = { git = "https://github.com/haraldng/omnipaxos", branch = "master" }
 ```
 --->
 
