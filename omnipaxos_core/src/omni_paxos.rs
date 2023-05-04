@@ -5,7 +5,7 @@ use crate::{
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, Snapshot, StopSign, Storage},
-    util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
+    util::{defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT}, LogEntry, NodeId, LogicalClock},
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
@@ -75,9 +75,8 @@ impl OmniPaxosConfig {
         OmniPaxos {
             seq_paxos: SequencePaxos::with(self.clone().into(), storage),
             ble: BallotLeaderElection::with(self.clone().into()),
-            election_tick_timeout: self.election_tick_timeout,
-            resend_message_tick_timeout: self.resend_message_tick_timeout,
-            tick: 0,
+            election_clock: LogicalClock::with(self.election_tick_timeout),
+            resend_message_clock: LogicalClock::with(self.resend_message_tick_timeout),
         }
     }
 }
@@ -89,8 +88,8 @@ impl Default for OmniPaxosConfig {
             pid: 0,
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
-            election_tick_timeout: 100,
-            resend_message_tick_timeout: 500,
+            election_tick_timeout: ELECTION_TIMEOUT,
+            resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             skip_prepare_use_leader: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
@@ -110,9 +109,8 @@ where
 {
     seq_paxos: SequencePaxos<T, S, B>,
     ble: BallotLeaderElection,
-    election_tick_timeout: u64,
-    resend_message_tick_timeout: u64,
-    tick: u64,
+    election_clock: LogicalClock,
+    resend_message_clock: LogicalClock,
 }
 
 impl<T, S, B> OmniPaxos<T, S, B>
@@ -240,11 +238,12 @@ where
     /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
     /// ticks. Also drives the detection and resending of dropped omnipaxos messages every `resend_message_tick_timeout` ticks.
     pub fn tick(&mut self) {
-        self.tick += 1;
-        if self.tick % self.election_tick_timeout == 0 {
+        self.election_clock.tick();
+        if self.election_clock.reached_timeout() {
             self.election_timeout();
         }
-        if self.tick % self.resend_message_tick_timeout == 0 {
+        self.resend_message_clock.tick();
+        if self.resend_message_clock.reached_timeout() {
             self.seq_paxos.resend_message_timeout();
         }
     }

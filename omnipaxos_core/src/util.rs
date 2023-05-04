@@ -111,6 +111,10 @@ where
         self.follower_seq_nums[idx]
     }
 
+    pub fn get_seq_num(&mut self, pid: NodeId) -> SequenceNumber{
+        self.follower_seq_nums[Self::pid_to_idx(pid)]
+    }
+
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
         self.decided_indexes[Self::pid_to_idx(pid)] = idx;
     }
@@ -143,11 +147,11 @@ where
         &self.max_promise_meta
     }
 
-    pub fn set_accepted_stopsign(&mut self, from: u64) {
+    pub fn set_accepted_stopsign(&mut self, from: NodeId) {
         self.accepted_stopsign[Self::pid_to_idx(from)] = true;
     }
 
-    pub fn get_accepted_stopsign(&mut self, from: u64) -> bool {
+    pub fn follower_has_accepted_stopsign(&mut self, from: NodeId) -> bool {
         self.accepted_stopsign[Self::pid_to_idx(from)]
     }
 
@@ -169,21 +173,21 @@ where
         self.batch_accept_meta = vec![None; self.max_pid];
     }
 
-    pub fn get_promised_followers(&self) -> Vec<u64> {
+    pub fn get_promised_followers(&self) -> Vec<NodeId> {
         self.decided_indexes
             .iter()
             .enumerate()
             .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as u64)
+            .map(|(idx, _)| (idx + 1) as NodeId)
             .collect()
     }
 
-    pub fn get_unpromised_peers(&self) -> Vec<u64> {
+    pub fn get_unpromised_peers(&self) -> Vec<NodeId> {
         self.decided_indexes
             .iter()
             .enumerate()
             .filter(|(pid, x)| x.is_none() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as u64)
+            .map(|(idx, _)| (idx + 1) as NodeId)
             .collect()
     }
 
@@ -284,6 +288,8 @@ where
 pub(crate) mod defaults {
     pub(crate) const BUFFER_SIZE: usize = 100000;
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
+    pub(crate) const ELECTION_TIMEOUT: u64 = 100;
+    pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 500;
 }
 
 #[allow(missing_docs)]
@@ -334,5 +340,31 @@ impl SequenceNumber {
         } else {
             MessageStatus::DroppedPreceding
         }
+    }
+}
+
+
+pub(crate) struct LogicalClock {
+    time: u64,
+    timeout: u64,
+}
+
+impl LogicalClock {
+    pub fn with(timeout: u64) -> Self {
+        Self {
+            time: 0,
+            timeout
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.time += 1;
+        if self.time == self.timeout {
+            self.time = 0;
+        }
+    }
+
+    pub fn reached_timeout(&self) -> bool {
+        self.time == 0
     }
 }

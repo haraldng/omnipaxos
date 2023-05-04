@@ -14,14 +14,11 @@ where
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        // TODO: Double check that this covers all the edge cases
-        if self.internal_storage.get_promise() < prep.n
-            || (self.internal_storage.get_promise() == prep.n && self.state.1 == Phase::Recover)
-        {
+        if self.internal_storage.get_promise() <= prep.n {
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
-            self.current_seq_num = SequenceNumber::default();
+            self.current_seq_num = SequenceNumber::default(); // TODO: revisit this
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_log_len();
             let decided_idx = self.get_decided_idx();
@@ -181,12 +178,10 @@ where
             let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
             match msg_status {
                 MessageStatus::First => {
-                    #[cfg(feature = "logging")]
-                    warn!(
-                        self.logger,
-                        "AcceptStopSign cannot be the first message in a sequence!"
-                    );
-                    return;
+                    // psuedo-AcceptSync for reconfigurations
+                    self.internal_storage.set_accepted_round(acc_ss.n);
+                    self.forward_pending_proposals();
+                    self.current_seq_num = acc_ss.seq_num;
                 }
                 MessageStatus::Expected => self.current_seq_num = acc_ss.seq_num,
                 MessageStatus::DroppedPreceding => {

@@ -131,7 +131,7 @@ where
                     if self.pending_stopsign.is_none() {
                         self.accept_stopsign(ss.clone());
                         for pid in self.leader_state.get_promised_followers() {
-                            self.send_accept_stopsign(pid, ss.clone());
+                            self.send_accept_stopsign(pid, ss.clone(), false);
                         }
                     }
                 }
