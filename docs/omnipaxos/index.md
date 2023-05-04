@@ -22,7 +22,7 @@ pub struct KeyValue {
 With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance.  Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following: 
 ```rust,edition2018,no_run,noplaypen
 use omnipaxos::{
-    omni_paxos::{OmniPaxos, OmniPaxosConfig},
+   {OmniPaxos, OmniPaxosConfig},
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
