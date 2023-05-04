@@ -1,6 +1,6 @@
 pub mod utils;
 
-use omnipaxos_core::{
+use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     util::{LogEntry, SequenceNumber},
 };

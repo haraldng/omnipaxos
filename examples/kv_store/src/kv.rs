@@ -1,9 +1,9 @@
 #[cfg(feature = "derive_entry")]
-use omnipaxos_core::macros::Entry;
+use omnipaxos::macros::Entry;
 #[cfg(not(feature = "derive_entry"))]
-use omnipaxos_core::storage::Entry;
+use omnipaxos::storage::Entry;
 #[cfg(not(feature = "derive_entry"))]
-use omnipaxos_core::storage::Snapshot;
+use omnipaxos::storage::Snapshot;
 use serde::{Deserialize, Serialize};
 #[cfg(not(feature = "derive_entry"))]
 use std::collections::HashMap;

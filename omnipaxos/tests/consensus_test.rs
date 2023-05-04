@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
+use omnipaxos::{
     omni_paxos::OmniPaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
 };

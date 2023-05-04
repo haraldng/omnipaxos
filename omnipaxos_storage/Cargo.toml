@@ -9,7 +9,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-omnipaxos_core = { path = "../omnipaxos_core" }
+omnipaxos = { path = "../omnipaxos" }
 rocksdb = { version = "0.18.0", optional = true }
 sled = { version = "0.34.7", optional = true }
 serde = { version = "1.0", features = ["derive"] }
