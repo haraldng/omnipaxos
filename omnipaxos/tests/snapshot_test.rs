@@ -2,7 +2,7 @@ pub mod utils;
 
 use crate::utils::LatestValue;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::Snapshot,
     util::{LogEntry, NodeId},

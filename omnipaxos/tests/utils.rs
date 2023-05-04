@@ -1,7 +1,7 @@
 use self::omnireplica::OmniPaxosComponent;
 use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     messages::Message,
     storage::{Entry, Snapshot, StopSign, Storage},
@@ -24,7 +24,7 @@ const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
 
-use omnipaxos_core::omni_paxos::OmniPaxosConfig;
+use omnipaxos::omni_paxos::OmniPaxosConfig;
 use sled::Config;
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
@@ -203,14 +203,14 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos_core::storage::StopSignEntry) {
+    fn set_stopsign(&mut self, s: omnipaxos::storage::StopSignEntry) {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
         }
     }
 
-    fn get_stopsign(&self) -> Option<omnipaxos_core::storage::StopSignEntry> {
+    fn get_stopsign(&self) -> Option<omnipaxos::storage::StopSignEntry> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
@@ -476,7 +476,7 @@ impl TestSystem {
 
 pub mod omnireplica {
     use super::*;
-    use omnipaxos_core::{
+    use omnipaxos::{
         ballot_leader_election::Ballot,
         messages::Message,
         omni_paxos::OmniPaxos,
@@ -714,7 +714,7 @@ pub fn create_temp_dir() -> String {
 
 pub mod verification {
     use super::{LatestValue, Value};
-    use omnipaxos_core::{
+    use omnipaxos::{
         storage::{Snapshot, StopSign},
         util::LogEntry,
     };

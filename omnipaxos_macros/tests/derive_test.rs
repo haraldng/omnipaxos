@@ -1,6 +1,6 @@
 #[test]
 fn derive_entry_test() {
-    use omnipaxos_core::macros::Entry;
+    use omnipaxos::macros::Entry;
 
     #[derive(Clone, Debug, Entry)]
     struct TestEntry {
@@ -11,7 +11,7 @@ fn derive_entry_test() {
 
 #[test]
 fn build_op_test() {
-    use omnipaxos_core::{
+    use omnipaxos::{
         macros::Entry,
         omni_paxos::{OmniPaxos, OmniPaxosConfig},
     };

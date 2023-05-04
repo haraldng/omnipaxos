@@ -1,5 +1,5 @@
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
-use omnipaxos_core::{
+use omnipaxos::{
     messages::Message,
     omni_paxos::*,
     util::{LogEntry, NodeId},
