@@ -1,4 +1,10 @@
-Each server in the cluster should have a local instance of the `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`.
+Each server in the cluster should have a local instance of the `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`. For the sake of this tutorial, we will use some convenient macros and storage implementations that work out-of-the-box. This requires us to add to modify our `Cargo.toml`:
+
+```toml
+[dependencies]
+omnipaxos = { version = "LATEST_VERSION", features = ["macros"] }
+omnipaxos_storage = "LATEST_VERSION"
+``` 
 
 ## Example: Key-Value store
 As a guide for this tutorial, we will use OmniPaxos to implement a replicated log for the purpose of building a consistent Key-Value store. 
@@ -44,7 +50,7 @@ let omnipaxos_config = OmniPaxosConfig {
 }
 
 let storage = MemoryStorage::default();
-let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omni_paxos_config.build(storage);
+let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage);
 ```
 With the toml_config feature enabled, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
 
@@ -58,7 +64,7 @@ This can then be loaded to construct `OmniPaxosConfig`:
 
 ```rust,edition2018,no_run,noplaypen
 let config_file_path = "config/node1.toml"; 
-let omni_paxos_config = OmniPaxosConfig::with_toml(config_file_path);
+let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 
 ## Fail-recovery
@@ -77,6 +83,6 @@ my_config.set_commitlog_options(my_logopts);
 
 // Re-create storage with previous state, then create `OmniPaxos`
 let recovered_storage = PersistentStorage::open(persist_conf); 
-let mut recovered_paxos = omni_paxos_config.build(recovered_storage);
+let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
 recovered_paxos.fail_recovery();
 ```
