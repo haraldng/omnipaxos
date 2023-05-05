@@ -11,10 +11,7 @@ fn derive_entry_test() {
 
 #[test]
 fn build_op_test() {
-    use omnipaxos::{
-        macros::Entry,
-        omni_paxos::{OmniPaxos, OmniPaxosConfig},
-    };
+    use omnipaxos::{macros::Entry, OmniPaxos, OmniPaxosConfig};
     use omnipaxos_storage::memory_storage::MemoryStorage;
 
     #[derive(Clone, Debug, Entry)]

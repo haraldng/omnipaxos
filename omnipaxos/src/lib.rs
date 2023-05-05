@@ -21,7 +21,10 @@ pub mod errors;
 /// The different messages Omni-Paxos replicas can communicate to each other with.
 pub mod messages;
 /// The user-facing Omni-Paxos struct.
-pub mod omni_paxos;
+mod omni_paxos;
+/// Re-export the contents of the omni_paxos module
+pub use omni_paxos::*;
+
 pub(crate) mod sequence_paxos;
 /// The core replication algorithm of Omni-Paxos.
 // pub mod sequence_paxos;

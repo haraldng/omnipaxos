@@ -1,8 +1,8 @@
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
     messages::Message,
-    omni_paxos::*,
     util::{LogEntry, NodeId},
+    *,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use std::{

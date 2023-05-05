@@ -24,7 +24,7 @@ const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
 
-use omnipaxos::omni_paxos::OmniPaxosConfig;
+use omnipaxos::OmniPaxosConfig;
 use sled::Config;
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
@@ -479,8 +479,8 @@ pub mod omnireplica {
     use omnipaxos::{
         ballot_leader_election::Ballot,
         messages::Message,
-        omni_paxos::OmniPaxos,
         util::{LogEntry, NodeId},
+        OmniPaxos,
     };
     use std::collections::{HashMap, HashSet};
 

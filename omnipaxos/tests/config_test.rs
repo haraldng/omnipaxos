@@ -1,6 +1,6 @@
 #![cfg(feature = "toml_config")]
 
-use omnipaxos::{ballot_leader_election::Ballot, omni_paxos::OmniPaxosConfig};
+use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
 use serial_test::serial;
 
 /// Tests that all the fields of OmniPaxosConfig can be deserialized

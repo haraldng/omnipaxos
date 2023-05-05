@@ -2,8 +2,8 @@ pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{
-    omni_paxos::OmniPaxosConfig,
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
+    OmniPaxosConfig,
 };
 use serial_test::serial;
 use std::time::Duration;
