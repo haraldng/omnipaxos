@@ -1,6 +1,6 @@
 [package]
 name = "omnipaxos_macros"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Harald Ng <hng@kth.se>"]
 edition = "2021"
 description = "Macros for OmniPaxos."
@@ -19,5 +19,5 @@ syn = "1.0"
 quote = "1.0"
 
 [dev-dependencies]
-omnipaxos = { version = "0.1.0", path = "../omnipaxos", features = ["macros"] }
-omnipaxos_storage = { version = "0.1.0", path = "../omnipaxos_storage" }
+omnipaxos = { path = "../omnipaxos", features = ["macros"] }
+omnipaxos_storage = { path = "../omnipaxos_storage" }
