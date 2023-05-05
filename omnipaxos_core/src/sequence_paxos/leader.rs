@@ -31,11 +31,12 @@ where
                 self.leader_state.majority,
             );
             self.leader = n;
+            self.internal_storage.flush_batch();
             self.internal_storage.set_promise(n);
             /* insert my promise */
             let na = self.internal_storage.get_accepted_round();
             let decided_idx = self.internal_storage.get_decided_idx();
-            let accepted_idx = self.internal_storage.get_log_len();
+            let accepted_idx = self.internal_storage.get_accepted_idx();
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -78,7 +79,7 @@ where
             }
             let decided_idx = self.internal_storage.get_decided_idx();
             let n_accepted = self.internal_storage.get_accepted_round();
-            let accepted_idx = self.internal_storage.get_log_len();
+            let accepted_idx = self.internal_storage.get_accepted_idx();
             let prep = Prepare {
                 n: self.leader_state.n_leader,
                 decided_idx,
@@ -180,8 +181,9 @@ where
     }
 
     pub(crate) fn send_accept(&mut self, entry: T) {
+        let old_accepted_idx = self.internal_storage.get_accepted_idx();
         let accepted_res = self.internal_storage.append_entry(entry.clone());
-        if let Some(accepted_idx) = accepted_res {
+        if let Some((accepted_idx, flushed_entries)) = accepted_res {
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             for pid in self.leader_state.get_promised_followers() {
                 if cfg!(feature = "batch_accept") {
@@ -191,17 +193,17 @@ where
                             let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
                             match msg {
                                 PaxosMsg::AcceptDecide(a) => a.entries.push(entry.clone()),
-                                _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
+                                _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
                             }
                         }
-                        _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
+                        _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
                     }
                 } else {
                     let acc = AcceptDecide {
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),
                         decided_idx: self.internal_storage.get_decided_idx(),
-                        entries: vec![entry.clone()],
+                        entries: self.internal_storage.get_entries(old_accepted_idx, accepted_idx)
                     };
                     self.outgoing.push(PaxosMessage {
                         from: self.pid,
@@ -214,8 +216,8 @@ where
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
-        let append_res = self.internal_storage.append_entries(entries.clone());
-        if let Some(accepted_idx) = append_res {
+        let append_res = self.internal_storage.append_entries(entries.clone(), false);
+        if let Some((accepted_idx, flushed_entries)) = append_res {
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             for pid in self.leader_state.get_promised_followers() {
                 if cfg!(feature = "batch_accept") {
@@ -225,17 +227,17 @@ where
                             let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
                             match msg {
                                 PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
-                                _ => self.send_accept_and_cache(pid, entries.clone()),
+                                _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
                             }
                         }
-                        _ => self.send_accept_and_cache(pid, entries.clone()),
+                        _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
                     }
                 } else {
                     let acc = AcceptDecide {
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),
                         decided_idx: self.internal_storage.get_decided_idx(),
-                        entries: entries.clone(),
+                        entries: flushed_entries.clone(),
                     };
                     self.outgoing.push(PaxosMessage {
                         from: self.pid,
@@ -329,8 +331,8 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            let append_res = self.internal_storage.append_entries(new_entries);
-            if let Some(accepted_idx)  = append_res {
+            let append_res = self.internal_storage.append_entries(new_entries, false);
+            if let Some((accepted_idx, _))  = append_res {
                 self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             }
         }
@@ -368,7 +370,7 @@ where
                             }
                             _ => unimplemented!(),
                         }
-                        self.internal_storage.append_entries(suffix);
+                        self.internal_storage.append_entries(suffix, true);
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -379,7 +381,7 @@ where
                     None => {
                         // no snapshot, only suffix
                         if max_promise_meta.n == self.internal_storage.get_accepted_round() {
-                            self.internal_storage.append_entries(suffix);
+                            self.internal_storage.append_entries(suffix, true);
                         } else {
                             self.internal_storage.append_on_decided_prefix(suffix);
                         }

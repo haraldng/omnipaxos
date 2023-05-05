@@ -172,7 +172,7 @@ where
         }
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> Option<Ballot> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
@@ -200,7 +200,7 @@ where
         }
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> Option<Ballot> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),

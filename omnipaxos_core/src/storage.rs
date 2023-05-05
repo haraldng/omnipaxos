@@ -118,7 +118,7 @@ where
     fn set_accepted_round(&mut self, na: Ballot);
 
     /// Returns the latest round in which entries have been accepted.
-    fn get_accepted_round(&self) -> Ballot;
+    fn get_accepted_round(&self) -> Option<Ballot>;
 
     /// Returns the entries in the log in the index interval of [from, to).
     /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
@@ -130,8 +130,8 @@ where
     /// Returns the suffix of entries in the log from index `from`.
     fn get_suffix(&self, from: u64) -> Vec<T>;
 
-    /// Returns the round that has been promised.
-    fn get_promise(&self) -> Ballot;
+    /// Returns the round that has been promised, returns `None` if no promise has been made.
+    fn get_promise(&self) -> Option<Ballot>;
 
     /// Sets the StopSign used for reconfiguration.
     fn set_stopsign(&mut self, s: StopSignEntry);
@@ -207,9 +207,9 @@ impl<T> StateCache<T>
         }
     }
     // Getters
-    fn get_batching_size(&self) -> u64 {
-        self.batched_entries.len() as u64
-    }
+    // fn get_batching_size(&self) -> u64 {
+    //     self.batched_entries.len() as u64
+    // }
     fn get_promise(&self) -> Ballot {
         self.n_prom
     }
@@ -254,11 +254,11 @@ impl<T> StateCache<T>
         while self.batched_entries.len() >= self.batch_size {
             flushed_entries.extend(self.pop_front_batched_entries());
         }
-        return if flushed_entries.len() >= 0 {
+        if !flushed_entries.is_empty(){
             Some(flushed_entries)
         } else {
             None
-        };
+        }
     }
     // Pop entries from the front of the batched_entries with size of `batch_size`.
     fn pop_front_batched_entries(&mut self) -> Vec<T> {
@@ -336,7 +336,7 @@ where
             Bound::Included(i) => *i + 1,
             Bound::Excluded(e) => *e,
             Bound::Unbounded => {
-                let idx = self.get_log_len();
+                let idx = self.get_accepted_idx();
                 match self.get_stopsign() {
                     Some(ss) if ss.decided => idx + 1,
                     _ => idx,
@@ -344,7 +344,7 @@ where
             }
         };
         let compacted_idx = self.get_compacted_idx();
-        let virtual_log_len = self.get_log_len();
+        let virtual_log_len = self.get_accepted_idx();
         let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, virtual_log_len) {
             // use to_idx-1 when getting the entry type as to_idx is exclusive
             Some(IndexEntry::Compacted) => {
@@ -460,34 +460,52 @@ where
     }
 
     fn load_cache(&mut self) {
-        self.state_cache.set_decided_idx(self.storage.get_decided_idx());
-        self.state_cache.set_accepted_round(self.storage.get_accepted_round());
-        self.state_cache.set_promise(self.storage.get_promise());
-        self.state_cache.set_compacted_idx(self.storage.get_compacted_idx());
+        // try to load from storage, if storage is empty, use default values
+        match self.storage.get_promise() {
+            // set the cache to the values from storage
+            Some(promise) => {
+                self.state_cache.set_promise(promise);
+                self.state_cache.set_decided_idx(self.storage.get_decided_idx());
+                self.state_cache.set_accepted_round(self.storage.get_accepted_round().unwrap_or_default());
+                self.state_cache.set_compacted_idx(self.storage.get_compacted_idx());
+            }
+            // set the cache to default values
+            None => {
+                self.state_cache.set_promise(Ballot::default());
+                self.state_cache.set_decided_idx(0);
+                self.state_cache.set_accepted_round(Ballot::default());
+                self.state_cache.set_compacted_idx(0);
+            }
+        }
     }
 
     /*** Writing ***/
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
-    pub(crate) fn append_entry(&mut self, entry: T) -> Option<u64> {
+    pub(crate) fn append_entry(&mut self, entry: T) -> Option<(u64, Vec<T>)> {
         let append_res = self.state_cache.append_entry(entry);
-        return if let Some(flushed_entries) = append_res {
-            self.storage.append_entries(flushed_entries);
-            Some(self.get_log_len())
+        if let Some(flushed_entries) = append_res {
+            self.storage.append_entries(flushed_entries.clone());
+            Some((self.get_accepted_idx(), flushed_entries))
         } else {
             None
         }
     }
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
-    // accepted index
-    pub(crate) fn append_entries(&mut self, entries: Vec<T>) -> Option<u64> {
-        let append_res = self.state_cache.append_entries(entries);
-        return if let Some(flushed_entries) = append_res {
-            self.storage.append_entries(flushed_entries);
-            Some(self.get_log_len())
+    // accepted index and the flushed entries
+    pub(crate) fn append_entries(&mut self, entries: Vec<T>, skip_batching: bool) -> Option<(u64, Vec<T>)> {
+        if skip_batching {
+            self.storage.append_entries(entries.clone());
+            Some((self.get_accepted_idx(), entries))
         } else {
-            None
+            let append_res = self.state_cache.append_entries(entries);
+            if let Some(flushed_entries) = append_res {
+                self.storage.append_entries(flushed_entries.clone());
+                Some((self.get_accepted_idx(), flushed_entries))
+            } else {
+                None
+            }
         }
     }
 
@@ -546,7 +564,7 @@ where
     }
 
     /// The length of the replicated log, as if log was never compacted.
-    pub(crate) fn get_log_len(&self) -> u64 {
+    pub(crate) fn get_accepted_idx(&self) -> u64 {
         self.get_real_log_len() + self.get_compacted_idx()
     }
 

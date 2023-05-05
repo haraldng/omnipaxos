@@ -62,8 +62,8 @@ where
         self.acc_round = na;
     }
 
-    fn get_accepted_round(&self) -> Ballot {
-        self.acc_round
+    fn get_accepted_round(&self) -> Option<Ballot> {
+        Some(self.acc_round)
     }
 
     fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
@@ -84,8 +84,8 @@ where
         }
     }
 
-    fn get_promise(&self) -> Ballot {
-        self.n_prom
+    fn get_promise(&self) -> Option<Ballot> {
+        Some(self.n_prom)
     }
 
     fn set_stopsign(&mut self, s: StopSignEntry) {

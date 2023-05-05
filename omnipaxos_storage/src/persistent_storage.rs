@@ -318,7 +318,7 @@ where
         self.get_entries(from, self.commitlog.next_offset())
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> Option<Ballot> {
         #[cfg(feature = "rocksdb")]
         {
             let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
@@ -326,9 +326,9 @@ where
                 Some(prom_bytes) => {
                     let b_store = BallotStorage::read_from(prom_bytes.as_slice())
                         .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Some(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Some(Ballot::default()),
             }
         }
         #[cfg(feature = "sled")]
@@ -338,9 +338,9 @@ where
                 Some(prom_bytes) => {
                     let b_store = BallotStorage::read_from(prom_bytes.as_ref())
                         .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Some(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Some(Ballot::default()),
             }
         }
     }
@@ -402,7 +402,7 @@ where
         }
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> Option<Ballot> {
         #[cfg(feature = "rocksdb")]
         {
             let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
@@ -410,9 +410,9 @@ where
                 Some(acc_bytes) => {
                     let b_store = BallotStorage::read_from(acc_bytes.as_slice())
                         .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Some(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Some(Ballot::default()),
             }
         }
         #[cfg(feature = "sled")]
@@ -422,9 +422,9 @@ where
                 Some(acc_bytes) => {
                     let b_store = BallotStorage::read_from(acc_bytes.as_bytes())
                         .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    Some(Ballot::with(b_store.n, b_store.priority, b_store.pid))
                 }
-                None => Ballot::default(),
+                None => Some(Ballot::default()),
             }
         }
     }

@@ -21,7 +21,7 @@ where
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
             let na = self.internal_storage.get_accepted_round();
-            let accepted_idx = self.internal_storage.get_log_len();
+            let accepted_idx = self.internal_storage.get_accepted_idx();
             let decided_idx = self.get_decided_idx();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
@@ -82,10 +82,10 @@ where
                         }
                         _ => unimplemented!(),
                     }
-                    self.internal_storage.append_entries(accsync.suffix);
+                    self.internal_storage.append_entries(accsync.suffix, true);
                     Accepted {
                         n: accsync.n,
-                        accepted_idx: self.internal_storage.get_log_len(),
+                        accepted_idx: self.internal_storage.get_accepted_idx(),
                     }
 
                 }
@@ -163,7 +163,6 @@ where
                 }
                 MessageStatus::Outdated => return,
             }
-
             let entries = acc.entries;
             self.accept_entries(acc.n, entries);
             // handle decide
@@ -220,13 +219,13 @@ where
             ss.decided = true;
             self.internal_storage.set_stopsign(ss); // need to set it again now with the modified decided flag
             self.internal_storage
-                .set_decided_idx(self.internal_storage.get_log_len() + 1);
+                .set_decided_idx(self.internal_storage.get_accepted_idx() + 1);
         }
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) {
-        let accepted = self.internal_storage.append_entries(entries);
-        if let Some(accepted_idx) = accepted {
+        let accepted_res = self.internal_storage.append_entries(entries, false);
+        if let Some((accepted_idx, _)) = accepted_res {
             match &self.latest_accepted_meta {
                 Some((round, outgoing_idx)) if round == &n => {
                     let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();

@@ -62,28 +62,47 @@ where
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, lds) = match &config.skip_prepare_use_leader {
-            Some(l) => {
-                let (role, lds) = if l.pid == pid {
-                    // we are leader in new config
-                    let mut v = vec![None; max_pid];
-                    for idx in peers.iter().map(|pid| *pid as usize - 1) {
-                        // this works as a promise
-                        v[idx] = Some(0);
-                    }
-                    (Role::Leader, Some(v))
-                } else {
-                    (Role::Follower, None)
-                };
-                let state = (role, Phase::Accept);
-                (state, *l, lds)
+        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
+        let mut state = (Role::Follower, Phase::None);
+        let mut leader = Ballot::default();
+        let mut lds = None;
+        // try to do fail recovery from storage, if None then we are starting from scratch
+        match storage.get_promise() {
+            // failure recovery
+            Some(_) => {
+                state = (Role::Follower, Phase::Recover);
+                for peer_pid in &peers {
+                    outgoing.push(PaxosMessage {
+                        from: pid,
+                        to: *peer_pid,
+                        msg: PaxosMsg::PrepareReq,
+                    });
+                }
             }
+            // starting from scratch
             None => {
-                let state = (Role::Follower, Phase::None);
-                let lds = None;
-                (state, Ballot::default(), lds)
+                 match &config.skip_prepare_use_leader {
+                    Some(l) => {
+                        if l.pid == pid {
+                            // we are leader in new config
+                            let mut v = vec![None; max_pid];
+                            for idx in peers.iter().map(|pid| *pid as usize - 1) {
+                                // this works as a promise
+                                v[idx] = Some(0);
+                            }
+                            state = (Role::Leader, Phase::Accept);
+                            lds = Some(v);
+                        } else {
+                            state = (Role::Follower, Phase::Accept);
+                            lds = None
+                        };
+                        leader = *l;
+                    }
+                    None => ()
+                };
             }
-        };
+        }
+
 
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(storage, config.batch_size),
@@ -94,7 +113,7 @@ where
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            outgoing: Vec::with_capacity(BUFFER_SIZE),
+            outgoing,
             leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
