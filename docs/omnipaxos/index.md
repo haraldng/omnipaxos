@@ -1,4 +1,4 @@
-Each server in the cluster should have a local instance of the `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`. For the sake of this tutorial, we will use some convenient macros and storage implementations that work out-of-the-box. This requires us to add to modify our `Cargo.toml`:
+Each server in the cluster should have a local instance of the `OmniPaxos` struct. `OmniPaxos` maintains a local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch and send using their network implementation. The users also accesses the replicated log via `OmniPaxos`. For the sake of this tutorial, we will use some convenient macros and storage implementations that work out-of-the-box. This requires us to modify our `Cargo.toml`:
 
 ```toml
 [dependencies]
