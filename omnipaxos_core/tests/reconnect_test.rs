@@ -276,6 +276,103 @@ fn reconnect_after_dropped_prepare_test() {
     };
 }
 
+/// Verifies that a leader that misses a Promise message from a follower
+/// eventually receives a Promise from the follower.
+#[test]
+#[serial]
+fn reconnect_after_dropped_promise_test() {
+    // Start Kompact system
+    let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
+    let mut sys = TestSystem::with(
+        cfg.num_nodes,
+        cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
+        cfg.num_threads,
+        cfg.storage_type,
+    );
+    sys.start_all_nodes();
+
+    let initial_proposals = (0..INITIAL_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+
+    // Propose some values so that a leader is elected
+    sys.make_proposals(
+        2,
+        initial_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
+    let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    let follower_id = (1..=cfg.num_nodes as u64)
+        .into_iter()
+        .find(|x| *x != leader_id)
+        .expect("No followers found!");
+    let follower = sys.nodes.get(&follower_id).unwrap();
+
+    // Drop outgoing messages from follower so that a Promise is lost when next leader is chosen
+    follower.on_definition(|comp| {
+        for &node_id in sys.nodes.keys() {
+            if node_id != follower_id {
+                comp.set_connection(node_id, false);
+            }
+        }
+    });
+    
+    sys.stop_node(leader_id);
+    thread::sleep(SLEEP_TIMEOUT);
+    sys.start_node(leader_id);
+    let new_leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    assert_ne!(
+        leader_id, new_leader_id,
+        "reconnect_after_dropped_promise_test failed to elect a different leader"
+    );
+
+    // Decide new entries while follower is still disconnected
+    sys.make_proposals(
+        new_leader_id,
+        unseen_by_follower_proposals,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    );
+
+    // Reconnect follower and wait for re-sync with leader
+    follower.on_definition(|comp| {
+        for &node_id in sys.nodes.keys() {
+            if node_id != follower_id {
+                comp.set_connection(node_id, true);
+            }
+        }
+    });
+    thread::sleep(SLEEP_TIMEOUT);
+
+    // Verify log
+    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+        comp.paxos
+            .read_decided_suffix(0)
+            .expect("Cannot read decided log entry")
+    });
+    verify_log(followers_log, expected_log);
+
+    // Shutdown system
+    println!("Passed reconnect_to_leader_test!");
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
+        Ok(_) => {}
+        Err(e) => panic!("Error on kompact shutdown: {}", e),
+    };
+}
+
+
+
 /// Verifies that a leader that misses a PrepareReq message from a follower eventually
 /// receives a PrepareReq.
 #[test]
