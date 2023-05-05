@@ -112,7 +112,7 @@ pub mod sequence_paxos {
     pub struct Decide {
         /// The current round.
         pub n: Ballot,
-        /// The sequence number of this message in the leader-to-follower message sequence
+        /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided index.
         pub decided_idx: u64,
@@ -124,7 +124,7 @@ pub mod sequence_paxos {
     pub struct AcceptStopSign {
         /// The current round.
         pub n: Ballot,
-        /// The sequence number of this message in the leader-to-follower message sequence
+        /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided index.
         pub ss: StopSign,
@@ -144,8 +144,7 @@ pub mod sequence_paxos {
     pub struct DecideStopSign {
         /// The current round.
         pub n: Ballot,
-        // TODO: revisit docs mentioning "accept sequence"
-        /// The sequence number of this message in the leader-to-follower message sequence
+        /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
     }
 

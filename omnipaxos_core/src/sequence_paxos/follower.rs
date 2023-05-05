@@ -14,11 +14,12 @@ where
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        if self.internal_storage.get_promise() <= prep.n {
+        let promise = self.internal_storage.get_promise();
+        if promise < prep.n || (promise == prep.n && self.state.1 == Phase::Recover){
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
-            self.current_seq_num = SequenceNumber::default(); // TODO: revisit this
+            self.current_seq_num = SequenceNumber::default();
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_log_len();
             let decided_idx = self.get_decided_idx();
@@ -58,6 +59,7 @@ where
                 accepted_idx,
                 stopsign: self.get_stopsign(),
             };
+            self.cached_promise = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,

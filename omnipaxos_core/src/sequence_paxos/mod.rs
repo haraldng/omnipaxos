@@ -40,7 +40,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
-
+    cached_promise: Option<Promise<T,S>>,
     buffer_size: usize,
     s: PhantomData<S>,
     #[cfg(feature = "logging")]
@@ -99,6 +99,7 @@ where
             leader_state: LeaderState::<T, S>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
+            cached_promise: None,
             buffer_size: config.buffer_size,
             s: PhantomData,
             #[cfg(feature = "logging")]
@@ -222,15 +223,14 @@ where
                 // Resend AcceptStopSign
                 if *phase == Phase::Accept {
                     // TODO: This is slow. Get stopsign from cache instead.
-                    match self.internal_storage.get_stopsign() {
-                        Some(ss) if !ss.decided => {
+                    if let Some(ss) = self.internal_storage.get_stopsign() {
+                        if !ss.decided {
                             for follower in self.leader_state.get_promised_followers() {
                                 if !self.leader_state.follower_has_accepted_stopsign(follower) {
                                     self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
                                 }
                             }
                         }
-                        _ => (),
                     }
                 }
 
@@ -240,51 +240,39 @@ where
                     self.send_prepare(peer);
                 }
             },
-            (Role::Follower, Phase::Recover) => {
-                // Resend PrepareReq
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: self.leader.pid,
-                    msg: PaxosMsg::PrepareReq,
-                });
-            },
-            _ => (),
-        }
-        
-        /*
-        // Resend Prepare
-        if self.state.0 == Role::Leader {
-            let unpromised_peers = self.leader_state.get_unpromised_peers();
-            for peer in unpromised_peers {
-                self.send_prepare(peer);
-            }
-        }
-
-        // Resend AcceptStopSign
-        if self.state == (Role::Leader, Phase::Accept) {
-            // TODO: This is slow. Get stopsign from cache instead.
-            match self.internal_storage.get_stopsign() {
-                Some(ss) if !ss.decided => {
-                    for follower in self.leader_state.get_promised_followers() {
-                        if !self.leader_state.get_accepted_stopsign(follower) {
-                            // TODO: subtract 1 from seq_num to show duplicated?
-                            self.send_accept_stopsign(follower, ss.stopsign.clone());
+            (Role::Follower, phase) => {
+                match phase {
+                    Phase::Recover => {
+                        // Resend PrepareReq
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: self.leader.pid,
+                            msg: PaxosMsg::PrepareReq,
+                        });
+                    }
+                    Phase::Prepare => {
+                        // Resend Promise
+                        match &self.cached_promise {
+                            Some(promise) => {
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: promise.n.pid,
+                                    msg: PaxosMsg::Promise(promise.clone()),
+                                });
+                            },
+                            None => {
+                                #[cfg(feature = "logging")]
+                                warn!(
+                                    self.logger,
+                                    "In Prepare phase without a cached promise!"
+                                    );
+                            }
                         }
                     }
+                    _ => (),
                 }
-                _ => (),
-            }
+            },
         }
-
-        // Resend PrepareReq
-        if self.state == (Role::Follower, Phase::Recover) {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: self.leader.pid,
-                msg: PaxosMsg::PrepareReq,
-            });
-        }
-        */
     }
 
     /// Returns the id of the current leader.
