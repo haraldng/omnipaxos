@@ -10,7 +10,7 @@ OmniPaxos is an in-development replicated log library implemented in Rust. OmniP
 
 Similar to Raft, OmniPaxos can be used to build strongly consistent services such as replicated state machines. Additionally, the leader election of OmniPaxos offers better resilience to partial connectivity and more flexible and efficient reconfiguration compared to Raft.
 
-An OmniPaxos node is implemented as a plain Rust `struct. This allows it to be used with any desired storage, network, and runtime implementations.
+An OmniPaxos node is implemented as a plain Rust `struct`. This allows it to be used with any desired storage, network, and runtime implementations.
 
 For more detailed explanations and tutorials showcasing our features, check out https://omnipaxos.com.
 
