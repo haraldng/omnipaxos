@@ -7,8 +7,8 @@ use crate::{
     messages::ballot_leader_election::{
         BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest,
     },
-    omni_paxos::OmniPaxosConfig,
     util::NodeId,
+    OmniPaxosConfig,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

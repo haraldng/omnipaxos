@@ -5,7 +5,7 @@ use commitlog::{
     message::{MessageBuf, MessageSet},
     CommitLog, LogOptions, ReadLimit,
 };
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, StopSignEntry, Storage},
 };

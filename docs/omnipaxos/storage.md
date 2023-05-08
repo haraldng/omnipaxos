@@ -1,10 +1,10 @@
 You are free to use any storage implementation with `OmniPaxos`. The only requirement is that it implements the `Storage` trait. OmniPaxos includes the package `omnipaxos_storage` which provides two types of storage implementation that work out of the box: `MemoryStorage` and `PersistentStorage`.
 
 ## Importing `omnipaxos_storage`
-To use the provided storage implementations, we need to add `omnipaxos_storage` to the dependencies in the cargo file.
+To use the provided storage implementations, we need to add `omnipaxos_storage` to the dependencies in the cargo file. You can find the latest version on [crates](https://crates.io/crates/omnipaxos_storage).
 ```rust,edition2018,no_run,noplaypen
 [dependencies]
-omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-features = true } 
+omnipaxos_storage = { version = "LATEST_VERSION", default-features = true } 
 ```
 
 **If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
@@ -97,7 +97,7 @@ omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos", default-fea
 ## PersistentStorage
 `PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature `rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments. 
 ```rust,edition2018,no_run,noplaypen
-use omnipaxos_core::{
+use omnipaxos::{
     sequence_paxos::{OmniPaxos, OmniPaxosConfig},
 };
 use omnipaxos_storage::{

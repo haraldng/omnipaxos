@@ -7,7 +7,7 @@ use syn::{parse_macro_input, DeriveInput};
 /// ## Usage
 ///
 /// ```rust
-/// use omnipaxos_core::macros::Entry;
+/// use omnipaxos::macros::Entry;
 /// #[derive(Clone, Debug, Entry)]
 /// pub struct KeyValue {
 ///     pub key: String,
@@ -23,9 +23,9 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
     let name = &ast.ident;
     // Generate the implementation of Entry using the quote! macro
     let gen = quote! {
-        impl ::omnipaxos_core::storage::Entry for #name
+        impl ::omnipaxos::storage::Entry for #name
         {
-            type Snapshot = ::omnipaxos_core::storage::NoSnapshot;
+            type Snapshot = ::omnipaxos::storage::NoSnapshot;
         }
     };
 

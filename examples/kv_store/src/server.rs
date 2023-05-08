@@ -1,5 +1,5 @@
 use crate::kv::KeyValue;
-use omnipaxos_core::{messages::Message, util::NodeId};
+use omnipaxos::{messages::Message, util::NodeId};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

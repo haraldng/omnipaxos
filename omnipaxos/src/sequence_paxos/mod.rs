@@ -7,9 +7,9 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    omni_paxos::{CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest},
     storage::InternalStorage,
     util::{ConfigurationId, NodeId, SequenceNumber},
+    CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
