@@ -238,12 +238,10 @@ where
     /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
     /// ticks. Also drives the detection and resending of dropped omnipaxos messages every `resend_message_tick_timeout` ticks.
     pub fn tick(&mut self) {
-        self.election_clock.tick();
-        if self.election_clock.reached_timeout() {
+        if self.election_clock.tick_and_check_timeout() {
             self.election_timeout();
         }
-        self.resend_message_clock.tick();
-        if self.resend_message_clock.reached_timeout() {
+        if self.resend_message_clock.tick_and_check_timeout() {
             self.seq_paxos.resend_message_timeout();
         }
     }

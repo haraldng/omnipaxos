@@ -261,11 +261,14 @@ where
                                 });
                             },
                             None => {
+                                // Shouldn't be possible to be in prepare phase without having
+                                // cached the promise sent as a response to the prepare
                                 #[cfg(feature = "logging")]
                                 warn!(
                                     self.logger,
                                     "In Prepare phase without a cached promise!"
                                     );
+                                self.state = (Role::Follower, Phase::Recover);
                             }
                         }
                     }

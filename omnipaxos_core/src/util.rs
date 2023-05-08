@@ -357,14 +357,12 @@ impl LogicalClock {
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick_and_check_timeout(&mut self) -> bool {
         self.time += 1;
         if self.time == self.timeout {
             self.time = 0;
+            return true;
         }
-    }
-
-    pub fn reached_timeout(&self) -> bool {
-        self.time == 0
+        false
     }
 }

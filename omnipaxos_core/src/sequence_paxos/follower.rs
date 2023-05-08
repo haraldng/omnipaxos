@@ -151,7 +151,7 @@ where
             let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
             match msg_status {
                 MessageStatus::First => {
-                    // psuedo-AcceptSync for reconfigurations
+                    // pseudo-AcceptSync for prepare-less reconfigurations
                     self.internal_storage.set_accepted_round(acc.n);
                     self.forward_pending_proposals();
                     self.current_seq_num = acc.seq_num;
@@ -180,7 +180,7 @@ where
             let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
             match msg_status {
                 MessageStatus::First => {
-                    // psuedo-AcceptSync for reconfigurations
+                    // pseudo-AcceptSync for prepare-less reconfigurations
                     self.internal_storage.set_accepted_round(acc_ss.n);
                     self.forward_pending_proposals();
                     self.current_seq_num = acc_ss.seq_num;
