@@ -216,7 +216,7 @@ where
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
-        let append_res = self.internal_storage.append_entries(entries.clone(), false);
+        let append_res = self.internal_storage.append_entries_and_get_flushed(entries.clone());
         if let Some((accepted_idx, flushed_entries)) = append_res {
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             for pid in self.leader_state.get_promised_followers() {
@@ -331,8 +331,8 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            let append_res = self.internal_storage.append_entries(new_entries, false);
-            if let Some((accepted_idx, _))  = append_res {
+            let append_res = self.internal_storage.append_entries_with_batching(new_entries);
+            if let Some(accepted_idx)  = append_res {
                 self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             }
         }
@@ -370,7 +370,7 @@ where
                             }
                             _ => unimplemented!(),
                         }
-                        self.internal_storage.append_entries(suffix, true);
+                        self.internal_storage.append_entries_without_batching(suffix);
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -381,7 +381,8 @@ where
                     None => {
                         // no snapshot, only suffix
                         if max_promise_meta.n == self.internal_storage.get_accepted_round() {
-                            self.internal_storage.append_entries(suffix, true);
+                            self.internal_storage.append_entries_without_batching(suffix);
+
                         } else {
                             self.internal_storage.append_on_decided_prefix(suffix);
                         }

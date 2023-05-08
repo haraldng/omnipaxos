@@ -117,7 +117,8 @@ where
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: Ballot);
 
-    /// Returns the latest round in which entries have been accepted.
+    /// Returns the latest round in which entries have been accepted, returns `None` if no
+    /// entries have been accepted.
     fn get_accepted_round(&self) -> Option<Ballot>;
 
     /// Returns the entries in the log in the index interval of [from, to).
@@ -136,7 +137,7 @@ where
     /// Sets the StopSign used for reconfiguration.
     fn set_stopsign(&mut self, s: StopSignEntry);
 
-    /// Returns the stored StopSign.
+    /// Returns the stored StopSign, returns `None` if no StopSign has been stored.
     fn get_stopsign(&self) -> Option<StopSignEntry>;
 
     /// Removes elements up to the given [`idx`] from storage.
@@ -199,7 +200,7 @@ impl<T> StateCache<T>
     pub fn new(batch_size: usize) -> Self {
         StateCache {
             batch_size,
-            batched_entries: Vec::new(),
+            batched_entries: Vec::with_capacity(batch_size),
             n_prom: Ballot::default(),
             acc_round: Ballot::default(),
             ld: 0,
@@ -207,9 +208,6 @@ impl<T> StateCache<T>
         }
     }
     // Getters
-    // fn get_batching_size(&self) -> u64 {
-    //     self.batched_entries.len() as u64
-    // }
     fn get_promise(&self) -> Ballot {
         self.n_prom
     }
@@ -250,9 +248,9 @@ impl<T> StateCache<T>
     }
     // Flushes the batched entries if the batch is full, and returns the flushed entries.
     fn flush_if_batch_full(&mut self) -> Option<Vec<T>> {
-        let mut flushed_entries = Vec::new();
+        let mut flushed_entries = Vec::with_capacity((self.batched_entries.len() / self.batch_size) * self.batch_size);
         while self.batched_entries.len() >= self.batch_size {
-            flushed_entries.extend(self.pop_front_batched_entries());
+            flushed_entries.extend(self.batched_entries.drain(0..self.batch_size).collect::<Vec<T>>());
         }
         if !flushed_entries.is_empty(){
             Some(flushed_entries)
@@ -260,13 +258,9 @@ impl<T> StateCache<T>
             None
         }
     }
-    // Pop entries from the front of the batched_entries with size of `batch_size`.
-    fn pop_front_batched_entries(&mut self) -> Vec<T> {
-        self.batched_entries.drain(0..self.batch_size).collect()
-    }
     // Clears the batched entries and returns the cleared entries. If the batch is empty,
     // return an empty vector.
-    fn clear_batch(&mut self) -> Vec<T> {
+    fn take_batch(&mut self) -> Vec<T> {
         std::mem::take(&mut self.batched_entries)
     }
 }
@@ -461,21 +455,11 @@ where
 
     fn load_cache(&mut self) {
         // try to load from storage, if storage is empty, use default values
-        match self.storage.get_promise() {
-            // set the cache to the values from storage
-            Some(promise) => {
-                self.state_cache.set_promise(promise);
-                self.state_cache.set_decided_idx(self.storage.get_decided_idx());
-                self.state_cache.set_accepted_round(self.storage.get_accepted_round().unwrap_or_default());
-                self.state_cache.set_compacted_idx(self.storage.get_compacted_idx());
-            }
-            // set the cache to default values
-            None => {
-                self.state_cache.set_promise(Ballot::default());
-                self.state_cache.set_decided_idx(0);
-                self.state_cache.set_accepted_round(Ballot::default());
-                self.state_cache.set_compacted_idx(0);
-            }
+        if let Some(promise) = self.storage.get_promise() {
+            self.state_cache.set_promise(promise);
+            self.state_cache.set_decided_idx(self.storage.get_decided_idx());
+            self.state_cache.set_accepted_round(self.storage.get_accepted_round().unwrap_or_default());
+            self.state_cache.set_compacted_idx(self.storage.get_compacted_idx());
         }
     }
 
@@ -493,24 +477,37 @@ where
     }
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
-    // accepted index and the flushed entries
-    pub(crate) fn append_entries(&mut self, entries: Vec<T>, skip_batching: bool) -> Option<(u64, Vec<T>)> {
-        if skip_batching {
-            self.storage.append_entries(entries.clone());
-            Some((self.get_accepted_idx(), entries))
+    // accepted index. If the batch size is not reached, return None.
+    pub(crate) fn append_entries_with_batching(&mut self, entries: Vec<T>) -> Option<u64> {
+        let append_res = self.state_cache.append_entries(entries);
+        if let Some(flushed_entries) = append_res {
+            self.storage.append_entries(flushed_entries);
+            Some(self.get_accepted_idx())
         } else {
-            let append_res = self.state_cache.append_entries(entries);
-            if let Some(flushed_entries) = append_res {
-                self.storage.append_entries(flushed_entries.clone());
-                Some((self.get_accepted_idx(), flushed_entries))
-            } else {
-                None
-            }
+            None
+        }
+    }
+
+    // Append entries without batching, return the accepted index
+    pub(crate) fn append_entries_without_batching(&mut self, entries: Vec<T>) -> u64 {
+        self.storage.append_entries(entries);
+        self.get_accepted_idx()
+    }
+
+    // Append entries in batch, if the batch size is reached, flush the batch and return the
+    // accepted index and the flushed entries. If the batch size is not reached, return None.
+    pub(crate) fn append_entries_and_get_flushed(&mut self, entries: Vec<T>) -> Option<(u64, Vec<T>)> {
+        let append_res = self.state_cache.append_entries(entries);
+        if let Some(flushed_entries) = append_res {
+            self.storage.append_entries(flushed_entries.clone());
+            Some((self.get_accepted_idx(), flushed_entries))
+        } else {
+            None
         }
     }
 
     pub(crate) fn flush_batch(&mut self) {
-        let flushed_entries = self.state_cache.clear_batch();
+        let flushed_entries = self.state_cache.take_batch();
         self.storage.append_entries(flushed_entries);
     }
 

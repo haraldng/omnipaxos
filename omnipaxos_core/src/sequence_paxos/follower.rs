@@ -82,7 +82,7 @@ where
                         }
                         _ => unimplemented!(),
                     }
-                    self.internal_storage.append_entries(accsync.suffix, true);
+                    self.internal_storage.append_entries_without_batching(accsync.suffix);
                     Accepted {
                         n: accsync.n,
                         accepted_idx: self.internal_storage.get_accepted_idx(),
@@ -224,8 +224,9 @@ where
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) {
-        let accepted_res = self.internal_storage.append_entries(entries, false);
-        if let Some((accepted_idx, _)) = accepted_res {
+        // let accepted_res = self.internal_storage.append_entries(entries, false);
+        let accepted_res = self.internal_storage.append_entries_with_batching(entries);
+        if let Some(accepted_idx) = accepted_res {
             match &self.latest_accepted_meta {
                 Some((round, outgoing_idx)) if round == &n => {
                     let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();

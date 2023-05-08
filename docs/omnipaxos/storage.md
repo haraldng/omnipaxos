@@ -146,5 +146,3 @@ let omnipaxos_config = OmniPaxosConfig {
 // build omnipaxos instance
 ```
 
-> Best Practices: always make sure that all the nodes on your cluster have same batch size to reduce potential problems.
-

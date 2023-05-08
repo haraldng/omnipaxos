@@ -63,23 +63,19 @@ where
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
-        let mut state = (Role::Follower, Phase::None);
-        let mut leader = Ballot::default();
-        let mut lds = None;
-        // try to do fail recovery from storage, if None then we are starting from scratch
-        match storage.get_promise() {
-            // failure recovery
+        let (state, leader, lds) = match storage.get_promise() {
+            // try to do fail recovery from storage, if None then we are starting from scratch
             Some(_) => {
-                state = (Role::Follower, Phase::Recover);
+                let state = (Role::Follower, Phase::Recover);
                 for peer_pid in &peers {
                     outgoing.push(PaxosMessage {
                         from: pid,
                         to: *peer_pid,
                         msg: PaxosMsg::PrepareReq,
                     });
-                }
+                };
+                (state, Ballot::default(), None)
             }
-            // starting from scratch
             None => {
                  match &config.skip_prepare_use_leader {
                     Some(l) => {
@@ -90,18 +86,17 @@ where
                                 // this works as a promise
                                 v[idx] = Some(0);
                             }
-                            state = (Role::Leader, Phase::Accept);
-                            lds = Some(v);
+                            let state = (Role::Leader, Phase::Accept);
+                            (state, *l, Some(v))
                         } else {
-                            state = (Role::Follower, Phase::Accept);
-                            lds = None
-                        };
-                        leader = *l;
+                            let state = (Role::Follower, Phase::Accept);
+                            (state, *l, None)
+                        }
                     }
-                    None => ()
-                };
+                    None => ((Role::Follower, Phase::None), Ballot::default(), None)
+                }
             }
-        }
+        };
 
 
         let mut paxos = SequencePaxos {
