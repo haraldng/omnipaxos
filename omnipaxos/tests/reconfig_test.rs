@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::omni_paxos::ReconfigurationRequest;
+use omnipaxos::ReconfigurationRequest;
 use serial_test::serial;
 use std::time::Duration;
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};

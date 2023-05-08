@@ -4,8 +4,11 @@ use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
-    storage::{Entry, Snapshot, StopSign, Storage},
-    util::{defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT}, LogEntry, NodeId, LogicalClock},
+    storage::{Entry, StopSign, Storage},
+    util::{
+        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
+        LogEntry, LogicalClock, NodeId,
+    },
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
@@ -55,11 +58,10 @@ impl OmniPaxosConfig {
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, S, B>(self, storage: B) -> OmniPaxos<T, S, B>
+    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
     where
         T: Entry,
-        S: Snapshot<T>,
-        B: Storage<T, S>,
+        B: Storage<T>,
     {
         assert_ne!(self.pid, 0, "Pid cannot be 0");
         assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
@@ -101,23 +103,21 @@ impl Default for OmniPaxosConfig {
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
-pub struct OmniPaxos<T, S, B>
+pub struct OmniPaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
-    seq_paxos: SequencePaxos<T, S, B>,
+    seq_paxos: SequencePaxos<T, B>,
     ble: BallotLeaderElection,
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
 }
 
-impl<T, S, B> OmniPaxos<T, S, B>
+impl<T, B> OmniPaxos<T, B>
 where
     T: Entry,
-    S: Snapshot<T>,
-    B: Storage<T, S>,
+    B: Storage<T>,
 {
     /// Initiates the trim process.
     /// # Arguments
@@ -169,7 +169,7 @@ where
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
-    pub fn outgoing_messages(&mut self) -> Vec<Message<T, S>> {
+    pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
         let paxos_msgs = self
             .seq_paxos
             .get_outgoing_msgs()
@@ -184,7 +184,7 @@ where
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
-    pub fn read(&self, idx: u64) -> Option<LogEntry<T, S>> {
+    pub fn read(&self, idx: u64) -> Option<LogEntry<T>> {
         match self.seq_paxos.internal_storage.read(idx..idx + 1) {
             Some(mut v) => v.pop(),
             None => None,
@@ -192,7 +192,7 @@ where
     }
 
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
-    pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T, S>>>
+    pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T>>>
     where
         R: RangeBounds<u64>,
     {
@@ -200,14 +200,14 @@ where
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
-    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T, S>>> {
+    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T>>> {
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
     }
 
     /// Handle an incoming message.
-    pub fn handle_incoming(&mut self, m: Message<T, S>) {
+    pub fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
             Message::BLE(b) => self.ble.handle(b),

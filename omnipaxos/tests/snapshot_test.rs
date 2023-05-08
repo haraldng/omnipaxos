@@ -2,7 +2,7 @@ pub mod utils;
 
 use crate::utils::LatestValue;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::Snapshot,
     util::{LogEntry, NodeId},
@@ -174,7 +174,7 @@ fn double_snapshot_test() {
 
 fn check_snapshot(
     vec_proposals: Vec<Value>,
-    seq_after: Vec<(u64, Vec<LogEntry<Value, LatestValue>>)>,
+    seq_after: Vec<(u64, Vec<LogEntry<Value>>)>,
     gc_idx: u64,
     leader: NodeId,
 ) {

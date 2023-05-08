@@ -1,7 +1,7 @@
 use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::Promise,
-    storage::{Entry, Snapshot, SnapshotType, StopSign},
+    storage::{Entry, SnapshotType, StopSign},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -41,16 +41,15 @@ impl PartialEq for PromiseMetaData {
 
 #[derive(Debug, Clone, Default)]
 /// Actual data of a promise i.e., the decided snapshot and/or the suffix.
-pub(crate) struct PromiseData<T: Entry, S: Snapshot<T>> {
-    pub decided_snapshot: Option<SnapshotType<T, S>>,
+pub(crate) struct PromiseData<T: Entry> {
+    pub decided_snapshot: Option<SnapshotType<T>>,
     pub suffix: Vec<T>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LeaderState<T, S>
+pub(crate) struct LeaderState<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     pub n_leader: Ballot,
     pub promises_meta: Vec<Option<PromiseMetaData>>,
@@ -59,7 +58,7 @@ where
     pub accepted_indexes: Vec<u64>,
     pub decided_indexes: Vec<Option<u64>>,
     pub max_promise_meta: PromiseMetaData,
-    pub max_promise: Option<PromiseData<T, S>>,
+    pub max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
@@ -67,10 +66,9 @@ where
     pub majority: usize,
 }
 
-impl<T, S> LeaderState<T, S>
+impl<T> LeaderState<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     pub fn with(
         n_leader: Ballot,
@@ -111,7 +109,7 @@ where
         self.follower_seq_nums[idx]
     }
 
-    pub fn get_seq_num(&mut self, pid: NodeId) -> SequenceNumber{
+    pub fn get_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
@@ -119,7 +117,7 @@ where
         self.decided_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T, S>, from: u64, check_max_prom: bool) -> bool {
+    pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
@@ -139,7 +137,7 @@ where
         num_promised >= self.majority
     }
 
-    pub fn take_max_promise(&mut self) -> Option<PromiseData<T, S>> {
+    pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
         std::mem::take(&mut self.max_promise)
     }
 
@@ -234,10 +232,9 @@ where
 
 /// The entry read in the log.
 #[derive(Debug, Clone)]
-pub enum LogEntry<T, S>
+pub enum LogEntry<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     /// The entry is decided.
     Decided(T),
@@ -246,7 +243,7 @@ where
     /// The entry has been trimmed.
     Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
-    Snapshotted(SnapshottedEntry<T, S>),
+    Snapshotted(SnapshottedEntry<T>),
     /// This Sequence Paxos instance has been stopped for reconfiguration.
     StopSign(StopSign),
 }
@@ -261,22 +258,20 @@ pub(crate) enum IndexEntry {
 
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]
-pub struct SnapshottedEntry<T, S>
+pub struct SnapshottedEntry<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     pub trimmed_idx: TrimmedIndex,
-    pub snapshot: S,
+    pub snapshot: T::Snapshot,
     _p: PhantomData<T>,
 }
 
-impl<T, S> SnapshottedEntry<T, S>
+impl<T> SnapshottedEntry<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
-    pub(crate) fn with(trimmed_idx: u64, snapshot: S) -> Self {
+    pub(crate) fn with(trimmed_idx: u64, snapshot: T::Snapshot) -> Self {
         Self {
             trimmed_idx,
             snapshot,
@@ -343,7 +338,6 @@ impl SequenceNumber {
     }
 }
 
-
 pub(crate) struct LogicalClock {
     time: u64,
     timeout: u64,
@@ -351,10 +345,7 @@ pub(crate) struct LogicalClock {
 
 impl LogicalClock {
     pub fn with(timeout: u64) -> Self {
-        Self {
-            time: 0,
-            timeout
-        }
+        Self { time: 0, timeout }
     }
 
     pub fn tick_and_check_timeout(&mut self) -> bool {

@@ -1,16 +1,16 @@
 pub mod utils;
 
-use omnipaxos_core::{
+use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
-    omni_paxos::ReconfigurationRequest,
     storage::StopSign,
     util::{LogEntry, SequenceNumber},
+    ReconfigurationRequest,
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{
     verification::{verify_entries, verify_log, verify_stopsign},
-    LatestValue, TestConfig, TestSystem, Value,
+    TestConfig, TestSystem, Value,
 };
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -170,7 +170,7 @@ fn reconnect_after_dropped_accepts_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -259,7 +259,7 @@ fn reconnect_after_dropped_prepare_test() {
     }
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -326,7 +326,7 @@ fn reconnect_after_dropped_promise_test() {
             }
         }
     });
-    
+
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
@@ -354,7 +354,7 @@ fn reconnect_after_dropped_promise_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -370,8 +370,6 @@ fn reconnect_after_dropped_promise_test() {
         Err(e) => panic!("Error on kompact shutdown: {}", e),
     };
 }
-
-
 
 /// Verifies that a leader that misses a PrepareReq message from a follower eventually
 /// receives a PrepareReq.
@@ -451,7 +449,7 @@ fn reconnect_after_dropped_preparereq_test() {
     // Wait for Re-Sync with leader to finish
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -523,7 +521,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value, LatestValue>> = follower.on_definition(|comp| {
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")

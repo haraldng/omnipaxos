@@ -1,4 +1,3 @@
-# Reconfiguration
 To change the nodes in the cluster, we must first stop the current Omni-Paxos instance. This is done via the `reconfigure()` function, which has a `ReconfigurationRequest` that contains the nodes for the next Omni-Paxos instance and some optional metadata.
 
 ```rust,edition2018,no_run,noplaypen
@@ -13,7 +12,7 @@ Calling ``reconfigure()`` will propose a `StopSign` entry to be appended. If it 
 
 ```rust,edition2018,no_run,noplaypen
 let idx: u64 = ...  // some index we last read from
-    let decided_entries: Option<Vec<LogEntry<KeyValue, KVSnapshot>>> = seq_paxos.read_decided_suffix(idx);
+    let decided_entries: Option<Vec<LogEntry<KeyValue>>> = seq_paxos.read_decided_suffix(idx);
     if let Some(de) = decided_entries {
         for d in de {
             match d {

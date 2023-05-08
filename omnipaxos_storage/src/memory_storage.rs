@@ -1,13 +1,12 @@
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, Snapshot, StopSignEntry, Storage},
+    storage::{Entry, StopSignEntry, Storage},
 };
 /// An in-memory storage implementation for SequencePaxos.
 #[derive(Clone)]
-pub struct MemoryStorage<T, S>
+pub struct MemoryStorage<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     /// Vector which contains all the logged entries in-memory.
     log: Vec<T>,
@@ -20,15 +19,14 @@ where
     /// Garbage collected index.
     trimmed_idx: u64,
     /// Stored snapshot
-    snapshot: Option<S>,
+    snapshot: Option<T::Snapshot>,
     /// Stored StopSign
     stopsign: Option<StopSignEntry>,
 }
 
-impl<T, S> Storage<T, S> for MemoryStorage<T, S>
+impl<T> Storage<T> for MemoryStorage<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     fn append_entry(&mut self, entry: T) -> u64 {
         self.log.push(entry);
@@ -109,16 +107,16 @@ where
         self.trimmed_idx
     }
 
-    fn set_snapshot(&mut self, snapshot: S) {
+    fn set_snapshot(&mut self, snapshot: T::Snapshot) {
         self.snapshot = Some(snapshot);
     }
 
-    fn get_snapshot(&self) -> Option<S> {
+    fn get_snapshot(&self) -> Option<T::Snapshot> {
         self.snapshot.clone()
     }
 }
 
-impl<T: Entry, S: Snapshot<T>> Default for MemoryStorage<T, S> {
+impl<T: Entry> Default for MemoryStorage<T> {
     fn default() -> Self {
         Self {
             log: vec![],

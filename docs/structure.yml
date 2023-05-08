@@ -4,9 +4,7 @@ Foreword:
   Getting Started:
     path: "getting-started.md"
   Introduction:
-    path: "introduction/index.md"
-  Project Info:
-    path: "project.md"
+    path: "introduction.md"
 
 OmniPaxos:
   OmniPaxos:
@@ -23,6 +21,8 @@ OmniPaxos:
     path: "omnipaxos/compaction.md"
   Reconfiguration:
     path: "omnipaxos/reconfiguration.md"
+  Features:
+    path: "omnipaxos/features.md"
   Logging:
     path: "omnipaxos/logging.md"
 

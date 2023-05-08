@@ -1,6 +1,6 @@
 use crate::{
     messages::{ballot_leader_election::BLEMessage, sequence_paxos::PaxosMessage},
-    storage::{Entry, Snapshot},
+    storage::Entry,
     util::NodeId,
 };
 #[cfg(feature = "serde")]
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
-        storage::{Entry, Snapshot, SnapshotType, StopSign},
+        storage::{Entry, SnapshotType, StopSign},
         util::{NodeId, SequenceNumber},
     };
     #[cfg(feature = "serde")]
@@ -34,17 +34,16 @@ pub mod sequence_paxos {
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct Promise<T, S>
+    pub struct Promise<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         /// The current round.
         pub n: Ballot,
         /// The latest round in which an entry was accepted.
         pub n_accepted: Ballot,
         /// The decided snapshot.
-        pub decided_snapshot: Option<SnapshotType<T, S>>,
+        pub decided_snapshot: Option<SnapshotType<T>>,
         /// The log suffix.
         pub suffix: Vec<T>,
         /// The decided index of this follower.
@@ -58,17 +57,16 @@ pub mod sequence_paxos {
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct AcceptSync<T, S>
+    pub struct AcceptSync<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         /// The current round.
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided snapshot.
-        pub decided_snapshot: Option<SnapshotType<T, S>>,
+        pub decided_snapshot: Option<SnapshotType<T>>,
         /// The log suffix.
         pub suffix: Vec<T>,
         /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
@@ -161,17 +159,16 @@ pub mod sequence_paxos {
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub enum PaxosMsg<T, S>
+    pub enum PaxosMsg<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
         PrepareReq,
         #[allow(missing_docs)]
         Prepare(Prepare),
-        Promise(Promise<T, S>),
-        AcceptSync(AcceptSync<T, S>),
+        Promise(Promise<T>),
+        AcceptSync(AcceptSync<T>),
         AcceptDecide(AcceptDecide<T>),
         Accepted(Accepted),
         Decide(Decide),
@@ -187,17 +184,16 @@ pub mod sequence_paxos {
     /// A struct for a Paxos message that also includes sender and receiver.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct PaxosMessage<T, S>
+    pub struct PaxosMessage<T>
     where
         T: Entry,
-        S: Snapshot<T>,
     {
         /// Sender of `msg`.
         pub from: NodeId,
         /// Receiver of `msg`.
         pub to: NodeId,
         /// The message content.
-        pub msg: PaxosMsg<T, S>,
+        pub msg: PaxosMsg<T>,
     }
 }
 
@@ -253,19 +249,17 @@ pub mod ballot_leader_election {
 /// Message in OmniPaxos. Can be either a `SequencePaxos` message (for log replication) or `BLE` message (for leader election)
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Message<T, S>
+pub enum Message<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
-    SequencePaxos(PaxosMessage<T, S>),
+    SequencePaxos(PaxosMessage<T>),
     BLE(BLEMessage),
 }
 
-impl<T, S> Message<T, S>
+impl<T> Message<T>
 where
     T: Entry,
-    S: Snapshot<T>,
 {
     /// Get the sender id of the message
     pub fn get_sender(&self) -> NodeId {

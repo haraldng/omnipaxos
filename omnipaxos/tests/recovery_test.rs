@@ -1,10 +1,10 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
-use omnipaxos_core::util::LogEntry;
+use omnipaxos::util::LogEntry;
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{verification::verify_log, LatestValue, TestConfig, TestSystem, Value};
+use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -49,7 +49,7 @@ fn leader_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -104,7 +104,7 @@ fn leader_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -163,7 +163,7 @@ fn follower_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
@@ -222,7 +222,7 @@ fn follower_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value, LatestValue>> = recovery_px.on_definition(|comp| {
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
         comp.paxos
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
