@@ -3,7 +3,7 @@ wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
 election_timeout_ms = 50
-storage_type = "Memory"
+storage_type = { type = "Memory" }
 
 [consensus_test]
 wait_timeout_ms = 3000
@@ -11,21 +11,21 @@ num_threads = 8
 num_nodes = 5
 election_timeout_ms = 50
 num_proposals = 10000
-storage_type = "Memory"
+storage_type = { type = "Memory" }
 
 [proposal_test]
 wait_timeout_ms = 5000
 num_threads = 8
 num_nodes = 7
 election_timeout_ms = 50
-storage_type = "Memory"
+storage_type = { type = "Memory" }
 
 [reconnect_test]
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
 election_timeout_ms = 50
-storage_type = "Memory"
+storage_type = { type = "Memory" }
 
 [recovery_test]
 wait_timeout_ms = 7000
@@ -33,7 +33,7 @@ num_threads = 8
 num_nodes = 3
 election_timeout_ms = 50
 num_proposals = 100
-storage_type = "Persistent"
+storage_type = { type = "Persistent" }
 
 [gc_test]
 wait_timeout_ms = 3000
@@ -42,5 +42,8 @@ num_nodes = 3
 election_timeout_ms = 50
 num_proposals = 10000
 gc_idx = 1000
-storage_type = "Memory"
+storage_type = { type = "Memory" }
 
+[atomic_storage_test]
+num_nodes = 3
+storage_type = { type = "Broken", after = 0 }

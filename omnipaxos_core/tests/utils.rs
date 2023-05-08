@@ -11,7 +11,13 @@ use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error, fs, str, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fs, str,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tempfile::TempDir;
 use toml;
 
@@ -21,8 +27,6 @@ const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
-const PERSISTENT: &str = "persistent";
-const MEMORY: &str = "memory";
 
 use omnipaxos_core::omni_paxos::OmniPaxosConfig;
 use sled::Config;
@@ -71,29 +75,71 @@ impl Default for TestConfig {
 /// An enum for selecting storage type. The type
 /// can be set in `config/test.conf` at `storage_type`
 #[derive(Clone, Copy, Deserialize)]
+#[serde(tag = "type")]
 pub enum StorageTypeSelector {
     Persistent,
     Memory,
+    Broken(BrokenStorageConfig),
 }
 
-impl StorageTypeSelector {
-    pub fn with(storage_type: &str) -> Self {
-        match storage_type.to_lowercase().as_ref() {
-            PERSISTENT => StorageTypeSelector::Persistent,
-            MEMORY => StorageTypeSelector::Memory,
-            _ => panic!("No such storage type: {}", storage_type),
+#[derive(Clone, Copy, Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct BrokenStorageConfig {
+    /// This many operations should be error-free at the start
+    pub after: usize,
+    /// Fail every n operations
+    pub every_n_ops: Option<usize>,
+    /// Fail once after this many operations
+    pub fail_in: usize,
+    op_counter: usize,
+}
+
+impl BrokenStorageConfig {
+    /// Should be called before every operation on the broken storage.
+    /// Returns Ok(_) if the operation should be performed without error.
+    /// Returns Err(_) if the operation should fail.
+    pub fn next(&mut self) -> StorageResult<()> {
+        let err = Err("test error from mocked broken storage".into());
+        self.op_counter += 1;
+        if self.fail_in > 0 {
+            self.fail_in -= 1;
+            if self.fail_in == 0 {
+                return err
+            }
         }
+        // if self.op_counter > self.after {
+        //     let op = self.op_counter + self.after;
+        //     if let Some(n) = self.every_n_ops {
+        //         if op % n == 0 {
+        //             return err;
+        //         }
+        //     }
+        // }
+        Ok(())
+    }
+
+    /// Schedules a single failure after n operations.
+    /// If `n == 1`, the next operation fails.
+    pub fn schedule_failure_in(&mut self, n: usize) {
+        self.fail_in = n;
     }
 }
 
 /// An enum which can either be a 'PersistentStorage' or 'MemoryStorage', the type depends on the
 /// 'StorageTypeSelector' enum. Used for testing purposes with SequencePaxos and BallotLeaderElection.
+/// Supports simulating storage failures in the `Broken` variant.
 pub enum StorageType<T>
 where
     T: Entry,
 {
     Persistent(PersistentStorage<T>),
     Memory(MemoryStorage<T>),
+    /// Mocks a storage that fails depending of the config.
+    /// Arc<Mutex<_>> is needed since we need to mutate conf through immutable references.
+    Broken(
+        Arc<Mutex<MemoryStorage<T>>>,
+        Arc<Mutex<BrokenStorageConfig>>,
+    ),
 }
 
 impl<T> StorageType<T>
@@ -110,6 +156,10 @@ where
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
+            StorageTypeSelector::Broken(config) => StorageType::Broken(
+                Arc::new(Mutex::new(MemoryStorage::default())),
+                Arc::new(Mutex::new(config)),
+            ),
         }
     }
 }
@@ -123,6 +173,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_entry(entry)
+            }
         }
     }
 
@@ -130,6 +184,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_entries(entries)
+            }
         }
     }
 
@@ -137,6 +195,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_on_prefix(from_idx, entries)
+            }
         }
     }
 
@@ -144,6 +206,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
             StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_promise(n_prom)
+            }
         }
     }
 
@@ -151,6 +217,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_decided_idx(ld)
+            }
         }
     }
 
@@ -158,6 +228,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_decided_idx()
+            }
         }
     }
 
@@ -165,6 +239,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
             StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_accepted_round(na)
+            }
         }
     }
 
@@ -172,6 +250,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_accepted_round()
+            }
         }
     }
 
@@ -179,6 +261,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_entries(from, to)
+            }
         }
     }
 
@@ -186,6 +272,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_log_len()
+            }
         }
     }
 
@@ -193,6 +283,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_suffix(from)
+            }
         }
     }
 
@@ -200,6 +294,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_promise()
+            }
         }
     }
 
@@ -207,6 +305,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_stopsign(s)
+            }
         }
     }
 
@@ -214,6 +316,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_stopsign()
+            }
         }
     }
 
@@ -221,6 +327,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().trim(idx)
+            }
         }
     }
 
@@ -228,6 +338,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_compacted_idx(idx)
+            }
         }
     }
 
@@ -235,6 +349,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_compacted_idx()
+            }
         }
     }
 
@@ -242,6 +360,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_snapshot(snapshot)
+            }
         }
     }
 
@@ -249,6 +371,10 @@ where
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_snapshot()
+            }
         }
     }
 }
