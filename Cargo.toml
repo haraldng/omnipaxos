@@ -3,7 +3,8 @@ members = [
     "omnipaxos",
     "omnipaxos_storage",
     "omnipaxos_macros",
-    "examples/kv_store"
+    "examples/kv_store",
+    "examples/tutorial"
 ]
 
 [profile.release]
