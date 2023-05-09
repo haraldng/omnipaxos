@@ -5,11 +5,12 @@ use omnipaxos::{
     *,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
+use tokio::{runtime::Builder, sync::mpsc};
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use tokio::{runtime::Builder, sync::mpsc};
 
 mod kv;
 mod server;
@@ -48,11 +49,18 @@ fn main() {
 
     for pid in SERVERS {
         let peers = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
-        let op_config = OmniPaxosConfig {
-            pid,
-            configuration_id,
-            peers,
-            ..Default::default()
+        let op_config = if pid == 1 {
+            // use a toml file to configure the first node
+            let mut op_config_temp = OmniPaxosConfig::with_toml(&*(BASE_PATH.to_owned() + "src/configs/node1.toml")).unwrap();
+            op_config_temp.peers = peers;
+            op_config_temp
+        } else {
+            OmniPaxosConfig {
+                pid,
+                configuration_id,
+                peers,
+                ..Default::default()
+            }
         };
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> =
             Arc::new(Mutex::new(op_config.build(MemoryStorage::default())));

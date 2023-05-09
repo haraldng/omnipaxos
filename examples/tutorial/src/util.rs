@@ -1,4 +1,7 @@
+use std::string::ToString;
 use std::time::Duration;
+
+pub const BASE_PATH: String = "examples/tutorial/".to_string();
 
 pub const BUFFER_SIZE: usize = 10000;
 pub const ELECTION_TIMEOUT: Duration = Duration::from_millis(100);
