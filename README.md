@@ -14,6 +14,8 @@ An OmniPaxos node is implemented as a plain Rust `struct`. This allows it to be 
 
 For more detailed explanations and tutorials showcasing our features, check out https://omnipaxos.com.
 
+To learn more about OmniPaxos, check out our [EuroSys'23 paper](https://dl.acm.org/doi/pdf/10.1145/3552326.3587441).
+
 ## License
 This project is licensed under the [Apache-2.0 license](LICENSE).
 
