@@ -3,6 +3,8 @@
 /log
 Cargo.lock
 omnipaxos_storage/storage
+/examples/tutorial/logs/
+/examples/tutorial/storage/
 
 # IntelliJ
 *.iml
@@ -11,3 +13,4 @@ omnipaxos_storage/storage
 docs/.DS_Store
 .DS_Store
 */.idea/*
+

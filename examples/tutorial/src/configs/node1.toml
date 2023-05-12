@@ -2,6 +2,6 @@
 configuration_id = 1
 pid = 1
 buffer_size = 100000
-logger_file_path = "examples/tutorial/log/log4node1.txt"
+logger_file_path = "examples/tutorial/logs/log4node1.txt"
 leader_priority = 2
 initial_leader = { n = 1, priority = 1, pid = 1 }

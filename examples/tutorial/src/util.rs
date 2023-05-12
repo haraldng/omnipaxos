@@ -1,7 +1,7 @@
-use std::string::ToString;
 use std::time::Duration;
 
-pub const BASE_PATH: String = "examples/tutorial/".to_string();
+pub const NODE1_CONFIG_PATH: &str = "examples/tutorial/src/configs/node1.toml";
+pub const STORAGE_BASE_PATH: &str = "examples/tutorial/storage/";
 
 pub const BUFFER_SIZE: usize = 10000;
 pub const ELECTION_TIMEOUT: Duration = Duration::from_millis(100);
