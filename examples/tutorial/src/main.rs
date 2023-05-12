@@ -1,6 +1,6 @@
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
-    messages::Message,
+    messages::Message as OmniPaxosMsg,
     util::{LogEntry, NodeId},
     *,
 };
@@ -19,14 +19,18 @@ mod server;
 mod util;
 
 type OmniPaxosKV = OmniPaxos<KeyValue, PersistentStorage<KeyValue>>;
+type Message = OmniPaxosMsg<KeyValue>;
+// use the serde feature to make messages of OmniPaxos instances serializable
+// More information about this feature can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/features/).
+type SerializedMessage = String;
 const COMMITLOG: &str = "/commitlog/";
 
 const SERVERS: [u64; 3] = [1, 2, 3];
 
 #[allow(clippy::type_complexity)]
 fn initialise_channels() -> (
-    HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
-    HashMap<NodeId, mpsc::Receiver<Message<KeyValue>>>,
+    HashMap<NodeId, mpsc::Sender<SerializedMessage>>,
+    HashMap<NodeId, mpsc::Receiver<SerializedMessage>>,
 ) {
     let mut sender_channels = HashMap::new();
     let mut receiver_channels = HashMap::new();
