@@ -4,8 +4,10 @@ use omnipaxos::{
     util::{LogEntry, NodeId},
     *,
 };
-use omnipaxos_storage::memory_storage::MemoryStorage;
+use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
 use tokio::{runtime::Builder, sync::mpsc};
+use commitlog::LogOptions;
+use sled::Config;
 
 use std::{
     collections::HashMap,
@@ -16,7 +18,8 @@ mod kv;
 mod server;
 mod util;
 
-type OmniPaxosKV = OmniPaxos<KeyValue, MemoryStorage<KeyValue>>;
+type OmniPaxosKV = OmniPaxos<KeyValue, PersistentStorage<KeyValue>>;
+const COMMITLOG: &str = "/commitlog/";
 
 const SERVERS: [u64; 3] = [1, 2, 3];
 
@@ -51,9 +54,10 @@ fn main() {
         let peers = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
         let op_config = if pid == 1 {
             // use a toml file to configure the first node
-            let mut op_config_temp = OmniPaxosConfig::with_toml(&*(BASE_PATH.to_owned() + "src/configs/node1.toml")).unwrap();
-            op_config_temp.peers = peers;
-            op_config_temp
+            // More information about this feature can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/features/).
+            let mut op_config_node1 = OmniPaxosConfig::with_toml(NODE1_CONFIG_PATH).unwrap();
+            op_config_node1.peers = peers;
+            op_config_node1
         } else {
             OmniPaxosConfig {
                 pid,
@@ -62,8 +66,15 @@ fn main() {
                 ..Default::default()
             }
         };
-        let omni_paxos: Arc<Mutex<OmniPaxosKV>> =
-            Arc::new(Mutex::new(op_config.build(MemoryStorage::default())));
+
+        // setup persistent storage
+        // More information about the Storage can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/storage/).
+        let store_base_path = format!("{STORAGE_BASE_PATH}node{pid}");
+        let my_logopts = LogOptions::new(format!("{store_base_path}{COMMITLOG}"));
+        let my_sledopts = Config::new();
+        let store_config = PersistentStorageConfig::with(store_base_path, my_logopts, my_sledopts);
+
+        let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(op_config.build(PersistentStorage::open(store_config))));
         let mut op_server = OmniPaxosServer {
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),
