@@ -56,7 +56,17 @@ where
         let peers = config.peers;
         let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
-        let majority = num_nodes / 2 + 1;
+        let leader_quorum_size = config.leader_quorum_size.unwrap_or(num_nodes / 2 + 1);
+        let append_quorum_size = match config.append_quorum_size {
+            Some(s) => s,
+            None => {
+                if num_nodes % 2 == 0 {
+                    num_nodes / 2
+                } else {
+                    num_nodes / 2 + 1
+                }
+            }
+        };
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let (state, leader, lds) = match &config.skip_prepare_use_leader {
@@ -92,7 +102,13 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::<T>::with(leader, lds, max_pid, majority),
+            leader_state: LeaderState::<T>::with(
+                leader,
+                lds,
+                max_pid,
+                leader_quorum_size,
+                append_quorum_size,
+            ),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
             buffer_size: config.buffer_size,
@@ -377,6 +393,7 @@ enum Role {
     Leader,
 }
 
+// TODO: update docs
 /// Configuration for `SequencePaxos`.
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
@@ -393,6 +410,8 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
+    leader_quorum_size: Option<usize>,
+    append_quorum_size: Option<usize>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -405,6 +424,8 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             peers: config.peers,
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
+            leader_quorum_size: config.leader_quorum_size,
+            append_quorum_size: config.append_quorum_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.logger_file_path,
         }

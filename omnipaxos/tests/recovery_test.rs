@@ -13,14 +13,7 @@ const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 #[ignore]
 fn leader_fail_follower_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
-
+    let mut sys = TestSystem::with(cfg.clone());
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -71,14 +64,7 @@ fn leader_fail_follower_propose_test() {
 #[ignore]
 fn leader_fail_leader_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
-
+    let mut sys = TestSystem::with(cfg.clone());
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -125,14 +111,7 @@ fn leader_fail_leader_propose_test() {
 #[ignore]
 fn follower_fail_leader_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
-
+    let mut sys = TestSystem::with(cfg.clone());
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -183,14 +162,7 @@ fn follower_fail_leader_propose_test() {
 #[ignore]
 fn follower_fail_follower_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
-
+    let mut sys = TestSystem::with(cfg.clone());
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -285,6 +257,8 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         cfg.election_timeout_ms,
         cfg.storage_type,
         &storage_path,
+        cfg.leader_quorum_size,
+        cfg.append_quorum_size,
     );
     sys.start_node(pid);
     let px = sys

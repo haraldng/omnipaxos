@@ -29,7 +29,7 @@ use sled::Config;
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(default)]
 pub struct TestConfig {
     pub num_threads: usize,
@@ -40,6 +40,8 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
+    pub leader_quorum_size: Option<usize>,
+    pub append_quorum_size: Option<usize>,
 }
 
 impl TestConfig {
@@ -65,6 +67,8 @@ impl Default for TestConfig {
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
+            leader_quorum_size: None,
+            append_quorum_size: None,
         }
     }
 }
@@ -260,18 +264,13 @@ pub struct TestSystem {
 }
 
 impl TestSystem {
-    pub fn with(
-        num_nodes: usize,
-        election_timeout_ms: u64,
-        num_threads: usize,
-        storage_type: StorageTypeSelector,
-    ) -> Self {
+    pub fn with(test_config: TestConfig) -> Self {
         let temp_dir_path = create_temp_dir();
 
         let mut conf = KompactConfig::default();
         conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
-        conf.set_config_value(&system::THREADS, num_threads);
-        Self::set_executor_for_threads(num_threads, &mut conf);
+        conf.set_config_value(&system::THREADS, test_config.num_threads);
+        Self::set_executor_for_threads(test_config.num_threads, &mut conf);
 
         let mut net = NetworkConfig::default();
         net.set_tcp_nodelay(true);
@@ -281,22 +280,24 @@ impl TestSystem {
 
         let mut nodes = HashMap::new();
 
-        let all_pids: Vec<u64> = (1..=num_nodes as u64).collect();
+        let all_pids: Vec<u64> = (1..=test_config.num_nodes as u64).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
 
-        for pid in 1..=num_nodes as u64 {
+        for pid in 1..=test_config.num_nodes as u64 {
             let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
             let mut op_config = OmniPaxosConfig::default();
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
+            op_config.leader_quorum_size = test_config.leader_quorum_size;
+            op_config.append_quorum_size = test_config.append_quorum_size;
             let storage: StorageType<Value> =
-                StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
+                StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.build(storage),
-                    Duration::from_millis(election_timeout_ms),
+                    Duration::from_millis(test_config.election_timeout_ms),
                 )
             });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -355,6 +356,8 @@ impl TestSystem {
         election_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
+        leader_quorum_size: Option<usize>,
+        append_quorum_size: Option<usize>,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
@@ -362,6 +365,8 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
+        op_config.leader_quorum_size = leader_quorum_size;
+        op_config.append_quorum_size = append_quorum_size;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -424,18 +429,15 @@ impl TestSystem {
     pub fn get_elected_leader(&self, node: u64, wait_timeout: Duration) -> u64 {
         let node = self.nodes.get(&node).expect("No BLE component found");
 
-        node.on_definition(|x| {
-            let leader_pid = x.paxos.get_current_leader();
-            leader_pid.unwrap_or_else(|| {
-                // Leader is not elected yet
-                let (kprom, kfuture) = promise::<Ballot>();
-                x.election_futures.push(Ask::new(kprom, ()));
-
-                let ballot = kfuture
-                    .wait_timeout(wait_timeout)
-                    .expect("No leader has been elected in the allocated time!");
-                ballot.pid
-            })
+        let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
+        leader_pid.unwrap_or_else(|| {
+            // Leader is not elected yet
+            let (kprom, kfuture) = promise::<Ballot>();
+            node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
+            let ballot = kfuture
+                .wait_timeout(wait_timeout)
+                .expect("No leader has been elected in the allocated time!");
+            ballot.pid
         })
     }
 

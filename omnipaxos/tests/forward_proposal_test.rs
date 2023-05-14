@@ -13,16 +13,9 @@ use utils::{TestConfig, TestSystem, Value};
 #[serial]
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg.clone());
 
     let first_node = sys.nodes.get(&1).unwrap();
-
     let (kprom_ble, kfuture_ble) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom_ble, ())));
 

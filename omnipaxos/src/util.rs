@@ -63,7 +63,8 @@ where
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
     pub max_pid: usize,
-    pub majority: usize,
+    pub leader_quorum_size: usize,
+    pub append_quorum_size: usize,
 }
 
 impl<T> LeaderState<T>
@@ -74,7 +75,8 @@ where
         n_leader: Ballot,
         decided_indexes: Option<Vec<Option<u64>>>,
         max_pid: usize,
-        majority: usize,
+        leader_quorum_size: usize,
+        append_quorum_size: usize,
     ) -> Self {
         Self {
             n_leader,
@@ -88,7 +90,8 @@ where
             batch_accept_meta: vec![None; max_pid],
             accepted_stopsign: vec![false; max_pid],
             max_pid,
-            majority,
+            leader_quorum_size,
+            append_quorum_size,
         }
     }
 
@@ -130,7 +133,7 @@ where
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
         let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
-        num_promised >= self.majority
+        num_promised >= self.leader_quorum_size
     }
 
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
@@ -197,7 +200,7 @@ where
 
     pub fn is_stopsign_chosen(&self) -> bool {
         let num_accepted = self.accepted_stopsign.iter().filter(|x| **x).count();
-        num_accepted >= self.majority
+        num_accepted >= self.append_quorum_size
     }
 
     pub fn is_chosen(&self, idx: u64) -> bool {
@@ -205,7 +208,7 @@ where
             .iter()
             .filter(|la| **la >= idx)
             .count()
-            >= self.majority
+            >= self.append_quorum_size
     }
 
     pub fn take_max_promise_stopsign(&mut self) -> Option<StopSign> {

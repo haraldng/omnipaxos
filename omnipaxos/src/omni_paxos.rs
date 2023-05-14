@@ -22,8 +22,11 @@ use toml;
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `leader_quorum_size`: The number of votes a node needs to become the leader.
+/// * `append_quorum_size`: The number of nodes that need to participate to progress the log replication.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
+//TODO: review Docs
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
@@ -33,6 +36,8 @@ pub struct OmniPaxosConfig {
     pub peers: Vec<u64>,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
+    pub leader_quorum_size: Option<usize>,
+    pub append_quorum_size: Option<usize>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
@@ -62,6 +67,31 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
+
+        let num_nodes = self.peers.len() + 1;
+        match (self.leader_quorum_size, self.append_quorum_size) {
+            (Some(prepare_quorum_size), Some(accept_quorum_size)) => {
+                let quorums_overlap = prepare_quorum_size + accept_quorum_size > num_nodes;
+                assert!(
+                    quorums_overlap,
+                    "The sum of quorum sizes must exceed the # of nodes"
+                );
+                assert!(
+                    prepare_quorum_size > 0 && prepare_quorum_size <= num_nodes,
+                    "Prepare quorum must be in range 0 to # of nodes in the cluster"
+                );
+                // TODO: currently accept_quorum_size = 1 doesn't work, add to check?
+                assert!(
+                    accept_quorum_size > 0 && accept_quorum_size <= num_nodes,
+                    "Accept quorum must be in range 0 to # of nodes in the cluster"
+                );
+                assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if prepare quorum is smaller than accept quorum");
+            }
+            (None, Some(_)) => panic!("Prepare quorum must also be defined"),
+            (Some(_), None) => panic!("Accept quorum must also be defined"),
+            (None, None) => (),
+        }
+
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
@@ -81,6 +111,8 @@ impl Default for OmniPaxosConfig {
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
+            leader_quorum_size: None,
+            append_quorum_size: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
             leader_priority: 0,

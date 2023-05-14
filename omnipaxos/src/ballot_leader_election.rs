@@ -56,8 +56,8 @@ pub(crate) struct BallotLeaderElection {
     quorum_connected: bool,
     /// Current elected leader.
     leader: Option<Ballot>,
-    /// The majority of replicas inside a cluster. It is measured in ticks.
-    majority: usize,
+    /// The number of replicas inside the cluster whose vote is needed to become leader.
+    quorum_size: usize,
     /// Vector which holds all the outgoing messages of the BLE instance.
     outgoing: Vec<BLEMessage>,
     /// Logger used to output the status of the component.
@@ -70,17 +70,18 @@ impl BallotLeaderElection {
     pub(crate) fn with(config: BLEConfig) -> Self {
         let pid = config.pid;
         let peers = config.peers;
-        let n = &peers.len() + 1;
+        let num_nodes = &peers.len() + 1;
+        let quorum_size = config.leader_quorum_size.unwrap_or(num_nodes / 2 + 1);
         let initial_ballot = match &config.initial_leader {
             Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
             _ => Ballot::with(0, config.priority, pid),
         };
         let mut ble = BallotLeaderElection {
             pid,
-            majority: n / 2 + 1, // +1 because peers is exclusive ourselves
+            quorum_size,
             peers,
             hb_round: 0,
-            ballots: Vec::with_capacity(n),
+            ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             quorum_connected: true,
             leader: config.initial_leader,
@@ -197,7 +198,7 @@ impl BallotLeaderElection {
     }
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
-        let result: Option<Ballot> = if self.ballots.len() + 1 >= self.majority {
+        let result: Option<Ballot> = if self.ballots.len() + 1 >= self.quorum_size {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
@@ -266,6 +267,7 @@ pub(crate) struct BLEConfig {
     peers: Vec<u64>,
     priority: u64,
     initial_leader: Option<Ballot>,
+    leader_quorum_size: Option<usize>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Option<Logger>,
@@ -281,6 +283,7 @@ impl From<OmniPaxosConfig> for BLEConfig {
             priority: config.leader_priority,
             initial_leader: config.initial_leader,
             buffer_size: BLE_BUFFER_SIZE,
+            leader_quorum_size: config.leader_quorum_size,
             #[cfg(feature = "logging")]
             logger: None,
             #[cfg(feature = "logging")]
