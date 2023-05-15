@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-omnipaxos = { version = "0.1.0", features = ["batch_accept", "continued_leader_reconfiguration", "toml_config", "serde"] }
+omnipaxos = { version = "0.1.0", features = ["batch_accept", "continued_leader_reconfiguration", "toml_config"] }
 #omnipaxos = { version = "0.1.0", features = ["batch_accept", "continued_leader_reconfiguration", "toml_config", "serde", "logging"] }
 omnipaxos_storage = { version = "0.1.0" , default-features = true }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }

@@ -6,7 +6,7 @@ use std::{
 };
 
 
-use crate::{kv::KeyValue, util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD}, OmniPaxosKV, OmniPaxosMsg, Message, SerializedMessage};
+use crate::{util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD}, OmniPaxosKV, Message, SerializedMessage};
 
 pub struct OmniPaxosServer {
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,

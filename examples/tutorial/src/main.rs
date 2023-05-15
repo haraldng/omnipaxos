@@ -23,6 +23,7 @@ type Message = OmniPaxosMsg<KeyValue>;
 // use the serde feature to make messages of OmniPaxos instances serializable
 // More information about this feature can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/features/).
 type SerializedMessage = String;
+
 const COMMITLOG: &str = "/commitlog/";
 
 const SERVERS: [u64; 3] = [1, 2, 3];
@@ -54,6 +55,7 @@ fn main() {
     let mut op_server_handles = HashMap::new();
     let (sender_channels, mut receiver_channels) = initialise_channels();
 
+    // initialise the OmniPaxos servers
     for pid in SERVERS {
         let peers = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
         let op_config = if pid == 1 {
@@ -70,7 +72,6 @@ fn main() {
                 ..Default::default()
             }
         };
-
         // setup persistent storage
         // More information about the Storage can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/storage/).
         let store_base_path = format!("{STORAGE_BASE_PATH}node{pid}");
