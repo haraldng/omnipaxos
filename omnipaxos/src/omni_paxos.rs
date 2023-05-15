@@ -73,17 +73,17 @@ impl OmniPaxosConfig {
                 let quorums_overlap = prepare_quorum_size + accept_quorum_size > num_nodes;
                 assert!(
                     quorums_overlap,
-                    "The sum of quorum sizes must exceed the # of nodes"
+                    "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
                 );
                 assert!(
                     prepare_quorum_size >= 1 && prepare_quorum_size <= num_nodes,
-                    "Prepare quorum must be in range 1 to # of nodes in the cluster"
+                    "Read quorum must be in range 1 to # of nodes in the cluster"
                 );
                 assert!(
                     accept_quorum_size >= 2 && accept_quorum_size <= num_nodes,
-                    "Accept quorum must be in range 2 to # of nodes in the cluster"
+                    "Write quorum must be in range 2 to # of nodes in the cluster"
                 );
-                assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if prepare quorum is smaller than accept quorum");
+                assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if read quorum is smaller than write quorum");
             }
             (None, Some(_)) => panic!("Prepare quorum must also be defined"),
             (Some(_), None) => panic!("Accept quorum must also be defined"),

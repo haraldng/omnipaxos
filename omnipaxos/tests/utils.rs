@@ -356,8 +356,8 @@ impl TestSystem {
         election_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
-        leader_quorum_size: Option<usize>,
-        append_quorum_size: Option<usize>,
+        prepare_quorum_size: Option<usize>,
+        accept_quorum_size: Option<usize>,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
@@ -365,8 +365,8 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
-        op_config.read_quorum_size = leader_quorum_size;
-        op_config.write_quorum_size = append_quorum_size;
+        op_config.read_quorum_size = prepare_quorum_size;
+        op_config.write_quorum_size = accept_quorum_size;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self

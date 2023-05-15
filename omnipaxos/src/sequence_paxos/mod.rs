@@ -12,7 +12,7 @@ use crate::{
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
-use slog::{debug, info, trace, Logger};
+use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
 
 pub mod follower;
@@ -56,8 +56,8 @@ where
         let peers = config.peers;
         let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
-        let leader_quorum_size = config.prepare_quorum_size.unwrap_or(num_nodes / 2 + 1);
-        let append_quorum_size = match config.accept_quorum_size {
+        let prepare_quorum_size = config.prepare_quorum_size.unwrap_or(num_nodes / 2 + 1);
+        let accept_quorum_size = match config.accept_quorum_size {
             Some(s) => s,
             None => {
                 if num_nodes % 2 == 0 {
@@ -106,8 +106,8 @@ where
                 leader,
                 lds,
                 max_pid,
-                leader_quorum_size,
-                append_quorum_size,
+                prepare_quorum_size,
+                accept_quorum_size,
             ),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
@@ -124,6 +124,12 @@ where
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
+            if prepare_quorum_size > num_nodes - accept_quorum_size + 1 {
+                warn!(
+                    paxos.logger,
+                    "Unnecessary overlaps in read and write quorums. The optimal read quorum size = (# of nodes) - (write quorum size) + 1."
+                    );
+            }
         }
         paxos
     }
