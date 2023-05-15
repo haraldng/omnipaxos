@@ -262,6 +262,11 @@ where
                                 #[cfg(feature = "logging")]
                                 warn!(self.logger, "In Prepare phase without a cached promise!");
                                 self.state = (Role::Follower, Phase::Recover);
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: self.leader.pid,
+                                    msg: PaxosMsg::PrepareReq,
+                                });
                             }
                         }
                     }

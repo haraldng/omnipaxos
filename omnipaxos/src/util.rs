@@ -352,8 +352,9 @@ impl LogicalClock {
         self.time += 1;
         if self.time == self.timeout {
             self.time = 0;
-            return true;
+            true
+        } else {
+            false
         }
-        false
     }
 }
