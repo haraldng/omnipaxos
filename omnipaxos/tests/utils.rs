@@ -36,6 +36,7 @@ pub struct TestConfig {
     pub num_nodes: usize,
     pub wait_timeout_ms: u64,
     pub election_timeout_ms: u64,
+    pub resend_message_timeout_ms: u64,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
@@ -61,6 +62,7 @@ impl Default for TestConfig {
             num_nodes: 3,
             wait_timeout_ms: 3000,
             election_timeout_ms: 50,
+            resend_message_timeout_ms: 500,
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,
@@ -263,6 +265,7 @@ impl TestSystem {
     pub fn with(
         num_nodes: usize,
         election_timeout_ms: u64,
+        resend_message_timeout_ms: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
     ) -> Self {
@@ -290,14 +293,13 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
+            // Make tick timeouts reletive to election timeout
+            op_config.election_tick_timeout = 1;
+            op_config.resend_message_tick_timeout = resend_message_timeout_ms / election_timeout_ms;
             let storage: StorageType<Value> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
-                OmniPaxosComponent::with(
-                    pid,
-                    op_config.build(storage),
-                    Duration::from_millis(election_timeout_ms),
-                )
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout_ms)
             });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
             omni_refs.insert(pid, omni_replica.actor_ref());
@@ -353,6 +355,7 @@ impl TestSystem {
         pid: u64,
         num_nodes: usize,
         election_timeout_ms: u64,
+        resend_message_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
     ) {
@@ -362,6 +365,9 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
+        // Make tick timeouts reletive to election timeout
+        op_config.election_tick_timeout = 1;
+        op_config.resend_message_tick_timeout = resend_message_timeout_ms / election_timeout_ms;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -369,11 +375,7 @@ impl TestSystem {
             .as_ref()
             .expect("No KompactSystem found!")
             .create_and_register(|| {
-                OmniPaxosComponent::with(
-                    pid,
-                    op_config.build(storage),
-                    Duration::from_millis(election_timeout_ms),
-                )
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout_ms)
             });
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -495,12 +497,12 @@ pub mod omnireplica {
         pub peer_disconnections: HashSet<u64>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
+        tick_timeout_ms: u64,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
         pub decided_futures: Vec<Ask<(), Value>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: u64,
-        election_timeout: Duration,
     }
 
     impl ComponentLifecycle for OmniPaxosComponent {
@@ -515,10 +517,10 @@ pub mod omnireplica {
                 },
             ));
             self.tick_timer = Some(self.schedule_periodic(
-                self.election_timeout,
-                self.election_timeout,
+                Duration::from_millis(self.tick_timeout_ms),
+                Duration::from_millis(self.tick_timeout_ms),
                 move |c, _| {
-                    c.paxos.election_timeout();
+                    c.paxos.tick();
                     if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
                         if leader_ballot != c.current_leader_ballot {
                             c.current_leader_ballot = leader_ballot;
@@ -543,7 +545,7 @@ pub mod omnireplica {
         pub fn with(
             pid: NodeId,
             paxos: OmniPaxos<Value, StorageType<Value>>,
-            election_timeout: Duration,
+            tick_timeout_ms: u64,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -552,12 +554,12 @@ pub mod omnireplica {
                 peer_disconnections: HashSet::new(),
                 paxos_timer: None,
                 tick_timer: None,
+                tick_timeout_ms,
                 decided_idx: paxos.get_decided_idx(),
                 paxos,
                 decided_futures: vec![],
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
-                election_timeout,
             }
         }
 
@@ -724,7 +726,8 @@ pub mod verification {
     /// * All entries are decided, verify the decided entries
     /// * Only a snapshot was taken, verify the snapshot
     /// * A snapshot was taken and entries decided on afterwards, verify both the snapshot and entries
-    pub fn verify_log(read_log: Vec<LogEntry<Value>>, proposals: Vec<Value>, num_proposals: u64) {
+    pub fn verify_log(read_log: Vec<LogEntry<Value>>, proposals: Vec<Value>) {
+        let num_proposals = proposals.len() as u64;
         match &read_log[..] {
             [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
             [LogEntry::Snapshotted(s)] => {

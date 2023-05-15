@@ -9,7 +9,6 @@ storage_type = "Memory"
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
-election_timeout_ms = 50
 num_proposals = 10000
 storage_type = "Memory"
 
@@ -17,21 +16,19 @@ storage_type = "Memory"
 wait_timeout_ms = 5000
 num_threads = 8
 num_nodes = 7
-election_timeout_ms = 50
 storage_type = "Memory"
 
 [reconnect_test]
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
-election_timeout_ms = 50
+resend_message_timeout_ms = 500
 storage_type = "Memory"
 
 [recovery_test]
 wait_timeout_ms = 7000
 num_threads = 8
 num_nodes = 3
-election_timeout_ms = 50
 num_proposals = 100
 storage_type = "Persistent"
 
@@ -39,7 +36,6 @@ storage_type = "Persistent"
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 3
-election_timeout_ms = 50
 num_proposals = 10000
 gc_idx = 1000
 storage_type = "Memory"
