@@ -27,8 +27,8 @@ where
                 n,
                 None,
                 self.leader_state.max_pid,
-                self.leader_state.leader_quorum_size,
-                self.leader_state.append_quorum_size,
+                self.leader_state.prepare_quorum_size,
+                self.leader_state.accept_quorum_size,
             );
             self.leader = n;
             self.internal_storage.set_promise(n);

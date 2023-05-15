@@ -257,8 +257,8 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         cfg.election_timeout_ms,
         cfg.storage_type,
         &storage_path,
-        cfg.leader_quorum_size,
-        cfg.append_quorum_size,
+        cfg.read_quorum_size,
+        cfg.write_quorum_size,
     );
     sys.start_node(pid);
     let px = sys

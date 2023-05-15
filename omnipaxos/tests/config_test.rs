@@ -31,8 +31,8 @@ fn config_all_fields_test() {
                     pid: 2,
                 })
             );
-            assert_eq!(omnipaxos_config.leader_quorum_size, Some(3));
-            assert_eq!(omnipaxos_config.append_quorum_size, Some(1));
+            assert_eq!(omnipaxos_config.read_quorum_size, Some(3));
+            assert_eq!(omnipaxos_config.write_quorum_size, Some(1));
             assert_eq!(
                 omnipaxos_config.initial_leader,
                 Some(Ballot {
@@ -63,8 +63,8 @@ fn config_some_fields_test() {
             assert_eq!(omnipaxos_config.logger_file_path, None);
             assert_eq!(omnipaxos_config.leader_priority, 0);
             assert_eq!(omnipaxos_config.skip_prepare_use_leader, None);
-            assert_eq!(omnipaxos_config.leader_quorum_size, None);
-            assert_eq!(omnipaxos_config.append_quorum_size, None);
+            assert_eq!(omnipaxos_config.read_quorum_size, None);
+            assert_eq!(omnipaxos_config.write_quorum_size, None);
             assert_eq!(omnipaxos_config.initial_leader, None);
         }
     }

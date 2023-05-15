@@ -224,8 +224,8 @@ pub mod ballot_leader_election {
         pub round: u32,
         /// Ballot of a replica.
         pub ballot: Ballot,
-        /// States if the replica is a candidate to become a leader.
-        pub quorum_connected: bool,
+        /// Used to determine if the replica is a candidate to become a leader or remain a leader.
+        pub connected_peers: usize,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

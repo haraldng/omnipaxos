@@ -6,6 +6,6 @@ buffer_size = 100000
 logger_file_path = "/omnipaxos/logs"
 leader_priority = 2
 skip_prepare_use_leader = { n = 5, priority = 2, pid = 2 }
-leader_quorum_size = 3
-append_quorum_size = 1
+read_quorum_size = 3
+write_quorum_size = 1
 initial_leader = { n = 1, priority = 1, pid = 1 }

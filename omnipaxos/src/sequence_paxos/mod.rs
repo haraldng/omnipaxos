@@ -56,8 +56,8 @@ where
         let peers = config.peers;
         let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
-        let leader_quorum_size = config.leader_quorum_size.unwrap_or(num_nodes / 2 + 1);
-        let append_quorum_size = match config.append_quorum_size {
+        let leader_quorum_size = config.prepare_quorum_size.unwrap_or(num_nodes / 2 + 1);
+        let append_quorum_size = match config.accept_quorum_size {
             Some(s) => s,
             None => {
                 if num_nodes % 2 == 0 {
@@ -393,7 +393,6 @@ enum Role {
     Leader,
 }
 
-// TODO: update docs
 /// Configuration for `SequencePaxos`.
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
@@ -401,6 +400,8 @@ enum Role {
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `prepare_quorum_size`: The number of promises needed in the prepare phase to become synced.
+/// * `accept_quorum_size`: The number of accepteds needed in the accept phase to decide an entry.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
@@ -410,8 +411,8 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
-    leader_quorum_size: Option<usize>,
-    append_quorum_size: Option<usize>,
+    prepare_quorum_size: Option<usize>,
+    accept_quorum_size: Option<usize>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -424,8 +425,8 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             peers: config.peers,
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
-            leader_quorum_size: config.leader_quorum_size,
-            append_quorum_size: config.append_quorum_size,
+            prepare_quorum_size: config.read_quorum_size,
+            accept_quorum_size: config.write_quorum_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.logger_file_path,
         }

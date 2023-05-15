@@ -40,8 +40,8 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
-    pub leader_quorum_size: Option<usize>,
-    pub append_quorum_size: Option<usize>,
+    pub read_quorum_size: Option<usize>,
+    pub write_quorum_size: Option<usize>,
 }
 
 impl TestConfig {
@@ -67,8 +67,8 @@ impl Default for TestConfig {
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
-            leader_quorum_size: None,
-            append_quorum_size: None,
+            read_quorum_size: None,
+            write_quorum_size: None,
         }
     }
 }
@@ -289,8 +289,8 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
-            op_config.leader_quorum_size = test_config.leader_quorum_size;
-            op_config.append_quorum_size = test_config.append_quorum_size;
+            op_config.read_quorum_size = test_config.read_quorum_size;
+            op_config.write_quorum_size = test_config.write_quorum_size;
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
@@ -365,8 +365,8 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
-        op_config.leader_quorum_size = leader_quorum_size;
-        op_config.append_quorum_size = append_quorum_size;
+        op_config.read_quorum_size = leader_quorum_size;
+        op_config.write_quorum_size = append_quorum_size;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self

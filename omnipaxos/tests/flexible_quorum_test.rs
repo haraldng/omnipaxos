@@ -5,8 +5,8 @@ use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 
-/// Verifies that an OmniPaxos cluster with an append quorum size of A can still make
-/// progress with A-1 failures, including leader failure.
+/// Verifies that an OmniPaxos cluster with a write quorum size of Q can still make
+/// progress with Q-1 failures, including leader failure.
 #[test]
 #[serial]
 fn flexible_quorum_prepare_phase_test() {
@@ -40,7 +40,7 @@ fn flexible_quorum_prepare_phase_test() {
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
         .into_iter()
         .filter(|id| *id != leader_id)
-        .take(cfg.append_quorum_size.unwrap() - 2);
+        .take(cfg.write_quorum_size.unwrap() - 2);
     for node_id in maximum_tolerable_follower_failures {
         sys.kill_node(node_id);
     }
@@ -67,8 +67,8 @@ fn flexible_quorum_prepare_phase_test() {
     verify_log(nodes_log, expected_log, cfg.num_proposals);
 }
 
-/// Verifies that an OmniPaxos cluster with N nodes and an append quorum size of A can still make
-/// progress with N - A failures so long as nodes remain in the accept phase (leader doesn't fail).
+/// Verifies that an OmniPaxos cluster with N nodes and a write quorum size of Q can still make
+/// progress with N - Q failures so long as nodes remain in the accept phase (leader doesn't fail).
 #[test]
 #[serial]
 fn flexible_quorum_accept_phase_test() {
@@ -102,7 +102,7 @@ fn flexible_quorum_accept_phase_test() {
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
         .into_iter()
         .filter(|id| *id != leader_id)
-        .take(cfg.num_nodes - cfg.append_quorum_size.unwrap());
+        .take(cfg.num_nodes - cfg.write_quorum_size.unwrap());
     for node_id in maximum_tolerable_follower_failures {
         sys.kill_node(node_id);
     }
