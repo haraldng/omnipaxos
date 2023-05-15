@@ -17,8 +17,8 @@ fn config_all_fields_test() {
             assert_eq!(omnipaxos_config.pid, 1);
             assert_eq!(omnipaxos_config.peers, vec![2, 3]);
             assert_eq!(omnipaxos_config.buffer_size, 10000);
-            assert_eq!(omnipaxos_config.election_tick_timeout, 1);
-            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 10);
+            assert_eq!(omnipaxos_config.election_tick_timeout, 10);
+            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 100);
             #[cfg(feature = "logging")]
             assert_eq!(
                 omnipaxos_config.logger_file_path,
@@ -61,8 +61,8 @@ fn config_some_fields_test() {
             assert_eq!(omnipaxos_config.pid, 0);
             assert_eq!(omnipaxos_config.peers, vec![]);
             assert_eq!(omnipaxos_config.buffer_size, 100000);
-            assert_eq!(omnipaxos_config.election_tick_timeout, 1);
-            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 5);
+            assert_eq!(omnipaxos_config.election_tick_timeout, 10);
+            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 100);
             #[cfg(feature = "logging")]
             assert_eq!(omnipaxos_config.logger_file_path, None);
             assert_eq!(omnipaxos_config.leader_priority, 0);

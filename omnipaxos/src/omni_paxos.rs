@@ -236,7 +236,7 @@ where
     }
 
     /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
-    /// ticks. Also drives the detection and resending of dropped omnipaxos messages every `resend_message_tick_timeout` ticks.
+    /// ticks. Also drives the detection and re-sending of dropped OmniPaxos messages every `resend_message_tick_timeout` ticks.
     pub fn tick(&mut self) {
         if self.election_clock.tick_and_check_timeout() {
             self.election_timeout();

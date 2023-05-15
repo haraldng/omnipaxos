@@ -1,6 +1,6 @@
 A unique feature of Omni-Paxos is the guaranteed progress with one quorum-connected server using Ballot Leader Election (BLE). In this section, we will see how the leader election is used in OmniPaxos.
 
-To detect any leader failures and elect a new leader, you must call the function ``tick()`` periodically (e.g., every 100ms). The number of ticks required before an election timeout is triggered can be configured with the ``election_tick_timeout`` field of ``OmniPaxosConfig``.
+To detect any leader failures and elect a new leader, you must call the function ``tick()`` periodically. The number of ticks required before an election timeout is triggered can be configured with the ``election_tick_timeout`` field of ``OmniPaxosConfig``. For example, if ``tick()`` is called every 10ms and the ``election_tick_timeout`` is 10, then an election will be triggered every 100ms.
 
 ```
 // Call this periodically
