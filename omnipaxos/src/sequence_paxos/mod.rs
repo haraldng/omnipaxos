@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId, SequenceNumber},
+    util::{ConfigurationId, NodeId, Quorum, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -56,17 +56,7 @@ where
         let peers = config.peers;
         let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
-        let prepare_quorum_size = config.prepare_quorum_size.unwrap_or(num_nodes / 2 + 1);
-        let accept_quorum_size = match config.accept_quorum_size {
-            Some(s) => s,
-            None => {
-                if num_nodes % 2 == 0 {
-                    num_nodes / 2
-                } else {
-                    num_nodes / 2 + 1
-                }
-            }
-        };
+        let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let (state, leader, lds) = match &config.skip_prepare_use_leader {
@@ -102,13 +92,7 @@ where
             pending_stopsign: None,
             leader,
             outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::<T>::with(
-                leader,
-                lds,
-                max_pid,
-                prepare_quorum_size,
-                accept_quorum_size,
-            ),
+            leader_state: LeaderState::<T>::with(leader, lds, max_pid, quorum),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
             buffer_size: config.buffer_size,
@@ -124,11 +108,13 @@ where
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
-            if prepare_quorum_size > num_nodes - accept_quorum_size + 1 {
-                warn!(
-                    paxos.logger,
-                    "Unnecessary overlaps in read and write quorums. The optimal read quorum size = (# of nodes) - (write quorum size) + 1."
-                    );
+            if let Quorum::Flexible(prepare_quorum_size, accept_quorum_size) = quorum {
+                if prepare_quorum_size > num_nodes - accept_quorum_size + 1 {
+                    warn!(
+                        paxos.logger,
+                        "Unnecessary overlaps in read and write quorums. The optimal read quorum size = (# of nodes) - (write quorum size) + 1."
+                        );
+                }
             }
         }
         paxos
@@ -406,8 +392,7 @@ enum Role {
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `prepare_quorum_size`: The number of promises needed in the prepare phase to become synced.
-/// * `accept_quorum_size`: The number of accepteds needed in the accept phase to decide an entry.
+/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes (including the leader) a leader needs to consult to get a synced view of the log. write_quorum_size is the number of nodes (including the leader) a leader need to consult to write to the log.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
@@ -417,8 +402,7 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
-    prepare_quorum_size: Option<usize>,
-    accept_quorum_size: Option<usize>,
+    flexible_quorum: Option<(usize, usize)>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -431,8 +415,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             peers: config.peers,
             buffer_size: config.buffer_size,
             skip_prepare_use_leader: config.skip_prepare_use_leader,
-            prepare_quorum_size: config.read_quorum_size,
-            accept_quorum_size: config.write_quorum_size,
+            flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]
             logger_file_path: config.logger_file_path,
         }

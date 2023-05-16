@@ -225,7 +225,7 @@ pub mod ballot_leader_election {
         /// Ballot of a replica.
         pub ballot: Ballot,
         /// Used to determine if the replica is a candidate to become a leader or remain a leader.
-        pub connected_peers: usize,
+        pub connectivity: usize,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

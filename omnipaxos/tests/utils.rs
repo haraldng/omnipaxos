@@ -40,8 +40,7 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
-    pub read_quorum_size: Option<usize>,
-    pub write_quorum_size: Option<usize>,
+    pub flexible_quorum: Option<(usize, usize)>,
 }
 
 impl TestConfig {
@@ -67,8 +66,7 @@ impl Default for TestConfig {
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
-            read_quorum_size: None,
-            write_quorum_size: None,
+            flexible_quorum: None,
         }
     }
 }
@@ -289,8 +287,7 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
-            op_config.read_quorum_size = test_config.read_quorum_size;
-            op_config.write_quorum_size = test_config.write_quorum_size;
+            op_config.flexible_quorum = test_config.flexible_quorum;
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
@@ -356,8 +353,7 @@ impl TestSystem {
         election_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
-        prepare_quorum_size: Option<usize>,
-        accept_quorum_size: Option<usize>,
+        flexible_quorum: Option<(usize, usize)>,
     ) {
         let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
@@ -365,8 +361,7 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
-        op_config.read_quorum_size = prepare_quorum_size;
-        op_config.write_quorum_size = accept_quorum_size;
+        op_config.flexible_quorum = flexible_quorum;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self

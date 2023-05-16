@@ -1,5 +1,5 @@
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::defaults::*;
+use crate::util::{defaults::*, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -48,19 +48,17 @@ pub(crate) struct BallotLeaderElection {
     peers: Vec<u64>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
-    /// Vector which holds all the received ballots and their corresponding connected peers status
+    /// Vector which holds all the received ballots and their corresponding connectivity status
     ballots: Vec<(Ballot, usize)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot, // (round, pid)
     /// The number of replicas inside the cluster that this instance is connected to (based on
-    /// heartbeats received).
-    connected_peers: usize,
+    /// heartbeats received) including itself.
+    connectivity: usize,
     /// Current elected leader.
     leader: Option<Ballot>,
-    /// The number of replicas inside the cluster whose vote is needed to become leader.
-    read_quorum_size: usize,
-    /// The number of replicas inside the cluster whose vote is needed to remain leader.
-    write_quorum_size: usize,
+    /// The number of replicas inside the cluster whose heartbeats are needed to become and remain leader.
+    quorum: Quorum,
     /// Vector which holds all the outgoing messages of the BLE instance.
     outgoing: Vec<BLEMessage>,
     /// Logger used to output the status of the component.
@@ -74,31 +72,20 @@ impl BallotLeaderElection {
         let pid = config.pid;
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
-        let read_quorum_size = config.read_quorum_size.unwrap_or(num_nodes / 2 + 1);
-        let write_quorum_size = match config.write_quorum_size {
-            Some(s) => s,
-            None => {
-                if num_nodes % 2 == 0 {
-                    num_nodes / 2
-                } else {
-                    num_nodes / 2 + 1
-                }
-            }
-        };
+        let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let initial_ballot = match &config.initial_leader {
             Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
             _ => Ballot::with(0, config.priority, pid),
         };
         let mut ble = BallotLeaderElection {
             pid,
-            read_quorum_size,
-            write_quorum_size,
             peers,
             hb_round: 0,
             ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
-            connected_peers: num_nodes - 1,
+            connectivity: num_nodes,
             leader: config.initial_leader,
+            quorum,
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
@@ -156,8 +143,8 @@ impl BallotLeaderElection {
         let ballots = std::mem::take(&mut self.ballots);
         let top_ballot = ballots
             .into_iter()
-            .filter_map(|(ballot, connected_peers)| {
-                if connected_peers + 1 >= self.write_quorum_size {
+            .filter_map(|(ballot, connectivity)| {
+                if self.quorum.is_accept_quorum(connectivity) {
                     Some(ballot)
                 } else {
                     None
@@ -209,15 +196,15 @@ impl BallotLeaderElection {
     }
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
-        self.connected_peers = self.ballots.len();
-        let result: Option<Ballot> = if self.connected_peers + 1 >= self.read_quorum_size {
+        // +1 because we are always "connected" to ourselves
+        self.connectivity = self.ballots.len() + 1;
+        let result: Option<Ballot> = if self.quorum.is_prepare_quorum(self.connectivity) {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
-            self.ballots
-                .push((self.current_ballot, self.connected_peers));
+            self.ballots.push((self.current_ballot, self.connectivity));
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -238,7 +225,7 @@ impl BallotLeaderElection {
         let hb_reply = HeartbeatReply {
             round: req.round,
             ballot: self.current_ballot,
-            connected_peers: self.connected_peers,
+            connectivity: self.connectivity,
         };
 
         self.outgoing.push(BLEMessage {
@@ -250,7 +237,7 @@ impl BallotLeaderElection {
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round {
-            self.ballots.push((rep.ballot, rep.connected_peers));
+            self.ballots.push((rep.ballot, rep.connectivity));
         } else {
             #[cfg(feature = "logging")]
             warn!(
@@ -266,20 +253,18 @@ impl BallotLeaderElection {
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
-/// * `hb_delay`: Timeout for waiting on heartbeat messages. It is measured in number of ticks.
 /// * `initial_leader`: The initial leader of the cluster.
-/// * `initial_timeout`: Optional initial timeout that can be used to elect a leader faster initially.
+/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes (including the leader) a leader needs to consult to get a synced view of the log. write_quorum_size is the number of nodes (including the leader) a leader need to consult to write to the log.
+/// * `buffer_size`: The buffer size for outgoing messages.
 /// * `logger`: Custom logger for logging events of Ballot Leader Election.
 /// * `logger_file_path`: The path where the default logger logs events.
-/// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
     priority: u64,
     initial_leader: Option<Ballot>,
-    read_quorum_size: Option<usize>,
-    write_quorum_size: Option<usize>,
+    flexible_quorum: Option<(usize, usize)>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Option<Logger>,
@@ -295,8 +280,7 @@ impl From<OmniPaxosConfig> for BLEConfig {
             priority: config.leader_priority,
             initial_leader: config.initial_leader,
             buffer_size: BLE_BUFFER_SIZE,
-            read_quorum_size: config.read_quorum_size,
-            write_quorum_size: config.write_quorum_size,
+            flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]
             logger: None,
             #[cfg(feature = "logging")]

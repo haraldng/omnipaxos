@@ -46,7 +46,7 @@ pub(crate) struct PromiseData<T: Entry> {
     pub suffix: Vec<T>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct LeaderState<T>
 where
     T: Entry,
@@ -63,10 +63,9 @@ where
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub accepted_stopsign: Vec<bool>,
     pub max_pid: usize,
-    // The number of promises needed in the prepare phase to become synced.
-    pub prepare_quorum_size: usize,
-    // The number of accepteds needed in the accept phase to decide an entry.
-    pub accept_quorum_size: usize,
+    // The number of promises needed in the prepare phase to become synced and
+    // the number of accepteds needed in the accept phase to decide an entry.
+    pub quorum: Quorum,
 }
 
 impl<T> LeaderState<T>
@@ -77,8 +76,7 @@ where
         n_leader: Ballot,
         decided_indexes: Option<Vec<Option<u64>>>,
         max_pid: usize,
-        prepare_quorum_size: usize,
-        accept_quorum_size: usize,
+        quorum: Quorum,
     ) -> Self {
         Self {
             n_leader,
@@ -92,8 +90,7 @@ where
             batch_accept_meta: vec![None; max_pid],
             accepted_stopsign: vec![false; max_pid],
             max_pid,
-            prepare_quorum_size,
-            accept_quorum_size,
+            quorum,
         }
     }
 
@@ -135,7 +132,7 @@ where
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
         let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
-        num_promised >= self.prepare_quorum_size
+        self.quorum.is_prepare_quorum(num_promised)
     }
 
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
@@ -202,15 +199,16 @@ where
 
     pub fn is_stopsign_chosen(&self) -> bool {
         let num_accepted = self.accepted_stopsign.iter().filter(|x| **x).count();
-        num_accepted >= self.accept_quorum_size
+        self.quorum.is_accept_quorum(num_accepted)
     }
 
     pub fn is_chosen(&self, idx: u64) -> bool {
-        self.accepted_indexes
+        let num_accepted = self
+            .accepted_indexes
             .iter()
             .filter(|la| **la >= idx)
-            .count()
-            >= self.accept_quorum_size
+            .count();
+        self.quorum.is_accept_quorum(num_accepted)
     }
 
     pub fn take_max_promise_stopsign(&mut self) -> Option<StopSign> {
@@ -282,7 +280,7 @@ pub type NodeId = u64;
 pub type ConfigurationId = u32;
 
 /// Used for checking the ordering of message sequences in the accept phase
-pub enum MessageStatus {
+pub(crate) enum MessageStatus {
     /// Beginning of a message sequence
     First,
     /// Expected message sequence progression
@@ -311,7 +309,7 @@ impl SequenceNumber {
     };
 
     /// Compares this sequence number with the sequence number of an incoming message.
-    pub fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
+    pub(crate) fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
         if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
             MessageStatus::First
         } else if msg_seq_num.session < self.session {
@@ -320,6 +318,41 @@ impl SequenceNumber {
             MessageStatus::Expected
         } else {
             MessageStatus::DroppedPreceding
+        }
+    }
+}
+
+/// The type of quorum used by the OmniPaxos cluster. Flexible quorums can be used to increase/decrease
+/// the prepare and accept quorum sizes, for different latency vs fault tolerance tradeoffs.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum Quorum {
+    /// Both the read quorum and the write quorums are a majority of nodes
+    Majority(usize),
+    /// Has a read and write quorum size of Flexible(prepare quorum size, accept quorum size)
+    Flexible(usize, usize),
+}
+
+impl Quorum {
+    pub(crate) fn with(flexible_quorum_config: Option<(usize, usize)>, num_nodes: usize) -> Self {
+        match flexible_quorum_config {
+            Some((prepare_quorum_size, accept_quorum_size)) => {
+                Quorum::Flexible(prepare_quorum_size, accept_quorum_size)
+            }
+            None => Quorum::Majority(num_nodes / 2 + 1),
+        }
+    }
+
+    pub(crate) fn is_prepare_quorum(&self, num_nodes: usize) -> bool {
+        match self {
+            Quorum::Majority(majority) => num_nodes >= *majority,
+            Quorum::Flexible(prepare_quorum_size, _) => num_nodes >= *prepare_quorum_size,
+        }
+    }
+
+    pub(crate) fn is_accept_quorum(&self, num_nodes: usize) -> bool {
+        match self {
+            Quorum::Majority(majority) => num_nodes >= *majority,
+            Quorum::Flexible(_, accept_quorum_size) => num_nodes >= *accept_quorum_size,
         }
     }
 }

@@ -22,8 +22,7 @@ use toml;
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `read_quorum_size`: The number of nodes (including the leader) a leader needs to consult to get a synced view of the log.
-/// * `write_quorum_size`: The number of nodes (including the leader) a leader need to consult to write to the log.
+/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes a leader needs to consult to get a synced view of the log. write_quorum_size is the number of acknowledgements a leader needs to write to the log.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
@@ -35,8 +34,7 @@ pub struct OmniPaxosConfig {
     pub peers: Vec<u64>,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
-    pub read_quorum_size: Option<usize>,
-    pub write_quorum_size: Option<usize>,
+    pub flexible_quorum: Option<(usize, usize)>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
@@ -66,30 +64,23 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
-
-        let num_nodes = self.peers.len() + 1;
-        match (self.read_quorum_size, self.write_quorum_size) {
-            (Some(prepare_quorum_size), Some(accept_quorum_size)) => {
-                let quorums_overlap = prepare_quorum_size + accept_quorum_size > num_nodes;
-                assert!(
-                    quorums_overlap,
-                    "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
-                );
-                assert!(
-                    prepare_quorum_size >= 1 && prepare_quorum_size <= num_nodes,
-                    "Read quorum must be in range 1 to # of nodes in the cluster"
-                );
-                assert!(
-                    accept_quorum_size >= 2 && accept_quorum_size <= num_nodes,
-                    "Write quorum must be in range 2 to # of nodes in the cluster"
-                );
-                assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if read quorum is smaller than write quorum");
-            }
-            (None, Some(_)) => panic!("Prepare quorum must also be defined"),
-            (Some(_), None) => panic!("Accept quorum must also be defined"),
-            (None, None) => (),
+        if let Some((prepare_quorum_size, accept_quorum_size)) = self.flexible_quorum {
+            let num_nodes = self.peers.len() + 1;
+            let quorums_overlap = prepare_quorum_size + accept_quorum_size > num_nodes;
+            assert!(
+                quorums_overlap,
+                "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
+            );
+            assert!(
+                prepare_quorum_size >= 1 && prepare_quorum_size <= num_nodes,
+                "Read quorum must be in range 1 to # of nodes in the cluster"
+            );
+            assert!(
+                accept_quorum_size >= 2 && accept_quorum_size <= num_nodes,
+                "Write quorum must be in range 2 to # of nodes in the cluster"
+            );
+            assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if read quorum is smaller than write quorum");
         }
-
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
@@ -109,8 +100,7 @@ impl Default for OmniPaxosConfig {
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             skip_prepare_use_leader: None,
-            read_quorum_size: None,
-            write_quorum_size: None,
+            flexible_quorum: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
             leader_priority: 0,

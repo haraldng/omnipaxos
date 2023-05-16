@@ -14,7 +14,6 @@ use utils::{TestConfig, TestSystem};
 #[serial]
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");
-
     let mut sys = TestSystem::with(cfg.clone());
 
     let num_elections = cfg.num_nodes / 2;

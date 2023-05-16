@@ -40,7 +40,7 @@ fn flexible_quorum_prepare_phase_test() {
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
         .into_iter()
         .filter(|id| *id != leader_id)
-        .take(cfg.write_quorum_size.unwrap() - 2);
+        .take(cfg.flexible_quorum.unwrap().1 - 2);
     for node_id in maximum_tolerable_follower_failures {
         sys.kill_node(node_id);
     }
@@ -102,7 +102,7 @@ fn flexible_quorum_accept_phase_test() {
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
         .into_iter()
         .filter(|id| *id != leader_id)
-        .take(cfg.num_nodes - cfg.write_quorum_size.unwrap());
+        .take(cfg.num_nodes - cfg.flexible_quorum.unwrap().1);
     for node_id in maximum_tolerable_follower_failures {
         sys.kill_node(node_id);
     }

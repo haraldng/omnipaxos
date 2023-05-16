@@ -23,13 +23,8 @@ where
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
-            self.leader_state = LeaderState::with(
-                n,
-                None,
-                self.leader_state.max_pid,
-                self.leader_state.prepare_quorum_size,
-                self.leader_state.accept_quorum_size,
-            );
+            self.leader_state =
+                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
             self.internal_storage.set_promise(n);
             /* insert my promise */
