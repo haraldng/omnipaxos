@@ -190,8 +190,8 @@ struct StateCache<T>
     ld: u64,
     /// Garbage collected index.
     compacted_idx: u64,
-    /// Accepted index.
-    acc_idx: u64,
+    /// Real length of logs in the storage.
+    real_log_len: u64,
 }
 
 
@@ -207,7 +207,7 @@ impl<T> StateCache<T>
             acc_round: Ballot::default(),
             ld: 0,
             compacted_idx: 0,
-            acc_idx: 0,
+            real_log_len: 0,
         }
     }
     // Getters
@@ -223,8 +223,10 @@ impl<T> StateCache<T>
     fn get_compacted_idx(&self) -> u64 {
         self.compacted_idx
     }
+
+    // Returns the index of the last accepted entry.
     fn get_accepted_idx(&self) -> u64 {
-        self.acc_idx
+        self.compacted_idx + self.real_log_len
     }
     // Setters
     fn set_promise(&mut self, n_prom: Ballot) {
@@ -239,24 +241,24 @@ impl<T> StateCache<T>
     fn set_compacted_idx(&mut self, compacted_idx: u64) {
         self.compacted_idx = compacted_idx;
     }
-    fn set_accepted_idx(&mut self, acc_idx: u64) {
-        self.acc_idx = acc_idx;
+    fn set_real_log_len(&mut self, real_log_len: u64) {
+        self.real_log_len = real_log_len;
     }
 
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
         self.batched_entries.push(entry);
-        self.pop_batched_entries_tobe_flushed()
+        self.take_entries_to_be_flushed()
     }
     // Appends entries to the end of the `batched_entries`. If the batch is full, the
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
         self.batched_entries.extend(entries);
-        self.pop_batched_entries_tobe_flushed()
+        self.take_entries_to_be_flushed()
     }
     // Return batched entries if the batch is full that need to be flushed in to storage.
-    fn pop_batched_entries_tobe_flushed(&mut self) -> Option<Vec<T>> {
+    fn take_entries_to_be_flushed(&mut self) -> Option<Vec<T>> {
         let flushed_entries_len = (self.batched_entries.len() / self.batch_size) * self.batch_size;
         if flushed_entries_len > 0 {
             Some(self.batched_entries.drain(0..flushed_entries_len).collect::<Vec<T>>())
@@ -466,7 +468,7 @@ where
             self.state_cache.set_decided_idx(self.storage.get_decided_idx());
             self.state_cache.set_accepted_round(self.storage.get_accepted_round().unwrap_or_default());
             self.state_cache.set_compacted_idx(self.storage.get_compacted_idx());
-            self.update_accepted_idx();
+            self.state_cache.set_real_log_len(self.storage.get_log_len());
         }
     }
 
@@ -485,13 +487,6 @@ where
         append_res.map(|flushed_entries| self.append_entries_without_batching(flushed_entries))
     }
 
-    // Append entries without batching, return the accepted index
-    pub(crate) fn append_entries_without_batching(&mut self, entries: Vec<T>) -> u64 {
-        self.storage.append_entries(entries);
-        self.update_accepted_idx();
-        self.get_accepted_idx()
-    }
-
     // Append entries in batch, if the batch size is reached, flush the batch and return the
     // accepted index and the flushed entries. If the batch size is not reached, return None.
     pub(crate) fn append_entries_and_get_flushed(&mut self, entries: Vec<T>) -> Option<(u64, Vec<T>)> {
@@ -504,23 +499,23 @@ where
         self.append_entries_without_batching(flushed_entries);
     }
 
+    // Append entries without batching, return the accepted index
+    pub(crate) fn append_entries_without_batching(&mut self, entries: Vec<T>) -> u64 {
+        self.state_cache.set_real_log_len(self.storage.append_entries(entries));
+        self.get_accepted_idx()
+    }
+
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> u64 {
         let decided_idx = self.storage.get_decided_idx();
         let compacted_idx = self.get_compacted_idx();
-        let res = self.storage
-            .append_on_prefix(decided_idx - compacted_idx, entries)
-            + compacted_idx;
-        self.update_accepted_idx();
-        res
+        self.state_cache.set_real_log_len(self.storage.append_on_prefix(decided_idx - compacted_idx, entries));
+        self.get_accepted_idx()
     }
 
     pub(crate) fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
         let compacted_idx = self.get_compacted_idx();
-        let res = self.storage
-            .append_on_prefix(from_idx - compacted_idx, entries)
-            + compacted_idx;
-        self.update_accepted_idx();
-        res
+        self.state_cache.set_real_log_len(self.storage.append_on_prefix(from_idx - compacted_idx, entries));
+        self.get_accepted_idx()
     }
 
     pub(crate) fn set_promise(&mut self, n_prom: Ballot) {
@@ -557,19 +552,9 @@ where
         self.storage.get_entries(from_sfx_idx, to_sfx_idx)
     }
 
-    /// Update the accepted index in the state cache
-    fn update_accepted_idx(&mut self) {
-        self.state_cache.set_accepted_idx(self.get_real_log_len() + self.get_compacted_idx());
-    }
-
     /// The length of the replicated log, as if log was never compacted.
     pub(crate) fn get_accepted_idx(&self) -> u64 {
         self.state_cache.get_accepted_idx()
-    }
-
-    /// The length of the physical log, which can get smaller with compaction
-    fn get_real_log_len(&self) -> u64 {
-        self.storage.get_log_len()
     }
 
     pub(crate) fn get_suffix(&self, from: u64) -> Vec<T> {
@@ -620,9 +605,9 @@ where
         let compacted_idx = self.get_compacted_idx();
         if idx > compacted_idx {
             self.storage.trim(idx - compacted_idx);
+            self.state_cache.set_real_log_len(self.storage.get_log_len());
             self.storage.set_snapshot(snapshot);
             self.set_compacted_idx(idx);
-            self.update_accepted_idx();
         }
     }
 
@@ -644,7 +629,6 @@ where
             if idx <= decided_idx {
                 self.storage.trim(idx - compacted_idx);
                 self.set_compacted_idx(idx);
-                self.update_accepted_idx();
                 Ok(())
             } else {
                 Err(CompactionErr::UndecidedIndex(decided_idx))
@@ -654,7 +638,6 @@ where
 
     pub(crate) fn set_compacted_idx(&mut self, idx: u64) {
         self.state_cache.set_compacted_idx(idx);
-        self.update_accepted_idx();
         self.storage.set_compacted_idx(idx)
     }
 
