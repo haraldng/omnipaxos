@@ -157,7 +157,7 @@ where
     fn get_compacted_idx(&self) -> StorageResult<u64>;
 
     /// Sets the snapshot.
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) -> StorageResult<()>;
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()>;
 
     /// Returns the stored snapshot.
     fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>>;
@@ -498,15 +498,13 @@ where
         let old_snapshot = self.storage.get_snapshot()?;
         if idx > old_compacted_idx {
             self.storage.set_compacted_idx(idx)?;
-            if let Err(e) = self.storage.set_snapshot(snapshot) {
+            if let Err(e) = self.storage.set_snapshot(Some(snapshot)) {
                 self.storage.set_compacted_idx(old_compacted_idx)?;
                 return Err(e);
             }
             if let Err(e) = self.storage.trim(idx - old_compacted_idx) {
                 self.storage.set_compacted_idx(old_compacted_idx)?;
-                if let Some(s) = old_snapshot {
-                    self.storage.set_snapshot(s)?;
-                }
+                self.storage.set_snapshot(old_snapshot)?;
                 return Err(e);
             }
         }

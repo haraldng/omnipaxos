@@ -104,7 +104,7 @@ impl BrokenStorageConfig {
         if self.fail_in > 0 {
             self.fail_in -= 1;
             if self.fail_in == 0 {
-                return err
+                return err;
             }
         }
         // if self.op_counter > self.after {
@@ -356,7 +356,7 @@ where
         }
     }
 
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) -> StorageResult<()> {
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),

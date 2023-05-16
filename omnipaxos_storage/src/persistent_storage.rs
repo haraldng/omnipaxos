@@ -518,7 +518,7 @@ where
         {
             let snapshot = self.rocksdb.get(SNAPSHOT)?;
             if let Some(snapshot_bytes) = snapshot {
-                Ok(Some(bincode::deserialize(snapshot_bytes.as_bytes())?))
+                Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
             } else {
                 Ok(None)
             }
@@ -527,14 +527,14 @@ where
         {
             let snapshot = self.sled.get(SNAPSHOT)?;
             if let Some(snapshot_bytes) = snapshot {
-                Ok(Some(bincode::deserialize(snapshot_bytes.as_bytes())?))
+                Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
             } else {
                 Ok(None)
             }
         }
     }
 
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) -> StorageResult<()> {
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&snapshot)?;
         #[cfg(feature = "rocksdb")]
         {

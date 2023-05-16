@@ -114,8 +114,8 @@ where
         Ok(self.trimmed_idx)
     }
 
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) -> StorageResult<()> {
-        self.snapshot = Some(snapshot);
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
+        self.snapshot = snapshot;
         Ok(())
     }
 
