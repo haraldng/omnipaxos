@@ -5,13 +5,13 @@ use omnipaxos::{
     *,
 };
 use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
-use tokio::{runtime::Builder, sync::mpsc};
+use tokio::{sync::{mpsc, Mutex}, task};
 use commitlog::LogOptions;
 use sled::Config;
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc},
 };
 
 mod kv;
@@ -30,7 +30,7 @@ const SERVERS: [u64; 3] = [1, 2, 3];
 
 #[allow(clippy::type_complexity)]
 fn initialise_channels() -> (
-    HashMap<NodeId, mpsc::Sender<SerializedMessage>>,
+    Arc<Mutex<HashMap<NodeId, mpsc::Sender<SerializedMessage>>>>,
     HashMap<NodeId, mpsc::Receiver<SerializedMessage>>,
 ) {
     let mut sender_channels = HashMap::new();
@@ -41,16 +41,21 @@ fn initialise_channels() -> (
         sender_channels.insert(pid, sender);
         receiver_channels.insert(pid, receiver);
     }
-    (sender_channels, receiver_channels)
+    (Arc::new(Mutex::new(sender_channels)), receiver_channels)
 }
 
-fn main() {
-    let runtime = Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+fn build_omnipaxos(op_config: OmniPaxosConfig) -> Arc<Mutex<OmniPaxosKV>> {
+    // setup OmniPaxos instance using persistent storage
+    // More information about the Storage can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/storage/).
+    let store_base_path = format!("{STORAGE_BASE_PATH}node{0}", op_config.pid);
+    let my_logopts = LogOptions::new(format!("{store_base_path}{COMMITLOG}"));
+    let my_sledopts = Config::new();
+    let store_config = PersistentStorageConfig::with(store_base_path, my_logopts, my_sledopts);
+    Arc::new(Mutex::new(op_config.build(PersistentStorage::open(store_config))))
+}
 
+#[tokio::main]
+async fn main() {
     let configuration_id = 1;
     let mut op_server_handles = HashMap::new();
     let (sender_channels, mut receiver_channels) = initialise_channels();
@@ -72,20 +77,13 @@ fn main() {
                 ..Default::default()
             }
         };
-        // setup persistent storage
-        // More information about the Storage can be found in the [documentation](https://omnipaxos.com/docs/omnipaxos/storage/).
-        let store_base_path = format!("{STORAGE_BASE_PATH}node{pid}");
-        let my_logopts = LogOptions::new(format!("{store_base_path}{COMMITLOG}"));
-        let my_sledopts = Config::new();
-        let store_config = PersistentStorageConfig::with(store_base_path, my_logopts, my_sledopts);
-
-        let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(op_config.build(PersistentStorage::open(store_config))));
+        let omni_paxos = build_omnipaxos(op_config);
         let mut op_server = OmniPaxosServer {
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),
-            outgoing: sender_channels.clone(),
+            outgoing: Arc::clone(&sender_channels),
         };
-        let join_handle = runtime.spawn({
+        let join_handle = task::spawn({
             async move {
                 op_server.run().await;
             }
@@ -99,7 +97,7 @@ fn main() {
     // check which server is the current leader
     let leader = first_server
         .lock()
-        .unwrap()
+        .await
         .get_current_leader()
         .expect("Failed to get leader");
     println!("Elected leader: {}", leader);
@@ -114,7 +112,7 @@ fn main() {
     println!("Adding value: {:?} via server {}", kv1, follower);
     follower_server
         .lock()
-        .unwrap()
+        .await
         .append(kv1)
         .expect("append failed");
     // append kv2 to the replicated log via the leader
@@ -126,14 +124,14 @@ fn main() {
     let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
     leader_server
         .lock()
-        .unwrap()
+        .await
         .append(kv2)
         .expect("append failed");
     // wait for the entries to be decided...
     std::thread::sleep(WAIT_DECIDED_TIMEOUT);
     let committed_ents = leader_server
         .lock()
-        .unwrap()
+        .await
         .read_decided_suffix(0)
         .expect("Failed to read expected entries");
 
@@ -147,11 +145,13 @@ fn main() {
     println!("KV store: {:?}", simple_kv_store);
     println!("Killing leader: {}...", leader);
     leader_join_handle.abort();
+
+    let killed_node: NodeId = leader;
     // wait for new leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     let leader = follower_server
         .lock()
-        .unwrap()
+        .await
         .get_current_leader()
         .expect("Failed to get leader");
     println!("Elected new leader: {}", leader);
@@ -163,14 +163,14 @@ fn main() {
     let (leader_server, _) = op_server_handles.get(&leader).unwrap();
     leader_server
         .lock()
-        .unwrap()
+        .await
         .append(kv3)
         .expect("append failed");
     // wait for the entries to be decided...
     std::thread::sleep(WAIT_DECIDED_TIMEOUT);
     let committed_ents = follower_server
         .lock()
-        .unwrap()
+        .await
         .read_decided_suffix(2)
         .expect("Failed to read expected entries");
     for ent in committed_ents {
@@ -180,4 +180,32 @@ fn main() {
         // ignore uncommitted entries
     }
     println!("KV store: {:?}", simple_kv_store);
+    // recover killed node
+    let peers = SERVERS.iter().filter(|&&p| p != killed_node).copied().collect();
+    let op_config = OmniPaxosConfig {
+        pid: killed_node,
+        configuration_id: 1,
+        peers,
+        ..Default::default()
+    };
+    let (sender, receiver) = mpsc::channel(BUFFER_SIZE);
+    sender_channels.lock().await.insert(killed_node, sender);
+    let omni_paxos = build_omnipaxos(op_config);
+    omni_paxos
+        .lock()
+        .await
+        .fail_recovery();
+    let mut op_server = OmniPaxosServer {
+        omni_paxos: Arc::clone(&omni_paxos),
+        incoming: receiver,
+        outgoing: Arc::clone(&sender_channels),
+    };
+    let join_handle = task::spawn({
+        async move {
+            op_server.run().await;
+        }
+    });
+    op_server_handles.insert(killed_node, (omni_paxos, join_handle));
+    std::thread::sleep(WAIT_LEADER_TIMEOUT);
+
 }
