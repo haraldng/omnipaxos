@@ -382,7 +382,6 @@ where
                         // no snapshot, only suffix
                         if max_promise_meta.n == self.internal_storage.get_accepted_round() {
                             self.internal_storage.append_entries_without_batching(suffix);
-
                         } else {
                             self.internal_storage.append_on_decided_prefix(suffix);
                         }

@@ -224,7 +224,6 @@ where
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) {
-        // let accepted_res = self.internal_storage.append_entries(entries, false);
         let accepted_res = self.internal_storage.append_entries_with_batching(entries);
         if let Some(accepted_idx) = accepted_res {
             match &self.latest_accepted_meta {
