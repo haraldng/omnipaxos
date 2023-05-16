@@ -249,6 +249,7 @@ impl BallotLeaderElection {
     }
 }
 
+// TODO: update docs
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
@@ -276,15 +277,15 @@ pub(crate) struct BLEConfig {
 impl From<OmniPaxosConfig> for BLEConfig {
     fn from(config: OmniPaxosConfig) -> Self {
         Self {
-            pid: config.pid,
-            peers: config.peers,
-            priority: config.leader_priority,
-            initial_leader: config.initial_leader,
-            buffer_size: BLE_BUFFER_SIZE,
+            pid: config.instance_config.pid,
+            peers: config.instance_config.peers,
+            priority: config.instance_config.leader_priority,
+            initial_leader: config.cluster_config.initial_leader,
+            buffer_size: config.instance_config.buffer_size,
             #[cfg(feature = "logging")]
-            logger: None,
+            logger: None, //TODO: is this necessary?
             #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path,
+            logger_file_path: config.instance_config.logger_file_path,
         }
     }
 }

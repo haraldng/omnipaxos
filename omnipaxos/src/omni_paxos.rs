@@ -17,27 +17,14 @@ use toml;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
-/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
-/// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
-/// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
-/// * `logger_file_path`: The path where the default logger logs events.
+/// * `cluster_config`: The configuration settings that are cluster-wide.
+/// * `instance_config`: The configuration settings that unique to this OmniPaxos instance.
 #[allow(missing_docs)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
-    pub configuration_id: u32,
-    pub pid: NodeId,
-    pub peers: Vec<u64>,
-    pub buffer_size: usize,
-    pub skip_prepare_use_leader: Option<Ballot>,
-    #[cfg(feature = "logging")]
-    pub logger_file_path: Option<String>,
-    /*** BLE config fields ***/
-    pub leader_priority: u64,
-    pub initial_leader: Option<Ballot>,
+    pub cluster_config: ClusterConfig,
+    pub instance_config: InstanceConfig,
 }
 
 impl OmniPaxosConfig {
@@ -55,15 +42,33 @@ impl OmniPaxosConfig {
         T: Entry,
         B: Storage<T>,
     {
-        assert_ne!(self.pid, 0, "Pid cannot be 0");
-        assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
-        assert!(!self.peers.is_empty(), "Peers cannot be empty");
+        let ClusterConfig {
+            configuration_id,
+            nodes,
+            initial_leader,
+        } = &self.cluster_config;
+        let InstanceConfig {
+            pid,
+            peers,
+            buffer_size,
+            ..
+        } = &self.instance_config;
+
+        // Check that pid, peers, and nodes are consistent
+        assert_ne!(*pid, 0, "Pid cannot be 0");
+        assert_ne!(*configuration_id, 0, "Configuration id cannot be 0");
+        assert!(peers.is_empty(), "Peers cannot be empty");
         assert!(
-            !self.peers.contains(&self.pid),
+            !peers.contains(pid),
             "Peers should not include self pid"
         );
-        assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = self.skip_prepare_use_leader {
+        // let peers_and_pid = [*peers.clone(), vec![*pid]].concat();
+        // nodes.sort();
+        // peers_and_pid.sort();
+        // assert!(*nodes == peers_and_pid, "Nodes must be the union of peers and pid");
+
+        assert!(*buffer_size > 0, "Buffer size must be greater than 0");
+        if let Some(x) = initial_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
         };
         OmniPaxos {
@@ -73,21 +78,84 @@ impl OmniPaxosConfig {
     }
 }
 
-impl Default for OmniPaxosConfig {
+/// Configuration for an `OmniPaxos` cluster.
+/// # Fields
+/// * `configuration_id`: The identifier for the cluster configuration that this Sequence Paxos replica is part of.
+/// * `nodes`: The nodes in the cluster i.e. the `pid`s of the other replicas in the configuration.
+/// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase when switching to a new configuration.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
+pub struct ClusterConfig {
+    /// The identifier for the cluster configuration that this Sequence Paxos replica is part of.
+    pub configuration_id: u32,
+    /// The nodes in the cluster i.e. the `pid`s of the other replicas in the configuration.
+    pub nodes: Vec<u64>,
+    /// The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase when switching to a new configuration.
+    pub initial_leader: Option<Ballot>,
+}
+
+
+impl ClusterConfig {
+    /// Checks all configurations and returns the local OmniPaxos node if successful.
+    pub fn build_for<T, B>(self, storage: B, instance_config: InstanceConfig) -> OmniPaxos<T, B>
+    where
+        T: Entry,
+        B: Storage<T>,
+    {
+        let op_config = OmniPaxosConfig {
+            cluster_config: self,
+            instance_config,
+        };
+        op_config.build(storage)
+    }
+}
+
+impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
             configuration_id: 0,
-            pid: 0,
-            peers: Vec::new(),
-            buffer_size: BUFFER_SIZE,
-            skip_prepare_use_leader: None,
-            #[cfg(feature = "logging")]
-            logger_file_path: None,
-            leader_priority: 0,
+            nodes: Vec::new(),
             initial_leader: None,
         }
     }
 }
+
+/// Configuration for an `OmniPaxos` instance.
+/// # Fields
+/// * `pid`: The unique identifier of this node. Must not be 0.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `logger_file_path`: The path where the default logger logs events.
+/// * `leader_priority` : TODO:
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
+pub struct InstanceConfig {
+    /// The unique identifier of this node. Must not be 0.
+    pub pid: NodeId,
+    /// The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+    pub peers: Vec<u64>,
+    /// The buffer size for outgoing messages.
+    pub buffer_size: usize,
+    /// The path where the default logger logs events.
+    #[cfg(feature = "logging")]
+    pub logger_file_path: Option<String>,
+    /// TODO:
+    pub leader_priority: u64,
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        Self {
+            pid: 0,
+            peers: Vec::new(),
+            buffer_size: BUFFER_SIZE,
+            #[cfg(feature = "logging")]
+            logger_file_path: None,
+            leader_priority: 0,
+        }
+    }
+}
+
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
@@ -211,8 +279,8 @@ where
     }
 
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
-        self.seq_paxos.reconfigure(rc)
+    pub fn reconfigure(&mut self, new_configuration: ClusterConfig) -> Result<(), ProposeErr<T>> {
+        self.seq_paxos.reconfigure(new_configuration)
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.
@@ -268,7 +336,7 @@ where
     T: Entry,
 {
     Normal(T),
-    Reconfiguration(Vec<NodeId>),
+    Reconfiguration(ClusterConfig),
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.

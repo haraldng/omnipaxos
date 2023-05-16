@@ -9,7 +9,7 @@ use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
     util::{ConfigurationId, NodeId, SequenceNumber},
-    CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
+    CompactionErr, OmniPaxosConfig, ProposeErr, InstanceConfig, ClusterConfig,
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
@@ -59,7 +59,7 @@ where
         let majority = num_nodes / 2 + 1;
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, lds) = match &config.skip_prepare_use_leader {
+        let (state, leader, lds) = match &config.initial_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -273,39 +273,35 @@ where
     }
 
     /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    pub(crate) fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
-        let ReconfigurationRequest {
-            new_configuration,
-            metadata,
-        } = rc;
+    pub(crate) fn reconfigure(&mut self, new_config: ClusterConfig) -> Result<(), ProposeErr<T>> {
         #[cfg(feature = "logging")]
         info!(
             self.logger,
-            "Propose reconfiguration {:?}", new_configuration
+            "Propose reconfiguration {:?}", new_config.nodes
         );
         if self.stopped() {
-            Err(ProposeErr::Reconfiguration(new_configuration))
+            Err(ProposeErr::Reconfiguration(new_config))
         } else {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                        let ss = StopSign::with(new_config);
                         self.pending_stopsign = Some(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::Reconfiguration(new_config));
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
                     if !self.stopped() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                        let ss = StopSign::with(new_config);
                         self.accept_stopsign(ss.clone());
                         self.send_accept_stopsign(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::Reconfiguration(new_config));
                     }
                 }
                 _ => {
-                    let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    let ss = StopSign::with(new_config);
                     self.forward_stopsign(ss);
                 }
             }
@@ -377,6 +373,7 @@ enum Role {
     Leader,
 }
 
+// TODO: update docs
 /// Configuration for `SequencePaxos`.
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
@@ -387,12 +384,12 @@ enum Role {
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
-pub struct SequencePaxosConfig {
+pub(crate) struct SequencePaxosConfig {
     configuration_id: u32,
     pid: NodeId,
     peers: Vec<u64>,
     buffer_size: usize,
-    skip_prepare_use_leader: Option<Ballot>,
+    initial_leader: Option<Ballot>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -400,13 +397,14 @@ pub struct SequencePaxosConfig {
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
     fn from(config: OmniPaxosConfig) -> Self {
         SequencePaxosConfig {
-            configuration_id: config.configuration_id,
-            pid: config.pid,
-            peers: config.peers,
-            buffer_size: config.buffer_size,
-            skip_prepare_use_leader: config.skip_prepare_use_leader,
+            configuration_id: config.cluster_config.configuration_id,
+            pid: config.instance_config.pid,
+            peers: config.instance_config.peers,
+            buffer_size: config.instance_config.buffer_size,
+            initial_leader: config.cluster_config.initial_leader,
             #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path,
+            logger_file_path: config.instance_config.logger_file_path,
         }
     }
 }
+
