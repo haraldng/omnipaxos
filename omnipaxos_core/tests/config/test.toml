@@ -46,4 +46,4 @@ storage_type = { type = "Memory" }
 
 [atomic_storage_test]
 num_nodes = 3
-storage_type = { type = "Broken", after = 0 }
+storage_type = { type = "Broken" }

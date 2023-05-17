@@ -85,12 +85,8 @@ pub enum StorageTypeSelector {
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct BrokenStorageConfig {
-    /// This many operations should be error-free at the start
-    pub after: usize,
-    /// Fail every n operations
-    pub every_n_ops: Option<usize>,
     /// Fail once after this many operations
-    pub fail_in: usize,
+    fail_in: usize,
     op_counter: usize,
 }
 
@@ -107,14 +103,6 @@ impl BrokenStorageConfig {
                 return err;
             }
         }
-        // if self.op_counter > self.after {
-        //     let op = self.op_counter + self.after;
-        //     if let Some(n) = self.every_n_ops {
-        //         if op % n == 0 {
-        //             return err;
-        //         }
-        //     }
-        // }
         Ok(())
     }
 
