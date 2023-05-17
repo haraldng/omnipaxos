@@ -20,7 +20,7 @@ const SECOND_PROPOSALS: u64 = 5;
 fn increasing_accept_seq_num_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
@@ -94,7 +94,7 @@ fn increasing_accept_seq_num_test() {
 fn reconnect_to_leader_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..INITIAL_PROPOSALS)

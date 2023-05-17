@@ -13,7 +13,7 @@ const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 #[ignore]
 fn leader_fail_follower_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -64,7 +64,7 @@ fn leader_fail_follower_propose_test() {
 #[ignore]
 fn leader_fail_leader_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -111,7 +111,7 @@ fn leader_fail_leader_propose_test() {
 #[ignore]
 fn follower_fail_leader_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
@@ -162,7 +162,7 @@ fn follower_fail_leader_propose_test() {
 #[ignore]
 fn follower_fail_follower_propose_test() {
     let cfg = TestConfig::load("recovery_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)

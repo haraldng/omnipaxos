@@ -19,7 +19,7 @@ use utils::{
 #[serial]
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
     let mut vec_proposals = vec![];

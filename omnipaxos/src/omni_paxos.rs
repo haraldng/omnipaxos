@@ -5,7 +5,7 @@ use crate::{
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
-    util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
+    util::{defaults::BUFFER_SIZE, FlexibleQuorum, LogEntry, NodeId},
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
@@ -21,9 +21,8 @@ use toml;
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes a leader needs to consult to get a synced view of the log. write_quorum_size is the number of acknowledgements a leader needs to write to the log.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `skip_prepare_use_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
@@ -34,7 +33,7 @@ pub struct OmniPaxosConfig {
     pub peers: Vec<u64>,
     pub buffer_size: usize,
     pub skip_prepare_use_leader: Option<Ballot>,
-    pub flexible_quorum: Option<(usize, usize)>,
+    pub flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
@@ -64,23 +63,6 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
-        if let Some((prepare_quorum_size, accept_quorum_size)) = self.flexible_quorum {
-            let num_nodes = self.peers.len() + 1;
-            let quorums_overlap = prepare_quorum_size + accept_quorum_size > num_nodes;
-            assert!(
-                quorums_overlap,
-                "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
-            );
-            assert!(
-                prepare_quorum_size >= 1 && prepare_quorum_size <= num_nodes,
-                "Read quorum must be in range 1 to # of nodes in the cluster"
-            );
-            assert!(
-                accept_quorum_size >= 2 && accept_quorum_size <= num_nodes,
-                "Write quorum must be in range 2 to # of nodes in the cluster"
-            );
-            assert!(prepare_quorum_size >= accept_quorum_size, "Leader election cannot guarantee progress if read quorum is smaller than write quorum");
-        }
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")

@@ -1,6 +1,6 @@
 #![cfg(feature = "toml_config")]
 
-use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
+use omnipaxos::{ballot_leader_election::Ballot, util::FlexibleQuorum, OmniPaxosConfig};
 use serial_test::serial;
 
 /// Tests that all the fields of OmniPaxosConfig can be deserialized
@@ -9,7 +9,6 @@ use serial_test::serial;
 #[serial]
 fn config_all_fields_test() {
     let file_path = "tests/config/node1.toml";
-
     match OmniPaxosConfig::with_toml(file_path) {
         Err(e) => panic!("Couldn't parse config file: {:?}", e),
         Ok(omnipaxos_config) => {
@@ -31,7 +30,13 @@ fn config_all_fields_test() {
                     pid: 2,
                 })
             );
-            assert_eq!(omnipaxos_config.flexible_quorum, Some((3, 1)));
+            assert_eq!(
+                omnipaxos_config.flexible_quorum,
+                Some(FlexibleQuorum {
+                    read_quorum_size: 3,
+                    write_quorum_size: 2
+                })
+            );
             assert_eq!(
                 omnipaxos_config.initial_leader,
                 Some(Ballot {

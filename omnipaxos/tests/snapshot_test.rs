@@ -20,7 +20,7 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 #[serial]
 fn snapshot_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
@@ -87,7 +87,7 @@ fn snapshot_test() {
 #[serial]
 fn double_snapshot_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));

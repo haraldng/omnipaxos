@@ -5,6 +5,7 @@ use omnipaxos::{
     ballot_leader_election::Ballot,
     messages::Message,
     storage::{Entry, Snapshot, StopSign, Storage},
+    util::FlexibleQuorum,
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -29,7 +30,7 @@ use sled::Config;
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Copy)]
 #[serde(default)]
 pub struct TestConfig {
     pub num_threads: usize,
@@ -287,7 +288,15 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
-            op_config.flexible_quorum = test_config.flexible_quorum;
+            op_config.flexible_quorum =
+                test_config
+                    .flexible_quorum
+                    .and_then(|(read_quorum_size, write_quorum_size)| {
+                        Some(FlexibleQuorum {
+                            read_quorum_size,
+                            write_quorum_size,
+                        })
+                    });
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
@@ -361,7 +370,13 @@ impl TestSystem {
         op_config.pid = pid;
         op_config.peers = peers;
         op_config.configuration_id = 1;
-        op_config.flexible_quorum = flexible_quorum;
+        op_config.flexible_quorum =
+            flexible_quorum.and_then(|(read_quorum_size, write_quorum_size)| {
+                Some(FlexibleQuorum {
+                    read_quorum_size,
+                    write_quorum_size,
+                })
+            });
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self

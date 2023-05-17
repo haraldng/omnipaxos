@@ -1,5 +1,5 @@
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::{defaults::*, Quorum};
+use crate::util::{defaults::*, FlexibleQuorum, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -254,7 +254,7 @@ impl BallotLeaderElection {
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
 /// * `initial_leader`: The initial leader of the cluster.
-/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes (including the leader) a leader needs to consult to get a synced view of the log. write_quorum_size is the number of nodes (including the leader) a leader need to consult to write to the log.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `logger`: Custom logger for logging events of Ballot Leader Election.
 /// * `logger_file_path`: The path where the default logger logs events.
@@ -264,7 +264,7 @@ pub(crate) struct BLEConfig {
     peers: Vec<u64>,
     priority: u64,
     initial_leader: Option<Ballot>,
-    flexible_quorum: Option<(usize, usize)>,
+    flexible_quorum: Option<FlexibleQuorum>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Option<Logger>,

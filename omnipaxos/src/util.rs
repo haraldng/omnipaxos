@@ -322,21 +322,55 @@ impl SequenceNumber {
     }
 }
 
-/// The type of quorum used by the OmniPaxos cluster. Flexible quorums can be used to increase/decrease
-/// the prepare and accept quorum sizes, for different latency vs fault tolerance tradeoffs.
+/// Flexible quorums can be used to increase/decrease the read and write quorum sizes,
+/// for different latency vs fault tolerance tradeoffs.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize))]
+pub struct FlexibleQuorum {
+    /// The number of nodes a leader needs to consult to get an up-to-date view of the log.
+    pub read_quorum_size: usize,
+    /// The number of acknowledgments a leader needs to commit an entry to the log
+    pub write_quorum_size: usize,
+}
+
+/// The type of quorum used by the OmniPaxos cluster.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Quorum {
     /// Both the read quorum and the write quorums are a majority of nodes
     Majority(usize),
-    /// Has a read and write quorum size of Flexible(prepare quorum size, accept quorum size)
-    Flexible(usize, usize),
+    /// The read and write quorum sizes are defined by a `FlexibleQuorum`
+    Flexible(FlexibleQuorum),
 }
 
 impl Quorum {
-    pub(crate) fn with(flexible_quorum_config: Option<(usize, usize)>, num_nodes: usize) -> Self {
+    pub(crate) fn with(flexible_quorum_config: Option<FlexibleQuorum>, num_nodes: usize) -> Self {
         match flexible_quorum_config {
-            Some((prepare_quorum_size, accept_quorum_size)) => {
-                Quorum::Flexible(prepare_quorum_size, accept_quorum_size)
+            Some(FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            }) => {
+                // Check that quorum sizes are sensible
+                assert!(
+                    read_quorum_size + write_quorum_size > num_nodes,
+                    "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
+                    );
+                assert!(
+                    read_quorum_size >= 2 && read_quorum_size <= num_nodes,
+                    "Read quorum must be in range 2 to # of nodes in the cluster"
+                );
+                assert!(
+                    write_quorum_size >= 2 && write_quorum_size <= num_nodes,
+                    "Write quorum must be in range 2 to # of nodes in the cluster"
+                );
+                // TODO: remove this when we start supporting linearizable reads
+                assert!(
+                    read_quorum_size >= write_quorum_size,
+                    "Read quorum size must be >= the write quorum size."
+                );
+                Quorum::Flexible(FlexibleQuorum {
+                    read_quorum_size,
+                    write_quorum_size,
+                })
             }
             None => Quorum::Majority(num_nodes / 2 + 1),
         }
@@ -345,14 +379,14 @@ impl Quorum {
     pub(crate) fn is_prepare_quorum(&self, num_nodes: usize) -> bool {
         match self {
             Quorum::Majority(majority) => num_nodes >= *majority,
-            Quorum::Flexible(prepare_quorum_size, _) => num_nodes >= *prepare_quorum_size,
+            Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.read_quorum_size,
         }
     }
 
     pub(crate) fn is_accept_quorum(&self, num_nodes: usize) -> bool {
         match self {
             Quorum::Majority(majority) => num_nodes >= *majority,
-            Quorum::Flexible(_, accept_quorum_size) => num_nodes >= *accept_quorum_size,
+            Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.write_quorum_size,
         }
     }
 }

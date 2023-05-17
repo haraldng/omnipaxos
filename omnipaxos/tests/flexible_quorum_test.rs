@@ -12,7 +12,7 @@ use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 fn flexible_quorum_prepare_phase_test() {
     // Start Kompact system
     let cfg = TestConfig::load("flexible_quorum_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..cfg.num_proposals / 2)
@@ -37,11 +37,12 @@ fn flexible_quorum_prepare_phase_test() {
     let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
 
     // Kill maximum number of nodes (including leader) such that cluster can still function
-    let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
+    let maximum_tolerable_follower_failures = cfg.flexible_quorum.unwrap().1 - 1;
+    let faulty_followers = (1..=cfg.num_nodes as NodeId)
         .into_iter()
         .filter(|id| *id != leader_id)
-        .take(cfg.flexible_quorum.unwrap().1 - 2);
-    for node_id in maximum_tolerable_follower_failures {
+        .take(maximum_tolerable_follower_failures - 1);
+    for node_id in faulty_followers {
         sys.kill_node(node_id);
     }
     sys.kill_node(leader_id);
@@ -74,7 +75,7 @@ fn flexible_quorum_prepare_phase_test() {
 fn flexible_quorum_accept_phase_test() {
     // Start Kompact system
     let cfg = TestConfig::load("flexible_quorum_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..cfg.num_proposals / 2)

@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId, Quorum, SequenceNumber},
+    util::{ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -108,12 +108,11 @@ where
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
-            if let Quorum::Flexible(prepare_quorum_size, accept_quorum_size) = quorum {
-                if prepare_quorum_size > num_nodes - accept_quorum_size + 1 {
+            if let Quorum::Flexible(flex_quorum) = quorum {
+                if flex_quorum.read_quorum_size > num_nodes - flex_quorum.write_quorum_size + 1 {
                     warn!(
                         paxos.logger,
-                        "Unnecessary overlaps in read and write quorums. The optimal read quorum size = (# of nodes) - (write quorum size) + 1."
-                        );
+                        "Unnecessary overlaps in read and write quorums. Read and Write quorums only need to be overlapping by one node i.e., read_quorum_size + write_quorum_size = num_nodes + 1");
                 }
             }
         }
@@ -392,7 +391,7 @@ enum Role {
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `flexible_quorum` : The (read_quorum_size, write_quorum_size). read_quorum_size is the number of nodes (including the leader) a leader needs to consult to get a synced view of the log. write_quorum_size is the number of nodes (including the leader) a leader need to consult to write to the log.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
@@ -402,7 +401,7 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     buffer_size: usize,
     skip_prepare_use_leader: Option<Ballot>,
-    flexible_quorum: Option<(usize, usize)>,
+    flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }

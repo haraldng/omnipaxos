@@ -13,7 +13,7 @@ use utils::{TestConfig, TestSystem, Value};
 #[serial]
 fn forward_proposal_test() {
     let cfg = TestConfig::load("proposal_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(cfg.clone());
+    let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom_ble, kfuture_ble) = promise::<Ballot>();
