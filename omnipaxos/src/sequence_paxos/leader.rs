@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{Snapshot, SnapshotType};
+use crate::storage::{Snapshot, SnapshotType, StorageResult};
 
 use super::*;
 
@@ -57,6 +57,7 @@ where
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
+            // <<<<<<< HEAD:omnipaxos_core/src/sequence_paxos/leader.rs
             let prep = Prepare {
                 n,
                 decided_idx,
@@ -73,6 +74,10 @@ where
                     to: *pid,
                     msg: PaxosMsg::Prepare(prep),
                 });
+                // =======
+                //             for pid in self.peers.clone() {
+                //                 self.send_prepare(pid);
+                // >>>>>>> master:omnipaxos/src/sequence_paxos/leader.rs
             }
         } else {
             self.state.0 = Role::Follower;
@@ -88,29 +93,8 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            let decided_idx = self
-                .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index");
-            let n_accepted = self
-                .internal_storage
-                .get_accepted_round()
-                .expect("storage error while trying to read accepted round");
-            let accepted_idx = self
-                .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
-            let prep = Prepare {
-                n: self.leader_state.n_leader,
-                decided_idx,
-                n_accepted,
-                accepted_idx,
-            };
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: from,
-                msg: PaxosMsg::Prepare(prep),
-            });
+            self.send_prepare(from)
+                .expect("storage error while trying to read values for prepare message");
         }
     }
 
@@ -175,12 +159,29 @@ where
                 (Role::Leader, Phase::Accept) => {
                     if self.pending_stopsign.is_none() {
                         self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
+                        for pid in self.leader_state.get_promised_followers() {
+                            self.send_accept_stopsign(pid, ss.clone(), false);
+                        }
                     }
                 }
                 _ => self.forward_stopsign(ss),
             }
         }
+    }
+
+    pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
+        let prep = Prepare {
+            n: self.leader_state.n_leader,
+            decided_idx: self.internal_storage.get_decided_idx()?,
+            n_accepted: self.internal_storage.get_accepted_round()?,
+            accepted_idx: self.internal_storage.get_log_len()?,
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::Prepare(prep),
+        });
+        Ok(())
     }
 
     #[cfg(feature = "batch_accept")]
@@ -368,6 +369,18 @@ where
             from: self.pid,
             to,
             msg: PaxosMsg::Decide(d),
+        });
+    }
+
+    fn send_decide_stopsign(&mut self, to: NodeId) {
+        let d = DecideStopSign {
+            seq_num: self.leader_state.next_seq_num(to),
+            n: self.leader_state.n_leader,
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::DecideStopSign(d),
         });
     }
 
@@ -601,16 +614,36 @@ where
         {
             self.leader_state.set_accepted_stopsign(from);
             if self.leader_state.is_stopsign_chosen() {
-                let d = DecideStopSign {
-                    n: self.leader_state.n_leader,
-                };
-                self.handle_decide_stopsign(d);
+                let mut ss = self
+                    .internal_storage
+                    .get_stopsign()
+                    .expect("storage error while trying to read stopsign")
+                    .expect("No stopsign found when deciding!");
+                ss.decided = true;
+                let old_decided_idx = self
+                    .internal_storage
+                    .get_decided_idx()
+                    .expect("storage error while trying to read decided index");
+                self.internal_storage
+                    .set_decided_idx(
+                        self.internal_storage
+                            .get_log_len()
+                            .expect("storage error while trying to read log length")
+                            + 1,
+                    )
+                    .expect("storage error while trying to write decided index");
+                let result = self.internal_storage.set_stopsign(ss);
+                if result.is_err() {
+                    self.internal_storage
+                        .set_decided_idx(old_decided_idx)
+                        .expect("storage error while trying to write decided index");
+                    panic!(
+                        "storage error while trying to write stopsign: {}",
+                        result.unwrap_err()
+                    );
+                }
                 for pid in self.leader_state.get_promised_followers() {
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: pid,
-                        msg: PaxosMsg::DecideStopSign(d),
-                    });
+                    self.send_decide_stopsign(pid);
                 }
             }
         }

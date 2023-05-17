@@ -13,7 +13,7 @@
 pub mod utils;
 
 use crate::utils::StorageType;
-use omnipaxos_core::{
+use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
@@ -22,9 +22,9 @@ use omnipaxos_core::{
         },
         Message,
     },
-    omni_paxos::{OmniPaxos, OmniPaxosConfig, ReconfigurationRequest},
     storage::{Snapshot, SnapshotType, StopSign, Storage},
     util::{NodeId, SequenceNumber},
+    OmniPaxos, OmniPaxosConfig, ReconfigurationRequest,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use serial_test::serial;
@@ -65,7 +65,7 @@ fn setup_leader() -> (
     Arc<Mutex<BrokenStorageConfig>>,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
-    let (mem_storage, storage_conf, mut op) = basic_setup();
+    let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
     let n_old = n;
     let setup_msg = Message::<Value>::BLE(BLEMessage {
@@ -74,6 +74,28 @@ fn setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
+            quorum_connected: true,
+        }),
+    });
+    op.handle_incoming(setup_msg);
+    op.election_timeout();
+    let setup_msg = Message::<Value>::BLE(BLEMessage {
+        from: 2,
+        to: 1,
+        msg: HeartbeatMsg::Reply(HeartbeatReply {
+            round: 2,
+            ballot: n_old,
+            quorum_connected: false,
+        }),
+    });
+    op.handle_incoming(setup_msg);
+    op.election_timeout();
+    let setup_msg = Message::<Value>::BLE(BLEMessage {
+        from: 2,
+        to: 1,
+        msg: HeartbeatMsg::Reply(HeartbeatReply {
+            round: 3,
+            ballot: n_old,
             quorum_connected: false,
         }),
     });
@@ -81,7 +103,6 @@ fn setup_leader() -> (
     op.election_timeout();
     let msgs = op.outgoing_messages();
     for msg in msgs {
-        println!("{:?}", msg);
         if let Message::SequencePaxos(ref px_msg) = msg {
             if let PaxosMsg::Prepare(prep) = px_msg.msg {
                 n = prep.n;
@@ -102,7 +123,10 @@ fn setup_leader() -> (
         }),
     });
     op.handle_incoming(setup_msg);
-
+    assert!(
+        op.get_current_leader().expect("should have leader") == 1,
+        "should be leader"
+    );
     (mem_storage, storage_conf, op)
 }
 
@@ -117,6 +141,7 @@ fn setup_follower() -> (
 ) {
     let (mem_storage, storage_conf, mut op) = basic_setup();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
+    n.config_id = 1;
     n.n += 1;
     n.pid = 2;
     let setup_msg = Message::<Value>::SequencePaxos(PaxosMessage {
@@ -125,7 +150,7 @@ fn setup_follower() -> (
         msg: PaxosMsg::Prepare(Prepare {
             decided_idx: 0,
             accepted_idx: 0,
-            n_accepted: mem_storage.lock().unwrap().get_promise().unwrap(),
+            n_accepted: mem_storage.lock().unwrap().get_accepted_round().unwrap(),
             n,
         }),
     });
@@ -149,6 +174,11 @@ fn setup_follower() -> (
         }),
     });
     op.handle_incoming(setup_msg);
+    op.outgoing_messages();
+    assert!(
+        op.get_current_leader().expect("should have leader") == 2,
+        "node 2 should be leader"
+    );
     (mem_storage, storage_conf, op)
 }
 
@@ -163,6 +193,10 @@ fn atomic_storage_decide_stopsign_test() {
             to: 1,
             msg: PaxosMsg::AcceptStopSign(AcceptStopSign {
                 n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                seq_num: SequenceNumber {
+                    session: 1,
+                    counter: 2,
+                },
                 ss: StopSign {
                     config_id: 2,
                     nodes: vec![1, 2, 3],
@@ -184,6 +218,10 @@ fn atomic_storage_decide_stopsign_test() {
             to: 1,
             msg: PaxosMsg::DecideStopSign(DecideStopSign {
                 n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                seq_num: SequenceNumber {
+                    session: 1,
+                    counter: 3,
+                },
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
@@ -439,7 +477,7 @@ fn atomic_storage_accept_decide_test() {
 #[serial]
 fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
-        let (mem_storage, storage_conf, mut op) = basic_setup();
+        let (mem_storage, storage_conf, mut op) = setup_follower();
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
         let n_old = n;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
@@ -447,6 +485,28 @@ fn atomic_storage_majority_promises_test() {
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
+                ballot: n_old,
+                quorum_connected: true,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        op.election_timeout();
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 2,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 2,
+                ballot: n_old,
+                quorum_connected: false,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        op.election_timeout();
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 2,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 3,
                 ballot: n_old,
                 quorum_connected: false,
             }),
@@ -493,6 +553,10 @@ fn atomic_storage_majority_promises_test() {
         let new_log_len = s.get_log_len().unwrap();
         let new_snapshot = s.get_snapshot().unwrap();
         let new_accepted_round = s.get_accepted_round().unwrap();
+        assert!(
+            op.get_current_leader().expect("should have leader") == 1,
+            "should be leader"
+        );
         assert!(
             old_snapshot.is_none(),
             "sanity check failed: new OP instance has a snapshot set"

@@ -1,9 +1,9 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
-    omni_paxos::OmniPaxosConfig,
+use omnipaxos::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
+    OmniPaxosConfig,
 };
 use serial_test::serial;
 use std::time::Duration;
@@ -23,6 +23,7 @@ fn consensus_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );

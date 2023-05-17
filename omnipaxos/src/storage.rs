@@ -1,7 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    omni_paxos::CompactionErr,
     util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
+    CompactionErr,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

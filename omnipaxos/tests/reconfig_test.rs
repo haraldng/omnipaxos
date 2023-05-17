@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::omni_paxos::ReconfigurationRequest;
+use omnipaxos::ReconfigurationRequest;
 use serial_test::serial;
 use std::time::Duration;
 use utils::{TestConfig, TestSystem, Value, SS_METADATA};
@@ -15,6 +15,7 @@ fn reconfig_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );

@@ -7,12 +7,12 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    omni_paxos::{CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest},
     storage::InternalStorage,
     util::{ConfigurationId, NodeId, SequenceNumber},
+    CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
-use slog::{debug, info, trace, Logger};
+use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
 
 pub mod follower;
@@ -39,6 +39,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
+    cached_promise: Option<Promise<T>>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
@@ -95,6 +96,7 @@ where
             leader_state: LeaderState::<T>::with(leader, lds, max_pid, majority),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
+            cached_promise: None,
             buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
@@ -222,6 +224,76 @@ where
         }
     }
 
+    /// Detects if a Prepare, AcceptStopSign, or PrepareReq message has been sent but not received a reply.
+    /// If so resends them.
+    pub(crate) fn resend_message_timeout(&mut self) {
+        match &self.state {
+            (Role::Leader, phase) => {
+                // Resend AcceptStopSign
+                if *phase == Phase::Accept {
+                    // TODO: This is slow. Get stopsign from cache instead.
+                    if let Some(ss) = self
+                        .internal_storage
+                        .get_stopsign()
+                        .expect("storage error while trying to read stopsign")
+                    {
+                        if !ss.decided {
+                            for follower in self.leader_state.get_promised_followers() {
+                                if !self.leader_state.follower_has_accepted_stopsign(follower) {
+                                    self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Resend Prepare
+                let unpromised_peers = self.leader_state.get_unpromised_peers();
+                for peer in unpromised_peers {
+                    self.send_prepare(peer)
+                        .expect("storage error while trying to read data for prepare");
+                }
+            }
+            (Role::Follower, phase) => {
+                match phase {
+                    Phase::Recover => {
+                        // Resend PrepareReq
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: self.leader.pid,
+                            msg: PaxosMsg::PrepareReq,
+                        });
+                    }
+                    Phase::Prepare => {
+                        // Resend Promise
+                        match &self.cached_promise {
+                            Some(promise) => {
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: promise.n.pid,
+                                    msg: PaxosMsg::Promise(promise.clone()),
+                                });
+                            }
+                            None => {
+                                // Shouldn't be possible to be in prepare phase without having
+                                // cached the promise sent as a response to the prepare
+                                #[cfg(feature = "logging")]
+                                warn!(self.logger, "In Prepare phase without a cached promise!");
+                                self.state = (Role::Follower, Phase::Recover);
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: self.leader.pid,
+                                    msg: PaxosMsg::PrepareReq,
+                                });
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+
     /// Returns the id of the current leader.
     pub(crate) fn get_current_leader(&self) -> Ballot {
         self.leader
@@ -316,7 +388,9 @@ where
                     if !self.stopped() {
                         let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                         self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
+                        for pid in self.leader_state.get_promised_followers() {
+                            self.send_accept_stopsign(pid, ss.clone(), false);
+                        }
                     } else {
                         return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
@@ -330,18 +404,21 @@ where
         }
     }
 
-    fn send_accept_stopsign(&mut self, ss: StopSign) {
+    fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign, resend: bool) {
+        let seq_num = match resend {
+            true => self.leader_state.get_seq_num(to),
+            false => self.leader_state.next_seq_num(to),
+        };
         let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
+            seq_num,
             n: self.leader_state.n_leader,
             ss,
         });
-        for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: acc_ss.clone(),
-            });
-        }
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: acc_ss,
+        });
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {

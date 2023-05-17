@@ -1,6 +1,6 @@
 #![cfg(feature = "toml_config")]
 
-use omnipaxos_core::{ballot_leader_election::Ballot, omni_paxos::OmniPaxosConfig};
+use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
 use serial_test::serial;
 
 /// Tests that all the fields of OmniPaxosConfig can be deserialized
@@ -16,7 +16,9 @@ fn config_all_fields_test() {
             assert_eq!(omnipaxos_config.configuration_id, 1);
             assert_eq!(omnipaxos_config.pid, 1);
             assert_eq!(omnipaxos_config.peers, vec![2, 3]);
-            assert_eq!(omnipaxos_config.buffer_size, 100000);
+            assert_eq!(omnipaxos_config.buffer_size, 10000);
+            assert_eq!(omnipaxos_config.election_tick_timeout, 10);
+            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 100);
             #[cfg(feature = "logging")]
             assert_eq!(
                 omnipaxos_config.logger_file_path,
@@ -26,6 +28,7 @@ fn config_all_fields_test() {
             assert_eq!(
                 omnipaxos_config.skip_prepare_use_leader,
                 Some(Ballot {
+                    config_id: 3,
                     n: 5,
                     priority: 2,
                     pid: 2,
@@ -34,6 +37,7 @@ fn config_all_fields_test() {
             assert_eq!(
                 omnipaxos_config.initial_leader,
                 Some(Ballot {
+                    config_id: 3,
                     n: 1,
                     priority: 1,
                     pid: 1,
@@ -57,6 +61,8 @@ fn config_some_fields_test() {
             assert_eq!(omnipaxos_config.pid, 0);
             assert_eq!(omnipaxos_config.peers, vec![]);
             assert_eq!(omnipaxos_config.buffer_size, 100000);
+            assert_eq!(omnipaxos_config.election_tick_timeout, 10);
+            assert_eq!(omnipaxos_config.resend_message_tick_timeout, 100);
             #[cfg(feature = "logging")]
             assert_eq!(omnipaxos_config.logger_file_path, None);
             assert_eq!(omnipaxos_config.leader_priority, 0);

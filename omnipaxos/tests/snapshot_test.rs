@@ -2,7 +2,7 @@ pub mod utils;
 
 use crate::utils::LatestValue;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::Snapshot,
     util::{LogEntry, NodeId},
@@ -23,6 +23,7 @@ fn snapshot_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );
@@ -95,6 +96,7 @@ fn double_snapshot_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );

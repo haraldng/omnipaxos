@@ -1,12 +1,11 @@
 Foreword:
   Foreword:
     path: "foreword.md"
+    tags: [ "omnipaxos", "rust" ]
   Getting Started:
     path: "getting-started.md"
   Introduction:
-    path: "introduction/index.md"
-  Project Info:
-    path: "project.md"
+    path: "introduction.md"
 
 OmniPaxos:
   OmniPaxos:

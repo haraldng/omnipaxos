@@ -20,7 +20,7 @@ where
             .internal_storage
             .get_promise()
             .expect("storage error while trying to read promise");
-        if old_promise <= prep.n || old_promise == prep.n && self.state.1 == Phase::Recover {
+        if old_promise <= prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
             self.leader = prep.n;
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
@@ -90,6 +90,7 @@ where
                 accepted_idx,
                 stopsign,
             };
+            self.cached_promise = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,
@@ -314,6 +315,24 @@ where
             == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
         {
+            let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    // pseudo-AcceptSync for prepare-less reconfigurations
+                    self.internal_storage
+                        .set_accepted_round(acc_ss.n)
+                        .expect("storage error while trying to write accepted round");
+                    self.forward_pending_proposals();
+                    self.current_seq_num = acc_ss.seq_num;
+                }
+                MessageStatus::Expected => self.current_seq_num = acc_ss.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(acc_ss.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign { n: acc_ss.n };
             self.outgoing.push(PaxosMessage {
@@ -363,6 +382,24 @@ where
             == dec.n
             && self.state.1 == Phase::Accept
         {
+            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    #[cfg(feature = "logging")]
+                    warn!(
+                        self.logger,
+                        "DecideStopSign cannot be the first message in a sequence!"
+                    );
+                    return;
+                }
+                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(dec.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             let mut ss = self
                 .internal_storage
                 .get_stopsign()

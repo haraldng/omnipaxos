@@ -1,4 +1,4 @@
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSignEntry, Storage, StorageResult},
 };

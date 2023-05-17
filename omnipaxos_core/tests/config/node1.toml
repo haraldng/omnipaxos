@@ -1,9 +1,0 @@
-# This file is used for testing that fields are deserialized to set values
-configuration_id = 1
-pid = 1
-peers = [2, 3]
-buffer_size = 100000
-logger_file_path = "/omnipaxos/logs"
-leader_priority = 2
-skip_prepare_use_leader = { n = 5, priority = 2, pid = 2 }
-initial_leader = { n = 1, priority = 1, pid = 1 }

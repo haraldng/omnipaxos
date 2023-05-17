@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos_core::ballot_leader_election::Ballot;
+use omnipaxos::ballot_leader_election::Ballot;
 use rand::Rng;
 use serial_test::serial;
 use std::time::Duration;
@@ -17,6 +17,7 @@ fn forward_proposal_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );

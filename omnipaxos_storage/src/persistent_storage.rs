@@ -5,7 +5,7 @@ use commitlog::{
     message::{MessageBuf, MessageSet},
     CommitLog, LogOptions, ReadLimit,
 };
-use omnipaxos_core::{
+use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, StopSignEntry, Storage, StorageResult},
 };
@@ -32,6 +32,7 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 #[repr(packed)]
 #[derive(Clone, Copy, AsBytes, FromBytes)]
 struct BallotStorage {
+    config_id: u32,
     n: u32,
     priority: u64,
     pid: u64,
@@ -40,6 +41,7 @@ struct BallotStorage {
 impl BallotStorage {
     fn with(b: Ballot) -> Self {
         BallotStorage {
+            config_id: b.config_id,
             n: b.n,
             priority: b.priority,
             pid: b.pid,
@@ -322,7 +324,12 @@ where
                 Some(prom_bytes) => {
                     let b_store =
                         BallotStorage::read_from(prom_bytes.as_slice()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
+                    Ok(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    ))
                 }
                 None => Ok(Ballot::default()),
             }
@@ -334,7 +341,12 @@ where
                 Some(prom_bytes) => {
                     let b_store =
                         BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
+                    Ok(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    ))
                 }
                 None => Ok(Ballot::default()),
             }
@@ -395,7 +407,12 @@ where
                 Some(acc_bytes) => {
                     let b_store =
                         BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
+                    Ok(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    ))
                 }
                 None => Ok(Ballot::default()),
             }
@@ -407,7 +424,12 @@ where
                 Some(acc_bytes) => {
                     let b_store =
                         BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(b_store.n, b_store.priority, b_store.pid))
+                    Ok(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    ))
                 }
                 None => Ok(Ballot::default()),
             }

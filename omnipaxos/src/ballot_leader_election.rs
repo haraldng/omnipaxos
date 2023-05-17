@@ -7,8 +7,8 @@ use crate::{
     messages::ballot_leader_election::{
         BLEMessage, HeartbeatMsg, HeartbeatReply, HeartbeatRequest,
     },
-    omni_paxos::OmniPaxosConfig,
     util::NodeId,
+    OmniPaxosConfig,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,8 @@ use slog::{debug, info, trace, warn, Logger};
 #[derive(Clone, Copy, Eq, Debug, Default, Ord, PartialOrd, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ballot {
+    /// The identifier for the configuration that the replica with this ballot is part of.
+    pub config_id: u32,
     /// Ballot number
     pub n: u32,
     /// Custom priority parameter
@@ -30,11 +32,17 @@ pub struct Ballot {
 impl Ballot {
     /// Creates a new Ballot
     /// # Arguments
+    /// * `config_id` - The identifier for the configuration that the replica with this ballot is part of.
     /// * `n` - Ballot number.
     /// * `priority` - Custom priority parameter.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(n: u32, priority: u64, pid: NodeId) -> Ballot {
-        Ballot { n, priority, pid }
+    pub fn with(config_id: u32, n: u32, priority: u64, pid: NodeId) -> Ballot {
+        Ballot {
+            config_id,
+            n,
+            priority,
+            pid,
+        }
     }
 }
 
@@ -42,6 +50,8 @@ impl Ballot {
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub(crate) struct BallotLeaderElection {
+    /// The identifier for the configuration that this instance is part of.
+    configuration_id: u32,
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
     /// Vector that holds all the other replicas.
@@ -68,14 +78,16 @@ pub(crate) struct BallotLeaderElection {
 impl BallotLeaderElection {
     /// Construct a new BallotLeaderElection node
     pub(crate) fn with(config: BLEConfig) -> Self {
+        let config_id = config.configuration_id;
         let pid = config.pid;
         let peers = config.peers;
         let n = &peers.len() + 1;
         let initial_ballot = match &config.initial_leader {
             Some(leader_ballot) if leader_ballot.pid == pid => *leader_ballot,
-            _ => Ballot::with(0, config.priority, pid),
+            _ => Ballot::with(config_id, 0, config.priority, pid),
         };
         let mut ble = BallotLeaderElection {
+            configuration_id: config_id,
             pid,
             majority: n / 2 + 1, // +1 because peers is exclusive ourselves
             peers,
@@ -237,7 +249,7 @@ impl BallotLeaderElection {
     }
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
-        if rep.round == self.hb_round {
+        if rep.round == self.hb_round && rep.ballot.config_id == self.configuration_id {
             self.ballots.push((rep.ballot, rep.quorum_connected));
         } else {
             #[cfg(feature = "logging")]
@@ -251,6 +263,7 @@ impl BallotLeaderElection {
 
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
+/// * `configuration_id`: The identifier for the configuration that this node is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
@@ -262,6 +275,7 @@ impl BallotLeaderElection {
 /// * `buffer_size`: The buffer size for outgoing messages.
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
+    configuration_id: u32,
     pid: NodeId,
     peers: Vec<u64>,
     priority: u64,
@@ -276,6 +290,7 @@ pub(crate) struct BLEConfig {
 impl From<OmniPaxosConfig> for BLEConfig {
     fn from(config: OmniPaxosConfig) -> Self {
         Self {
+            configuration_id: config.configuration_id,
             pid: config.pid,
             peers: config.peers,
             priority: config.leader_priority,

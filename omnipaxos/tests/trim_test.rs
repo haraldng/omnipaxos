@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{ballot_leader_election::Ballot, util::NodeId};
+use omnipaxos::{ballot_leader_election::Ballot, util::NodeId};
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{TestConfig, TestSystem, Value};
@@ -18,6 +18,7 @@ fn trim_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );
@@ -88,6 +89,7 @@ fn double_trim_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
     );
