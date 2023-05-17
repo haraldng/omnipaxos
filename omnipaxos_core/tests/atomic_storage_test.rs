@@ -193,8 +193,8 @@ fn atomic_storage_decide_stopsign_test() {
         let new_decided_idx = s.get_decided_idx().unwrap();
         let ss_decided = s.get_stopsign().unwrap().unwrap().decided;
         assert!(
-            !ss_decided && new_decided_idx == old_decided_idx
-                || ss_decided && new_decided_idx + 1 == old_decided_idx,
+            (!ss_decided && new_decided_idx == old_decided_idx)
+                || (ss_decided && new_decided_idx == old_decided_idx + 1),
             "decided_idx and stopsign should be updated atomically"
         );
     }
@@ -255,8 +255,8 @@ fn atomic_storage_acceptsync_test() {
         let new_decided_idx = s.get_decided_idx().unwrap();
         let new_log_len = s.get_log_len().unwrap();
         assert!(
-            old_decided_idx == new_decided_idx && old_log_len == new_log_len
-                || old_decided_idx != new_decided_idx && old_log_len != new_log_len,
+            (old_decided_idx == new_decided_idx && old_log_len == new_log_len)
+                || (old_decided_idx != new_decided_idx && old_log_len != new_log_len),
             "decided_idx and log should be updated atomically"
         );
     }
@@ -307,8 +307,8 @@ fn atomic_storage_trim_test() {
         let new_compacted_idx = s.get_compacted_idx().unwrap();
         let new_log_len = s.get_log_len().unwrap();
         assert!(
-            new_log_len == old_log_len && new_compacted_idx == old_compacted_idx
-                || new_log_len < old_log_len && new_compacted_idx > old_compacted_idx,
+            (new_log_len == old_log_len && new_compacted_idx == old_compacted_idx)
+                || (new_log_len < old_log_len && new_compacted_idx > old_compacted_idx),
             "compacted_idx and log_len only change together"
         );
         assert!(
@@ -364,13 +364,13 @@ fn atomic_storage_snapshot_test() {
         let new_log_len = s.get_log_len().unwrap();
         let new_snapshot = s.get_snapshot().unwrap();
         assert!(
-            new_log_len == old_log_len && new_compacted_idx == old_compacted_idx
-                || new_log_len < old_log_len && new_compacted_idx > old_compacted_idx,
+            (new_log_len == old_log_len && new_compacted_idx == old_compacted_idx)
+                || (new_log_len < old_log_len && new_compacted_idx > old_compacted_idx),
             "compacted_idx and log_len only change together"
         );
         assert!(
             new_log_len == old_log_len
-                || new_snapshot.is_some() && new_compacted_idx > old_compacted_idx,
+                || (new_snapshot.is_some() && new_compacted_idx > old_compacted_idx),
             "trim should only happen if snapshot and compacted_idx are updated successfully"
         );
         assert!(
@@ -420,12 +420,12 @@ fn atomic_storage_accept_decide_test() {
         let new_log_len = s.get_log_len().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
         assert!(
-            new_log_len == old_log_len
+            (new_log_len == old_log_len
                 && new_decided_idx == old_decided_idx
-                && new_accepted_round == old_accepted_round
-                || new_log_len > old_log_len
+                && new_accepted_round == old_accepted_round)
+                || (new_log_len > old_log_len
                     && new_decided_idx > old_decided_idx
-                    && new_accepted_round >= old_accepted_round,
+                    && new_accepted_round >= old_accepted_round),
             "acceptdecide was not done atomically"
         );
     }
@@ -498,13 +498,13 @@ fn atomic_storage_majority_promises_test() {
             "sanity check failed: new OP instance has a snapshot set"
         );
         assert!(
-            new_decided_idx == old_decided_idx && new_snapshot.is_none()
-                || new_decided_idx > old_decided_idx && new_snapshot.is_some(),
+            (new_decided_idx == old_decided_idx && new_snapshot.is_none())
+                || (new_decided_idx > old_decided_idx && new_snapshot.is_some()),
             "decided_idx and decided_snapshot should be updated atomically"
         );
         assert!(
-            new_log_len == old_log_len && new_accepted_round == n_old
-                || new_log_len > old_log_len && new_accepted_round == n,
+            (new_log_len == old_log_len && new_accepted_round == n_old)
+                || (new_log_len > old_log_len && new_accepted_round == n),
             "accepted round and the log should be updated atomically"
         );
     }
@@ -548,8 +548,8 @@ fn atomic_storage_majority_accepted_stopsign_test() {
             "sanity check failed: newly proposed stopsign is decided"
         );
         assert!(
-            new_decided_idx == old_decided_idx && !new_stopsign.decided
-                || new_decided_idx > old_decided_idx && new_stopsign.decided,
+            (new_decided_idx == old_decided_idx && !new_stopsign.decided)
+                || (new_decided_idx > old_decided_idx && new_stopsign.decided),
             "decided_idx and decided_stopsign should be updated atomically"
         );
     }
