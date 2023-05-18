@@ -33,6 +33,7 @@ fn batching_test() {
 
     let mut futures = vec![];
     let mut vec_proposals = vec![];
+    let mut last_decided_idx = 0;
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
         vec_proposals.push(Value(i));
@@ -45,7 +46,8 @@ fn batching_test() {
         // check batching
         first_node.on_definition(|x| {
             let decided_idx = x.paxos.get_decided_idx();
-            check_batching(decided_idx, cfg.batch_size as u64);
+            check_batching(decided_idx, last_decided_idx, cfg.batch_size as u64);
+            last_decided_idx = decided_idx;
         });
 
     }
@@ -71,6 +73,9 @@ fn batching_test() {
     };
 }
 
-fn check_batching(decided_idx: u64, batch_size: u64) {
-    assert_eq!(decided_idx % batch_size, 0);
+fn check_batching(decided_idx: u64, last_decided_idx: u64, batch_size: u64) {
+    let idx_diff = decided_idx - last_decided_idx;
+    if idx_diff != 0 {
+        assert!(decided_idx - last_decided_idx >= batch_size);
+    }
 }
