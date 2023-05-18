@@ -231,15 +231,6 @@ impl<T> StateCache<T>
     }
 
     // Return batched entries if the batch is full that need to be flushed in to storage.
-    // todo: remove this comment
-    // fn take_entries_if_batch_full(&mut self) -> Option<Vec<T>> {
-    //     let flushed_entries_len = (self.batched_entries.len() / self.batch_size) * self.batch_size;
-    //     if flushed_entries_len > 0 {
-    //         Some(self.batched_entries.drain(0..flushed_entries_len).collect::<Vec<T>>())
-    //     } else {
-    //         None
-    //     }
-    // }
     fn take_entries_if_batch_full(&mut self) -> Option<Vec<T>> {
         if self.batched_entries.len() >= self.batch_size {
             Some(self.take_batched_entries())
