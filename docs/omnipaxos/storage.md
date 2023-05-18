@@ -10,7 +10,7 @@ omnipaxos_storage = { version = "LATEST_VERSION", default-features = true }
 **If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
 
 ## MemoryStorage
-`MemoryStorage` is an in-memory storage implementation and it will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
+`MemoryStorage` is an in-memory storage implementation and it will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction)).
 ```rust,edition2018,no_run,noplaypen
     // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]

@@ -16,9 +16,8 @@ where
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        if self.internal_storage.get_promise() < prep.n
-            || (self.internal_storage.get_promise() == prep.n && self.state.1 == Phase::Recover)
-        {
+        let promise = self.internal_storage.get_promise();
+        if promise < prep.n || (promise == prep.n && self.state.1 == Phase::Recover) {
             self.leader = prep.n;
             self.internal_storage.set_promise(prep.n);
             self.state = (Role::Follower, Phase::Prepare);
@@ -62,6 +61,7 @@ where
                 accepted_idx,
                 stopsign: self.get_stopsign(),
             };
+            self.cached_promise = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,
@@ -152,7 +152,7 @@ where
             let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
             match msg_status {
                 MessageStatus::First => {
-                    // psuedo-AcceptSync for reconfigurations
+                    // pseudo-AcceptSync for prepare-less reconfigurations
                     self.internal_storage.set_accepted_round(acc.n);
                     self.forward_pending_proposals();
                     self.current_seq_num = acc.seq_num;
@@ -178,6 +178,22 @@ where
         if self.internal_storage.get_promise() == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
         {
+            let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    // pseudo-AcceptSync for prepare-less reconfigurations
+                    self.internal_storage.set_accepted_round(acc_ss.n);
+                    self.forward_pending_proposals();
+                    self.current_seq_num = acc_ss.seq_num;
+                }
+                MessageStatus::Expected => self.current_seq_num = acc_ss.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(acc_ss.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign { n: acc_ss.n };
             self.outgoing.push(PaxosMessage {
@@ -214,6 +230,24 @@ where
 
     pub(crate) fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
         if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
+            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
+            match msg_status {
+                MessageStatus::First => {
+                    #[cfg(feature = "logging")]
+                    warn!(
+                        self.logger,
+                        "DecideStopSign cannot be the first message in a sequence!"
+                    );
+                    return;
+                }
+                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
+                MessageStatus::DroppedPreceding => {
+                    self.reconnected(dec.n.pid);
+                    return;
+                }
+                MessageStatus::Outdated => return,
+            }
+
             let mut ss = self
                 .internal_storage
                 .get_stopsign()

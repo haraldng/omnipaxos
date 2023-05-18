@@ -2,8 +2,12 @@
 configuration_id = 1
 pid = 1
 peers = [2, 3]
-buffer_size = 100000
+buffer_size = 10000
+# If `tick()` is called every 10ms then an election will be triggered every 100ms
+election_tick_timeout = 10
+# If `tick()` is called every 10ms then dropped messages will be resent every 1000ms
+resend_message_tick_timeout = 100
 logger_file_path = "/omnipaxos/logs"
 leader_priority = 2
-skip_prepare_use_leader = { n = 5, priority = 2, pid = 2 }
-initial_leader = { n = 1, priority = 1, pid = 1 }
+skip_prepare_use_leader = { config_id = 3, n = 5, priority = 2, pid = 2 }
+initial_leader = { config_id = 3, n = 1, priority = 1, pid = 1 }

@@ -20,7 +20,7 @@ pub struct KeyValue {
 }
 ``` 
 
-`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](compaction.md#snapshot).
+`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](../compaction/#snapshot).
 
 > **Note** To use the #[derive(Entry)] macro, please make sure to enable the `macros` feature.
 
@@ -68,7 +68,7 @@ let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 
 ## Fail-recovery
-To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md#persistentstorage).
+To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](../storage/#persistentstorage).
 
 ```rust,edition2018,no_run,noplaypen
 /* Re-creating our node after a crash... */
