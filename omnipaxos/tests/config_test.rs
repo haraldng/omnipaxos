@@ -1,6 +1,9 @@
 #![cfg(feature = "toml_config")]
 
-use omnipaxos::{ballot_leader_election::Ballot, util::FlexibleQuorum, OmniPaxosConfig};
+use omnipaxos::{
+    util::{FlexibleQuorum, InitialLeader},
+    OmniPaxosConfig,
+};
 use serial_test::serial;
 
 /// Tests that all the fields of OmniPaxosConfig can be deserialized
@@ -23,14 +26,6 @@ fn config_all_fields_test() {
             );
             assert_eq!(omnipaxos_config.leader_priority, 2);
             assert_eq!(
-                omnipaxos_config.skip_prepare_use_leader,
-                Some(Ballot {
-                    n: 5,
-                    priority: 2,
-                    pid: 2,
-                })
-            );
-            assert_eq!(
                 omnipaxos_config.flexible_quorum,
                 Some(FlexibleQuorum {
                     read_quorum_size: 3,
@@ -39,10 +34,10 @@ fn config_all_fields_test() {
             );
             assert_eq!(
                 omnipaxos_config.initial_leader,
-                Some(Ballot {
+                Some(InitialLeader {
                     n: 1,
-                    priority: 1,
-                    pid: 1,
+                    priority: 3,
+                    pid: 1
                 })
             );
         }
@@ -66,7 +61,6 @@ fn config_some_fields_test() {
             #[cfg(feature = "logging")]
             assert_eq!(omnipaxos_config.logger_file_path, None);
             assert_eq!(omnipaxos_config.leader_priority, 0);
-            assert_eq!(omnipaxos_config.skip_prepare_use_leader, None);
             assert_eq!(omnipaxos_config.flexible_quorum, None);
             assert_eq!(omnipaxos_config.initial_leader, None);
         }

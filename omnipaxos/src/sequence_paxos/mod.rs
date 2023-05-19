@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    util::{ConfigurationId, FlexibleQuorum, InitialLeader, NodeId, Quorum, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -59,7 +59,7 @@ where
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, lds) = match &config.skip_prepare_use_leader {
+        let (state, leader, lds) = match &config.initial_leader {
             Some(l) => {
                 let (role, lds) = if l.pid == pid {
                     // we are leader in new config
@@ -73,7 +73,7 @@ where
                     (Role::Follower, None)
                 };
                 let state = (role, Phase::Accept);
-                (state, *l, lds)
+                (state, Ballot { n: l.n, pid: l.pid }, lds)
             }
             None => {
                 let state = (Role::Follower, Phase::None);
@@ -390,9 +390,8 @@ enum Role {
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub struct SequencePaxosConfig {
@@ -400,7 +399,7 @@ pub struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<u64>,
     buffer_size: usize,
-    skip_prepare_use_leader: Option<Ballot>,
+    initial_leader: Option<InitialLeader>,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
@@ -413,7 +412,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             pid: config.pid,
             peers: config.peers,
             buffer_size: config.buffer_size,
-            skip_prepare_use_leader: config.skip_prepare_use_leader,
+            initial_leader: config.initial_leader,
             flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]
             logger_file_path: config.logger_file_path,

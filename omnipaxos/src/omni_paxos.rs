@@ -5,7 +5,7 @@ use crate::{
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
-    util::{defaults::BUFFER_SIZE, FlexibleQuorum, LogEntry, NodeId},
+    util::{defaults::BUFFER_SIZE, FlexibleQuorum, InitialLeader, LogEntry, NodeId},
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
@@ -21,7 +21,7 @@ use toml;
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `initial_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
@@ -32,13 +32,12 @@ pub struct OmniPaxosConfig {
     pub pid: NodeId,
     pub peers: Vec<u64>,
     pub buffer_size: usize,
-    pub skip_prepare_use_leader: Option<Ballot>,
     pub flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
-    pub leader_priority: u64,
-    pub initial_leader: Option<Ballot>,
+    pub leader_priority: u32,
+    pub initial_leader: Option<InitialLeader>,
 }
 
 impl OmniPaxosConfig {
@@ -64,7 +63,7 @@ impl OmniPaxosConfig {
             "Peers should not include self pid"
         );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = self.skip_prepare_use_leader {
+        if let Some(x) = &self.initial_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
         };
         OmniPaxos {
@@ -81,7 +80,6 @@ impl Default for OmniPaxosConfig {
             pid: 0,
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
-            skip_prepare_use_leader: None,
             flexible_quorum: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
@@ -225,13 +223,13 @@ where
 
     /*** BLE calls ***/
     /// Update the custom priority used in the Ballot for this server.
-    pub fn set_priority(&mut self, p: u64) {
+    pub fn set_priority(&mut self, p: u32) {
         self.ble.set_priority(p)
     }
 
     /// If the heartbeat of a leader is not received when election_timeout() is called, the server might attempt to become the leader.
     /// It is also used for the election process, where the server checks if it can become the leader.
-    /// This function should be called periodically to detect leader failure and drive the election process.
+    /// This function .should be called periodically to detect leader failure and drive the election process.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
     pub fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
