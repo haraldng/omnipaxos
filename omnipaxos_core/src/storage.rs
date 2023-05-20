@@ -183,11 +183,11 @@ struct StateCache<T>
     /// Vector which contains all the logged entries in-memory.
     batched_entries: Vec<T>,
     /// Last promised round.
-    n_prom: Ballot,
+    promise: Ballot,
     /// Last accepted round.
-    acc_round: Ballot,
+    accepted_round: Ballot,
     /// Length of the decided log.
-    ld: u64,
+    decided_idx: u64,
     /// Garbage collected index.
     compacted_idx: u64,
     /// Real length of logs in the storage.
@@ -203,9 +203,9 @@ impl<T> StateCache<T>
         StateCache {
             batch_size,
             batched_entries: Vec::with_capacity(batch_size),
-            n_prom: Ballot::default(),
-            acc_round: Ballot::default(),
-            ld: 0,
+            promise: Ballot::default(),
+            accepted_round: Ballot::default(),
+            decided_idx: 0,
             compacted_idx: 0,
             real_log_len: 0,
         }
@@ -220,18 +220,18 @@ impl<T> StateCache<T>
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
         self.batched_entries.push(entry);
-        self.take_entries_if_batch_full()
+        self.take_entries_if_batch_is_full()
     }
 
     // Appends entries to the end of the `batched_entries`. If the batch is full, the
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
         self.batched_entries.extend(entries);
-        self.take_entries_if_batch_full()
+        self.take_entries_if_batch_is_full()
     }
 
     // Return batched entries if the batch is full that need to be flushed in to storage.
-    fn take_entries_if_batch_full(&mut self) -> Option<Vec<T>> {
+    fn take_entries_if_batch_is_full(&mut self) -> Option<Vec<T>> {
         if self.batched_entries.len() >= self.batch_size {
             Some(self.take_batched_entries())
         } else {
@@ -437,9 +437,9 @@ where
     fn load_cache(&mut self) {
         // try to load from storage
         if let Some(promise) = self.storage.get_promise() {
-            self.state_cache.n_prom = promise;
-            self.state_cache.ld = self.storage.get_decided_idx();
-            self.state_cache.acc_round = self.storage.get_accepted_round().unwrap_or_default();
+            self.state_cache.promise = promise;
+            self.state_cache.decided_idx = self.storage.get_decided_idx();
+            self.state_cache.accepted_round = self.storage.get_accepted_round().unwrap_or_default();
             self.state_cache.compacted_idx = self.storage.get_compacted_idx();
             self.state_cache.real_log_len = self.storage.get_log_len();
         }
@@ -492,26 +492,26 @@ where
     }
 
     pub(crate) fn set_promise(&mut self, n_prom: Ballot) {
-        self.state_cache.n_prom = n_prom;
+        self.state_cache.promise = n_prom;
         self.storage.set_promise(n_prom)
     }
 
     pub(crate) fn set_decided_idx(&mut self, ld: u64) {
-        self.state_cache.ld = ld;
+        self.state_cache.decided_idx = ld;
         self.storage.set_decided_idx(ld)
     }
 
     pub(crate) fn get_decided_idx(&self) -> u64 {
-        self.state_cache.ld
+        self.state_cache.decided_idx
     }
 
     pub(crate) fn set_accepted_round(&mut self, na: Ballot) {
-        self.state_cache.acc_round = na;
+        self.state_cache.accepted_round = na;
         self.storage.set_accepted_round(na)
     }
 
     pub(crate) fn get_accepted_round(&self) -> Ballot {
-        self.state_cache.acc_round
+        self.state_cache.accepted_round
     }
 
     pub(crate) fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
@@ -535,7 +535,7 @@ where
     }
 
     pub(crate) fn get_promise(&self) -> Ballot {
-        self.state_cache.n_prom
+        self.state_cache.promise
     }
 
     pub(crate) fn set_stopsign(&mut self, s: StopSignEntry) {
