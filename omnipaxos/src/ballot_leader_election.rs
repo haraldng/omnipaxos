@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::{defaults::*, FlexibleQuorum, InitialLeader, Quorum};
+use crate::util::{defaults::*, FlexibleQuorum, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -23,6 +23,8 @@ use slog::{debug, info, trace, warn, Logger};
 pub struct Ballot {
     /// Ballot number
     pub n: u32,
+    /// Custom priority parameter
+    pub priority: u32,
     /// The pid of the process
     pub pid: NodeId,
 }
@@ -32,20 +34,19 @@ impl Ballot {
     /// # Arguments
     /// * `n` - Ballot number.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(n: u32, pid: NodeId) -> Ballot {
-        Ballot { n, pid }
+    pub fn with(n: u32, priority: u32, pid: NodeId) -> Ballot {
+        Ballot { n, priority, pid }
     }
 }
 
 /// Used to define a BLE epoch
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
-struct BLEBallot {
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BLEBallot {
     /// Ballot of a replica.
-    ballot: Ballot,
-    /// Custom priority parameter
-    priority: u32,
+    pub ballot: Ballot,
     /// Used to determine if the replica is a candidate to become a leader or remain a leader.
-    connectivity: u8,
+    pub connectivity: u8,
 }
 
 impl BLEBallot {
@@ -53,11 +54,11 @@ impl BLEBallot {
     /// # Arguments
     /// * `ballot` - A Sequence Paxos ballot.
     /// * `priority` - Custom priority parameter.
-    /// * `connectivity` - Number of nodes a replica is connected to
-    pub fn with(ballot: Ballot, priority: u32, connectivity: u8) -> Self {
+    /// * `connectivity` - The number of replicas inside the cluster that this instance is
+    /// connected to (based on heartbeats received) including itself.
+    pub fn with(ballot: Ballot, connectivity: u8) -> Self {
         BLEBallot {
             ballot,
-            priority,
             connectivity,
         }
     }
@@ -67,13 +68,13 @@ impl Ord for BLEBallot {
     fn cmp(&self, other: &Self) -> Ordering {
         (
             self.ballot.n,
-            self.priority,
+            self.ballot.priority,
             self.connectivity,
             self.ballot.pid,
         )
             .cmp(&(
                 other.ballot.n,
-                other.priority,
+                other.ballot.priority,
                 other.connectivity,
                 other.ballot.pid,
             ))
@@ -99,16 +100,11 @@ pub(crate) struct BallotLeaderElection {
     /// Vector which holds all the received heartbeats
     ballots: Vec<BLEBallot>,
     /// Holds the current ballot of this instance.
-    current_ballot: Ballot, // (round, pid)
-    /// The number of replicas inside the cluster that this instance is connected to (based on
-    /// heartbeats received) including itself.
-    connectivity: u8,
+    current_ballot: BLEBallot,
     /// Current elected leader.
-    leader: Option<BLEBallot>,
+    leader: Option<Ballot>,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain leader.
     quorum: Quorum,
-    /// The custom priority for this node to be elected as the leader.
-    priority: u32,
     /// Vector which holds all the outgoing messages of the BLE instance.
     outgoing: Vec<BLEMessage>,
     /// Logger used to output the status of the component.
@@ -123,19 +119,11 @@ impl BallotLeaderElection {
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let initial_ballot = match &config.initial_leader {
-            Some(initial_leader) if initial_leader.pid == pid => {
-                Ballot::with(initial_leader.n, initial_leader.pid)
-            }
-            _ => Ballot::with(0, pid),
+        let initial_leader = config.initial_leader;
+        let initial_ballot = match initial_leader {
+            Some(ballot) if ballot.pid == pid => BLEBallot::with(ballot, num_nodes as u8),
+            _ => BLEBallot::with(Ballot::with(0, config.priority, pid), num_nodes as u8),
         };
-        let leader = config.initial_leader.map(|initial_leader| {
-            BLEBallot::with(
-                Ballot::with(initial_leader.n, initial_leader.pid),
-                0,
-                num_nodes as u8,
-            )
-        });
 
         let mut ble = BallotLeaderElection {
             pid,
@@ -143,10 +131,8 @@ impl BallotLeaderElection {
             hb_round: 0,
             ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
-            connectivity: num_nodes as u8,
-            leader,
+            leader: initial_leader,
             quorum,
-            priority: config.priority,
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
@@ -170,7 +156,7 @@ impl BallotLeaderElection {
 
     /// Update the custom priority used in the Ballot for this server.
     pub(crate) fn set_priority(&mut self, p: u32) {
-        self.priority = p;
+        self.current_ballot.ballot.priority = p;
     }
 
     /// Returns outgoing messages
@@ -188,42 +174,45 @@ impl BallotLeaderElection {
         }
     }
 
-    /*
-    /// Sets initial state after creation. *Must only be used before being started*.
-    /// # Arguments
-    /// * `leader_ballot` - Initial leader.
-    pub(crate) fn set_initial_leader(&mut self, leader_ballot: Ballot) {
-        assert!(self.leader.is_none());
-        if leader_ballot.pid == self.pid {
-            self.current_ballot = leader_ballot;
-        }
-        self.leader = Some(leader_ballot);
-    }*/
-
     fn check_leader(&mut self) -> Option<Ballot> {
         let ballots = std::mem::take(&mut self.ballots);
-        let top_ballot = ballots
-            .into_iter()
-            .filter(|ballot| self.quorum.is_accept_quorum(ballot.connectivity as usize))
+        let top_accept_ballot = ballots
+            .iter()
+            .filter_map(|&ballot| {
+                if self.quorum.is_accept_quorum(ballot.connectivity as usize) {
+                    Some(ballot)
+                } else {
+                    None
+                }
+            })
             .max()
             .unwrap_or_default();
-
-        if top_ballot < self.leader.unwrap_or_default() {
-            // did not get HB from leader
-            self.current_ballot.n = self.leader.unwrap_or_default().ballot.n + 1;
-            self.leader = None;
+        if top_accept_ballot.ballot == self.leader.unwrap_or_default() {
+            // leader is still alive and has accept quorum
             None
-        } else if self.leader != Some(top_ballot) {
-            // got a new leader with greater ballot
-            self.leader = Some(top_ballot);
-            #[cfg(feature = "logging")]
-            debug!(
-                self.logger,
-                "BLE {}, New Leader elected: {:?}", self.pid, top_ballot
-            );
-            Some(top_ballot.ballot)
         } else {
-            None
+            // leader is dead || changed priority || doesn't have an accept quorum
+            let top_prepare_ballot = ballots
+                .into_iter()
+                .filter(|ballot| self.quorum.is_prepare_quorum(ballot.connectivity as usize))
+                .max()
+                .unwrap_or_default();
+            if top_prepare_ballot.ballot > self.leader.unwrap_or_default() {
+                // new leader with prepare quorum
+                let new_leader = top_prepare_ballot.ballot;
+                self.leader = Some(new_leader);
+                #[cfg(feature = "logging")]
+                debug!(
+                    self.logger,
+                    "BLE {}, New Leader elected: {:?}", self.pid, new_leader
+                );
+                Some(new_leader)
+            } else {
+                // nobody has taken over leadership, let's try to ourselves
+                self.current_ballot.ballot.n = self.leader.unwrap_or_default().n + 1;
+                self.leader = None;
+                None
+            }
         }
     }
 
@@ -252,18 +241,17 @@ impl BallotLeaderElection {
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         // +1 because we are always "connected" to ourselves
-        self.connectivity = self.ballots.len() as u8 + 1;
-        let result: Option<Ballot> = if self.quorum.is_prepare_quorum(self.connectivity as usize) {
+        self.current_ballot.connectivity = self.ballots.len() as u8 + 1;
+        let result: Option<Ballot> = if self
+            .quorum
+            .is_prepare_quorum(self.current_ballot.connectivity as usize)
+        {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
-            self.ballots.push(BLEBallot::with(
-                self.current_ballot,
-                self.priority,
-                self.connectivity,
-            ));
+            self.ballots.push(self.current_ballot);
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -284,8 +272,6 @@ impl BallotLeaderElection {
         let hb_reply = HeartbeatReply {
             round: req.round,
             ballot: self.current_ballot,
-            connectivity: self.connectivity,
-            priority: self.priority,
         };
 
         self.outgoing.push(BLEMessage {
@@ -297,8 +283,7 @@ impl BallotLeaderElection {
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round {
-            self.ballots
-                .push(BLEBallot::with(rep.ballot, rep.priority, rep.connectivity));
+            self.ballots.push(rep.ballot);
         } else {
             #[cfg(feature = "logging")]
             warn!(
@@ -324,7 +309,7 @@ pub(crate) struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
     priority: u32,
-    initial_leader: Option<InitialLeader>,
+    initial_leader: Option<Ballot>,
     flexible_quorum: Option<FlexibleQuorum>,
     buffer_size: usize,
     #[cfg(feature = "logging")]

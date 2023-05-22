@@ -390,16 +390,3 @@ impl Quorum {
         }
     }
 }
-
-/// The initial leader of the cluster. An initial leader can be used in combination with a
-/// reconfiguration to skip the first prepare phase in the new configuration.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct InitialLeader {
-    /// Ballot number
-    pub n: u32,
-    /// The pid of the process
-    pub pid: NodeId,
-    /// Custom priority parameter
-    pub priority: u32,
-}

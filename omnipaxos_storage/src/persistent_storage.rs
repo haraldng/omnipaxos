@@ -33,12 +33,17 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 #[derive(Clone, Copy, AsBytes, FromBytes)]
 struct BallotStorage {
     n: u32,
+    priority: u32,
     pid: u64,
 }
 
 impl BallotStorage {
     fn with(b: Ballot) -> Self {
-        BallotStorage { n: b.n, pid: b.pid }
+        BallotStorage {
+            n: b.n,
+            priority: b.priority,
+            pid: b.pid,
+        }
     }
 }
 
@@ -317,7 +322,7 @@ where
                 Some(prom_bytes) => {
                     let b_store = BallotStorage::read_from(prom_bytes.as_slice())
                         .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.pid)
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
                 None => Ballot::default(),
             }
@@ -329,7 +334,7 @@ where
                 Some(prom_bytes) => {
                     let b_store = BallotStorage::read_from(prom_bytes.as_ref())
                         .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.pid)
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
                 None => Ballot::default(),
             }
@@ -401,7 +406,7 @@ where
                 Some(acc_bytes) => {
                     let b_store = BallotStorage::read_from(acc_bytes.as_slice())
                         .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.pid)
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
                 None => Ballot::default(),
             }
@@ -413,7 +418,7 @@ where
                 Some(acc_bytes) => {
                     let b_store = BallotStorage::read_from(acc_bytes.as_bytes())
                         .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.pid)
+                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
                 }
                 None => Ballot::default(),
             }

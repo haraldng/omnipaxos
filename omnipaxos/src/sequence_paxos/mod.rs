@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, FlexibleQuorum, InitialLeader, NodeId, Quorum, SequenceNumber},
+    util::{ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -73,7 +73,7 @@ where
                     (Role::Follower, None)
                 };
                 let state = (role, Phase::Accept);
-                (state, Ballot { n: l.n, pid: l.pid }, lds)
+                (state, *l, lds)
             }
             None => {
                 let state = (Role::Follower, Phase::None);
@@ -399,7 +399,7 @@ pub struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<u64>,
     buffer_size: usize,
-    initial_leader: Option<InitialLeader>,
+    initial_leader: Option<Ballot>,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,

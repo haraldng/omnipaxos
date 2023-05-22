@@ -5,7 +5,7 @@ use crate::{
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
-    util::{defaults::BUFFER_SIZE, FlexibleQuorum, InitialLeader, LogEntry, NodeId},
+    util::{defaults::BUFFER_SIZE, FlexibleQuorum, LogEntry, NodeId},
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
@@ -21,7 +21,7 @@ use toml;
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `initial_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the prepare phase in the new configuration.
+/// * `initial_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the first prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
@@ -37,7 +37,7 @@ pub struct OmniPaxosConfig {
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
     pub leader_priority: u32,
-    pub initial_leader: Option<InitialLeader>,
+    pub initial_leader: Option<Ballot>,
 }
 
 impl OmniPaxosConfig {
@@ -64,8 +64,12 @@ impl OmniPaxosConfig {
         );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = &self.initial_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
-        };
+            assert_ne!(x.pid, 0, "Initial leader cannot be 0");
+            if x.pid == self.pid {
+                assert_eq!(x.priority, self.leader_priority, "Pid matches initial leader's pid {}, but priority {} does not match initial leader's priority {}", x.pid, self.leader_priority, x.priority);
+            }
+        }
+        // TODO: recover ballot from internal storage and use as initial leader
         OmniPaxos {
             seq_paxos: SequencePaxos::with(self.clone().into(), storage),
             ble: BallotLeaderElection::with(self.into()),
