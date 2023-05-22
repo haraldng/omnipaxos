@@ -12,6 +12,7 @@ use sled::Config;
 use std::{
     collections::HashMap,
     sync::{Arc},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 mod kv;
@@ -83,16 +84,22 @@ async fn main() {
             incoming: receiver_channels.remove(&pid).unwrap(),
             outgoing: Arc::clone(&sender_channels),
         };
-        let join_handle = task::spawn({
+        let abort_flag = Arc::new(AtomicBool::new(false));
+        let abort_flag_clone = Arc::clone(&abort_flag);
+        task::spawn({
             async move {
-                op_server.run().await;
+                op_server.run(Arc::clone(&abort_flag)).await;
+                drop(op_server.omni_paxos);
+                println!("Server {} stopped", pid);
             }
         });
-        op_server_handles.insert(pid, (omni_paxos, join_handle));
+        op_server_handles.insert(pid, (omni_paxos, abort_flag_clone));
     }
 
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
+    // init a simple key-value store
+    let mut simple_kv_store = HashMap::new();
     let (first_server, _) = op_server_handles.get(&1).unwrap();
     // check which server is the current leader
     let leader = first_server
@@ -121,7 +128,7 @@ async fn main() {
         value: 2,
     };
     println!("Adding value: {:?} via server {}", kv2, leader);
-    let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
+    let (leader_server, abort_flag) = op_server_handles.get(&leader).unwrap();
     leader_server
         .lock()
         .await
@@ -134,8 +141,6 @@ async fn main() {
         .await
         .read_decided_suffix(0)
         .expect("Failed to read expected entries");
-
-    let mut simple_kv_store = HashMap::new();
     for ent in committed_ents {
         if let LogEntry::Decided(kv) = ent {
             simple_kv_store.insert(kv.key, kv.value);
@@ -144,7 +149,7 @@ async fn main() {
     }
     println!("KV store: {:?}", simple_kv_store);
     println!("Killing leader: {}...", leader);
-    leader_join_handle.abort();
+    abort_flag.store(true, Ordering::Relaxed);
 
     let killed_node: NodeId = leader;
     // wait for new leader to be elected...
@@ -200,12 +205,13 @@ async fn main() {
         incoming: receiver,
         outgoing: Arc::clone(&sender_channels),
     };
-    let join_handle = task::spawn({
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    let abort_flag_clone = Arc::clone(&abort_flag);
+    task::spawn({
         async move {
-            op_server.run().await;
+            op_server.run(Arc::clone(&abort_flag_clone)).await;
         }
     });
-    op_server_handles.insert(killed_node, (omni_paxos, join_handle));
+    op_server_handles.insert(killed_node, (omni_paxos, abort_flag));
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
-
 }

@@ -1,5 +1,6 @@
 use omnipaxos::{util::NodeId};
 use tokio::{sync::{mpsc, Mutex}, time};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
     sync::{Arc},
@@ -29,7 +30,7 @@ impl OmniPaxosServer {
         }
     }
 
-    pub(crate) async fn run(&mut self) {
+    pub(crate) async fn run(&mut self, abort_flag: Arc<AtomicBool>) {
         let mut outgoing_interval = time::interval(OUTGOING_MESSAGE_PERIOD);
         let mut election_interval = time::interval(ELECTION_TIMEOUT);
         loop {
@@ -43,6 +44,10 @@ impl OmniPaxosServer {
                     self.omni_paxos.lock().await.handle_incoming(deserialized_msg);
                 },
                 else => { }
+            }
+            // abort if flag is set to true
+            if abort_flag.load(Ordering::Relaxed) {
+                break;
             }
         }
     }
