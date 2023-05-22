@@ -65,7 +65,7 @@ where
         let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
         let (state, leader, lds) = match storage.get_promise() {
             // try to do fail recovery from storage, if None then we are starting from scratch
-            Some(_) => {
+            Some(b) => {
                 let state = (Role::Follower, Phase::Recover);
                 for peer_pid in &peers {
                     outgoing.push(PaxosMessage {
@@ -74,7 +74,7 @@ where
                         msg: PaxosMsg::PrepareReq,
                     });
                 };
-                (state, Ballot::default(), None)
+                (state, b, None)
             }
             None => {
                  match &config.skip_prepare_use_leader {
