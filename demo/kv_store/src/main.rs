@@ -32,6 +32,11 @@ lazy_static!{
     } else {
         vec![]
     }; 
+    static ref API_ADDR: String = if let Ok(var) = env::var("API_ADDR") {
+        var
+    } else {
+        panic!("missing API address")
+    }; 
     static ref PID: NodeId = if let Ok(var) = env::var("PID") {
         let x = var.parse().expect("PIDs must be u64");
         if x == 0 { panic!("PIDs cannot be 0") } else { x }
@@ -63,6 +68,8 @@ async fn main() {
         peer_addrs,
         peers: PEERS.clone(),
         pid: *PID,
+        api_addr: *API_ADDR,
+        api_socket: None,
     };
     op_server.run().await;
 }
