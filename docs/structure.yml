@@ -28,8 +28,8 @@ OmniPaxos:
     path: "omnipaxos/logging.md"
 
 Contributing:
-  How to Contribute:
-    path: "contributing/how-to-contribute.md"
+  Contributing to OmniPaxos:
+    path: "contributing/contributing.md"
 
 ## Example: how to define nested structure
 #Temp1:
