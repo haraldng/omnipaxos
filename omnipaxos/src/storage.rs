@@ -1,7 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
-    CompactionErr, ClusterConfig,
+    util::{IndexEntry, LogEntry, SnapshottedEntry},
+    ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -48,9 +48,7 @@ pub struct StopSign {
 impl StopSign {
     /// Creates a [`StopSign`].
     pub fn with(next_config: ClusterConfig) -> Self {
-        StopSign {
-            next_config
-        }
+        StopSign { next_config }
     }
 }
 

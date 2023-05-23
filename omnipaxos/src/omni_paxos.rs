@@ -7,8 +7,10 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{defaults::BUFFER_SIZE, LogEntry, NodeId},
 };
-#[cfg(feature = "toml_config")]
+#[cfg(any(feature = "toml_config", feature = "serde"))]
 use serde::Deserialize;
+#[cfg(feature = "serde")]
+use serde::Serialize;
 #[cfg(feature = "toml_config")]
 use std::fs;
 use std::ops::RangeBounds;
@@ -18,13 +20,13 @@ use toml;
 /// Configuration for `OmniPaxos`.
 /// # Fields
 /// * `cluster_config`: The configuration settings that are cluster-wide.
-/// * `instance_config`: The configuration settings that unique to this OmniPaxos instance.
+/// * `server_config`: The configuration settings that unique to this OmniPaxos replica.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
     pub cluster_config: ClusterConfig,
-    pub instance_config: InstanceConfig,
+    pub server_config: ServerConfig,
 }
 
 impl OmniPaxosConfig {
@@ -47,26 +49,15 @@ impl OmniPaxosConfig {
             nodes,
             initial_leader,
         } = &self.cluster_config;
-        let InstanceConfig {
-            pid,
-            peers,
-            buffer_size,
-            ..
-        } = &self.instance_config;
+        let ServerConfig {
+            pid, buffer_size, ..
+        } = &self.server_config;
 
         // Check that pid, peers, and nodes are consistent
         assert_ne!(*pid, 0, "Pid cannot be 0");
         assert_ne!(*configuration_id, 0, "Configuration id cannot be 0");
-        assert!(peers.is_empty(), "Peers cannot be empty");
-        assert!(
-            !peers.contains(pid),
-            "Peers should not include self pid"
-        );
-        // let peers_and_pid = [*peers.clone(), vec![*pid]].concat();
-        // nodes.sort();
-        // peers_and_pid.sort();
-        // assert!(*nodes == peers_and_pid, "Nodes must be the union of peers and pid");
-
+        assert!(nodes.contains(pid), "Nodes should include self pid {}", pid);
+        assert!(nodes.len() > 1, "Need more than 1 node");
         assert!(*buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = initial_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
@@ -84,7 +75,9 @@ impl OmniPaxosConfig {
 /// * `nodes`: The nodes in the cluster i.e. the `pid`s of the other replicas in the configuration.
 /// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase when switching to a new configuration.
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
+#[cfg_attr(any(feature = "serde", feature = "toml_config"), derive(Deserialize))]
+#[cfg_attr(feature = "toml_config", serde(default))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ClusterConfig {
     /// The identifier for the cluster configuration that this Sequence Paxos replica is part of.
     pub configuration_id: u32,
@@ -94,17 +87,16 @@ pub struct ClusterConfig {
     pub initial_leader: Option<Ballot>,
 }
 
-
 impl ClusterConfig {
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build_for<T, B>(self, storage: B, instance_config: InstanceConfig) -> OmniPaxos<T, B>
+    pub fn build_for<T, B>(self, storage: B, server_config: ServerConfig) -> OmniPaxos<T, B>
     where
         T: Entry,
         B: Storage<T>,
     {
         let op_config = OmniPaxosConfig {
             cluster_config: self,
-            instance_config,
+            server_config,
         };
         op_config.build(storage)
     }
@@ -113,41 +105,37 @@ impl ClusterConfig {
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
-            configuration_id: 0,
+            configuration_id: 1,
             nodes: Vec::new(),
             initial_leader: None,
         }
     }
 }
 
-/// Configuration for an `OmniPaxos` instance.
+/// Configuration for a singular `OmniPaxos` instance in a cluster.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `logger_file_path`: The path where the default logger logs events.
-/// * `leader_priority` : TODO:
+/// * `leader_priority` : Custom priority for this node to be elected as the leader.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
-pub struct InstanceConfig {
+pub struct ServerConfig {
     /// The unique identifier of this node. Must not be 0.
     pub pid: NodeId,
-    /// The peers of this node i.e. the `pid`s of the other replicas in the configuration.
-    pub peers: Vec<u64>,
     /// The buffer size for outgoing messages.
     pub buffer_size: usize,
     /// The path where the default logger logs events.
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
-    /// TODO:
+    /// Custom priority for this node to be elected as the leader.
     pub leader_priority: u64,
 }
 
-impl Default for InstanceConfig {
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             pid: 0,
-            peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             #[cfg(feature = "logging")]
             logger_file_path: None,
@@ -155,7 +143,6 @@ impl Default for InstanceConfig {
         }
     }
 }
-
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
@@ -278,8 +265,10 @@ where
         self.seq_paxos.append(entry)
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
+    /// Propose a reconfiguration. Returns error if already stopped.
     pub fn reconfigure(&mut self, new_configuration: ClusterConfig) -> Result<(), ProposeErr<T>> {
+        // TODO: doesn't check to make sure the new_config is valid. A user could propose a flawed
+        // ClusterConfig and if it gets decided be stuck with it. Is this acceptable?
         self.seq_paxos.reconfigure(new_configuration)
     }
 
@@ -302,28 +291,6 @@ where
     pub fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
             self.seq_paxos.handle_leader(b);
-        }
-    }
-}
-
-/// Used for proposing reconfiguration of the cluster.
-#[derive(Debug, Clone)]
-pub struct ReconfigurationRequest {
-    /// The id of the servers in the new configuration.
-    pub(crate) new_configuration: Vec<NodeId>,
-    /// Optional metadata to be decided with the reconfiguration.
-    pub(crate) metadata: Option<Vec<u8>>,
-}
-
-impl ReconfigurationRequest {
-    /// create a `ReconfigurationRequest`.
-    /// # Arguments
-    /// * `new_configuration`: The pids of the nodes in the new configuration.
-    /// * `metadata`: Some optional metadata in raw bytes. This could include some auxiliary data for the new configuration to start with.
-    pub fn with(new_configuration: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
-        Self {
-            new_configuration,
-            metadata,
         }
     }
 }

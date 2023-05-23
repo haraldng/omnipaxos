@@ -265,7 +265,6 @@ where
 
 pub(crate) mod defaults {
     pub(crate) const BUFFER_SIZE: usize = 100000;
-    pub(crate) const BLE_BUFFER_SIZE: usize = 100;
 }
 
 #[allow(missing_docs)]
@@ -317,18 +316,4 @@ impl SequenceNumber {
             MessageStatus::DroppedPreceding
         }
     }
-}
-
-// TODO: We have a lot of config structs now. Maybe its worth making configs.rs?
-// TODO: Weird to have some fields that will have different values among nodes in cluster
-// TODO: What is difference between `skip_prepare_use_leader` and `initial_leader`?
-// TODO: docs
-#[allow(missing_docs)]
-struct ReconfigurationConfig {
-    pub configuration_id: u32,
-    pub nodes: Vec<u64>,
-    pub skip_prepare_use_leader: Option<Ballot>,
-    /*** BLE config fields ***/
-    pub leader_priority: u64, // ?
-    pub initial_leader: Option<Ballot>, // ?
 }

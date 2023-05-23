@@ -8,6 +8,7 @@ use commitlog::{
 use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, StopSignEntry, Storage},
+    ClusterConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -30,7 +31,7 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 
 /// Wrapper struct that represents a `Ballot` type. Implements AsBytes and FromBytes.
 #[repr(packed)]
-#[derive(Clone, Copy, AsBytes, FromBytes)]
+#[derive(Clone, Copy, AsBytes, FromBytes, Serialize, Deserialize)]
 struct BallotStorage {
     n: u32,
     priority: u64,
@@ -66,17 +67,17 @@ impl StopSignEntryStorage {
 /// Wrapper struct that represents a `StopSign` type. Implements Serialize and Deserialize.
 #[derive(Clone, Serialize, Deserialize)]
 struct StopSignStorage {
-    config_id: u32,
+    configuration_id: u32,
     nodes: Vec<u64>,
-    metadata: Option<Vec<u8>>,
+    initial_leader: Option<BallotStorage>,
 }
 
 impl StopSignStorage {
     fn with(ss: StopSign) -> Self {
         StopSignStorage {
-            config_id: ss.config_id,
-            nodes: ss.nodes,
-            metadata: ss.metadata,
+            configuration_id: ss.next_config.configuration_id,
+            nodes: ss.next_config.nodes,
+            initial_leader: ss.next_config.initial_leader.map(BallotStorage::with),
         }
     }
 }
@@ -490,12 +491,17 @@ where
                 Some(ss_bytes) => {
                     let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
                         .expect("Failed to deserialize the stopsign");
+                    let next_config = ClusterConfig {
+                        configuration_id: ss_entry_storage.ss.configuration_id,
+                        nodes: ss_entry_storage.ss.nodes,
+                        initial_leader: ss_entry_storage.ss.initial_leader.map(|ballot| Ballot {
+                            n: ballot.n,
+                            priority: ballot.priority,
+                            pid: ballot.pid,
+                        }),
+                    };
                     Some(StopSignEntry::with(
-                        StopSign::with(
-                            ss_entry_storage.ss.config_id,
-                            ss_entry_storage.ss.nodes,
-                            ss_entry_storage.ss.metadata,
-                        ),
+                        StopSign::with(next_config),
                         ss_entry_storage.decided,
                     ))
                 }
@@ -512,12 +518,17 @@ where
                 Some(ss_bytes) => {
                     let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
                         .expect("Failed to deserialize the stopsign");
+                    let next_config = ClusterConfig {
+                        configuration_id: ss_entry_storage.ss.configuration_id,
+                        nodes: ss_entry_storage.ss.nodes,
+                        initial_leader: ss_entry_storage.ss.initial_leader.map(|ballot| Ballot {
+                            n: ballot.n,
+                            priority: ballot.priority,
+                            pid: ballot.pid,
+                        }),
+                    };
                     Some(StopSignEntry::with(
-                        StopSign::with(
-                            ss_entry_storage.ss.config_id,
-                            ss_entry_storage.ss.nodes,
-                            ss_entry_storage.ss.metadata,
-                        ),
+                        StopSign::with(next_config),
                         ss_entry_storage.decided,
                     ))
                 }

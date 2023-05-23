@@ -1,2 +1,3 @@
 # This file is used for testing that unspecified fields are deserialized to default values
+[cluster_config]
 configuration_id = 2

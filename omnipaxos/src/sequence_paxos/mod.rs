@@ -9,7 +9,7 @@ use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
     util::{ConfigurationId, NodeId, SequenceNumber},
-    CompactionErr, OmniPaxosConfig, ProposeErr, InstanceConfig, ClusterConfig,
+    ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, Logger};
@@ -27,6 +27,8 @@ where
     B: Storage<T>,
 {
     pub(crate) internal_storage: InternalStorage<B, T>,
+    // Will be needed after rebase
+    #[allow(dead_code)]
     config_id: ConfigurationId,
     pid: NodeId,
     peers: Vec<u64>, // excluding self pid
@@ -272,7 +274,7 @@ where
         }
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
+    /// Propose a reconfiguration. Returns error if already stopped.
     pub(crate) fn reconfigure(&mut self, new_config: ClusterConfig) -> Result<(), ProposeErr<T>> {
         #[cfg(feature = "logging")]
         info!(
@@ -373,15 +375,13 @@ enum Role {
     Leader,
 }
 
-// TODO: update docs
 /// Configuration for `SequencePaxos`.
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub(crate) struct SequencePaxosConfig {
@@ -396,15 +396,22 @@ pub(crate) struct SequencePaxosConfig {
 
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
     fn from(config: OmniPaxosConfig) -> Self {
+        let pid = config.server_config.pid;
+        let peers = config
+            .cluster_config
+            .nodes
+            .into_iter()
+            .filter(|x| *x != pid)
+            .collect();
+
         SequencePaxosConfig {
             configuration_id: config.cluster_config.configuration_id,
-            pid: config.instance_config.pid,
-            peers: config.instance_config.peers,
-            buffer_size: config.instance_config.buffer_size,
+            pid,
+            peers,
+            buffer_size: config.server_config.buffer_size,
             initial_leader: config.cluster_config.initial_leader,
             #[cfg(feature = "logging")]
-            logger_file_path: config.instance_config.logger_file_path,
+            logger_file_path: config.server_config.logger_file_path,
         }
     }
 }
-

@@ -19,7 +19,6 @@ const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
-pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
 const PERSISTENT: &str = "persistent";
 const MEMORY: &str = "memory";
@@ -285,11 +284,10 @@ impl TestSystem {
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
 
         for pid in 1..=num_nodes as u64 {
-            let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
             let mut op_config = OmniPaxosConfig::default();
-            op_config.pid = pid;
-            op_config.peers = peers;
-            op_config.configuration_id = 1;
+            op_config.server_config.pid = pid;
+            op_config.cluster_config.nodes = all_pids.clone();
+            op_config.cluster_config.configuration_id = 1;
             let storage: StorageType<Value> =
                 StorageType::with(storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
@@ -356,12 +354,11 @@ impl TestSystem {
         storage_type: StorageTypeSelector,
         storage_path: &str,
     ) {
-        let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
         let mut op_config = OmniPaxosConfig::default();
-        op_config.pid = pid;
-        op_config.peers = peers;
-        op_config.configuration_id = 1;
+        op_config.server_config.pid = pid;
+        op_config.cluster_config.nodes = (1..=num_nodes as u64).collect();
+        op_config.cluster_config.configuration_id = 1;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -642,7 +639,7 @@ pub mod omnireplica {
                                 .decided_futures
                                 .pop()
                                 .unwrap()
-                                .reply(stopsign_meta_to_value(&ss))
+                                .reply(stopsign_config_to_value(&ss))
                                 .expect("Failed to reply stopsign promise"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
@@ -695,14 +692,9 @@ impl Entry for Value {
     type Snapshot = LatestValue;
 }
 
-fn stopsign_meta_to_value(ss: &StopSign) -> Value {
-    let v = ss
-        .metadata
-        .as_ref()
-        .expect("StopSign Metadata was None")
-        .first()
-        .expect("Empty metadata");
-    Value(*v as u64)
+fn stopsign_config_to_value(ss: &StopSign) -> Value {
+    let v = ss.next_config.configuration_id;
+    Value(v as u64)
 }
 
 /// Create a temporary directory in /tmp/

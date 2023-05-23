@@ -1,5 +1,4 @@
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::defaults::*;
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -87,11 +86,10 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-                let path = config.logger_file_path;
-                config.logger.unwrap_or_else(|| {
-                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(s.as_str())
-                })
+                let s = config
+                    .logger_file_path
+                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                create_logger(s.as_str())
             },
         };
         #[cfg(feature = "logging")]
@@ -249,18 +247,14 @@ impl BallotLeaderElection {
     }
 }
 
-// TODO: update docs
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
-/// * `hb_delay`: Timeout for waiting on heartbeat messages. It is measured in number of ticks.
 /// * `initial_leader`: The initial leader of the cluster.
-/// * `initial_timeout`: Optional initial timeout that can be used to elect a leader faster initially.
-/// * `logger`: Custom logger for logging events of Ballot Leader Election.
-/// * `logger_file_path`: The path where the default logger logs events.
 /// * `buffer_size`: The buffer size for outgoing messages.
+/// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
     pid: NodeId,
@@ -269,23 +263,27 @@ pub(crate) struct BLEConfig {
     initial_leader: Option<Ballot>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
-    logger: Option<Logger>,
-    #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
 
 impl From<OmniPaxosConfig> for BLEConfig {
     fn from(config: OmniPaxosConfig) -> Self {
+        let pid = config.server_config.pid;
+        let peers = config
+            .cluster_config
+            .nodes
+            .into_iter()
+            .filter(|x| *x != pid)
+            .collect();
+
         Self {
-            pid: config.instance_config.pid,
-            peers: config.instance_config.peers,
-            priority: config.instance_config.leader_priority,
+            pid,
+            peers,
+            priority: config.server_config.leader_priority,
             initial_leader: config.cluster_config.initial_leader,
-            buffer_size: config.instance_config.buffer_size,
+            buffer_size: config.server_config.buffer_size,
             #[cfg(feature = "logging")]
-            logger: None, //TODO: is this necessary?
-            #[cfg(feature = "logging")]
-            logger_file_path: config.instance_config.logger_file_path,
+            logger_file_path: config.server_config.logger_file_path,
         }
     }
 }
