@@ -186,32 +186,32 @@ async fn main() {
     }
     println!("KV store: {:?}", simple_kv_store);
     // recover killed node
-    let peers = SERVERS.iter().filter(|&&p| p != killed_node).copied().collect();
-    let op_config = OmniPaxosConfig {
-        pid: killed_node,
-        configuration_id: 1,
-        peers,
-        ..Default::default()
-    };
-    let (sender, receiver) = mpsc::channel(BUFFER_SIZE);
-    sender_channels.lock().await.insert(killed_node, sender);
-    let omni_paxos = build_omnipaxos(op_config);
-    omni_paxos
-        .lock()
-        .await
-        .fail_recovery();
-    let mut op_server = OmniPaxosServer {
-        omni_paxos: Arc::clone(&omni_paxos),
-        incoming: receiver,
-        outgoing: Arc::clone(&sender_channels),
-    };
-    let abort_flag = Arc::new(AtomicBool::new(false));
-    let abort_flag_clone = Arc::clone(&abort_flag);
-    task::spawn({
-        async move {
-            op_server.run(Arc::clone(&abort_flag_clone)).await;
-        }
-    });
-    op_server_handles.insert(killed_node, (omni_paxos, abort_flag));
-    std::thread::sleep(WAIT_LEADER_TIMEOUT);
+    // let peers = SERVERS.iter().filter(|&&p| p != killed_node).copied().collect();
+    // let op_config = OmniPaxosConfig {
+    //     pid: killed_node,
+    //     configuration_id: 1,
+    //     peers,
+    //     ..Default::default()
+    // };
+    // let (sender, receiver) = mpsc::channel(BUFFER_SIZE);
+    // sender_channels.lock().await.insert(killed_node, sender);
+    // let omni_paxos = build_omnipaxos(op_config);
+    // omni_paxos
+    //     .lock()
+    //     .await
+    //     .fail_recovery();
+    // let mut op_server = OmniPaxosServer {
+    //     omni_paxos: Arc::clone(&omni_paxos),
+    //     incoming: receiver,
+    //     outgoing: Arc::clone(&sender_channels),
+    // };
+    // let abort_flag = Arc::new(AtomicBool::new(false));
+    // let abort_flag_clone = Arc::clone(&abort_flag);
+    // task::spawn({
+    //     async move {
+    //         op_server.run(Arc::clone(&abort_flag_clone)).await;
+    //     }
+    // });
+    // op_server_handles.insert(killed_node, (omni_paxos, abort_flag));
+    // std::thread::sleep(WAIT_LEADER_TIMEOUT);
 }
