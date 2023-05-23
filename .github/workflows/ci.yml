@@ -82,11 +82,5 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
-      - name: Set Up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 14
-      - name: Install Dependencies
-        run: npm install
       - name: Run Document Structure Check
-        run: node .github/scripts/doc_structure_checker.js
+        run: scripts/doc_structure_checker
