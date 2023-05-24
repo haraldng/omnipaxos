@@ -82,5 +82,7 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+      - name: Install dependencies
+        run: npm install js-yaml fs
       - name: Run Document Structure Check
-        run: scripts/doc_structure_checker
+        run: node .github/scripts/doc_structure_checker.js
