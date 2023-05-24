@@ -215,8 +215,12 @@ where
     /// Writes the value.
     pub(crate) fn single_rollback(&mut self, value: RollbackValue) {
         match value {
-            RollbackValue::DecidedIdx(idx) => self.set_decided_idx(idx).expect("storage error while trying to write decided_idx"),
-            RollbackValue::AcceptedRound(b) => self.set_accepted_round(b).expect("storage error while trying to write accepted_round"),
+            RollbackValue::DecidedIdx(idx) => self
+                .set_decided_idx(idx)
+                .expect("storage error while trying to write decided_idx"),
+            RollbackValue::AcceptedRound(b) => self
+                .set_accepted_round(b)
+                .expect("storage error while trying to write accepted_round"),
         }
     }
 
@@ -230,13 +234,17 @@ where
     /// This function is useful to handle `StorageResult::Error`.
     /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
     /// Otherwise it returns.
-    pub(crate) fn rollback_if_err<R>(&mut self, result: &StorageResult<R>, values: Vec<RollbackValue>, msg: &str)
-    where
+    pub(crate) fn rollback_if_err<R>(
+        &mut self,
+        result: &StorageResult<R>,
+        values: Vec<RollbackValue>,
+        msg: &str,
+    ) where
         R: Debug,
     {
         if result.is_err() {
             self.rollback(values);
-            panic!("{}: {}", msg, result.unwrap_err());
+            panic!("{}: {}", msg, result.as_ref().unwrap_err());
         }
     }
 

@@ -3,7 +3,7 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::{
-    storage::{Snapshot, SnapshotType, StorageResult, RollbackValue},
+    storage::{RollbackValue, Snapshot, SnapshotType, StorageResult},
     util::MessageStatus,
 };
 #[cfg(feature = "logging")]
@@ -138,7 +138,10 @@ where
                     };
                     self.internal_storage.rollback_if_err(
                         &result,
-                        vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
+                        vec![
+                            RollbackValue::AcceptedRound(old_accepted_round),
+                            RollbackValue::DecidedIdx(old_decided_idx),
+                        ],
                         "storage error while trying to write snapshot",
                     );
                     let accepted_idx = self.internal_storage.append_entries(accsync.suffix);
@@ -160,7 +163,10 @@ where
                         .append_on_prefix(accsync.sync_idx, accsync.suffix);
                     self.internal_storage.rollback_if_err(
                         &accepted_idx,
-                        vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
+                        vec![
+                            RollbackValue::AcceptedRound(old_accepted_round),
+                            RollbackValue::DecidedIdx(old_decided_idx),
+                        ],
                         "storage error while trying to write log entries",
                     );
                     Accepted {
@@ -254,20 +260,25 @@ where
             // handle decide
             if acc.decided_idx > old_decided_idx {
                 let result = self.internal_storage.set_decided_idx(acc.decided_idx);
-                if let Some(r) = old_accepted_round {
-                    self.internal_storage.rollback_if_err(
-                        &result,
-                        vec![RollbackValue::AcceptedRound(r)],
-                        "storage error while trying to write decided index",
+                if result.is_err() {
+                    if let Some(r) = old_accepted_round {
+                        self.internal_storage
+                            .single_rollback(RollbackValue::AcceptedRound(r));
+                    }
+                    panic!(
+                        "storage error while trying to write decided index: {}",
+                        result.unwrap_err()
                     );
                 }
             }
             let result = self.accept_entries(acc.n, entries);
             if result.is_err() {
                 if let Some(r) = old_accepted_round {
-                    self.internal_storage.single_rollback(RollbackValue::AcceptedRound(r));
+                    self.internal_storage
+                        .single_rollback(RollbackValue::AcceptedRound(r));
                 }
-                self.internal_storage.single_rollback(RollbackValue::DecidedIdx(old_decided_idx));
+                self.internal_storage
+                    .single_rollback(RollbackValue::DecidedIdx(old_decided_idx));
                 panic!(
                     "storage error while trying to write log entries: {}",
                     result.unwrap_err()

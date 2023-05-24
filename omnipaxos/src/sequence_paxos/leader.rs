@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{Snapshot, SnapshotType, StorageResult, RollbackValue};
+use crate::storage::{RollbackValue, Snapshot, SnapshotType, StorageResult};
 
 use super::*;
 
@@ -449,7 +449,10 @@ where
                         };
                         self.internal_storage.rollback_if_err(
                             &result,
-                            vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
                             "storage error while trying to write snapshot",
                         );
                         let result = self.internal_storage.append_entries(suffix);
@@ -474,8 +477,11 @@ where
                         };
                         self.internal_storage.rollback_if_err(
                             &result,
-                            vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
-                            "storage error while trying to write log entries"
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
+                            "storage error while trying to write log entries",
                         );
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
