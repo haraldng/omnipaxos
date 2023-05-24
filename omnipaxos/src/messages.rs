@@ -196,7 +196,10 @@ pub mod sequence_paxos {
 /// The different messages BLE uses to communicate with other replicas.
 pub mod ballot_leader_election {
 
-    use crate::{ballot_leader_election::Ballot, util::NodeId};
+    use crate::{
+        ballot_leader_election::Ballot,
+        util::{Connectivity, NodeId},
+    };
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
 
@@ -226,7 +229,7 @@ pub mod ballot_leader_election {
         /// BLEBallot of a replica.
         pub ballot: Ballot,
         /// The number of replicas inside the cluster the sender is connected to (including itself)
-        pub connectivity: u8,
+        pub connectivity: Connectivity,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

@@ -278,6 +278,8 @@ pub type TrimmedIndex = u64;
 pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
+/// The connectivity of an OmniPaxos node
+pub type Connectivity = u8;
 
 /// Used for checking the ordering of message sequences in the accept phase
 pub(crate) enum MessageStatus {

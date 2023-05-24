@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::{defaults::*, FlexibleQuorum, Quorum};
+use crate::util::{defaults::*, Connectivity, FlexibleQuorum, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -51,53 +51,6 @@ impl PartialOrd for Ballot {
     }
 }
 
-/// Used to define a BLE epoch
-#[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
-struct BLEBallot {
-    /// Ballot of a replica.
-    ballot: Ballot,
-    /// Used to determine if the replica is a candidate to become a leader or remain a leader.
-    connectivity: u8,
-}
-
-impl BLEBallot {
-    /// Creates a new BLEBallot
-    /// # Arguments
-    /// * `ballot` - A Sequence Paxos ballot.
-    /// * `priority` - Custom priority parameter.
-    /// * `connectivity` - The number of replicas inside the cluster that this instance is
-    /// connected to (based on heartbeats received) including itself.
-    pub fn with(ballot: Ballot, connectivity: u8) -> Self {
-        BLEBallot {
-            ballot,
-            connectivity,
-        }
-    }
-}
-
-impl Ord for BLEBallot {
-    fn cmp(&self, other: &Self) -> Ordering {
-        (
-            self.ballot.n,
-            self.ballot.priority,
-            self.connectivity,
-            self.ballot.pid,
-        )
-            .cmp(&(
-                other.ballot.n,
-                other.ballot.priority,
-                other.connectivity,
-                other.ballot.pid,
-            ))
-    }
-}
-
-impl PartialOrd for BLEBallot {
-    fn partial_cmp(&self, other: &BLEBallot) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
@@ -109,12 +62,12 @@ pub(crate) struct BallotLeaderElection {
     /// The current round of the heartbeat cycle.
     hb_round: u32,
     /// Vector which holds all the received heartbeats
-    ballots: Vec<(Ballot, u8)>,
+    ballots: Vec<(Ballot, Connectivity)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
     /// The number of replicas inside the cluster that this instance is
     /// connected to (based on heartbeats received) including itself.
-    connectivity: u8,
+    connectivity: Connectivity,
     /// Current elected leader.
     leader: Option<Ballot>,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain the leader.
@@ -146,7 +99,7 @@ impl BallotLeaderElection {
             hb_round: 0,
             ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
-            connectivity: num_nodes as u8,
+            connectivity: num_nodes as Connectivity,
             leader: initial_leader,
             quorum,
             outgoing: Vec::with_capacity(config.buffer_size),
@@ -197,14 +150,13 @@ impl BallotLeaderElection {
             .iter()
             .filter_map(|&(ballot, connectivity)| {
                 if self.quorum.is_accept_quorum(connectivity as usize) {
-                    Some(BLEBallot::with(ballot, connectivity))
+                    Some(ballot)
                 } else {
                     None
                 }
             })
             .max()
-            .unwrap_or_default()
-            .ballot;
+            .unwrap_or_default();
         let leader_ballot = self.leader.unwrap_or_default();
         if top_accept_ballot == leader_ballot {
             // leader is still alive and has accept quorum
@@ -212,17 +164,16 @@ impl BallotLeaderElection {
         } else {
             // leader is dead || changed priority || doesn't have an accept quorum
             let top_prepare_ballot = ballots
-                .into_iter()
-                .filter_map(|(ballot, connectivity)| {
+                .iter()
+                .filter_map(|&(ballot, connectivity)| {
                     if self.quorum.is_prepare_quorum(connectivity as usize) {
-                        Some(BLEBallot::with(ballot, connectivity))
+                        Some(ballot)
                     } else {
                         None
                     }
                 })
                 .max()
-                .unwrap_or_default()
-                .ballot;
+                .unwrap_or_default();
             if top_prepare_ballot > leader_ballot {
                 // new leader with prepare quorum
                 let new_leader = top_prepare_ballot;
@@ -267,7 +218,7 @@ impl BallotLeaderElection {
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         let my_connectivity = self.ballots.len() + 1;
-        self.connectivity = my_connectivity as u8;
+        self.connectivity = my_connectivity as Connectivity;
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
             debug!(
