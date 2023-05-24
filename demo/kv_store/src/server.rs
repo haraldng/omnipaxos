@@ -1,11 +1,11 @@
 use crate::{
     util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD},
     OmniPaxosKV,
-    kv::{KVSnapshot, KeyValue},
+    kv::KeyValue,
 };
-use omnipaxos_core::{messages::Message, util::NodeId};
+use omnipaxos::{messages::Message, util::NodeId};
 use serde_json;
-use serde::{Serialize, Deserialize},
+use serde::{Serialize, Deserialize};
 use tokio::{
     time,
     net::{TcpStream, tcp},
@@ -52,7 +52,7 @@ impl OmniPaxosServer {
     }
 
     async fn connect_sockets(&mut self) {
-        let api_stream = TcpStream::connect(self.api_addr.clone());
+        let api_stream = TcpStream::connect(self.api_addr.clone()).await.unwrap();
         let omni_paxos = self.omni_paxos.clone();
         let (api_reader, api_writer) = api_stream.into_split();
         self.api_socket = Some(api_writer);
@@ -61,7 +61,7 @@ impl OmniPaxosServer {
             let mut data = Vec::new();
             loop {
                 data.clear();
-                let bytes_read = api_reader.read_until(b'\n', &mut data).await;
+                let bytes_read = reader.read_until(b'\n', &mut data).await;
                 if bytes_read.is_err() {
                     // stream ended?
                     panic!("stream ended?")
@@ -70,7 +70,7 @@ impl OmniPaxosServer {
                 println!("CMD: {:?}", cmd);
                 match cmd {
                     APICommand::Append(kv) => {
-                        omni_paxos.lock().unwrap().append(kv);
+                        omni_paxos.lock().unwrap().append(kv).unwrap();
                     }
                 }
             }
@@ -93,7 +93,7 @@ impl OmniPaxosServer {
                         // stream ended?
                         panic!("stream ended?")
                     }
-                    let msg: Message<KeyValue, KVSnapshot> = serde_json::from_slice(&data).expect("could not deserialize msg");
+                    let msg: Message<KeyValue> = serde_json::from_slice(&data).expect("could not deserialize msg");
                     println!("{:?}", msg);
                     omni_paxos.lock().unwrap().handle_incoming(msg);
                 }
@@ -119,7 +119,7 @@ impl OmniPaxosServer {
                         let resp = APIResponse::Decided(new_decided_idx);
                         let mut data = serde_json::to_vec(&resp).expect("could not serialize response");
                         data.push(b'\n');
-                        self.api_socket.unwrap().write_all(&data).await.unwrap();
+                        self.api_socket.as_mut().unwrap().write_all(&data).await.unwrap();
                     }
                 },
                 else => (),

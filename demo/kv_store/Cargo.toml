@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # TODO: it's not nice to depend on git instead of a relative path here, but docker didn't like that
-omnipaxos_core = { git = "https://github.com/haraldng/omnipaxos", features = ["serde"] }
+omnipaxos = { git = "https://github.com/haraldng/omnipaxos", features = ["serde"] }
 omnipaxos_storage = { git = "https://github.com/haraldng/omnipaxos" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "net", "io-util", "time"] }
 serde = { version = "1.0", features = ["derive"] }

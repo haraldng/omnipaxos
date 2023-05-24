@@ -1,4 +1,4 @@
-use omnipaxos_core::storage::Snapshot;
+use omnipaxos::storage::{Snapshot, Entry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -6,6 +6,10 @@ use std::collections::HashMap;
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
+}
+
+impl Entry for KeyValue {
+    type Snapshot = KVSnapshot;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

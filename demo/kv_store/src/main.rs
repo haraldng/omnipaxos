@@ -1,11 +1,8 @@
 use crate::{
-    kv::{KVSnapshot, KeyValue},
+    kv::KeyValue,
     server::OmniPaxosServer,
 };
-use omnipaxos_core::{
-    omni_paxos::*,
-    util::NodeId,
-};
+use omnipaxos::{*, util::NodeId};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use tokio;
 use std::{
@@ -46,7 +43,7 @@ lazy_static!{
 
 }
 
-type OmniPaxosKV = OmniPaxos<KeyValue, KVSnapshot, MemoryStorage<KeyValue, KVSnapshot>>;
+type OmniPaxosKV = OmniPaxos<KeyValue, MemoryStorage<KeyValue>>;
 
 #[tokio::main]
 async fn main() {
@@ -68,8 +65,9 @@ async fn main() {
         peer_addrs,
         peers: PEERS.clone(),
         pid: *PID,
-        api_addr: *API_ADDR,
+        api_addr: API_ADDR.clone(),
         api_socket: None,
+        last_sent_decided_idx: 0,
     };
     op_server.run().await;
 }
