@@ -182,6 +182,13 @@ impl<T: Entry> Snapshot<T> for NoSnapshot {
     }
 }
 
+/// Used to perform convenient rollbacks of storage operations on internal storage.
+/// Represents only values that can and will actually be rolled back from outside internal storage.
+pub(crate) enum RollbackValue {
+    DecidedIdx(u64),
+    AcceptedRound(Ballot),
+}
+
 /// Internal representation of storage. Hides all complexities with the compacted index
 /// such that Sequence Paxos accesses the log with the uncompacted index.
 pub(crate) struct InternalStorage<I, T>
@@ -202,6 +209,34 @@ where
         InternalStorage {
             storage,
             _t: Default::default(),
+        }
+    }
+
+    /// Writes the value.
+    pub(crate) fn single_rollback(&mut self, value: RollbackValue) {
+        match value {
+            RollbackValue::DecidedIdx(idx) => self.set_decided_idx(idx).expect("storage error while trying to write decided_idx"),
+            RollbackValue::AcceptedRound(b) => self.set_accepted_round(b).expect("storage error while trying to write accepted_round"),
+        }
+    }
+
+    /// Writes the values.
+    pub(crate) fn rollback(&mut self, values: Vec<RollbackValue>) {
+        for value in values {
+            self.single_rollback(value);
+        }
+    }
+
+    /// This function is useful to handle `StorageResult::Error`.
+    /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
+    /// Otherwise it returns.
+    pub(crate) fn rollback_if_err<R>(&mut self, result: &StorageResult<R>, values: Vec<RollbackValue>, msg: &str)
+    where
+        R: Debug,
+    {
+        if result.is_err() {
+            self.rollback(values);
+            panic!("{}: {}", msg, result.unwrap_err());
         }
     }
 

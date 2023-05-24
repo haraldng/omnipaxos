@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{Snapshot, SnapshotType, StorageResult};
+use crate::storage::{Snapshot, SnapshotType, StorageResult, RollbackValue};
 
 use super::*;
 
@@ -57,7 +57,6 @@ where
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
-            // <<<<<<< HEAD:omnipaxos_core/src/sequence_paxos/leader.rs
             let prep = Prepare {
                 n,
                 decided_idx,
@@ -74,10 +73,6 @@ where
                     to: *pid,
                     msg: PaxosMsg::Prepare(prep),
                 });
-                // =======
-                //             for pid in self.peers.clone() {
-                //                 self.send_prepare(pid);
-                // >>>>>>> master:omnipaxos/src/sequence_paxos/leader.rs
             }
         } else {
             self.state.0 = Role::Follower;
@@ -428,15 +423,11 @@ where
             .set_accepted_round(self.leader_state.n_leader)
             .expect("storage error while trying to write accepted round");
         let result = self.internal_storage.set_decided_idx(decided_idx);
-        if result.is_err() {
-            self.internal_storage
-                .set_accepted_round(old_accepted_round)
-                .expect("storage error while trying to write accepted round");
-            panic!(
-                "storage error while trying to write decided index: {}",
-                result.unwrap_err()
-            );
-        }
+        self.internal_storage.rollback_if_err(
+            &result,
+            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+            "storage error while trying to write decided index",
+        );
         match max_promise {
             Some(PromiseData {
                 decided_snapshot,
@@ -456,29 +447,17 @@ where
                                 self.internal_storage.merge_snapshot(decided_idx, d)
                             }
                         };
-                        if result.is_err() {
-                            self.internal_storage
-                                .set_accepted_round(old_accepted_round)
-                                .expect("storage error while trying to write accepted round");
-                            self.internal_storage
-                                .set_decided_idx(old_decided_idx)
-                                .expect("storage error while trying to write decided index");
-                            panic!(
-                                "storage error while trying to write snapshot: {}",
-                                result.unwrap_err()
-                            );
-                        }
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
+                            "storage error while trying to write snapshot",
+                        );
                         let result = self.internal_storage.append_entries(suffix);
-                        if result.is_err() {
-                            // we set the decided snapshot successfully, so no need to rollback decided_idx
-                            self.internal_storage
-                                .set_accepted_round(old_accepted_round)
-                                .expect("storage error while trying to write accepted round");
-                            panic!(
-                                "storage error while trying to write log entries: {}",
-                                result.unwrap_err()
-                            );
-                        }
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+                            "storage error while trying to write log entries",
+                        );
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -493,18 +472,11 @@ where
                         } else {
                             self.internal_storage.append_on_decided_prefix(suffix)
                         };
-                        if result.is_err() {
-                            self.internal_storage
-                                .set_accepted_round(old_accepted_round)
-                                .expect("storage error while trying to write accepted round");
-                            self.internal_storage
-                                .set_decided_idx(old_decided_idx)
-                                .expect("storage error while trying to write decided index");
-                            panic!(
-                                "storage error while trying to write log entries: {}",
-                                result.unwrap_err()
-                            );
-                        }
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![RollbackValue::AcceptedRound(old_accepted_round), RollbackValue::DecidedIdx(old_decided_idx)],
+                            "storage error while trying to write log entries"
+                        );
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -633,15 +605,11 @@ where
                     )
                     .expect("storage error while trying to write decided index");
                 let result = self.internal_storage.set_stopsign(ss);
-                if result.is_err() {
-                    self.internal_storage
-                        .set_decided_idx(old_decided_idx)
-                        .expect("storage error while trying to write decided index");
-                    panic!(
-                        "storage error while trying to write stopsign: {}",
-                        result.unwrap_err()
-                    );
-                }
+                self.internal_storage.rollback_if_err(
+                    &result,
+                    vec![RollbackValue::DecidedIdx(old_decided_idx)],
+                    "storage error while trying to write stopsign",
+                );
                 for pid in self.leader_state.get_promised_followers() {
                     self.send_decide_stopsign(pid);
                 }
