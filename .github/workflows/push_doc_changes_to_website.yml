@@ -4,18 +4,11 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - '**'
-    if: github.repository == 'haraldng/omnipaxos'
-
-  pull_request:
-    branches:
-      - master
-    types: [opened, reopened, synchronize]
 
 jobs:
-  dispatch:
+  doc_dispatch:
     runs-on: ubuntu-latest
+    if: github.repository == 'haraldng/omnipaxos'
     steps:
       - name: Set SSH key
         run: echo "$SSH_DEPLOY_KEY" > ssh_deploy_key.pem
