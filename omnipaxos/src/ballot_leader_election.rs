@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::{defaults::*, Connectivity, FlexibleQuorum, Quorum};
+use crate::util::{defaults::*, FlexibleQuorum, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -50,6 +50,9 @@ impl PartialOrd for Ballot {
         Some(self.cmp(other))
     }
 }
+
+/// The connectivity of an OmniPaxos node
+type Connectivity = u8;
 
 /// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
