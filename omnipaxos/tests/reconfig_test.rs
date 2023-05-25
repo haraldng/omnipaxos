@@ -6,6 +6,8 @@ use serial_test::serial;
 use std::time::Duration;
 use utils::{TestConfig, TestSystem, Value};
 
+const SS_METADATA: u8 = 255;
+
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
 #[serial]
@@ -33,12 +35,13 @@ fn reconfig_test() {
         nodes: new_nodes.clone(),
         initial_leader: None,
     };
+    let metadata = Some(vec![SS_METADATA]);
 
     let first_node = sys.nodes.get(&1).unwrap();
     let reconfig_f = first_node.on_definition(|x| {
         let (kprom, kfuture) = promise::<Value>();
         x.paxos
-            .reconfigure(new_config.clone())
+            .reconfigure(new_config.clone(), metadata.clone())
             .expect("Failed to reconfigure");
         x.decided_futures.push(Ask::new(kprom, ()));
         kfuture
@@ -53,6 +56,7 @@ fn reconfig_test() {
         let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());
         if let Some(stop_sign) = ss {
             assert_eq!(stop_sign.next_config, new_config);
+            assert_eq!(stop_sign.metadata, metadata);
             x.push(pid);
         }
         x

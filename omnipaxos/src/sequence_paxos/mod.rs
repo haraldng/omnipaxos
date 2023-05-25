@@ -31,7 +31,7 @@ where
     #[allow(dead_code)]
     config_id: ConfigurationId,
     pid: NodeId,
-    peers: Vec<u64>, // excluding self pid
+    peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
     leader: Ballot,
     pending_proposals: Vec<T>,
@@ -265,45 +265,51 @@ where
     }
 
     /// Append an entry to the replicated log.
-    pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
+    pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr> {
         if self.stopped() {
-            Err(ProposeErr::Normal(entry))
+            Err(ProposeErr::Stopped)
         } else {
             self.propose_entry(entry);
             Ok(())
         }
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped.
-    pub(crate) fn reconfigure(&mut self, new_config: ClusterConfig) -> Result<(), ProposeErr<T>> {
+    /// Propose a reconfiguration. Returns an error if already stopped or `new_config` is invalid.
+    /// `new_config` defines the cluster-wide configuration settings for the next cluster.
+    /// `metadata` is optional data to commit alongside the reconfiguration.
+    pub(crate) fn reconfigure(
+        &mut self,
+        new_config: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr> {
         #[cfg(feature = "logging")]
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_config.nodes
         );
         if self.stopped() {
-            Err(ProposeErr::Reconfiguration(new_config))
+            Err(ProposeErr::Stopped)
         } else {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(new_config);
+                        let ss = StopSign::with(new_config, metadata);
                         self.pending_stopsign = Some(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_config));
+                        return Err(ProposeErr::Stopped);
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
                     if !self.stopped() {
-                        let ss = StopSign::with(new_config);
+                        let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         self.send_accept_stopsign(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_config));
+                        return Err(ProposeErr::Stopped);
                     }
                 }
                 _ => {
-                    let ss = StopSign::with(new_config);
+                    let ss = StopSign::with(new_config, metadata);
                     self.forward_stopsign(ss);
                 }
             }
@@ -379,7 +385,7 @@ enum Role {
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `logger_file_path`: The path where the default logger logs events.
@@ -387,7 +393,7 @@ enum Role {
 pub(crate) struct SequencePaxosConfig {
     configuration_id: u32,
     pid: NodeId,
-    peers: Vec<u64>,
+    peers: Vec<NodeId>,
     buffer_size: usize,
     initial_leader: Option<Ballot>,
     #[cfg(feature = "logging")]

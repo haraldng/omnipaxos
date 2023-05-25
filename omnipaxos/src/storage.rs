@@ -43,12 +43,17 @@ impl StopSignEntry {
 pub struct StopSign {
     /// The new `Omnipaxos` cluster configuration
     pub next_config: ClusterConfig,
+    /// Metadata for the reconfiguration.
+    pub metadata: Option<Vec<u8>>,
 }
 
 impl StopSign {
     /// Creates a [`StopSign`].
-    pub fn with(next_config: ClusterConfig) -> Self {
-        StopSign { next_config }
+    pub fn with(next_config: ClusterConfig, metadata: Option<Vec<u8>>) -> Self {
+        StopSign {
+            next_config,
+            metadata,
+        }
     }
 }
 

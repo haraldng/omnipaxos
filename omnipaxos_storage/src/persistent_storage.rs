@@ -70,6 +70,7 @@ struct StopSignStorage {
     configuration_id: u32,
     nodes: Vec<u64>,
     initial_leader: Option<BallotStorage>,
+    metadata: Option<Vec<u8>>,
 }
 
 impl StopSignStorage {
@@ -78,6 +79,7 @@ impl StopSignStorage {
             configuration_id: ss.next_config.configuration_id,
             nodes: ss.next_config.nodes,
             initial_leader: ss.next_config.initial_leader.map(BallotStorage::with),
+            metadata: ss.metadata,
         }
     }
 }
@@ -500,8 +502,9 @@ where
                             pid: ballot.pid,
                         }),
                     };
+                    let metadata = ss_entry_storage.ss.metadata;
                     Some(StopSignEntry::with(
-                        StopSign::with(next_config),
+                        StopSign::with(next_config, metadata),
                         ss_entry_storage.decided,
                     ))
                 }
@@ -527,8 +530,9 @@ where
                             pid: ballot.pid,
                         }),
                     };
+                    let metadata = ss_entry_storage.ss.metadata;
                     Some(StopSignEntry::with(
-                        StopSign::with(next_config),
+                        StopSign::with(next_config, metadata),
                         ss_entry_storage.decided,
                     ))
                 }

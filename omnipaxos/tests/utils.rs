@@ -4,7 +4,7 @@ use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelu
 use omnipaxos::{
     ballot_leader_election::Ballot,
     messages::Message,
-    storage::{Entry, Snapshot, StopSign, Storage},
+    storage::{Entry, Snapshot, Storage},
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -293,7 +293,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
-                    op_config.build(storage),
+                    op_config.build(storage).unwrap(),
                     Duration::from_millis(election_timeout_ms),
                 )
             });
@@ -368,7 +368,7 @@ impl TestSystem {
             .create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
-                    op_config.build(storage),
+                    op_config.build(storage).unwrap(),
                     Duration::from_millis(election_timeout_ms),
                 )
             });
@@ -639,7 +639,7 @@ pub mod omnireplica {
                                 .decided_futures
                                 .pop()
                                 .unwrap()
-                                .reply(stopsign_config_to_value(&ss))
+                                .reply(Value(ss.next_config.configuration_id as u64))
                                 .expect("Failed to reply stopsign promise"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
@@ -690,11 +690,6 @@ impl Snapshot<Value> for LatestValue {
 
 impl Entry for Value {
     type Snapshot = LatestValue;
-}
-
-fn stopsign_config_to_value(ss: &StopSign) -> Value {
-    let v = ss.next_config.configuration_id;
-    Value(v as u64)
 }
 
 /// Create a temporary directory in /tmp/

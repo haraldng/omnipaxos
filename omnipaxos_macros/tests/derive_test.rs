@@ -35,5 +35,5 @@ fn build_op_test() {
     };
 
     let _omnipaxos: OmniPaxos<TestEntry, MemoryStorage<TestEntry>> =
-        config.build(MemoryStorage::default());
+        config.build(MemoryStorage::default()).unwrap();
 }

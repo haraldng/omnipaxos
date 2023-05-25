@@ -1,5 +1,5 @@
-#[cfg(feature = "toml_config")]
-use crate::errors::ConfigError;
+use crate::errors::{valid_config, ConfigError};
+// use crate::valid_config;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
@@ -20,7 +20,7 @@ use toml;
 /// Configuration for `OmniPaxos`.
 /// # Fields
 /// * `cluster_config`: The configuration settings that are cluster-wide.
-/// * `server_config`: The configuration settings that unique to this OmniPaxos replica.
+/// * `server_config`: The configuration settings that unique to this OmniPaxos server.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
@@ -30,66 +30,77 @@ pub struct OmniPaxosConfig {
 }
 
 impl OmniPaxosConfig {
+    /// Checks that all the fields of the cluster config are valid
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.cluster_config.validate()?;
+        self.server_config.validate()?;
+        valid_config!(
+            self.cluster_config.nodes.contains(&self.server_config.pid),
+            "Nodes must include own server pid"
+        );
+        Ok(())
+    }
+
     /// Creates a new `OmniPaxosConfig` from a `toml` file.
     #[cfg(feature = "toml_config")]
     pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
         let config_file = fs::read_to_string(file_path)?;
         let config: OmniPaxosConfig = toml::from_str(&config_file)?;
+        config.validate()?;
         Ok(config)
     }
 
-    /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
+    /// Checks all configuration fields and returns the local OmniPaxos node if successful.
+    pub fn build<T, B>(self, storage: B) -> Result<OmniPaxos<T, B>, ConfigError>
     where
         T: Entry,
         B: Storage<T>,
     {
-        let ClusterConfig {
-            configuration_id,
-            nodes,
-            initial_leader,
-        } = &self.cluster_config;
-        let ServerConfig {
-            pid, buffer_size, ..
-        } = &self.server_config;
-
-        // Check that pid, peers, and nodes are consistent
-        assert_ne!(*pid, 0, "Pid cannot be 0");
-        assert_ne!(*configuration_id, 0, "Configuration id cannot be 0");
-        assert!(nodes.contains(pid), "Nodes should include self pid {}", pid);
-        assert!(nodes.len() > 1, "Need more than 1 node");
-        assert!(*buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = initial_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
-        };
-        OmniPaxos {
+        self.validate()?;
+        Ok(OmniPaxos {
             seq_paxos: SequencePaxos::with(self.clone().into(), storage),
             ble: BallotLeaderElection::with(self.into()),
-        }
+        })
     }
 }
 
 /// Configuration for an `OmniPaxos` cluster.
 /// # Fields
-/// * `configuration_id`: The identifier for the cluster configuration that this Sequence Paxos replica is part of.
-/// * `nodes`: The nodes in the cluster i.e. the `pid`s of the other replicas in the configuration.
+/// * `configuration_id`: The identifier for the cluster configuration that this OmniPaxos server is part of.
+/// * `nodes`: The nodes in the cluster i.e. the `pid`s of the other servers in the configuration.
 /// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase when switching to a new configuration.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 #[cfg_attr(any(feature = "serde", feature = "toml_config"), derive(Deserialize))]
 #[cfg_attr(feature = "toml_config", serde(default))]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ClusterConfig {
-    /// The identifier for the cluster configuration that this Sequence Paxos replica is part of.
+    /// The identifier for the cluster configuration that this OmniPaxos server is part of. Must
+    /// not be 0 and be greater than the previous configuration's id.
     pub configuration_id: u32,
-    /// The nodes in the cluster i.e. the `pid`s of the other replicas in the configuration.
-    pub nodes: Vec<u64>,
+    /// The nodes in the cluster i.e. the `pid`s of the other servers in the configuration.
+    pub nodes: Vec<NodeId>,
     /// The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase when switching to a new configuration.
     pub initial_leader: Option<Ballot>,
 }
 
 impl ClusterConfig {
-    /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build_for<T, B>(self, storage: B, server_config: ServerConfig) -> OmniPaxos<T, B>
+    /// Checks that all the fields of the cluster config are valid
+    fn validate(&self) -> Result<(), ConfigError> {
+        valid_config!(self.nodes.len() > 1, "Need more than 1 node");
+        valid_config!(self.configuration_id != 0, "Configuration ID cannot be 0");
+        if let Some(leader) = self.initial_leader {
+            valid_config!(leader.pid != 0, "Initial leader pid cannot be 0")
+        }
+        Ok(())
+    }
+
+    /// Checks all configuration fields and builds a local OmniPaxos node with settings for this
+    /// node defined in `server_config` and using storage `with_storage`.
+    pub fn build_for_server<T, B>(
+        self,
+        server_config: ServerConfig,
+        with_storage: B,
+    ) -> Result<OmniPaxos<T, B>, ConfigError>
     where
         T: Entry,
         B: Storage<T>,
@@ -98,17 +109,7 @@ impl ClusterConfig {
             cluster_config: self,
             server_config,
         };
-        op_config.build(storage)
-    }
-}
-
-impl Default for ClusterConfig {
-    fn default() -> Self {
-        Self {
-            configuration_id: 1,
-            nodes: Vec::new(),
-            initial_leader: None,
-        }
+        op_config.build(with_storage)
     }
 }
 
@@ -130,6 +131,14 @@ pub struct ServerConfig {
     pub logger_file_path: Option<String>,
     /// Custom priority for this node to be elected as the leader.
     pub leader_priority: u64,
+}
+
+impl ServerConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        valid_config!(self.pid != 0, "Initial leader pid cannot be 0");
+        valid_config!(self.buffer_size != 0, "Buffer size must be greater than 0");
+        Ok(())
+    }
 }
 
 impl Default for ServerConfig {
@@ -209,7 +218,7 @@ where
         }
     }
 
-    /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
+    /// Returns the outgoing messages from this server. The messages should then be sent via the network implementation.
     pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
         let paxos_msgs = self
             .seq_paxos
@@ -261,15 +270,22 @@ where
     }
 
     /// Append an entry to the replicated log.
-    pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
+    pub fn append(&mut self, entry: T) -> Result<(), ProposeErr> {
         self.seq_paxos.append(entry)
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped.
-    pub fn reconfigure(&mut self, new_configuration: ClusterConfig) -> Result<(), ProposeErr<T>> {
-        // TODO: doesn't check to make sure the new_config is valid. A user could propose a flawed
-        // ClusterConfig and if it gets decided be stuck with it. Is this acceptable?
-        self.seq_paxos.reconfigure(new_configuration)
+    /// Propose a reconfiguration. Returns an error if already stopped or `new_configuration` is invalid.
+    /// `new_configuration` defines the cluster-wide configuration settings for the next cluster.
+    /// `metadata` is optional data to commit alongside the reconfiguration.
+    pub fn reconfigure(
+        &mut self,
+        new_configuration: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr> {
+        if let Err(config_error) = new_configuration.validate() {
+            return Err(ProposeErr::Reconfiguration(config_error));
+        }
+        self.seq_paxos.reconfigure(new_configuration, metadata)
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.
@@ -295,15 +311,13 @@ where
     }
 }
 
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
+/// An error indicating a failed proposal due to the current configuration being already stopped
+/// or due to an invalid proposed configuration.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub enum ProposeErr<T>
-where
-    T: Entry,
-{
-    Normal(T),
-    Reconfiguration(ClusterConfig),
+pub enum ProposeErr {
+    Stopped,
+    Reconfiguration(ConfigError),
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.

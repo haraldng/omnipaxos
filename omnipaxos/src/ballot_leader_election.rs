@@ -37,20 +37,20 @@ impl Ballot {
     }
 }
 
-/// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
+/// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub(crate) struct BallotLeaderElection {
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
-    /// Vector that holds all the other replicas.
-    peers: Vec<u64>,
+    /// Vector that holds the pids of all the other servers.
+    peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
     /// Vector which holds all the received ballots.
     ballots: Vec<(Ballot, bool)>,
     /// Holds the current ballot of this instance.
-    current_ballot: Ballot, // (round, pid)
+    current_ballot: Ballot,
     /// States if the instance is a candidate to become a leader.
     quorum_connected: bool,
     /// Current elected leader.
@@ -220,7 +220,7 @@ impl BallotLeaderElection {
         result
     }
 
-    fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
+    fn handle_request(&mut self, from: NodeId, req: HeartbeatRequest) {
         let hb_reply = HeartbeatReply {
             round: req.round,
             ballot: self.current_ballot,
@@ -250,7 +250,7 @@ impl BallotLeaderElection {
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
 /// * `initial_leader`: The initial leader of the cluster.
 /// * `buffer_size`: The buffer size for outgoing messages.
@@ -258,7 +258,7 @@ impl BallotLeaderElection {
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
     pid: NodeId,
-    peers: Vec<u64>,
+    peers: Vec<NodeId>,
     priority: u64,
     initial_leader: Option<Ballot>,
     buffer_size: usize,
