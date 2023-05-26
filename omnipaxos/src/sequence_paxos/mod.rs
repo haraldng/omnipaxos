@@ -106,7 +106,10 @@ where
                 create_logger(s.as_str())
             },
         };
-        paxos.internal_storage.set_promise(leader);
+        paxos
+            .internal_storage
+            .set_promise(leader)
+            .expect("storage error while trying to write promise");
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -147,7 +150,10 @@ where
                         });
                     }
                 }
-                result
+                result.map_err(|e| {
+                    *e.downcast()
+                        .expect("storage error while trying to trim log")
+                })
             }
             _ => Err(CompactionErr::NotCurrentLeader(self.leader.pid)),
         }
@@ -174,17 +180,24 @@ where
                 });
             }
         }
-        result
+        result.map_err(|e| {
+            *e.downcast()
+                .expect("storage error while trying to snapshot log")
+        })
     }
 
     /// Return the decided index.
     pub(crate) fn get_decided_idx(&self) -> u64 {
-        self.internal_storage.get_decided_idx()
+        self.internal_storage
+            .get_decided_idx()
+            .expect("storage error while trying to read decided index")
     }
 
     /// Return trim index from storage.
     pub(crate) fn get_compacted_idx(&self) -> u64 {
-        self.internal_storage.get_compacted_idx()
+        self.internal_storage
+            .get_compacted_idx()
+            .expect("storage error while trying to read compacted index")
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
@@ -219,7 +232,11 @@ where
                 // Resend AcceptStopSign
                 if *phase == Phase::Accept {
                     // TODO: This is slow. Get stopsign from cache instead.
-                    if let Some(ss) = self.internal_storage.get_stopsign() {
+                    if let Some(ss) = self
+                        .internal_storage
+                        .get_stopsign()
+                        .expect("storage error while trying to read stopsign")
+                    {
                         if !ss.decided {
                             for follower in self.leader_state.get_promised_followers() {
                                 if !self.leader_state.follower_has_accepted_stopsign(follower) {
@@ -233,7 +250,8 @@ where
                 // Resend Prepare
                 let unpromised_peers = self.leader_state.get_unpromised_peers();
                 for peer in unpromised_peers {
-                    self.send_prepare(peer);
+                    self.send_prepare(peer)
+                        .expect("storage error while trying to read data for prepare");
                 }
             }
             (Role::Follower, phase) => {
@@ -318,7 +336,11 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        match self.internal_storage.get_stopsign() {
+        match self
+            .internal_storage
+            .get_stopsign()
+            .expect("storage error while trying to read stopsign")
+        {
             Some(ss) if ss.decided => Some(ss.stopsign),
             _ => None,
         }
@@ -401,7 +423,8 @@ where
 
     fn accept_stopsign(&mut self, ss: StopSign) {
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, false));
+            .set_stopsign(StopSignEntry::with(ss, false))
+            .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
             self.leader_state.set_accepted_stopsign(self.pid);
         }
@@ -431,7 +454,10 @@ where
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {
-        self.internal_storage.get_stopsign().map(|x| x.stopsign)
+        self.internal_storage
+            .get_stopsign()
+            .expect("storage error while trying to read stopsign")
+            .map(|x| x.stopsign)
     }
 }
 

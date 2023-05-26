@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{Snapshot, SnapshotType};
+use crate::storage::{RollbackValue, Snapshot, SnapshotType, StorageResult};
 
 use super::*;
 
@@ -16,7 +16,12 @@ where
     pub(crate) fn handle_leader(&mut self, n: Ballot) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
-        if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
+        if n <= self.leader_state.n_leader
+            || n <= self
+                .internal_storage
+                .get_promise()
+                .expect("storage error while trying to read promise")
+        {
             return;
         }
         if self.stopped() {
@@ -30,11 +35,16 @@ where
                 self.leader_state.majority,
             );
             self.leader = n;
-            self.internal_storage.set_promise(n);
             /* insert my promise */
-            let na = self.internal_storage.get_accepted_round();
-            let decided_idx = self.internal_storage.get_decided_idx();
-            let accepted_idx = self.internal_storage.get_log_len();
+            let na = self
+                .internal_storage
+                .get_accepted_round()
+                .expect("storage error while trying to read accepted round");
+            let decided_idx = self.get_decided_idx();
+            let accepted_idx = self
+                .internal_storage
+                .get_log_len()
+                .expect("storage error while trying to read log length");
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -47,8 +57,22 @@ where
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
-            for pid in self.peers.clone() {
-                self.send_prepare(pid);
+            let prep = Prepare {
+                n,
+                decided_idx,
+                n_accepted: na,
+                accepted_idx,
+            };
+            self.internal_storage
+                .set_promise(n)
+                .expect("storage error while trying to write promise");
+            /* send prepare */
+            for pid in &self.peers {
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: *pid,
+                    msg: PaxosMsg::Prepare(prep),
+                });
             }
         } else {
             self.state.0 = Role::Follower;
@@ -64,7 +88,8 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            self.send_prepare(from);
+            self.send_prepare(from)
+                .expect("storage error while trying to read values for prepare message");
         }
     }
 
@@ -139,18 +164,19 @@ where
         }
     }
 
-    pub(crate) fn send_prepare(&mut self, to: NodeId) {
+    pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
         let prep = Prepare {
             n: self.leader_state.n_leader,
-            decided_idx: self.internal_storage.get_decided_idx(),
-            n_accepted: self.internal_storage.get_accepted_round(),
-            accepted_idx: self.internal_storage.get_log_len(),
+            decided_idx: self.internal_storage.get_decided_idx()?,
+            n_accepted: self.internal_storage.get_accepted_round()?,
+            accepted_idx: self.internal_storage.get_log_len()?,
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::Prepare(prep),
         });
+        Ok(())
     }
 
     #[cfg(feature = "batch_accept")]
@@ -158,7 +184,10 @@ where
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: self.internal_storage.get_decided_idx(),
+            decided_idx: self
+                .internal_storage
+                .get_decided_idx()
+                .expect("storage error while trying to read decided index"),
             entries,
         };
         self.outgoing.push(PaxosMessage {
@@ -171,7 +200,14 @@ where
     }
 
     pub(crate) fn send_accept(&mut self, entry: T) {
-        let accepted_idx = self.internal_storage.append_entry(entry.clone());
+        let decided_idx = self
+            .internal_storage
+            .get_decided_idx()
+            .expect("storage error while trying to read decided index");
+        let accepted_idx = self
+            .internal_storage
+            .append_entry(entry.clone())
+            .expect("storage error while trying to write an entry");
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -190,7 +226,7 @@ where
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
                     seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.internal_storage.get_decided_idx(),
+                    decided_idx,
                     entries: vec![entry.clone()],
                 };
                 self.outgoing.push(PaxosMessage {
@@ -203,7 +239,14 @@ where
     }
 
     fn send_batch_accept(&mut self, entries: Vec<T>) {
-        let accepted_idx = self.internal_storage.append_entries(entries.clone());
+        let decided_idx = self
+            .internal_storage
+            .get_decided_idx()
+            .expect("storage error while trying to read decided index");
+        let accepted_idx = self
+            .internal_storage
+            .append_entries(entries.clone())
+            .expect("storage error while trying to write log entries");
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -222,7 +265,7 @@ where
                 let acc = AcceptDecide {
                     n: self.leader_state.n_leader,
                     seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx: self.internal_storage.get_decided_idx(),
+                    decided_idx,
                     entries: entries.clone(),
                 };
                 self.outgoing.push(PaxosMessage {
@@ -253,26 +296,44 @@ where
             .expect("Received PromiseMetaData but not found in ld");
         let (delta_snapshot, suffix, sync_idx) =
             if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
-                if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
+                if self
+                    .internal_storage
+                    .get_compacted_idx()
+                    .expect("storage error while trying to read compacted index")
+                    > *promise_accepted_idx
                     && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
                         .internal_storage
-                        .create_diff_snapshot(follower_decided_idx, my_decided_idx);
-                    let suffix = self.internal_storage.get_suffix(my_decided_idx);
+                        .create_diff_snapshot(follower_decided_idx, my_decided_idx)
+                        .expect("storage error while trying to read diff snapshot");
+                    let suffix = self
+                        .internal_storage
+                        .get_suffix(my_decided_idx)
+                        .expect("storage error while trying to read log suffix");
                     (Some(delta_snapshot), suffix, follower_decided_idx)
                 } else {
-                    let sfx = self.internal_storage.get_suffix(*promise_accepted_idx);
+                    let sfx = self
+                        .internal_storage
+                        .get_suffix(*promise_accepted_idx)
+                        .expect("storage error while trying to read log suffix");
                     (None, sfx, *promise_accepted_idx)
                 }
             } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
                 let delta_snapshot = self
                     .internal_storage
-                    .create_diff_snapshot(follower_decided_idx, my_decided_idx);
-                let suffix = self.internal_storage.get_suffix(my_decided_idx);
+                    .create_diff_snapshot(follower_decided_idx, my_decided_idx)
+                    .expect("storage error while trying to read diff snapshot");
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(my_decided_idx)
+                    .expect("storage error while trying to read log suffix");
                 (Some(delta_snapshot), suffix, follower_decided_idx)
             } else {
-                let suffix = self.internal_storage.get_suffix(follower_decided_idx);
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(follower_decided_idx)
+                    .expect("storage error while trying to read log suffix");
                 (None, suffix, follower_decided_idx)
             };
         self.leader_state.increment_seq_num_session(to);
@@ -293,11 +354,11 @@ where
         self.outgoing.push(msg);
     }
 
-    fn send_decide(&mut self, to: NodeId) {
+    fn send_decide(&mut self, to: NodeId, decided_idx: u64) {
         let d = Decide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: self.internal_storage.get_decided_idx(),
+            decided_idx,
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
@@ -328,11 +389,16 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            let accepted_idx = self.internal_storage.append_entries(new_entries);
+            let accepted_idx = self
+                .internal_storage
+                .append_entries(new_entries)
+                .expect("storage error while trying to write log entries");
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }
 
+    // Correctness: This function performs multiple operations that cannot be rolled
+    // back, so instead it relies on writing in a "safe" order for correctness.
     fn handle_majority_promises(&mut self) {
         self.state = (Role::Leader, Phase::Accept);
         let max_stopsign = self.leader_state.take_max_promise_stopsign();
@@ -345,6 +411,23 @@ where
             .max()
             .unwrap()
             .unwrap();
+        let old_decided_idx = self
+            .internal_storage
+            .get_decided_idx()
+            .expect("storage error while trying to read decided index");
+        let old_accepted_round = self
+            .internal_storage
+            .get_accepted_round()
+            .expect("storage error while trying to read accepted round");
+        self.internal_storage
+            .set_accepted_round(self.leader_state.n_leader)
+            .expect("storage error while trying to write accepted round");
+        let result = self.internal_storage.set_decided_idx(decided_idx);
+        self.internal_storage.rollback_if_err(
+            &result,
+            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+            "storage error while trying to write decided index",
+        );
         match max_promise {
             Some(PromiseData {
                 decided_snapshot,
@@ -356,15 +439,28 @@ where
                             .leader_state
                             .get_decided_idx(max_promise_meta.pid)
                             .unwrap();
-                        match s {
+                        let result = match s {
                             SnapshotType::Complete(c) => {
-                                self.internal_storage.set_snapshot(decided_idx, c);
+                                self.internal_storage.set_snapshot(decided_idx, c)
                             }
                             SnapshotType::Delta(d) => {
-                                self.internal_storage.merge_snapshot(decided_idx, d);
+                                self.internal_storage.merge_snapshot(decided_idx, d)
                             }
-                        }
-                        self.internal_storage.append_entries(suffix);
+                        };
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
+                            "storage error while trying to write snapshot",
+                        );
+                        let result = self.internal_storage.append_entries(suffix);
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+                            "storage error while trying to write log entries",
+                        );
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -374,11 +470,19 @@ where
                     }
                     None => {
                         // no snapshot, only suffix
-                        if max_promise_meta.n == self.internal_storage.get_accepted_round() {
-                            self.internal_storage.append_entries(suffix);
+                        let result = if max_promise_meta.n == old_accepted_round {
+                            self.internal_storage.append_entries(suffix)
                         } else {
-                            self.internal_storage.append_on_decided_prefix(suffix);
-                        }
+                            self.internal_storage.append_on_decided_prefix(suffix)
+                        };
+                        self.internal_storage.rollback_if_err(
+                            &result,
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
+                            "storage error while trying to write log entries",
+                        );
                         if let Some(ss) = max_stopsign {
                             self.accept_stopsign(ss);
                         } else {
@@ -394,9 +498,6 @@ where
                 self.adopt_pending_stopsign();
             }
         }
-        self.internal_storage
-            .set_accepted_round(self.leader_state.n_leader);
-        self.internal_storage.set_decided_idx(decided_idx);
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
@@ -438,15 +539,24 @@ where
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
             accepted.accepted_idx,
-            self.internal_storage.get_decided_idx()
+            self.internal_storage
+                .get_decided_idx()
+                .expect("storage error while trying to read decided index")
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
+            let old_decided_idx = self
+                .internal_storage
+                .get_decided_idx()
+                .expect("storage error while trying to read decided index");
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
-            if accepted.accepted_idx > self.internal_storage.get_decided_idx()
+            if accepted.accepted_idx > old_decided_idx
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
-                self.internal_storage.set_decided_idx(accepted.accepted_idx);
+                let decided_idx = accepted.accepted_idx;
+                self.internal_storage
+                    .set_decided_idx(decided_idx)
+                    .expect("storage error while trying to write decided index");
                 // Send Decides to followers or batch with previous AcceptDecide
                 for pid in self.leader_state.get_promised_followers() {
                     if cfg!(feature = "batch_accept") {
@@ -457,15 +567,15 @@ where
                                     self.outgoing.get_mut(outgoing_idx).unwrap();
                                 match msg {
                                     PaxosMsg::AcceptDecide(a) => {
-                                        a.decided_idx = self.internal_storage.get_decided_idx()
+                                        a.decided_idx = decided_idx;
                                     }
-                                    _ => self.send_decide(pid),
+                                    _ => self.send_decide(pid, decided_idx),
                                 }
                             }
-                            _ => self.send_decide(pid),
+                            _ => self.send_decide(pid, decided_idx),
                         }
                     } else {
-                        self.send_decide(pid);
+                        self.send_decide(pid, decided_idx);
                     }
                 }
             }
@@ -485,11 +595,27 @@ where
                 let mut ss = self
                     .internal_storage
                     .get_stopsign()
+                    .expect("storage error while trying to read stopsign")
                     .expect("No stopsign found when deciding!");
                 ss.decided = true;
-                self.internal_storage.set_stopsign(ss);
+                let old_decided_idx = self
+                    .internal_storage
+                    .get_decided_idx()
+                    .expect("storage error while trying to read decided index");
                 self.internal_storage
-                    .set_decided_idx(self.internal_storage.get_log_len() + 1);
+                    .set_decided_idx(
+                        self.internal_storage
+                            .get_log_len()
+                            .expect("storage error while trying to read log length")
+                            + 1,
+                    )
+                    .expect("storage error while trying to write decided index");
+                let result = self.internal_storage.set_stopsign(ss);
+                self.internal_storage.rollback_if_err(
+                    &result,
+                    vec![RollbackValue::DecidedIdx(old_decided_idx)],
+                    "storage error while trying to write stopsign",
+                );
                 for pid in self.leader_state.get_promised_followers() {
                     self.send_decide_stopsign(pid);
                 }
