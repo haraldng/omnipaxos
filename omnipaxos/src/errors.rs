@@ -1,6 +1,6 @@
-use std::fmt;
 #[cfg(feature = "toml_config")]
 use std::io;
+use std::{error, fmt};
 #[cfg(feature = "toml_config")]
 use toml;
 
@@ -21,25 +21,25 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             #[cfg(feature = "toml_config")]
-            ConfigError::ReadFile(ref err) => write!(f, "Could not read config file: {}", err),
+            ConfigError::ReadFile(ref err) => write!(f, "{}", err),
             #[cfg(feature = "toml_config")]
-            ConfigError::Parse(ref err) => write!(f, "Could not parse config file:\n {}", err),
+            ConfigError::Parse(ref err) => write!(f, "{}", err),
             ConfigError::InvalidConfig(ref str) => write!(f, "Invalid config: {}", str),
         }
     }
 }
 
-// impl error::Error for ConfigError {
-//     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-//         match *self {
-//             #[cfg(feature = "toml_config")]
-//             ConfigError::ReadFile(ref err) => Some(err),
-//             #[cfg(feature = "toml_config")]
-//             ConfigError::Parse(ref err) => Some(err),
-//             ConfigError::InvalidConfig(ref str) => Some(self),
-//         }
-//     }
-// }
+impl error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match *self {
+            #[cfg(feature = "toml_config")]
+            ConfigError::ReadFile(ref err) => Some(err),
+            #[cfg(feature = "toml_config")]
+            ConfigError::Parse(ref err) => Some(err),
+            ConfigError::InvalidConfig(_) => Some(self),
+        }
+    }
+}
 
 #[cfg(feature = "toml_config")]
 impl From<io::Error> for ConfigError {

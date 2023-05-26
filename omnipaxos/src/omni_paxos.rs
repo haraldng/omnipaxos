@@ -135,7 +135,7 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        valid_config!(self.pid != 0, "Initial leader pid cannot be 0");
+        valid_config!(self.pid != 0, "Server pid cannot be 0");
         valid_config!(self.buffer_size != 0, "Buffer size must be greater than 0");
         Ok(())
     }
@@ -270,20 +270,25 @@ where
     }
 
     /// Append an entry to the replicated log.
-    pub fn append(&mut self, entry: T) -> Result<(), ProposeErr> {
+    pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
         self.seq_paxos.append(entry)
     }
 
-    /// Propose a reconfiguration. Returns an error if already stopped or `new_configuration` is invalid.
+    /// Propose a cluster reconfiguration. Returns an error if the current configuration has already been stopped
+    /// by a previous reconfiguration request or if the `new_configuration` is invalid.
     /// `new_configuration` defines the cluster-wide configuration settings for the next cluster.
     /// `metadata` is optional data to commit alongside the reconfiguration.
     pub fn reconfigure(
         &mut self,
         new_configuration: ClusterConfig,
         metadata: Option<Vec<u8>>,
-    ) -> Result<(), ProposeErr> {
+    ) -> Result<(), ProposeErr<T>> {
         if let Err(config_error) = new_configuration.validate() {
-            return Err(ProposeErr::Reconfiguration(config_error));
+            return Err(ProposeErr::ConfigError(
+                config_error,
+                new_configuration,
+                metadata,
+            ));
         }
         self.seq_paxos.reconfigure(new_configuration, metadata)
     }
@@ -311,13 +316,17 @@ where
     }
 }
 
-/// An error indicating a failed proposal due to the current configuration being already stopped
-/// or due to an invalid proposed configuration.
+/// An error indicating a failed proposal due to the current cluster configuration being already stopped
+/// or due to an invalid proposed configuration. Returns the failed proposal.
 #[allow(missing_docs)]
 #[derive(Debug)]
-pub enum ProposeErr {
-    Stopped,
-    Reconfiguration(ConfigError),
+pub enum ProposeErr<T>
+where
+    T: Entry,
+{
+    PendingReconfigEntry(T),
+    PendingReconfigConfig(ClusterConfig, Option<Vec<u8>>),
+    ConfigError(ConfigError, ClusterConfig, Option<Vec<u8>>),
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.

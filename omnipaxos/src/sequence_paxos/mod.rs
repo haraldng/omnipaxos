@@ -260,14 +260,14 @@ where
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    fn stopped(&self) -> bool {
+    fn pending_reconfiguration(&self) -> bool {
         self.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
-    pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr> {
-        if self.stopped() {
-            Err(ProposeErr::Stopped)
+    pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigEntry(entry))
         } else {
             self.propose_entry(entry);
             Ok(())
@@ -281,14 +281,14 @@ where
         &mut self,
         new_config: ClusterConfig,
         metadata: Option<Vec<u8>>,
-    ) -> Result<(), ProposeErr> {
+    ) -> Result<(), ProposeErr<T>> {
         #[cfg(feature = "logging")]
         info!(
             self.logger,
             "Propose reconfiguration {:?}", new_config.nodes
         );
-        if self.stopped() {
-            Err(ProposeErr::Stopped)
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
         } else {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
@@ -296,16 +296,16 @@ where
                         let ss = StopSign::with(new_config, metadata);
                         self.pending_stopsign = Some(ss);
                     } else {
-                        return Err(ProposeErr::Stopped);
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
-                    if !self.stopped() {
+                    if !self.pending_reconfiguration() {
                         let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         self.send_accept_stopsign(ss);
                     } else {
-                        return Err(ProposeErr::Stopped);
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 _ => {
