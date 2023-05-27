@@ -10,3 +10,4 @@ omnipaxos_storage/storage
 *.log
 docs/.DS_Store
 .DS_Store
+*/.idea/*
