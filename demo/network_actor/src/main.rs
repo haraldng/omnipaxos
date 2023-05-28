@@ -36,13 +36,14 @@ lazy_static! {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyValue {
     pub key: String,
-    pub value: u64,
+    pub value: String,
 }
 
 /// Same as in KV demo
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum APICommand {
-    Append(KeyValue),
+pub enum KVCommand {
+    Put(KeyValue),
+    Delete(String),
 }
 
 /// Same as in KV demo
@@ -53,7 +54,7 @@ pub enum APIResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Message {
-    APICommand(APICommand),
+    APICommand(KVCommand),
     APIResponse(APIResponse),
 }
 

@@ -5,24 +5,37 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyValue {
     pub key: String,
-    pub value: u64,
+    pub value: String,
 }
 
-impl Entry for KeyValue {
+/// Same as in network actor
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum KVCommand {
+    Put(KeyValue),
+    Delete(String),
+}
+
+impl Entry for KVCommand {
     type Snapshot = KVSnapshot;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KVSnapshot {
-    snapshotted: HashMap<String, u64>,
+    snapshotted: HashMap<String, String>,
 }
 
-impl Snapshot<KeyValue> for KVSnapshot {
-    fn create(entries: &[KeyValue]) -> Self {
+impl Snapshot<KVCommand> for KVSnapshot {
+    fn create(entries: &[KVCommand]) -> Self {
         let mut snapshotted = HashMap::new();
         for e in entries {
-            let KeyValue { key, value } = e;
-            snapshotted.insert(key.clone(), *value);
+            match e {
+                KVCommand::Put(KeyValue { key, value }) => {
+                    snapshotted.insert(key.clone(), value.clone());
+                },
+                KVCommand::Delete(key) => {
+                    snapshotted.remove(key);
+                },
+            }
         }
         Self { snapshotted }
     }

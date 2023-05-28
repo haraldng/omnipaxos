@@ -1,18 +1,15 @@
 use crate::{
     util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD},
     OmniPaxosKV,
-    kv::KeyValue, network::{Network, Message},
+    network::{Network, Message},
 };
-use omnipaxos::util::NodeId;
+use omnipaxos::util::{LogEntry, NodeId};
 use serde::{Serialize, Deserialize};
 use tokio::time;
 use std::sync::{Arc, Mutex};
+use crate::database::Database;
+use crate::kv::KVCommand;
 
-/// Same as in network actor
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum APICommand {
-    Append(KeyValue),
-}
 
 /// Same as in network actor
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,9 +23,24 @@ pub struct OmniPaxosServer {
     pub peers: Vec<NodeId>,
     pub last_sent_decided_idx: u64,
     pub network: Network,
+    pub database: Database,
 }
 
 impl OmniPaxosServer {
+    fn handle_decided(&self, decided_entries: Option<Vec<LogEntry<KVCommand>>>) {
+        if let Some(decided_entries) = decided_entries {
+            for entry in decided_entries {
+                match entry {
+                    LogEntry::Decided(cmd) => {
+                        self.database.handle_command(cmd);
+                    },
+                    LogEntry::Snapshotted(_s) => unimplemented!(),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     async fn send_outgoing_msgs(&mut self) {
         let messages = self.omni_paxos.lock().unwrap().outgoing_messages();
         for msg in messages {
@@ -43,11 +55,7 @@ impl OmniPaxosServer {
         for msg in messages {
             match msg {
                 Message::OmniPaxosMsg(m) => op.handle_incoming(m),
-                Message::APICommand(cmd) => {
-                    match cmd {
-                        APICommand::Append(kv) => op.append(kv).unwrap(),
-                    }
-                },
+                Message::APICommand(cmd) => op.append(cmd).unwrap(),
                 Message::APIResponse(_) => panic!("received API response"),
             }
         }
@@ -67,6 +75,8 @@ impl OmniPaxosServer {
                     let op = self.omni_paxos.lock().unwrap();
                     let new_decided_idx = op.get_decided_idx();
                     if self.last_sent_decided_idx < new_decided_idx {
+                        let decided_entries = op.read_decided_suffix(self.last_sent_decided_idx);
+                        self.handle_decided(decided_entries);
                         self.last_sent_decided_idx = new_decided_idx;
                         let msg = Message::APIResponse(APIResponse::Decided(new_decided_idx));
                         self.network.send(0, msg).await;

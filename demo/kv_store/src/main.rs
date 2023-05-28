@@ -1,5 +1,4 @@
 use crate::{
-    kv::KeyValue,
     server::OmniPaxosServer,
 };
 use omnipaxos::{*, util::NodeId};
@@ -9,6 +8,7 @@ use std::{
     sync::{Arc, Mutex},
     env,
 };
+use crate::kv::KVCommand;
 
 #[macro_use]
 extern crate lazy_static;
@@ -17,6 +17,7 @@ mod kv;
 mod server;
 mod util;
 mod network;
+mod database;
 
 lazy_static!{
     pub static ref PEERS: Vec<NodeId> = if let Ok(var) = env::var("PEERS") {
@@ -42,7 +43,7 @@ lazy_static!{
     };
 }
 
-type OmniPaxosKV = OmniPaxos<KeyValue, MemoryStorage<KeyValue>>;
+type OmniPaxosKV = OmniPaxos<KVCommand, MemoryStorage<KVCommand>>;
 
 #[tokio::main]
 async fn main() {
@@ -60,6 +61,7 @@ async fn main() {
         peers: PEERS.clone(),
         pid: *PID,
         last_sent_decided_idx: 0,
+        database: database::Database::new(format!("db_{}", *PID).as_str()),
     };
     op_server.run().await;
 }

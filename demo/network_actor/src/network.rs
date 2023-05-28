@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde_json;
 use rand::random;
 
-use crate::{Message, APIResponse, APICommand, KeyValue, CLIENT_PORTS, PORT_MAPPINGS};
+use crate::{Message, KeyValue, CLIENT_PORTS, PORT_MAPPINGS, KVCommand};
 
 pub async fn run() {
     // setup client sockets to talk to nodes
@@ -42,7 +42,7 @@ pub async fn run() {
             sleep(Duration::from_millis(10)).await;
             for port in CLIENT_PORTS.iter() {
                 if let Some(writer) = api.lock().await.get_mut(port) {
-                    let cmd = Message::APICommand(APICommand::Append(KeyValue {key: random::<u64>().to_string(), value: random()}));
+                    let cmd = Message::APICommand(KVCommand::Put(KeyValue {key: random::<u64>().to_string(), value: random::<u64>().to_string()}));
                     let mut data = serde_json::to_vec(&cmd).expect("could not serialize cmd");
                     data.push(b'\n');
                     writer.write_all(&data).await.unwrap();

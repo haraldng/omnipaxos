@@ -9,12 +9,12 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::{kv::KeyValue, server::{APICommand, APIResponse}, API_ADDR, PEERS, PEER_ADDRS};
+use crate::{kv::KVCommand, server::APIResponse, API_ADDR, PEERS, PEER_ADDRS};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Message {
-    OmniPaxosMsg(OPMessage<KeyValue>),
-    APICommand(APICommand),
+    OmniPaxosMsg(OPMessage<KVCommand>),
+    APICommand(KVCommand),
     APIResponse(APIResponse),
 }
 
