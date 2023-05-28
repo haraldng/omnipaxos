@@ -1,6 +1,11 @@
 FROM rust:1.67 as builder
 WORKDIR /usr/src/kv_demo
 
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        libclang-dev
+
 # cache dependencies
 RUN cargo init --bin
 COPY Cargo.toml ./
