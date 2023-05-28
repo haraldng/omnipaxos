@@ -91,8 +91,8 @@ fn read_test() {
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
-    storage.append_entries(log.clone());
-    storage.set_decided_idx(decided_idx);
+    storage.append_entries(log.clone()).expect("Failed to append entries");
+    storage.set_decided_idx(decided_idx).expect("Failed to set decided index");
 
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
@@ -132,9 +132,9 @@ fn read_test() {
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone());
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_idx(log_len);
+    stopped_storage.append_entries(log.clone()).expect("Failed to append entries");
+    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true)).expect("Failed to set StopSign");
+    stopped_storage.set_decided_idx(log_len).expect("Failed to set decided index");
 
     let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
@@ -159,14 +159,12 @@ fn read_entries_test() {
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
-
     let exp_snapshot = LatestValue::create(snapshotted);
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
-    storage.append_entries(log.clone());
-    storage.set_decided_idx(decided_idx);
-
+    storage.append_entries(log.clone()).expect("Failed to append entries");
+    storage.set_decided_idx(decided_idx).expect("Failed to set decided index");
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
     op_config.peers = vec![2, 3];
@@ -183,7 +181,6 @@ fn read_entries_test() {
         .expect("No entries");
     let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
-
     // read snapshot only
     let entries = omni_paxos
         .read_entries(0..snapshotted_idx)
@@ -212,9 +209,9 @@ fn read_entries_test() {
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone());
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_idx(log_len);
+    stopped_storage.append_entries(log.clone()).expect("Failed to append entries");
+    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true)).unwrap();
+    stopped_storage.set_decided_idx(log_len).unwrap();
 
     let mut stopped_op = op_config.build(stopped_storage);
     stopped_op

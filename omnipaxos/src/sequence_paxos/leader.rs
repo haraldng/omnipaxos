@@ -20,7 +20,6 @@ where
             || n <= self
                 .internal_storage
                 .get_promise()
-                .expect("storage error while trying to read promise")
         {
             return;
         }
@@ -35,17 +34,15 @@ where
                 self.leader_state.majority,
             );
             self.leader = n;
-            self.internal_storage.flush_batch();
+            self.internal_storage.flush_batch().expect("storage error while trying to flush batch");
             /* insert my promise */
             let na = self
                 .internal_storage
-                .get_accepted_round()
-                .expect("storage error while trying to read accepted round");
+                .get_accepted_round();
             let decided_idx = self.get_decided_idx();
             let accepted_idx = self
                 .internal_storage
-                .get_accepted_idx()
-                .expect("storage error while trying to read log length");
+                .get_accepted_idx();
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -168,9 +165,9 @@ where
     pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
         let prep = Prepare {
             n: self.leader_state.n_leader,
-            decided_idx: self.internal_storage.get_decided_idx()?,
-            n_accepted: self.internal_storage.get_accepted_round()?,
-            accepted_idx: self.internal_storage.get_log_len()?,
+            decided_idx: self.internal_storage.get_decided_idx(),
+            n_accepted: self.internal_storage.get_accepted_round(),
+            accepted_idx: self.internal_storage.get_accepted_idx()
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
@@ -187,8 +184,7 @@ where
             seq_num: self.leader_state.next_seq_num(to),
             decided_idx: self
                 .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index"),
+                .get_decided_idx(),
             entries,
         };
         self.outgoing.push(PaxosMessage {
@@ -201,12 +197,11 @@ where
     }
 
     pub(crate) fn send_accept(&mut self, entry: T) {
-        let old_accepted_idx = self.internal_storage.get_accepted_idx()?;
-        let accepted_res = self.internal_storage.append_entry(entry.clone())?;
+        let old_accepted_idx = self.internal_storage.get_accepted_idx();
+        let accepted_res = self.internal_storage.append_entry(entry.clone()).expect("storage error while trying to write an entry");
         let decided_idx = self
             .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
+            .get_decided_idx();
         if let Some((accepted_idx, flushed_entries)) = accepted_res {
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             for pid in self.leader_state.get_promised_followers() {
@@ -227,7 +222,7 @@ where
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),
                         decided_idx,
-                        entries: self.internal_storage.get_entries(old_accepted_idx, accepted_idx)?,
+                        entries: self.internal_storage.get_entries(old_accepted_idx, accepted_idx).expect("storage error while trying to read entries"),
                     };
                     self.outgoing.push(PaxosMessage {
                         from: self.pid,
@@ -242,9 +237,8 @@ where
     fn send_batch_accept(&mut self, entries: Vec<T>) {
         let decided_idx = self
             .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
-        let append_res = self.internal_storage.append_entries_and_get_flushed(entries.clone())?;
+            .get_decided_idx();
+        let append_res = self.internal_storage.append_entries_and_get_flushed(entries.clone()).expect("storage error while trying to write entries");
         if let Some((accepted_idx, flushed_entries)) = append_res {
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             for pid in self.leader_state.get_promised_followers() {
@@ -299,7 +293,6 @@ where
                 if self
                     .internal_storage
                     .get_compacted_idx()
-                    .expect("storage error while trying to read compacted index")
                     > *promise_accepted_idx
                     && T::Snapshot::use_snapshots()
                 {
@@ -415,12 +408,10 @@ where
             .unwrap();
         let old_decided_idx = self
             .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
+            .get_decided_idx();
         let old_accepted_round = self
             .internal_storage
-            .get_accepted_round()
-            .expect("storage error while trying to read accepted round");
+            .get_accepted_round();
         self.internal_storage
             .set_accepted_round(self.leader_state.n_leader)
             .expect("storage error while trying to write accepted round");
@@ -548,8 +539,7 @@ where
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             let old_decided_idx = self
                 .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index");
+                .get_decided_idx();
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
             if accepted.accepted_idx > old_decided_idx
@@ -602,13 +592,11 @@ where
                 ss.decided = true;
                 let old_decided_idx = self
                     .internal_storage
-                    .get_decided_idx()
-                    .expect("storage error while trying to read decided index");
+                    .get_decided_idx();
                 self.internal_storage
                     .set_decided_idx(
                         self.internal_storage
-                            .get_log_len()
-                            .expect("storage error while trying to read log length")
+                            .get_accepted_idx()
                             + 1,
                     )
                     .expect("storage error while trying to write decided index");

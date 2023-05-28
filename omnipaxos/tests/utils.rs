@@ -703,6 +703,12 @@ pub mod omnireplica {
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
+                // temp
+                let temp = out.clone();
+                if let Message::SequencePaxos(msg) = temp {
+                    println!("{:?}", msg);
+                }
+                // temp
                 if self.is_connected_to(&out.get_receiver()) {
                     let receiver = self.peers.get(&out.get_receiver()).unwrap();
                     receiver.tell(out);

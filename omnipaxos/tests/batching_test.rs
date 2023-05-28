@@ -1,13 +1,13 @@
 pub mod utils;
 
 use std::thread;
-use std::time::Duration;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos_core::{
-    omni_paxos::OmniPaxosConfig,
+use omnipaxos::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
+    OmniPaxosConfig,
 };
 use serial_test::serial;
+use std::time::Duration;
 use utils::{
     create_temp_dir,
     verification::{verify_entries, verify_snapshot, verify_stopsign},
@@ -24,6 +24,7 @@ fn batching_test() {
     let mut sys = TestSystem::with(
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
         cfg.batch_size,

@@ -61,7 +61,7 @@ where
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
-        let (state, leader, lds) = match storage.get_promise() {
+        let (state, leader, lds) = match storage.get_promise().expect("Storage error") {
             // try to do fail recovery from storage, if None then we are starting from scratch
             Some(b) => {
                 let state = (Role::Follower, Phase::Recover);
@@ -203,14 +203,12 @@ where
     pub(crate) fn get_decided_idx(&self) -> u64 {
         self.internal_storage
             .get_decided_idx()
-            .expect("storage error while trying to read decided index")
     }
 
     /// Return trim index from storage.
     pub(crate) fn get_compacted_idx(&self) -> u64 {
         self.internal_storage
             .get_compacted_idx()
-            .expect("storage error while trying to read compacted index")
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.

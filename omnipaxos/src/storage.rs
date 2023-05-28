@@ -127,7 +127,7 @@ pub trait Storage<T>
 
     /// Returns the latest round in which entries have been accepted, returns `None` if no
     /// entries have been accepted.
-    fn get_accepted_round(&self) -> Option<Ballot>;
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>>;
 
     /// Returns the entries in the log in the index interval of [from, to).
     /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
@@ -280,7 +280,6 @@ impl<I, T> InternalStorage<I, T>
     where
         I: Storage<T>,
         T: Entry,
-        S: Snapshot<T>,
 {
     pub(crate) fn with(storage: I, batch_size: usize) -> Self {
         let mut internal_store = InternalStorage {
@@ -353,6 +352,7 @@ impl<I, T> InternalStorage<I, T>
         where
             R: RangeBounds<u64>,
     {
+        let accepted_idx = self.get_accepted_idx();
         let from_idx = match r.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(e) => *e + 1,
@@ -363,14 +363,14 @@ impl<I, T> InternalStorage<I, T>
             Bound::Excluded(e) => *e,
             Bound::Unbounded => {
                 let idx = self.get_accepted_idx();
-                match self.get_stopsign() {
+                match self.get_stopsign().expect("storage error while trying to read stopsign") {
                     Some(ss) if ss.decided => idx + 1,
                     _ => idx,
                 }
             }
         };
-        let compacted_idx = self.get_compacted_idx()?;
-        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, virtual_log_len)? {
+        let compacted_idx = self.get_compacted_idx();
+        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, accepted_idx)? {
             // use to_idx-1 when getting the entry type as to_idx is exclusive
             Some(IndexEntry::Compacted) => {
                 return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
@@ -378,11 +378,11 @@ impl<I, T> InternalStorage<I, T>
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
-        let from_type = match self.get_entry_type(from_idx, compacted_idx, virtual_log_len)? {
+        let from_type = match self.get_entry_type(from_idx, compacted_idx, accepted_idx)? {
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
-        let decided_idx = self.get_decided_idx()?;
+        let decided_idx = self.get_decided_idx();
         match (from_type, to_type) {
             (IndexEntry::Entry, IndexEntry::Entry) => {
                 let from_suffix_idx = from_idx - compacted_idx;
@@ -444,6 +444,7 @@ impl<I, T> InternalStorage<I, T>
                 unimplemented!("{}", format!("Unexpected read combination: {:?}", e))
             }
         }
+
     }
 
     fn create_read_log_entries_with_real_idx(
@@ -474,7 +475,7 @@ impl<I, T> InternalStorage<I, T>
         &self,
         from_idx: u64,
     ) -> StorageResult<Option<Vec<LogEntry<T>>>> {
-        let decided_idx = self.get_decided_idx()?;
+        let decided_idx = self.get_decided_idx();
         if from_idx < decided_idx {
             self.read(from_idx..decided_idx)
         } else {
@@ -491,12 +492,12 @@ impl<I, T> InternalStorage<I, T>
 
     fn load_cache(&mut self) {
         // try to load from storage
-        if let Some(promise) = self.storage.get_promise() {
+        if let Some(promise) = self.storage.get_promise().expect("failed to load cache from storage") {
             self.state_cache.promise = promise;
-            self.state_cache.decided_idx = self.storage.get_decided_idx()?;
-            self.state_cache.accepted_round = self.storage.get_accepted_round().unwrap_or_default();
-            self.state_cache.compacted_idx = self.storage.get_compacted_idx()?;
-            self.state_cache.real_log_len = self.storage.get_log_len()?;
+            self.state_cache.decided_idx = self.storage.get_decided_idx().unwrap();
+            self.state_cache.accepted_round = self.storage.get_accepted_round().unwrap().unwrap_or_default();
+            self.state_cache.compacted_idx = self.storage.get_compacted_idx().unwrap();
+            self.state_cache.real_log_len = self.storage.get_log_len().unwrap();
         }
     }
 
@@ -549,7 +550,7 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<u64> {
-        let decided_idx = self.storage.get_decided_idx();
+        let decided_idx = self.get_decided_idx();
         let compacted_idx = self.get_compacted_idx();
         self.state_cache.real_log_len = self.storage.append_on_prefix(decided_idx - compacted_idx, entries)?;
         Ok(self.get_accepted_idx())
@@ -560,7 +561,7 @@ impl<I, T> InternalStorage<I, T>
         from_idx: u64,
         entries: Vec<T>,
     ) -> StorageResult<u64> {
-        let compacted_idx = self.storage.get_compacted_idx()?;
+        let compacted_idx = self.get_compacted_idx();
         self.state_cache.real_log_len = self.storage
             .append_on_prefix(from_idx - compacted_idx, entries)?;
         Ok(self.get_accepted_idx())
@@ -610,7 +611,7 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        let compacted_idx = self.get_compacted_idx()?;
+        let compacted_idx = self.get_compacted_idx();
         self.storage.get_suffix(from - compacted_idx.min(from))
     }
 
@@ -627,7 +628,7 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
-        let compacted_idx = self.get_compacted_idx()?;
+        let compacted_idx = self.get_compacted_idx();
         let entries = self.storage.get_entries(0, compact_idx - compacted_idx)?;
         let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot()? {
@@ -644,7 +645,7 @@ impl<I, T> InternalStorage<I, T>
         from_idx: u64,
         to_idx: u64,
     ) -> StorageResult<SnapshotType<T>> {
-        if self.get_compacted_idx()? >= from_idx {
+        if self.get_compacted_idx() >= from_idx {
             Ok(SnapshotType::Complete(self.create_snapshot(to_idx)?))
         } else {
             let diff_entries = self.get_entries(from_idx, to_idx)?;
@@ -659,23 +660,24 @@ impl<I, T> InternalStorage<I, T>
         let old_compacted_idx = self.get_compacted_idx();
         let old_snapshot = self.storage.get_snapshot()?;
         if idx > old_compacted_idx {
-            self.storage.set_compacted_idx(idx)?;
+            self.set_compacted_idx(idx)?;
             if let Err(e) = self.storage.set_snapshot(Some(snapshot)) {
                 self.set_compacted_idx(old_compacted_idx)?;
                 return Err(e);
             }
             if let Err(e) = self.storage.trim(idx - old_compacted_idx) {
                 self.set_compacted_idx(old_compacted_idx)?;
-                self.state_cache.real_log_len = self.storage.get_log_len()?;
                 self.storage.set_snapshot(old_snapshot)?;
+                self.state_cache.real_log_len = self.storage.get_log_len()?;
                 return Err(e);
             }
+            self.state_cache.real_log_len = self.storage.get_log_len()?;
         }
         Ok(())
     }
 
     pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: T::Snapshot) -> StorageResult<()> {
-        let log_len = self.storage.get_log_len()?;
+        let log_len = self.state_cache.real_log_len;
         let mut snapshot = if let Some(snap) = self.storage.get_snapshot()? {
             snap
         } else {
@@ -686,7 +688,7 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn try_trim(&mut self, idx: u64) -> StorageResult<()> {
-        let compacted_idx = self.get_compacted_idx()?;
+        let compacted_idx = self.get_compacted_idx();
         if idx <= compacted_idx {
             Ok(()) // already trimmed or snapshotted this index.
         } else {
@@ -716,7 +718,7 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<u64>) -> StorageResult<()> {
-        let decided_idx = self.get_decided_idx()?;
+        let decided_idx = self.get_decided_idx();
         let idx = match snapshot_idx {
             Some(i) => {
                 if i <= decided_idx {
@@ -727,7 +729,7 @@ impl<I, T> InternalStorage<I, T>
             }
             None => decided_idx,
         };
-        if idx > self.get_compacted_idx()? {
+        if idx > self.get_compacted_idx() {
             let snapshot = self.create_snapshot(idx)?;
             self.set_snapshot(idx, snapshot)?;
         }

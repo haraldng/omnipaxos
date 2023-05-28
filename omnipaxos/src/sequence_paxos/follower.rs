@@ -16,22 +16,18 @@ where
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
-        let old_promise = self
-            .internal_storage
-            .get_promise()
-            .expect("storage error while trying to read promise");
+        let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
             self.leader = prep.n;
+            self.internal_storage.flush_batch().expect("storage error while trying to flush batch");
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
             let na = self
                 .internal_storage
-                .get_accepted_round()
-                .expect("storage error while trying to read accepted round");
+                .get_accepted_round();
             let accepted_idx = self
                 .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
+                .get_accepted_idx();
             let decided_idx = self.get_decided_idx();
             let stopsign = self.get_stopsign();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
@@ -56,8 +52,7 @@ where
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 let compacted_idx = self
                     .internal_storage
-                    .get_compacted_idx()
-                    .expect("storage error while trying to read compacted index");
+                    .get_compacted_idx();
                 if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
                     let delta_snapshot = self
                         .internal_storage
@@ -105,18 +100,15 @@ where
         if self
             .internal_storage
             .get_promise()
-            .expect("storage error while trying to read promise")
             == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {
             let old_decided_idx = self
                 .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index");
+                .get_decided_idx();
             let old_accepted_round = self
                 .internal_storage
-                .get_accepted_round()
-                .expect("storage error while trying to read accepted round");
+                .get_accepted_round();
             self.internal_storage
                 .set_accepted_round(accsync.n)
                 .expect("storage error while trying to write accepted round");
@@ -144,7 +136,7 @@ where
                         ],
                         "storage error while trying to write snapshot",
                     );
-                    let accepted_idx = self.internal_storage.append_entries(accsync.suffix);
+                    let accepted_idx = self.internal_storage.append_entries_without_batching(accsync.suffix);
                     self.internal_storage.rollback_if_err(
                         &accepted_idx,
                         vec![RollbackValue::AcceptedRound(old_accepted_round)],
@@ -225,7 +217,6 @@ where
         if self
             .internal_storage
             .get_promise()
-            .expect("storage error while trying to read promise")
             == acc.n
             && self.state == (Role::Follower, Phase::Accept)
         {
@@ -236,8 +227,7 @@ where
                     // psuedo-AcceptSync for reconfigurations
                     let old_accepted_round = self
                         .internal_storage
-                        .get_accepted_round()
-                        .expect("storage error while trying to read accepted round");
+                        .get_accepted_round();
                     self.internal_storage
                         .set_accepted_round(acc.n)
                         .expect("storage error while trying to write accepted round");
@@ -291,7 +281,6 @@ where
         if self
             .internal_storage
             .get_promise()
-            .expect("storage error while trying to read promise")
             == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
         {
@@ -327,7 +316,6 @@ where
         if self
             .internal_storage
             .get_promise()
-            .expect("storage error while trying to read promise")
             == dec.n
             && self.state.1 == Phase::Accept
         {
@@ -358,7 +346,6 @@ where
         if self
             .internal_storage
             .get_promise()
-            .expect("storage error while trying to read promise")
             == dec.n
             && self.state.1 == Phase::Accept
         {
@@ -386,13 +373,12 @@ where
                 .expect("storage error while trying to read stopsign")
                 .expect("No stopsign found when deciding!");
             ss.decided = true;
-            let log_len = self
+            let accepted_idx = self
                 .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
+                .get_accepted_idx();
             let old_decided_idx = self.get_decided_idx();
             self.internal_storage
-                .set_decided_idx(log_len + 1)
+                .set_decided_idx(accepted_idx + 1)
                 .expect("storage error while trying to write decided index");
             let result = self.internal_storage.set_stopsign(ss); // need to set it again now with the modified decided flag
             self.internal_storage.rollback_if_err(
@@ -404,28 +390,31 @@ where
     }
 
     fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) -> StorageResult<()> {
-        let accepted_idx = self.internal_storage.append_entries(entries)?;
-        match &self.latest_accepted_meta {
-            Some((round, outgoing_idx)) if round == &n => {
-                let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
-                match msg {
-                    PaxosMsg::Accepted(a) => {
-                        a.accepted_idx = accepted_idx;
+        let accepted_res = self.internal_storage.append_entries_with_batching(entries)?;
+        if let Some(accepted_idx) = accepted_res {
+            match &self.latest_accepted_meta {
+                Some((round, outgoing_idx)) if round == &n => {
+                    let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
+                    match msg {
+                        PaxosMsg::Accepted(a) => {
+                            a.accepted_idx = accepted_idx;
+                        }
+                        _ => panic!("Cached idx is not an Accepted Message<T>!"),
                     }
-                    _ => panic!("Cached idx is not an Accepted Message<T>!"),
                 }
-            }
-            _ => {
-                let accepted = Accepted { n, accepted_idx };
-                let cached_idx = self.outgoing.len();
-                self.latest_accepted_meta = Some((n, cached_idx));
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: self.leader.pid,
-                    msg: PaxosMsg::Accepted(accepted),
-                });
-            }
-        };
+                _ => {
+                    let accepted = Accepted { n, accepted_idx };
+                    let cached_idx = self.outgoing.len();
+                    self.latest_accepted_meta = Some((n, cached_idx));
+                    self.outgoing.push(PaxosMessage {
+                        from: self.pid,
+                        to: self.leader.pid,
+                        msg: PaxosMsg::Accepted(accepted),
+                    });
+                }
+            };
+        }
+
         Ok(())
     }
 }
