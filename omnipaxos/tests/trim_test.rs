@@ -93,7 +93,7 @@ fn double_trim_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
-        cfg.batch_size
+        cfg.batch_size,
     );
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();

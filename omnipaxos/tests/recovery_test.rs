@@ -80,7 +80,7 @@ fn leader_fail_leader_propose_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
-        cfg.batch_size
+        cfg.batch_size,
     );
 
     sys.start_all_nodes();
@@ -136,7 +136,7 @@ fn follower_fail_leader_propose_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
-        cfg.batch_size
+        cfg.batch_size,
     );
 
     sys.start_all_nodes();
@@ -196,7 +196,7 @@ fn follower_fail_follower_propose_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
-        cfg.batch_size
+        cfg.batch_size,
     );
 
     sys.start_all_nodes();

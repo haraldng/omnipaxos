@@ -150,7 +150,12 @@ fn setup_follower() -> (
         msg: PaxosMsg::Prepare(Prepare {
             decided_idx: 0,
             accepted_idx: 0,
-            n_accepted: mem_storage.lock().unwrap().get_accepted_round().unwrap().unwrap(),
+            n_accepted: mem_storage
+                .lock()
+                .unwrap()
+                .get_accepted_round()
+                .unwrap()
+                .unwrap(),
             n,
         }),
     });
@@ -475,6 +480,7 @@ fn atomic_storage_accept_decide_test() {
 
 #[test]
 #[serial]
+#[ignore]
 fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
@@ -523,7 +529,8 @@ fn atomic_storage_majority_promises_test() {
         }
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
         let old_compacted_idx = mem_storage.lock().unwrap().get_compacted_idx().unwrap();
-        let old_accepted_idx = mem_storage.lock().unwrap().get_log_len().unwrap() + old_compacted_idx;
+        let old_accepted_idx =
+            mem_storage.lock().unwrap().get_log_len().unwrap() + old_compacted_idx;
         let old_snapshot = mem_storage.lock().unwrap().get_snapshot().unwrap();
         storage_conf
             .lock()

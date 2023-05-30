@@ -1,17 +1,11 @@
 pub mod utils;
 
-use std::thread;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
-    storage::{Snapshot, StopSign, StopSignEntry, Storage},
-    OmniPaxosConfig,
-};
 use serial_test::serial;
+use std::thread;
 use std::time::Duration;
 use utils::{
-    create_temp_dir,
-    verification::{verify_entries, verify_snapshot, verify_stopsign},
-    LatestValue, StorageType, TestConfig, TestSystem, Value,
+    TestConfig, TestSystem, Value,
 };
 
 /// Test case for batching.
@@ -50,10 +44,12 @@ fn batching_test() {
             check_batching(decided_idx, last_decided_idx, cfg.batch_size as u64);
             last_decided_idx = decided_idx;
         });
-
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, Duration::from_millis(cfg.wait_timeout_ms)) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(
+        futures,
+        Duration::from_millis(cfg.wait_timeout_ms),
+    ) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }

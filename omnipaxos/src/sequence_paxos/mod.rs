@@ -71,11 +71,11 @@ where
                         to: *peer_pid,
                         msg: PaxosMsg::PrepareReq,
                     });
-                };
+                }
                 (state, b, None)
             }
             None => {
-                 match &config.skip_prepare_use_leader {
+                match &config.skip_prepare_use_leader {
                     Some(l) => {
                         if l.pid == pid {
                             // we are leader in new config
@@ -91,7 +91,7 @@ where
                             (state, *l, None)
                         }
                     }
-                    None => ((Role::Follower, Phase::None), Ballot::default(), None)
+                    None => ((Role::Follower, Phase::None), Ballot::default(), None),
                 }
             }
         };
@@ -201,14 +201,12 @@ where
 
     /// Return the decided index.
     pub(crate) fn get_decided_idx(&self) -> u64 {
-        self.internal_storage
-            .get_decided_idx()
+        self.internal_storage.get_decided_idx()
     }
 
     /// Return trim index from storage.
     pub(crate) fn get_compacted_idx(&self) -> u64 {
-        self.internal_storage
-            .get_compacted_idx()
+        self.internal_storage.get_compacted_idx()
     }
 
     /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.

@@ -76,7 +76,10 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
-        assert!(self.batch_size >= 1, "Batch size must be greater than or equal to 1");
+        assert!(
+            self.batch_size >= 1,
+            "Batch size must be greater than or equal to 1"
+        );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
