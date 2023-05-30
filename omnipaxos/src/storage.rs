@@ -519,7 +519,7 @@ impl<I, T> InternalStorage<I, T>
     pub(crate) fn append_entries_with_batching(&mut self, entries: Vec<T>) -> StorageResult<Option<u64>>{
         let append_res = self.state_cache.append_entries(entries);
         if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
+            let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
             Ok(Some(accepted_idx))
         } else {
             Ok(None)
@@ -569,13 +569,19 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
-        self.state_cache.promise = n_prom;
-        self.storage.set_promise(n_prom)
+        let result = self.storage.set_promise(n_prom);
+        if result.is_ok() {
+            self.state_cache.promise = n_prom;
+        }
+        result
     }
 
     pub(crate) fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
-        self.state_cache.decided_idx = ld;
-        self.storage.set_decided_idx(ld)
+        let result = self.storage.set_decided_idx(ld);
+        if result.is_ok() {
+            self.state_cache.decided_idx = ld;
+        }
+        result
     }
 
     pub(crate) fn get_decided_idx(&self) -> u64 {
@@ -583,8 +589,11 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        self.state_cache.accepted_round = na;
-        self.storage.set_accepted_round(na)
+        let result = self.storage.set_accepted_round(na);
+        if result.is_ok() {
+            self.state_cache.accepted_round = na;
+        }
+        result
     }
 
     pub(crate) fn get_accepted_round(&self) -> Ballot {
@@ -657,8 +666,10 @@ impl<I, T> InternalStorage<I, T>
 
     /// This operation is atomic, but non-reversible after completion
     pub(crate) fn set_snapshot(&mut self, idx: u64, snapshot: T::Snapshot) -> StorageResult<()> {
+        let old_log_len = self.state_cache.real_log_len;
         let old_compacted_idx = self.get_compacted_idx();
         let old_snapshot = self.storage.get_snapshot()?;
+        println!("old log len{:?}",old_log_len);
         if idx > old_compacted_idx {
             self.set_compacted_idx(idx)?;
             if let Err(e) = self.storage.set_snapshot(Some(snapshot)) {
@@ -668,10 +679,12 @@ impl<I, T> InternalStorage<I, T>
             if let Err(e) = self.storage.trim(idx - old_compacted_idx) {
                 self.set_compacted_idx(old_compacted_idx)?;
                 self.storage.set_snapshot(old_snapshot)?;
-                self.state_cache.real_log_len = self.storage.get_log_len()?;
                 return Err(e);
             }
-            self.state_cache.real_log_len = self.storage.get_log_len()?;
+            println!("new log len{:?}",self.storage.get_log_len()?);
+            println!("new_compacted_idx{:?}",idx);
+            println!("old_compacted_idx{:?}",old_compacted_idx);
+            self.state_cache.real_log_len = old_log_len - (idx - old_compacted_idx);
         }
         Ok(())
     }
@@ -696,7 +709,7 @@ impl<I, T> InternalStorage<I, T>
             if idx <= decided_idx {
                 self.set_compacted_idx(idx)?;
                 if let Err(e) = self.storage.trim(idx - compacted_idx) {
-                    self.set_compacted_idx(idx)?;
+                    self.set_compacted_idx(compacted_idx)?;
                     Err(e)
                 } else {
                     self.state_cache.real_log_len = self.storage.get_log_len()?;
@@ -709,8 +722,11 @@ impl<I, T> InternalStorage<I, T>
     }
 
     pub(crate) fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()> {
-        self.state_cache.compacted_idx = idx;
-        self.storage.set_compacted_idx(idx)
+        let result = self.storage.set_compacted_idx(idx);
+        if result.is_err() {
+            self.state_cache.compacted_idx = self.storage.get_compacted_idx()?;
+        }
+        result
     }
 
     pub(crate) fn get_compacted_idx(&self) -> u64 {

@@ -522,7 +522,8 @@ fn atomic_storage_majority_promises_test() {
             }
         }
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
-        let old_log_len = mem_storage.lock().unwrap().get_log_len().unwrap();
+        let old_compacted_idx = mem_storage.lock().unwrap().get_compacted_idx().unwrap();
+        let old_accepted_idx = mem_storage.lock().unwrap().get_log_len().unwrap() + old_compacted_idx;
         let old_snapshot = mem_storage.lock().unwrap().get_snapshot().unwrap();
         storage_conf
             .lock()
@@ -550,7 +551,7 @@ fn atomic_storage_majority_promises_test() {
         // check consistency
         let s = mem_storage.lock().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
-        let new_log_len = s.get_log_len().unwrap();
+        let new_accepted_idx = s.get_log_len().unwrap() + s.get_compacted_idx().unwrap();
         let new_snapshot = s.get_snapshot().unwrap();
         let new_accepted_round = s.get_accepted_round().unwrap();
         assert!(
@@ -567,8 +568,8 @@ fn atomic_storage_majority_promises_test() {
             "decided_idx and decided_snapshot should be updated atomically"
         );
         assert!(
-            (new_log_len == old_log_len && new_accepted_round == Some(n_old))
-                || (new_log_len > old_log_len && new_accepted_round == Some(n)),
+            (new_accepted_idx == old_accepted_idx && new_accepted_round == Some(n_old))
+                || (new_accepted_idx > old_accepted_idx && new_accepted_round == Some(n)),
             "accepted round and the log should be updated atomically"
         );
     }
