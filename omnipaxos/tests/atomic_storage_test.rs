@@ -480,7 +480,6 @@ fn atomic_storage_accept_decide_test() {
 
 #[test]
 #[serial]
-#[ignore]
 fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
@@ -574,6 +573,12 @@ fn atomic_storage_majority_promises_test() {
                 || (new_decided_idx > old_decided_idx && new_snapshot.is_some()),
             "decided_idx and decided_snapshot should be updated atomically"
         );
+        println!("new_accepted_idx{:?}", new_accepted_idx);
+        println!("new_compacted_idx{:?}", s.get_compacted_idx().unwrap());
+        println!("old_accepted_idx{:?}", old_accepted_idx);
+        println!("new_accepted_round{:?}", new_accepted_round);
+        println!("n_old){:?}", n_old);
+        println!("n{:?}", n);
         assert!(
             (new_accepted_idx == old_accepted_idx && new_accepted_round == Some(n_old))
                 || (new_accepted_idx > old_accepted_idx && new_accepted_round == Some(n)),

@@ -406,6 +406,15 @@ where
             .unwrap();
         let old_decided_idx = self.internal_storage.get_decided_idx();
         let old_accepted_round = self.internal_storage.get_accepted_round();
+        let old_compacted_idx = self.internal_storage.get_compacted_idx();
+        let old_log = self
+            .internal_storage
+            .get_entries(0, self.internal_storage.get_accepted_idx())
+            .expect("storage error while trying to read log");
+        let old_snapshot = self
+            .internal_storage
+            .get_snapshot()
+            .expect("storage error while trying to read snapshot");
         self.internal_storage
             .set_accepted_round(self.leader_state.n_leader)
             .expect("storage error while trying to write accepted round");
@@ -442,12 +451,38 @@ where
                             ],
                             "storage error while trying to write snapshot",
                         );
-                        let result = self
+                        let accepted_res = self
                             .internal_storage
                             .append_entries_without_batching(suffix);
+                        // manually rollback set_snapshot if append suffix fails
+                        if let Err(_e) = &accepted_res {
+                            self.internal_storage
+                                .try_trim(self.internal_storage.get_accepted_idx())
+                                .expect("storage error while trying to trim log entries");
+                            self.internal_storage
+                                .append_entries_without_batching(old_log)
+                                .expect("storage error while trying to rollback log entries");
+                            if let Some(old_snapshot) = old_snapshot {
+                                self.internal_storage
+                                    .set_snapshot(old_compacted_idx, old_snapshot)
+                                    .expect("storage error while trying to rollback snapshot");
+                            } else {
+                                self.internal_storage
+                                    .set_compacted_idx(old_compacted_idx)
+                                    .expect(
+                                        "storage error while trying to rollback compacted index",
+                                    );
+                                self.internal_storage
+                                    .reset_snapshot()
+                                    .expect("storage error while trying to reset snapshot");
+                            }
+                        }
                         self.internal_storage.rollback_if_err(
-                            &result,
-                            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+                            &accepted_res,
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
                             "storage error while trying to write log entries",
                         );
                         if let Some(ss) = max_stopsign {

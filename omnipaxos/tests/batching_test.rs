@@ -4,9 +4,7 @@ use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::thread;
 use std::time::Duration;
-use utils::{
-    TestConfig, TestSystem, Value,
-};
+use utils::{TestConfig, TestSystem, Value};
 
 /// Test case for batching.
 #[test]

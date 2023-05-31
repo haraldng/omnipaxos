@@ -660,6 +660,10 @@ where
         }
     }
 
+    pub(crate) fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
+        self.storage.get_snapshot()
+    }
+
     pub(crate) fn create_diff_snapshot(
         &mut self,
         from_idx: u64,
@@ -673,6 +677,10 @@ where
                 diff_entries.as_slice(),
             )))
         }
+    }
+
+    pub(crate) fn reset_snapshot(&mut self) -> StorageResult<()> {
+        self.storage.set_snapshot(None)
     }
 
     /// This operation is atomic, but non-reversible after completion
