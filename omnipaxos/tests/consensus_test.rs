@@ -90,8 +90,8 @@ fn read_test() {
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
-    storage.append_entries(log.clone());
-    storage.set_decided_idx(decided_idx);
+    storage.append_entries(log.clone()).unwrap();
+    storage.set_decided_idx(decided_idx).unwrap();
 
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
@@ -131,9 +131,11 @@ fn read_test() {
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone());
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_idx(log_len);
+    stopped_storage.append_entries(log.clone()).unwrap();
+    stopped_storage
+        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
+        .unwrap();
+    stopped_storage.set_decided_idx(log_len + 1).unwrap();
 
     let mut stopped_op = op_config.build(stopped_storage);
     stopped_op
@@ -163,8 +165,8 @@ fn read_entries_test() {
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
-    storage.append_entries(log.clone());
-    storage.set_decided_idx(decided_idx);
+    storage.append_entries(log.clone()).unwrap();
+    storage.set_decided_idx(decided_idx).unwrap();
 
     let mut op_config = OmniPaxosConfig::default();
     op_config.pid = 1;
@@ -211,9 +213,11 @@ fn read_entries_test() {
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
     let ss = StopSign::with(2, vec![], None);
     let log_len = log.len() as u64;
-    stopped_storage.append_entries(log.clone());
-    stopped_storage.set_stopsign(StopSignEntry::with(ss.clone(), true));
-    stopped_storage.set_decided_idx(log_len);
+    stopped_storage.append_entries(log.clone()).unwrap();
+    stopped_storage
+        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
+        .unwrap();
+    stopped_storage.set_decided_idx(log_len + 1).unwrap();
 
     let mut stopped_op = op_config.build(stopped_storage);
     stopped_op

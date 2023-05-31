@@ -229,7 +229,8 @@ fn atomic_storage_decide_stopsign_test() {
         // check consistency
         let s = mem_storage.lock().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
-        let ss_decided = s.get_stopsign().unwrap().unwrap().decided;
+        let ss = s.get_stopsign().unwrap().unwrap();
+        let ss_decided = ss.decided(new_decided_idx);
         assert!(
             (!ss_decided && new_decided_idx == old_decided_idx)
                 || (ss_decided && new_decided_idx == old_decided_idx + 1),
@@ -608,12 +609,12 @@ fn atomic_storage_majority_accepted_stopsign_test() {
         let new_decided_idx = s.get_decided_idx().unwrap();
         let new_stopsign = s.get_stopsign().unwrap().unwrap();
         assert!(
-            !old_stopsign.decided,
+            !old_stopsign.decided(old_decided_idx),
             "sanity check failed: newly proposed stopsign is decided"
         );
         assert!(
-            (new_decided_idx == old_decided_idx && !new_stopsign.decided)
-                || (new_decided_idx > old_decided_idx && new_stopsign.decided),
+            (new_decided_idx == old_decided_idx && !new_stopsign.decided(new_decided_idx))
+                || (new_decided_idx > old_decided_idx && new_stopsign.decided(new_decided_idx)),
             "decided_idx and decided_stopsign should be updated atomically"
         );
     }

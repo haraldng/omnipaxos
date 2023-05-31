@@ -53,14 +53,14 @@ impl BallotStorage {
 #[derive(Clone, Serialize, Deserialize)]
 struct StopSignEntryStorage {
     ss: StopSignStorage,
-    decided: bool,
+    idx: u64,
 }
 
 impl StopSignEntryStorage {
     fn with(ss_entry: StopSignEntry) -> Self {
         StopSignEntryStorage {
             ss: StopSignStorage::with(ss_entry.stopsign),
-            decided: ss_entry.decided,
+            idx: ss_entry.idx,
         }
     }
 }
@@ -495,7 +495,7 @@ where
                             ss_entry_storage.ss.nodes,
                             ss_entry_storage.ss.metadata,
                         ),
-                        ss_entry_storage.decided,
+                        ss_entry_storage.idx,
                     )))
                 }
                 None => Ok(None),
@@ -513,7 +513,7 @@ where
                             ss_entry_storage.ss.nodes,
                             ss_entry_storage.ss.metadata,
                         ),
-                        ss_entry_storage.decided,
+                        ss_entry_storage.idx,
                     )))
                 }
                 None => Ok(None),

@@ -192,11 +192,7 @@ where
                         .get_stopsign()
                         .expect("storage error while trying to read stopsign")
                     {
-                        let StopSignEntry {
-                            decided: has_decided,
-                            stopsign: _my_ss,
-                        } = ss_entry;
-                        if !has_decided {
+                        if !ss_entry.decided(old_decided_idx) {
                             self.accept_stopsign(ss);
                         }
                     } else {
@@ -380,26 +376,22 @@ where
                 MessageStatus::Outdated => return,
             }
 
-            let mut ss = self
+            let _ss = self
                 .internal_storage
                 .get_stopsign()
                 .expect("storage error while trying to read stopsign")
                 .expect("No stopsign found when deciding!");
-            ss.decided = true;
             let log_len = self
                 .internal_storage
                 .get_log_len()
                 .expect("storage error while trying to read log length");
-            let old_decided_idx = self.get_decided_idx();
+            debug_assert!(
+                _ss.idx == log_len,
+                "trying to decide StopSignEntry with wrong index"
+            );
             self.internal_storage
                 .set_decided_idx(log_len + 1)
                 .expect("storage error while trying to write decided index");
-            let result = self.internal_storage.set_stopsign(ss); // need to set it again now with the modified decided flag
-            self.internal_storage.rollback_if_err(
-                &result,
-                vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                "storage error while trying to write decided index",
-            );
         }
     }
 

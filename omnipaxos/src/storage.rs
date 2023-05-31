@@ -28,13 +28,18 @@ pub trait Entry: Clone + Debug {
 #[allow(missing_docs)]
 pub struct StopSignEntry {
     pub stopsign: StopSign,
-    pub decided: bool,
+    pub idx: u64,
 }
 
 impl StopSignEntry {
     /// Creates a [`StopSign`].
-    pub fn with(stopsign: StopSign, decided: bool) -> Self {
-        StopSignEntry { stopsign, decided }
+    pub fn with(stopsign: StopSign, idx: u64) -> Self {
+        StopSignEntry { stopsign, idx }
+    }
+
+    /// Checks if the stopsign is decided.
+    pub fn decided(&self, decided_idx: u64) -> bool {
+        self.idx < decided_idx
     }
 }
 
@@ -252,6 +257,7 @@ where
         &self,
         idx: u64,
         compacted_idx: u64,
+        decided_idx: u64,
         virtual_log_len: u64,
     ) -> StorageResult<Option<IndexEntry>> {
         if idx < compacted_idx {
@@ -260,7 +266,7 @@ where
             Ok(Some(IndexEntry::Entry))
         } else if idx == virtual_log_len {
             match self.get_stopsign()? {
-                Some(ss) if ss.decided => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
+                Some(ss) if ss.decided(decided_idx) => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
                 _ => Ok(None),
             }
         } else {
@@ -273,6 +279,7 @@ where
     where
         R: RangeBounds<u64>,
     {
+        let decided_idx = self.get_decided_idx()?;
         let virtual_log_len = self.get_log_len()?;
         let from_idx = match r.start_bound() {
             Bound::Included(i) => *i,
@@ -285,24 +292,26 @@ where
             Bound::Unbounded => {
                 let idx = virtual_log_len;
                 match self.get_stopsign()? {
-                    Some(ss) if ss.decided => idx + 1,
+                    Some(ss) if ss.decided(decided_idx) => idx + 1,
                     _ => idx,
                 }
             }
         };
         let compacted_idx = self.get_compacted_idx()?;
-        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, virtual_log_len)? {
-            // use to_idx-1 when getting the entry type as to_idx is exclusive
-            Some(IndexEntry::Compacted) => {
-                return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
-            }
-            Some(from_type) => from_type,
-            _ => return Ok(None),
-        };
-        let from_type = match self.get_entry_type(from_idx, compacted_idx, virtual_log_len)? {
-            Some(from_type) => from_type,
-            _ => return Ok(None),
-        };
+        let to_type =
+            match self.get_entry_type(to_idx - 1, compacted_idx, decided_idx, virtual_log_len)? {
+                // use to_idx-1 when getting the entry type as to_idx is exclusive
+                Some(IndexEntry::Compacted) => {
+                    return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
+                }
+                Some(from_type) => from_type,
+                _ => return Ok(None),
+            };
+        let from_type =
+            match self.get_entry_type(from_idx, compacted_idx, decided_idx, virtual_log_len)? {
+                Some(from_type) => from_type,
+                _ => return Ok(None),
+            };
         let decided_idx = self.get_decided_idx()?;
         match (from_type, to_type) {
             (IndexEntry::Entry, IndexEntry::Entry) => {

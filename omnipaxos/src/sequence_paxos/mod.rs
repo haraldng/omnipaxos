@@ -237,7 +237,11 @@ where
                         .get_stopsign()
                         .expect("storage error while trying to read stopsign")
                     {
-                        if !ss.decided {
+                        let decided_idx = self
+                            .internal_storage
+                            .get_decided_idx()
+                            .expect("storage error while trying to read decided_idx");
+                        if !ss.decided(decided_idx) {
                             for follower in self.leader_state.get_promised_followers() {
                                 if !self.leader_state.follower_has_accepted_stopsign(follower) {
                                     self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
@@ -336,12 +340,16 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
+        let decided_idx = self
+            .internal_storage
+            .get_decided_idx()
+            .expect("storage error while trying to read decided_idx");
         match self
             .internal_storage
             .get_stopsign()
             .expect("storage error while trying to read stopsign")
         {
-            Some(ss) if ss.decided => Some(ss.stopsign),
+            Some(ss) if ss.decided(decided_idx) => Some(ss.stopsign),
             _ => None,
         }
     }
@@ -422,8 +430,12 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
+        let log_len = self
+            .internal_storage
+            .get_log_len()
+            .expect("storage error while trying to read log_len");
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, false))
+            .set_stopsign(StopSignEntry::with(ss, log_len))
             .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
             self.leader_state.set_accepted_stopsign(self.pid);

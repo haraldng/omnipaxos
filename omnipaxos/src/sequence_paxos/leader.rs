@@ -592,30 +592,22 @@ where
         {
             self.leader_state.set_accepted_stopsign(from);
             if self.leader_state.is_stopsign_chosen() {
-                let mut ss = self
+                let _ss = self
                     .internal_storage
                     .get_stopsign()
                     .expect("storage error while trying to read stopsign")
                     .expect("No stopsign found when deciding!");
-                ss.decided = true;
-                let old_decided_idx = self
+                let log_len = self
                     .internal_storage
-                    .get_decided_idx()
-                    .expect("storage error while trying to read decided index");
-                self.internal_storage
-                    .set_decided_idx(
-                        self.internal_storage
-                            .get_log_len()
-                            .expect("storage error while trying to read log length")
-                            + 1,
-                    )
-                    .expect("storage error while trying to write decided index");
-                let result = self.internal_storage.set_stopsign(ss);
-                self.internal_storage.rollback_if_err(
-                    &result,
-                    vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                    "storage error while trying to write stopsign",
+                    .get_log_len()
+                    .expect("storage error while trying to read log length");
+                debug_assert!(
+                    _ss.idx == log_len,
+                    "trying to decide StopSignEntry with wrong index"
                 );
+                self.internal_storage
+                    .set_decided_idx(log_len + 1)
+                    .expect("storage error while trying to write decided index");
                 for pid in self.leader_state.get_promised_followers() {
                     self.send_decide_stopsign(pid);
                 }
