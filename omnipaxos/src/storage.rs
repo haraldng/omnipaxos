@@ -309,6 +309,13 @@ where
         }
     }
 
+    pub(crate) fn rollback_and_panic(&mut self, values: Vec<RollbackValue>, msg: &str) {
+        for value in values {
+            self.single_rollback(value);
+        }
+        panic!("{}", msg);
+    }
+
     /// This function is useful to handle `StorageResult::Error`.
     /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
     /// Otherwise it returns.

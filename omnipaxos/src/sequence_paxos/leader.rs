@@ -426,11 +426,13 @@ where
                         let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
                         let old_snapshot_res = self.internal_storage.get_snapshot();
                         if old_log_res.is_err() || old_snapshot_res.is_err() {
-                            self.internal_storage
-                                .single_rollback(RollbackValue::DecidedIdx(old_decided_idx));
-                            self.internal_storage
-                                .single_rollback(RollbackValue::AcceptedRound(old_accepted_round));
-                            panic!("storage error while trying to read old log or snapshot",);
+                            self.internal_storage.rollback_and_panic(
+                                vec![
+                                    RollbackValue::AcceptedRound(old_accepted_round),
+                                    RollbackValue::DecidedIdx(old_decided_idx),
+                                ],
+                                "storage error while trying to read old log or snapshot",
+                            );
                         }
                         let decided_idx = self
                             .leader_state
