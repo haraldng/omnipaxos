@@ -23,6 +23,194 @@ pub trait Entry: Clone + Debug {
     type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
 }
 
+
+///
+pub enum StorageOp<T: Entry> {
+    ///
+    AppendEntries{
+        ///
+        entries: Vec<T>,
+        ///
+        from_idx: Option<u64>
+    },
+    ///
+    SetPromise(Ballot),
+    ///
+    SetDecidedIndex(u64),
+    ///
+    SetAcceptedRound(Ballot),
+    ///
+    SetCompactedIdx(u64),
+    ///
+    Trim(u64),
+    ///
+    SetStopsign(Option<StopSignEntry>),
+    ///
+    SetSnapshot(Option<T::Snapshot>),
+}
+
+///
+pub trait AtomicStorage<T: Entry> {
+    /// Atomically perform and persist all ops in order.
+    /// Returns an Error if the transaction was not committed (so it was rolled back).
+    fn write_txn(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()>;
+
+    /// Returns the entries in the log in the index interval of [from, to).
+    /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
+    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>>;
+
+    /// Returns the suffix of entries in the log from index `from`.
+    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>>;
+
+    /// Returns the current length of the log.
+    fn get_log_len(&self) -> StorageResult<u64>;
+
+    /// Returns the round that has been promised.
+    fn get_promise(&self) -> StorageResult<Ballot>;
+
+    /// Returns the decided index in the log.
+    fn get_decided_idx(&self) -> StorageResult<u64>;
+
+    /// Returns the latest round in which entries have been accepted.
+    fn get_accepted_round(&self) -> StorageResult<Ballot>;
+
+    /// Returns the stored StopSign.
+    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>>;
+
+    /// Returns the garbage collector index from storage.
+    fn get_compacted_idx(&self) -> StorageResult<u64>;
+
+    /// Returns the stored snapshot.
+    fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>>;
+}
+
+///
+pub trait NonAtomicStorage<T: Entry> {
+    /// Returns the entries in the log in the index interval of [from, to).
+    /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
+    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>>;
+
+    /// Returns the suffix of entries in the log from index `from`.
+    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>>;
+
+    /// Returns the current length of the log.
+    fn get_log_len(&self) -> StorageResult<u64>;
+
+    /// Appends the entries of `entries` to the prefix from index `from_index` in the log.
+    /// If `from_idx` is `None`, the entries are appended to the end of the log.
+    fn append_entries(&mut self, entries: Vec<T>, from_idx: Option<u64>) -> StorageResult<u64>; // TODO: how to rollback?
+
+    /// Removes elements up to the given [`idx`] from storage.
+    fn trim(&mut self, idx: u64) -> StorageResult<()>; // TODO: how to rollback?
+
+    /// Returns the round that has been promised.
+    fn get_promise(&self) -> StorageResult<Ballot>;
+
+    /// Sets the round that has been promised.
+    fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()>;
+
+    /// Returns the decided index in the log.
+    fn get_decided_idx(&self) -> StorageResult<u64>;
+
+    /// Sets the decided index in the log.
+    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()>;
+
+    /// Returns the latest round in which entries have been accepted.
+    fn get_accepted_round(&self) -> StorageResult<Ballot>;
+
+    /// Sets the latest accepted round.
+    fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()>;
+
+    /// Sets the StopSign used for reconfiguration.
+    fn set_stopsign(&mut self, s: Option<StopSignEntry>) -> StorageResult<()>;
+
+    /// Returns the stored StopSign.
+    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>>;
+
+    /// Returns the garbage collector index from storage.
+    fn get_compacted_idx(&self) -> StorageResult<u64>;
+
+    /// Sets the compacted (i.e. trimmed or snapshotted) index.
+    fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()>;
+
+    /// Returns the stored snapshot.
+    fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>>;
+
+    /// Sets the snapshot.
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()>;
+}
+
+///
+pub struct AtomicStorageWrapper<S, T>
+where
+    T: Entry,
+    S: NonAtomicStorage<T>,
+{
+    storage: S,
+    _t: PhantomData<T>,
+}
+
+impl<T, S> AtomicStorage<T> for AtomicStorageWrapper<S, T>
+where
+    T: Entry,
+    S: NonAtomicStorage<T>,
+{
+    /// Atomically perform and persist all ops in order.
+    /// Returns an Error if the transaction was not committed (so it was rolled back).
+    fn write_txn(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()> {
+        todo!()
+    }
+
+    /// Returns the entries in the log in the index interval of [from, to).
+    /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
+    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
+        todo!()
+    }
+
+    /// Returns the suffix of entries in the log from index `from`.
+    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
+        todo!()
+    }
+
+    /// Returns the current length of the log.
+    fn get_log_len(&self) -> StorageResult<u64> {
+        todo!()
+    }
+
+    /// Returns the round that has been promised.
+    fn get_promise(&self) -> StorageResult<Ballot> {
+        todo!()
+    }
+
+    /// Returns the decided index in the log.
+    fn get_decided_idx(&self) -> StorageResult<u64> {
+        todo!()
+    }
+
+    /// Returns the latest round in which entries have been accepted.
+    fn get_accepted_round(&self) -> StorageResult<Ballot> {
+        todo!()
+    }
+
+    /// Returns the stored StopSign.
+    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
+        todo!()
+    }
+
+    /// Returns the garbage collector index from storage.
+    fn get_compacted_idx(&self) -> StorageResult<u64> {
+        todo!()
+    }
+
+    /// Returns the stored snapshot.
+    fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
+        todo!()
+    }
+}
+
+
+
+
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
