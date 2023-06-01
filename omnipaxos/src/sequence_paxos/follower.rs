@@ -110,14 +110,17 @@ where
             let accepted = match accsync.decided_snapshot {
                 Some(s) => {
                     let old_compacted_idx = self.internal_storage.get_compacted_idx();
-                    let old_log = self
-                        .internal_storage
-                        .get_suffix(old_compacted_idx)
-                        .expect("Failed to get current log");
-                    let old_snapshot = self
-                        .internal_storage
-                        .get_snapshot()
-                        .expect("Failed to get current snapshot");
+                    let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
+                    let old_snapshot_res = self.internal_storage.get_snapshot();
+                    if old_log_res.is_err() || old_snapshot_res.is_err() {
+                        self.internal_storage.rollback_and_panic(
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                            ],
+                            "storage error while trying to read old log or snapshot",
+                        );
+                    }
                     let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
                             self.internal_storage.set_snapshot(accsync.decided_idx, c)
@@ -142,8 +145,8 @@ where
                         vec![
                             RollbackValue::AcceptedRound(old_accepted_round),
                             RollbackValue::DecidedIdx(old_decided_idx),
-                            RollbackValue::Log(old_log),
-                            RollbackValue::Snapshot(old_compacted_idx, old_snapshot),
+                            RollbackValue::Log(old_log_res.unwrap()),
+                            RollbackValue::Snapshot(old_compacted_idx, old_snapshot_res.unwrap()),
                         ],
                         "storage error while trying to write snapshot",
                     );
