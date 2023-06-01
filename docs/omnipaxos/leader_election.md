@@ -26,7 +26,7 @@ let flex_quorum = FlexibleQuorum {
 let config = OmniPaxosConfig {
     configuration_id: 1,
     pid: 1,
-    peers: [2, 3, 4, 5, 6, 7],
+    peers: vec![2, 3, 4, 5, 6, 7],
     flexible_quorum: Some(flex_quorum),
     ..Default::deafult()
 };
