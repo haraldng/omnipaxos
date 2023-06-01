@@ -573,12 +573,6 @@ fn atomic_storage_majority_promises_test() {
                 || (new_decided_idx > old_decided_idx && new_snapshot.is_some()),
             "decided_idx and decided_snapshot should be updated atomically"
         );
-        println!("new_accepted_idx{:?}", new_accepted_idx);
-        println!("new_compacted_idx{:?}", s.get_compacted_idx().unwrap());
-        println!("old_accepted_idx{:?}", old_accepted_idx);
-        println!("new_accepted_round{:?}", new_accepted_round);
-        println!("n_old){:?}", n_old);
-        println!("n{:?}", n);
         assert!(
             (new_accepted_idx == old_accepted_idx && new_accepted_round == Some(n_old))
                 || (new_accepted_idx > old_accepted_idx && new_accepted_round == Some(n)),
