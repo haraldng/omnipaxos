@@ -2,7 +2,7 @@ A unique feature of Omni-Paxos is the guaranteed progress with one quorum-connec
 
 To detect any leader failures and elect a new leader, you must call the function ``election_timeout()`` periodically (e.g., every 100ms).
 
-```
+```rust
 // Call this periodically
 omni_paxos.election_timeout();
 ```
