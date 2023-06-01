@@ -27,6 +27,7 @@ use toml;
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
 /// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered
@@ -41,6 +42,7 @@ pub struct OmniPaxosConfig {
     pub configuration_id: u32,
     pub pid: NodeId,
     pub peers: Vec<u64>,
+    pub batch_size: usize,
     pub buffer_size: usize,
     pub election_tick_timeout: u64,
     pub resend_message_tick_timeout: u64,
@@ -74,6 +76,10 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
+        assert!(
+            self.batch_size >= 1,
+            "Batch size must be greater than or equal to 1"
+        );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = self.skip_prepare_use_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0")
@@ -99,6 +105,7 @@ impl Default for OmniPaxosConfig {
             skip_prepare_use_leader: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
+            batch_size: 1,
             leader_priority: 0,
             initial_leader: None,
         }

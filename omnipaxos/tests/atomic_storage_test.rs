@@ -66,7 +66,7 @@ fn setup_leader() -> (
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
-    let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
+    let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
     let n_old = n;
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
@@ -140,7 +140,7 @@ fn setup_follower() -> (
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = basic_setup();
-    let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
+    let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
     n.config_id = 1;
     n.n += 1;
     n.pid = 2;
@@ -150,7 +150,12 @@ fn setup_follower() -> (
         msg: PaxosMsg::Prepare(Prepare {
             decided_idx: 0,
             accepted_idx: 0,
-            n_accepted: mem_storage.lock().unwrap().get_accepted_round().unwrap(),
+            n_accepted: mem_storage
+                .lock()
+                .unwrap()
+                .get_accepted_round()
+                .unwrap()
+                .unwrap(),
             n,
         }),
     });
@@ -192,7 +197,7 @@ fn atomic_storage_decide_stopsign_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::AcceptStopSign(AcceptStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 seq_num: SequenceNumber {
                     session: 1,
                     counter: 2,
@@ -217,7 +222,7 @@ fn atomic_storage_decide_stopsign_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::DecideStopSign(DecideStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 seq_num: SequenceNumber {
                     session: 1,
                     counter: 3,
@@ -247,7 +252,7 @@ fn atomic_storage_decide_stopsign_test() {
 fn atomic_storage_acceptsync_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = basic_setup();
-        let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
+        let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
         n.n += 1;
         n.pid = 2;
         let setup_msg = Message::<Value>::SequencePaxos(PaxosMessage {
@@ -256,7 +261,7 @@ fn atomic_storage_acceptsync_test() {
             msg: PaxosMsg::Prepare(Prepare {
                 decided_idx: 0,
                 accepted_idx: 0,
-                n_accepted: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n_accepted: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 n,
             }),
         });
@@ -314,7 +319,7 @@ fn atomic_storage_trim_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::AcceptDecide(AcceptDecide {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 seq_num: SequenceNumber {
                     session: 1,
                     counter: 2,
@@ -370,7 +375,7 @@ fn atomic_storage_snapshot_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::AcceptDecide(AcceptDecide {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 seq_num: SequenceNumber {
                     session: 1,
                     counter: 2,
@@ -441,7 +446,7 @@ fn atomic_storage_accept_decide_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::AcceptDecide(AcceptDecide {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 seq_num: SequenceNumber {
                     session: 1,
                     counter: 2,
@@ -478,7 +483,7 @@ fn atomic_storage_accept_decide_test() {
 fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
-        let mut n = mem_storage.lock().unwrap().get_promise().unwrap();
+        let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
         let n_old = n;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
@@ -522,7 +527,9 @@ fn atomic_storage_majority_promises_test() {
             }
         }
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
-        let old_log_len = mem_storage.lock().unwrap().get_log_len().unwrap();
+        let old_compacted_idx = mem_storage.lock().unwrap().get_compacted_idx().unwrap();
+        let old_accepted_idx =
+            mem_storage.lock().unwrap().get_log_len().unwrap() + old_compacted_idx;
         let old_snapshot = mem_storage.lock().unwrap().get_snapshot().unwrap();
         storage_conf
             .lock()
@@ -550,7 +557,7 @@ fn atomic_storage_majority_promises_test() {
         // check consistency
         let s = mem_storage.lock().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
-        let new_log_len = s.get_log_len().unwrap();
+        let new_accepted_idx = s.get_log_len().unwrap() + s.get_compacted_idx().unwrap();
         let new_snapshot = s.get_snapshot().unwrap();
         let new_accepted_round = s.get_accepted_round().unwrap();
         assert!(
@@ -567,8 +574,8 @@ fn atomic_storage_majority_promises_test() {
             "decided_idx and decided_snapshot should be updated atomically"
         );
         assert!(
-            (new_log_len == old_log_len && new_accepted_round == n_old)
-                || (new_log_len > old_log_len && new_accepted_round == n),
+            (new_accepted_idx == old_accepted_idx && new_accepted_round == Some(n_old))
+                || (new_accepted_idx > old_accepted_idx && new_accepted_round == Some(n)),
             "accepted round and the log should be updated atomically"
         );
     }
@@ -598,7 +605,7 @@ fn atomic_storage_majority_accepted_stopsign_test() {
             from: 2,
             to: 1,
             msg: PaxosMsg::AcceptedStopSign(AcceptedStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap(),
+                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));

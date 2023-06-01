@@ -316,7 +316,7 @@ where
         self.get_entries(from, self.commitlog.next_offset())
     }
 
-    fn get_promise(&self) -> StorageResult<Ballot> {
+    fn get_promise(&self) -> StorageResult<Option<Ballot>> {
         #[cfg(feature = "rocksdb")]
         {
             let promised = self.rocksdb.get(NPROM)?;
@@ -324,12 +324,12 @@ where
                 Some(prom_bytes) => {
                     let b_store =
                         BallotStorage::read_from(prom_bytes.as_slice()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(
+                    Ok(Some(Ballot::with(
                         b_store.config_id,
                         b_store.n,
                         b_store.priority,
                         b_store.pid,
-                    ))
+                    )))
                 }
                 None => Ok(Ballot::default()),
             }
@@ -341,14 +341,14 @@ where
                 Some(prom_bytes) => {
                     let b_store =
                         BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(
+                    Ok(Some(Ballot::with(
                         b_store.config_id,
                         b_store.n,
                         b_store.priority,
                         b_store.pid,
-                    ))
+                    )))
                 }
-                None => Ok(Ballot::default()),
+                None => Ok(Some(Ballot::default())),
             }
         }
     }
@@ -399,7 +399,7 @@ where
         Ok(())
     }
 
-    fn get_accepted_round(&self) -> StorageResult<Ballot> {
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
         #[cfg(feature = "rocksdb")]
         {
             let accepted = self.rocksdb.get(ACC)?;
@@ -407,14 +407,14 @@ where
                 Some(acc_bytes) => {
                     let b_store =
                         BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(
+                    Ok(Some(Ballot::with(
                         b_store.config_id,
                         b_store.n,
                         b_store.priority,
                         b_store.pid,
-                    ))
+                    )))
                 }
-                None => Ok(Ballot::default()),
+                None => Ok(Some(Ballot::default())),
             }
         }
         #[cfg(feature = "sled")]
@@ -424,14 +424,14 @@ where
                 Some(acc_bytes) => {
                     let b_store =
                         BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper {})?;
-                    Ok(Ballot::with(
+                    Ok(Some(Ballot::with(
                         b_store.config_id,
                         b_store.n,
                         b_store.priority,
                         b_store.pid,
-                    ))
+                    )))
                 }
-                None => Ok(Ballot::default()),
+                None => Ok(Some(Ballot::default())),
             }
         }
     }
