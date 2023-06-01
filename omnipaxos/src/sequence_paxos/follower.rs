@@ -113,13 +113,11 @@ where
                     let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
                     let old_snapshot_res = self.internal_storage.get_snapshot();
                     if old_log_res.is_err() || old_snapshot_res.is_err() {
-                        self.internal_storage.rollback_and_panic(
-                            vec![
-                                RollbackValue::AcceptedRound(old_accepted_round),
-                                RollbackValue::DecidedIdx(old_decided_idx),
-                            ],
-                            "storage error while trying to read old log or snapshot",
-                        );
+                        self.internal_storage
+                            .single_rollback(RollbackValue::DecidedIdx(old_decided_idx));
+                        self.internal_storage
+                            .single_rollback(RollbackValue::AcceptedRound(old_accepted_round));
+                        panic!("storage error while trying to read old log or snapshot",);
                     }
                     let result = match s {
                         SnapshotType::Complete(c) => {
@@ -140,7 +138,7 @@ where
                     let accepted_res = self
                         .internal_storage
                         .append_entries_without_batching(accsync.suffix);
-                    // manually rollback set_snapshot if append suffix fails
+                    // manually rollback snapshot and log if append suffix fails
                     if let Err(_e) = &accepted_res {
                         self.internal_storage.rollback_log(old_log_res.unwrap());
                         self.internal_storage

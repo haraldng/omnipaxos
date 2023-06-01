@@ -309,13 +309,6 @@ where
         }
     }
 
-    pub(crate) fn rollback_and_panic(&mut self, values: Vec<RollbackValue>, msg: &str) {
-        for value in values {
-            self.single_rollback(value);
-        }
-        panic!("{}", msg);
-    }
-
     /// This function is useful to handle `StorageResult::Error`.
     /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
     /// Otherwise it returns.
@@ -336,7 +329,7 @@ where
     /// Rollback the log in the storage using given log entries.
     pub(crate) fn rollback_log(&mut self, entries: Vec<T>) {
         self.try_trim(self.get_accepted_idx())
-            .expect("storage error while trying to trim log entries");
+            .expect("storage error while trying to trim log entries before rolling back");
         self.append_entries_without_batching(entries)
             .expect("storage error while trying to rollback log entries");
     }

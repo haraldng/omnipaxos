@@ -27,7 +27,7 @@ use toml;
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
-/// * `batch_size`: The size of the buffer for log batching. default is 1, means no batching.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
 /// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered
