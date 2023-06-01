@@ -25,7 +25,7 @@ pub struct KeyValue {
 > **Note** To use the #[derive(Entry)] macro, please make sure to enable the `macros` feature.
 
 ## Creating a Node
-With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance.  Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following: 
+With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance. Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following:
 ```rust,edition2018,no_run,noplaypen
 use omnipaxos::{
    {OmniPaxos, OmniPaxosConfig},
@@ -47,7 +47,7 @@ let omnipaxos_config = OmniPaxosConfig {
     pid: my_pid,
     peers: my_peers,
     ..Default::default()
-}
+};
 
 let storage = MemoryStorage::default();
 let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage);
@@ -79,7 +79,7 @@ let my_log_opts = LogOptions::new(my_path);
 let persist_conf = PersistentStorageConfig::default();
 
 persist_conf.set_path(my_path); // set the path to the persistent storage
-my_config.set_commitlog_options(my_logopts);
+my_config.set_commitlog_options(my_log_opts);
 
 // Re-create storage with previous state, then create `OmniPaxos`
 let recovered_storage = PersistentStorage::open(persist_conf); 
