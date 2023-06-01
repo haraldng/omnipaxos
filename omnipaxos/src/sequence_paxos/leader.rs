@@ -367,18 +367,6 @@ where
         });
     }
 
-    fn send_decide_stopsign(&mut self, to: NodeId) {
-        let d = DecideStopSign {
-            seq_num: self.leader_state.next_seq_num(to),
-            n: self.leader_state.n_leader,
-        };
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: PaxosMsg::DecideStopSign(d),
-        });
-    }
-
     fn adopt_pending_stopsign(&mut self) {
         if let Some(ss) = self.pending_stopsign.take() {
             self.accept_stopsign(ss);
@@ -577,39 +565,6 @@ where
                     } else {
                         self.send_decide(pid, decided_idx);
                     }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn handle_accepted_stopsign(
-        &mut self,
-        acc_stopsign: AcceptedStopSign,
-        from: NodeId,
-    ) {
-        if acc_stopsign.n == self.leader_state.n_leader
-            && self.state == (Role::Leader, Phase::Accept)
-        {
-            self.leader_state.set_accepted_stopsign(from);
-            if self.leader_state.is_stopsign_chosen() {
-                let _ss = self
-                    .internal_storage
-                    .get_stopsign()
-                    .expect("storage error while trying to read stopsign")
-                    .expect("No stopsign found when deciding!");
-                let log_len = self
-                    .internal_storage
-                    .get_log_len()
-                    .expect("storage error while trying to read log length");
-                debug_assert!(
-                    _ss.idx == log_len,
-                    "trying to decide StopSignEntry with wrong index"
-                );
-                self.internal_storage
-                    .set_decided_idx(log_len + 1)
-                    .expect("storage error while trying to write decided index");
-                for pid in self.leader_state.get_promised_followers() {
-                    self.send_decide_stopsign(pid);
                 }
             }
         }

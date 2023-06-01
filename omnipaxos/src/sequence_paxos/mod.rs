@@ -243,7 +243,7 @@ where
                             .expect("storage error while trying to read decided_idx");
                         if !ss.decided(decided_idx) {
                             for follower in self.leader_state.get_promised_followers() {
-                                if !self.leader_state.follower_has_accepted_stopsign(follower) {
+                                if !self.leader_state.get_accepted_idx(follower) > ss.log_idx {
                                     self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
                                 }
                             }
@@ -332,8 +332,6 @@ where
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
-            PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
-            PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
         }
     }
@@ -438,7 +436,7 @@ where
             .set_stopsign(StopSignEntry::with(ss, log_len))
             .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
-            self.leader_state.set_accepted_stopsign(self.pid);
+            self.leader_state.set_accepted_idx(self.pid, log_len + 1);
         }
     }
 

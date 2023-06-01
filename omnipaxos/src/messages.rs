@@ -128,24 +128,6 @@ pub mod sequence_paxos {
         pub ss: StopSign,
     }
 
-    /// Message sent by followers to leader when accepted StopSign
-    #[derive(Copy, Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct AcceptedStopSign {
-        /// The current round.
-        pub n: Ballot,
-    }
-
-    /// Message sent by leader to decide a StopSign
-    #[derive(Copy, Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct DecideStopSign {
-        /// The current round.
-        pub n: Ballot,
-        /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: SequenceNumber,
-    }
-
     /// Compaction Request
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
@@ -176,8 +158,6 @@ pub mod sequence_paxos {
         ProposalForward(Vec<T>),
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
-        AcceptedStopSign(AcceptedStopSign),
-        DecideStopSign(DecideStopSign),
         ForwardStopSign(StopSign),
     }
 

@@ -126,7 +126,7 @@ where
                 vec![RollbackValue::AcceptedRound(old_accepted_round)],
                 "storage error while trying to write decided index",
             );
-            let accepted = match accsync.decided_snapshot {
+            let mut accepted = match accsync.decided_snapshot {
                 Some(s) => {
                     let result = match s {
                         SnapshotType::Complete(c) => {
@@ -176,15 +176,6 @@ where
                     }
                 }
             };
-            self.state = (Role::Follower, Phase::Accept);
-            self.current_seq_num = accsync.seq_num;
-            let cached_idx = self.outgoing.len();
-            self.latest_accepted_meta = Some((accsync.n, cached_idx));
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: from,
-                msg: PaxosMsg::Accepted(accepted),
-            });
             match accsync.stopsign {
                 Some(ss) => {
                     if let Some(ss_entry) = self
@@ -198,15 +189,19 @@ where
                     } else {
                         self.accept_stopsign(ss);
                     }
-                    let a = AcceptedStopSign { n: accsync.n };
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: from,
-                        msg: PaxosMsg::AcceptedStopSign(a),
-                    });
+                    accepted.accepted_idx += 1;
                 }
                 None => self.forward_pending_proposals(),
             }
+            self.state = (Role::Follower, Phase::Accept);
+            self.current_seq_num = accsync.seq_num;
+            let cached_idx = self.outgoing.len();
+            self.latest_accepted_meta = Some((accsync.n, cached_idx));
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: from,
+                msg: PaxosMsg::Accepted(accepted),
+            });
         }
     }
 
@@ -292,6 +287,10 @@ where
             && self.state == (Role::Follower, Phase::Accept)
         {
             let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
+            let log_len = self
+                .internal_storage
+                .get_log_len()
+                .expect("storage error while trying to read log_len");
             match msg_status {
                 MessageStatus::First => {
                     // pseudo-AcceptSync for prepare-less reconfigurations
@@ -310,11 +309,14 @@ where
             }
 
             self.accept_stopsign(acc_ss.ss);
-            let a = AcceptedStopSign { n: acc_ss.n };
+            let a = Accepted {
+                n: acc_ss.n,
+                accepted_idx: log_len + 1,
+            };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: self.leader.pid,
-                msg: PaxosMsg::AcceptedStopSign(a),
+                msg: PaxosMsg::Accepted(a),
             });
         }
     }
@@ -346,51 +348,6 @@ where
             }
             self.internal_storage
                 .set_decided_idx(dec.decided_idx)
-                .expect("storage error while trying to write decided index");
-        }
-    }
-
-    pub(crate) fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
-        if self
-            .internal_storage
-            .get_promise()
-            .expect("storage error while trying to read promise")
-            == dec.n
-            && self.state.1 == Phase::Accept
-        {
-            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
-            match msg_status {
-                MessageStatus::First => {
-                    #[cfg(feature = "logging")]
-                    warn!(
-                        self.logger,
-                        "DecideStopSign cannot be the first message in a sequence!"
-                    );
-                    return;
-                }
-                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
-                MessageStatus::DroppedPreceding => {
-                    self.reconnected(dec.n.pid);
-                    return;
-                }
-                MessageStatus::Outdated => return,
-            }
-
-            let _ss = self
-                .internal_storage
-                .get_stopsign()
-                .expect("storage error while trying to read stopsign")
-                .expect("No stopsign found when deciding!");
-            let log_len = self
-                .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
-            debug_assert!(
-                _ss.idx == log_len,
-                "trying to decide StopSignEntry with wrong index"
-            );
-            self.internal_storage
-                .set_decided_idx(log_len + 1)
                 .expect("storage error while trying to write decided index");
         }
     }

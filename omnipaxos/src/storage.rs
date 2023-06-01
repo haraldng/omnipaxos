@@ -28,18 +28,22 @@ pub trait Entry: Clone + Debug {
 #[allow(missing_docs)]
 pub struct StopSignEntry {
     pub stopsign: StopSign,
-    pub idx: u64,
+    /// The log index of the StopSign
+    pub log_idx: u64,
 }
 
 impl StopSignEntry {
     /// Creates a [`StopSign`].
     pub fn with(stopsign: StopSign, idx: u64) -> Self {
-        StopSignEntry { stopsign, idx }
+        StopSignEntry {
+            stopsign,
+            log_idx: idx,
+        }
     }
 
     /// Checks if the stopsign is decided.
     pub fn decided(&self, decided_idx: u64) -> bool {
-        self.idx < decided_idx
+        self.log_idx < decided_idx
     }
 }
 
