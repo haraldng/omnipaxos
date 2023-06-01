@@ -1,6 +1,6 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    util::{ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
+    util::{AcceptedMetaData, ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
     CompactionErr,
 };
 #[cfg(feature = "serde")]
@@ -185,9 +185,12 @@ impl<T: Entry> Snapshot<T> for NoSnapshot {
 
 /// Used to perform convenient rollbacks of storage operations on internal storage.
 /// Represents only values that can and will actually be rolled back from outside internal storage.
-pub(crate) enum RollbackValue {
+pub(crate) enum RollbackValue<T: Entry> {
     DecidedIdx(u64),
     AcceptedRound(Ballot),
+    Log(Vec<T>),
+    /// compacted index and snapshot
+    Snapshot(u64, Option<T::Snapshot>),
 }
 
 /// A simple in-memory storage for simple state values of OmniPaxos.
@@ -291,7 +294,7 @@ where
     }
 
     /// Writes the value.
-    pub(crate) fn single_rollback(&mut self, value: RollbackValue) {
+    pub(crate) fn single_rollback(&mut self, value: RollbackValue<T>) {
         match value {
             RollbackValue::DecidedIdx(idx) => self
                 .set_decided_idx(idx)
@@ -299,17 +302,23 @@ where
             RollbackValue::AcceptedRound(b) => self
                 .set_accepted_round(b)
                 .expect("storage error while trying to write accepted_round"),
+            RollbackValue::Log(entries) => {
+                self.rollback_log(entries);
+            }
+            RollbackValue::Snapshot(compacted_idx, snapshot) => {
+                self.rollback_snapshot(compacted_idx, snapshot);
+            }
         }
     }
 
     /// Writes the values.
-    pub(crate) fn rollback(&mut self, values: Vec<RollbackValue>) {
+    pub(crate) fn rollback(&mut self, values: Vec<RollbackValue<T>>) {
         for value in values {
             self.single_rollback(value);
         }
     }
 
-    pub(crate) fn rollback_and_panic(&mut self, values: Vec<RollbackValue>, msg: &str) {
+    pub(crate) fn rollback_and_panic(&mut self, values: Vec<RollbackValue<T>>, msg: &str) {
         for value in values {
             self.single_rollback(value);
         }
@@ -319,10 +328,10 @@ where
     /// This function is useful to handle `StorageResult::Error`.
     /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
     /// Otherwise it returns.
-    pub(crate) fn rollback_if_err<R>(
+    pub(crate) fn rollback_and_panic_if_err<R>(
         &mut self,
         result: &StorageResult<R>,
-        values: Vec<RollbackValue>,
+        values: Vec<RollbackValue<T>>,
         msg: &str,
     ) where
         R: Debug,
@@ -334,7 +343,7 @@ where
     }
 
     /// Rollback the log in the storage using given log entries.
-    pub(crate) fn rollback_log(&mut self, entries: Vec<T>) {
+    fn rollback_log(&mut self, entries: Vec<T>) {
         self.try_trim(self.get_accepted_idx())
             .expect("storage error while trying to trim log entries before rolling back");
         self.append_entries_without_batching(entries)
@@ -342,7 +351,7 @@ where
     }
 
     /// Rollback the snapshot in the storage using given compacted_idx and snapshot.
-    pub(crate) fn rollback_snapshot(&mut self, compacted_idx: u64, snapshot: Option<T::Snapshot>) {
+    fn rollback_snapshot(&mut self, compacted_idx: u64, snapshot: Option<T::Snapshot>) {
         if let Some(old_snapshot) = snapshot {
             self.set_snapshot(compacted_idx, old_snapshot)
                 .expect("storage error while trying to rollback snapshot");
@@ -541,26 +550,17 @@ where
     /*** Writing ***/
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
-    pub(crate) fn append_entry(&mut self, entry: T) -> StorageResult<Option<(u64, Vec<T>)>> {
+    pub(crate) fn append_entry_with_batching(
+        &mut self,
+        entry: T,
+    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
         let append_res = self.state_cache.append_entry(entry);
         if let Some(flushed_entries) = append_res {
             let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
-            Ok(Some((accepted_idx, flushed_entries)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    // Append entries in batch, if the batch size is reached, flush the batch and return the
-    // accepted index. If the batch size is not reached, return None.
-    pub(crate) fn append_entries_with_batching(
-        &mut self,
-        entries: Vec<T>,
-    ) -> StorageResult<Option<u64>> {
-        let append_res = self.state_cache.append_entries(entries);
-        if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
-            Ok(Some(accepted_idx))
+            Ok(Some(AcceptedMetaData {
+                accepted_idx,
+                flushed_entries,
+            }))
         } else {
             Ok(None)
         }
@@ -568,14 +568,32 @@ where
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
     // accepted index and the flushed entries. If the batch size is not reached, return None.
-    pub(crate) fn append_entries_and_get_flushed(
+    pub(crate) fn append_entries_with_batching(
         &mut self,
         entries: Vec<T>,
-    ) -> StorageResult<Option<(u64, Vec<T>)>> {
+    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
         let append_res = self.state_cache.append_entries(entries);
         if let Some(flushed_entries) = append_res {
             let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
-            Ok(Some((accepted_idx, flushed_entries)))
+            Ok(Some(AcceptedMetaData {
+                accepted_idx,
+                flushed_entries,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // Append entries in batch, if the batch size is reached, flush the batch and return the
+    // accepted index. If the batch size is not reached, return None.
+    pub(crate) fn append_entries_and_get_accepted_idx(
+        &mut self,
+        entries: Vec<T>,
+    ) -> StorageResult<Option<u64>> {
+        let append_res = self.state_cache.append_entries(entries);
+        if let Some(flushed_entries) = append_res {
+            let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
+            Ok(Some(accepted_idx))
         } else {
             Ok(None)
         }

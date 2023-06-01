@@ -7,6 +7,12 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
+#[derive(Debug, Clone)]
+pub(crate) struct AcceptedMetaData<T: Entry> {
+    pub accepted_idx: u64,
+    pub flushed_entries: Vec<T>,
+}
+
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {

@@ -102,7 +102,7 @@ where
                 .set_accepted_round(accsync.n)
                 .expect("storage error while trying to write accepted round");
             let result = self.internal_storage.set_decided_idx(accsync.decided_idx);
-            self.internal_storage.rollback_if_err(
+            self.internal_storage.rollback_and_panic_if_err(
                 &result,
                 vec![RollbackValue::AcceptedRound(old_accepted_round)],
                 "storage error while trying to write decided index",
@@ -110,18 +110,15 @@ where
             let accepted = match accsync.decided_snapshot {
                 Some(s) => {
                     let old_compacted_idx = self.internal_storage.get_compacted_idx();
-                    let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
-                    let old_snapshot_res = self.internal_storage.get_snapshot();
-                    if old_log_res.is_err() || old_snapshot_res.is_err() {
-                        self.internal_storage.rollback_and_panic(
-                            vec![
-                                RollbackValue::AcceptedRound(old_accepted_round),
-                                RollbackValue::DecidedIdx(old_decided_idx),
-                            ],
-                            "storage error while trying to read old log or snapshot",
-                        );
-                    }
-                    let result = match s {
+                    let old_log = self
+                        .internal_storage
+                        .get_suffix(old_compacted_idx)
+                        .expect("Failed to get current log");
+                    let old_snapshot = self
+                        .internal_storage
+                        .get_snapshot()
+                        .expect("Failed to get current snapshot");
+                    let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
                             self.internal_storage.set_snapshot(accsync.decided_idx, c)
                         }
@@ -129,8 +126,8 @@ where
                             self.internal_storage.merge_snapshot(accsync.decided_idx, d)
                         }
                     };
-                    self.internal_storage.rollback_if_err(
-                        &result,
+                    self.internal_storage.rollback_and_panic_if_err(
+                        &snapshot_res,
                         vec![
                             RollbackValue::AcceptedRound(old_accepted_round),
                             RollbackValue::DecidedIdx(old_decided_idx),
@@ -140,16 +137,15 @@ where
                     let accepted_res = self
                         .internal_storage
                         .append_entries_without_batching(accsync.suffix);
-                    // manually rollback snapshot and log if append suffix fails
-                    if let Err(_e) = &accepted_res {
-                        self.internal_storage.rollback_log(old_log_res.unwrap());
-                        self.internal_storage
-                            .rollback_snapshot(old_compacted_idx, old_snapshot_res.unwrap());
-                    }
-                    self.internal_storage.rollback_if_err(
+                    self.internal_storage.rollback_and_panic_if_err(
                         &accepted_res,
-                        vec![RollbackValue::AcceptedRound(old_accepted_round)],
-                        "storage error while trying to write log entries",
+                        vec![
+                            RollbackValue::AcceptedRound(old_accepted_round),
+                            RollbackValue::DecidedIdx(old_decided_idx),
+                            RollbackValue::Log(old_log),
+                            RollbackValue::Snapshot(old_compacted_idx, old_snapshot),
+                        ],
+                        "storage error while trying to write snapshot",
                     );
                     Accepted {
                         n: accsync.n,
@@ -162,7 +158,7 @@ where
                     let accepted_idx = self
                         .internal_storage
                         .append_on_prefix(accsync.sync_idx, accsync.suffix);
-                    self.internal_storage.rollback_if_err(
+                    self.internal_storage.rollback_and_panic_if_err(
                         &accepted_idx,
                         vec![
                             RollbackValue::AcceptedRound(old_accepted_round),
@@ -268,7 +264,7 @@ where
                     }
                 }
             }
-            let result = self.accept_entries(acc.n, entries);
+            let result = self.accept_entries_follower(acc.n, entries);
             if result.is_err() {
                 if let Some(r) = old_accepted_round {
                     self.internal_storage.rollback_and_panic(
@@ -374,7 +370,7 @@ where
                 .set_decided_idx(accepted_idx + 1)
                 .expect("storage error while trying to write decided index");
             let result = self.internal_storage.set_stopsign(ss); // need to set it again now with the modified decided flag
-            self.internal_storage.rollback_if_err(
+            self.internal_storage.rollback_and_panic_if_err(
                 &result,
                 vec![RollbackValue::DecidedIdx(old_decided_idx)],
                 "storage error while trying to write decided index",
@@ -382,10 +378,10 @@ where
         }
     }
 
-    fn accept_entries(&mut self, n: Ballot, entries: Vec<T>) -> StorageResult<()> {
+    fn accept_entries_follower(&mut self, n: Ballot, entries: Vec<T>) -> StorageResult<()> {
         let accepted_res = self
             .internal_storage
-            .append_entries_with_batching(entries)?;
+            .append_entries_and_get_accepted_idx(entries)?;
         if let Some(accepted_idx) = accepted_res {
             match &self.latest_accepted_meta {
                 Some((round, outgoing_idx)) if round == &n => {
@@ -409,7 +405,6 @@ where
                 }
             };
         }
-
         Ok(())
     }
 }

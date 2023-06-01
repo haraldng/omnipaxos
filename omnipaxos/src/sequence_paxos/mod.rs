@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId, SequenceNumber},
+    util::{AcceptedMetaData, ConfigurationId, NodeId, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -457,7 +457,7 @@ where
     fn propose_entry(&mut self, entry: T) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.send_accept(entry),
+            (Role::Leader, Phase::Accept) => self.accept_entry(entry),
             _ => self.forward_proposals(vec![entry]),
         }
     }

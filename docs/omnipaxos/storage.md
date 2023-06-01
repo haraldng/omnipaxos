@@ -134,7 +134,7 @@ my_sled_opts.new(true);
 let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
 ```
 ## Batching
-OmniPaxos supports batch processing to reduce the number of IO operations onto storage. To enable it we need to add config when initiate the OmniPaxos instance.
+OmniPaxos supports batching to reduce the number of IO operations to storage. We enable it by specifying the `batch_size` in `OmniPaxosConfig`.
 
 ```rust
 let omnipaxos_config = OmniPaxosConfig {
@@ -147,3 +147,4 @@ let omnipaxos_config = OmniPaxosConfig {
 // build omnipaxos instance
 ```
 
+> **Note** OmniPaxos will wait until the batch size is reached before the entries get decided. A larger batch size may therefore incur higher latency before an append operation is decided. 
