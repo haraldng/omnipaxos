@@ -326,6 +326,27 @@ where
         }
     }
 
+    /// Rollback the log in the storage using given log entries.
+    pub(crate) fn rollback_log(&mut self, entries: Vec<T>) {
+        self.try_trim(self.get_accepted_idx())
+            .expect("storage error while trying to trim log entries");
+        self.append_entries_without_batching(entries)
+            .expect("storage error while trying to rollback log entries");
+    }
+
+    /// Rollback the snapshot in the storage using given compacted_idx and snapshot.
+    pub(crate) fn rollback_snapshot(&mut self, compacted_idx: u64, snapshot: Option<T::Snapshot>) {
+        if let Some(old_snapshot) = snapshot {
+            self.set_snapshot(compacted_idx, old_snapshot)
+                .expect("storage error while trying to rollback snapshot");
+        } else {
+            self.set_compacted_idx(compacted_idx)
+                .expect("storage error while trying to rollback compacted index");
+            self.reset_snapshot()
+                .expect("storage error while trying to reset snapshot");
+        }
+    }
+
     fn get_entry_type(
         &self,
         idx: u64,
