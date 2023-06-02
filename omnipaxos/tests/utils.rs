@@ -4,7 +4,7 @@ use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelu
 use omnipaxos::{
     ballot_leader_election::Ballot,
     messages::Message,
-    storage::{Entry, Snapshot, StopSign, Storage},
+    storage::{Entry, Snapshot, StopSign, Storage, StorageResult},
     util::FlexibleQuorum,
 };
 use omnipaxos_storage::{
@@ -12,7 +12,13 @@ use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error, fs, str, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fs, str,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tempfile::TempDir;
 use toml;
 
@@ -22,8 +28,6 @@ const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
-const PERSISTENT: &str = "persistent";
-const MEMORY: &str = "memory";
 
 use omnipaxos::OmniPaxosConfig;
 use sled::Config;
@@ -37,11 +41,13 @@ pub struct TestConfig {
     pub num_nodes: usize,
     pub wait_timeout_ms: u64,
     pub election_timeout_ms: u64,
+    pub resend_message_timeout_ms: u64,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
     pub flexible_quorum: Option<(usize, usize)>,
+    pub batch_size: usize,
 }
 
 impl TestConfig {
@@ -63,40 +69,72 @@ impl Default for TestConfig {
             num_nodes: 3,
             wait_timeout_ms: 3000,
             election_timeout_ms: 50,
+            resend_message_timeout_ms: 500,
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
             flexible_quorum: None,
+            batch_size: 1,
         }
     }
 }
 /// An enum for selecting storage type. The type
 /// can be set in `config/test.conf` at `storage_type`
 #[derive(Clone, Copy, Deserialize)]
+#[serde(tag = "type")]
 pub enum StorageTypeSelector {
     Persistent,
     Memory,
+    Broken(BrokenStorageConfig),
 }
 
-impl StorageTypeSelector {
-    pub fn with(storage_type: &str) -> Self {
-        match storage_type.to_lowercase().as_ref() {
-            PERSISTENT => StorageTypeSelector::Persistent,
-            MEMORY => StorageTypeSelector::Memory,
-            _ => panic!("No such storage type: {}", storage_type),
+#[derive(Clone, Copy, Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct BrokenStorageConfig {
+    /// Fail once after this many operations
+    fail_in: usize,
+    op_counter: usize,
+}
+
+impl BrokenStorageConfig {
+    /// Should be called before every operation on the broken storage.
+    /// Returns Ok(_) if the operation should be performed without error.
+    /// Returns Err(_) if the operation should fail.
+    pub fn next(&mut self) -> StorageResult<()> {
+        let err = Err("test error from mocked broken storage".into());
+        self.op_counter += 1;
+        if self.fail_in > 0 {
+            self.fail_in -= 1;
+            if self.fail_in == 0 {
+                return err;
+            }
         }
+        Ok(())
+    }
+
+    /// Schedules a single failure after n operations.
+    /// If `n == 1`, the next operation fails.
+    pub fn schedule_failure_in(&mut self, n: usize) {
+        self.fail_in = n;
     }
 }
 
 /// An enum which can either be a 'PersistentStorage' or 'MemoryStorage', the type depends on the
 /// 'StorageTypeSelector' enum. Used for testing purposes with SequencePaxos and BallotLeaderElection.
+/// Supports simulating storage failures in the `Broken` variant.
 pub enum StorageType<T>
 where
     T: Entry,
 {
     Persistent(PersistentStorage<T>),
     Memory(MemoryStorage<T>),
+    /// Mocks a storage that fails depending of the config.
+    /// Arc<Mutex<_>> is needed since we need to mutate conf through immutable references.
+    Broken(
+        Arc<Mutex<MemoryStorage<T>>>,
+        Arc<Mutex<BrokenStorageConfig>>,
+    ),
 }
 
 impl<T> StorageType<T>
@@ -113,6 +151,10 @@ where
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
+            StorageTypeSelector::Broken(config) => StorageType::Broken(
+                Arc::new(Mutex::new(MemoryStorage::default())),
+                Arc::new(Mutex::new(config)),
+            ),
         }
     }
 }
@@ -122,136 +164,212 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn append_entry(&mut self, entry: T) -> u64 {
+    fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_entry(entry)
+            }
         }
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_entries(entries)
+            }
         }
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().append_on_prefix(from_idx, entries)
+            }
         }
     }
 
-    fn set_promise(&mut self, n_prom: Ballot) {
+    fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
             StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_promise(n_prom)
+            }
         }
     }
 
-    fn set_decided_idx(&mut self, ld: u64) {
+    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_decided_idx(ld)
+            }
         }
     }
 
-    fn get_decided_idx(&self) -> u64 {
+    fn get_decided_idx(&self) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_decided_idx()
+            }
         }
     }
 
-    fn set_accepted_round(&mut self, na: Ballot) {
+    fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
             StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_accepted_round(na)
+            }
         }
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_accepted_round()
+            }
         }
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_entries(from, to)
+            }
         }
     }
 
-    fn get_log_len(&self) -> u64 {
+    fn get_log_len(&self) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_log_len()
+            }
         }
     }
 
-    fn get_suffix(&self, from: u64) -> Vec<T> {
+    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_suffix(from)
+            }
         }
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> StorageResult<Option<Ballot>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_promise()
+            }
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos::storage::StopSignEntry) {
+    fn set_stopsign(&mut self, s: omnipaxos::storage::StopSignEntry) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_stopsign(s)
+            }
         }
     }
 
-    fn get_stopsign(&self) -> Option<omnipaxos::storage::StopSignEntry> {
+    fn get_stopsign(&self) -> StorageResult<Option<omnipaxos::storage::StopSignEntry>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_stopsign()
+            }
         }
     }
 
-    fn trim(&mut self, idx: u64) {
+    fn trim(&mut self, idx: u64) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().trim(idx)
+            }
         }
     }
 
-    fn set_compacted_idx(&mut self, idx: u64) {
+    fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_compacted_idx(idx)
+            }
         }
     }
 
-    fn get_compacted_idx(&self) -> u64 {
+    fn get_compacted_idx(&self) -> StorageResult<u64> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_compacted_idx()
+            }
         }
     }
 
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) {
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().set_snapshot(snapshot)
+            }
         }
     }
 
-    fn get_snapshot(&self) -> Option<T::Snapshot> {
+    fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
+            StorageType::Broken(mem_s, conf) => {
+                conf.lock().unwrap().next()?;
+                mem_s.lock().unwrap().get_snapshot()
+            }
         }
     }
 }
@@ -297,13 +415,18 @@ impl TestSystem {
                             write_quorum_size,
                         })
                     });
+            op_config.batch_size = test_config.batch_size;
+            // Make tick timeouts reletive to election timeout
+            op_config.election_tick_timeout = 1;
+            op_config.resend_message_tick_timeout =
+                test_config.resend_message_timeout_ms / test_config.election_timeout_ms;
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.build(storage),
-                    Duration::from_millis(test_config.election_timeout_ms),
+                    test_config.election_timeout_ms,
                 )
             });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -360,6 +483,7 @@ impl TestSystem {
         pid: u64,
         num_nodes: usize,
         election_timeout_ms: u64,
+        resend_message_timeout_ms: u64,
         storage_type: StorageTypeSelector,
         storage_path: &str,
         flexible_quorum: Option<(usize, usize)>,
@@ -377,6 +501,9 @@ impl TestSystem {
                     write_quorum_size,
                 })
             });
+        // Make tick timeouts reletive to election timeout
+        op_config.election_tick_timeout = 1;
+        op_config.resend_message_tick_timeout = resend_message_timeout_ms / election_timeout_ms;
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -384,11 +511,7 @@ impl TestSystem {
             .as_ref()
             .expect("No KompactSystem found!")
             .create_and_register(|| {
-                OmniPaxosComponent::with(
-                    pid,
-                    op_config.build(storage),
-                    Duration::from_millis(election_timeout_ms),
-                )
+                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout_ms)
             });
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -507,12 +630,12 @@ pub mod omnireplica {
         pub peer_disconnections: HashSet<u64>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
+        tick_timeout_ms: u64,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
         pub decided_futures: Vec<Ask<(), Value>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: u64,
-        election_timeout: Duration,
     }
 
     impl ComponentLifecycle for OmniPaxosComponent {
@@ -527,10 +650,10 @@ pub mod omnireplica {
                 },
             ));
             self.tick_timer = Some(self.schedule_periodic(
-                self.election_timeout,
-                self.election_timeout,
+                Duration::from_millis(self.tick_timeout_ms),
+                Duration::from_millis(self.tick_timeout_ms),
                 move |c, _| {
-                    c.paxos.election_timeout();
+                    c.paxos.tick();
                     if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
                         if leader_ballot != c.current_leader_ballot {
                             c.current_leader_ballot = leader_ballot;
@@ -555,7 +678,7 @@ pub mod omnireplica {
         pub fn with(
             pid: NodeId,
             paxos: OmniPaxos<Value, StorageType<Value>>,
-            election_timeout: Duration,
+            tick_timeout_ms: u64,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -564,12 +687,12 @@ pub mod omnireplica {
                 peer_disconnections: HashSet::new(),
                 paxos_timer: None,
                 tick_timer: None,
+                tick_timeout_ms,
                 decided_idx: paxos.get_decided_idx(),
                 paxos,
                 decided_futures: vec![],
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
-                election_timeout,
             }
         }
 
@@ -736,7 +859,8 @@ pub mod verification {
     /// * All entries are decided, verify the decided entries
     /// * Only a snapshot was taken, verify the snapshot
     /// * A snapshot was taken and entries decided on afterwards, verify both the snapshot and entries
-    pub fn verify_log(read_log: Vec<LogEntry<Value>>, proposals: Vec<Value>, num_proposals: u64) {
+    pub fn verify_log(read_log: Vec<LogEntry<Value>>, proposals: Vec<Value>) {
+        let num_proposals = proposals.len() as u64;
         match &read_log[..] {
             [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
             [LogEntry::Snapshotted(s)] => {

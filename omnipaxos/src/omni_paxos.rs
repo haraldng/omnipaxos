@@ -5,13 +5,20 @@ use crate::{
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
-    util::{defaults::BUFFER_SIZE, FlexibleQuorum, LogEntry, NodeId},
+    util::{
+        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
+        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
+    },
 };
 #[cfg(feature = "toml_config")]
 use serde::Deserialize;
 #[cfg(feature = "toml_config")]
 use std::fs;
-use std::ops::RangeBounds;
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+    ops::RangeBounds,
+};
 #[cfg(feature = "toml_config")]
 use toml;
 
@@ -20,19 +27,25 @@ use toml;
 /// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `initial_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the first prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
+/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
+/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
-    pub configuration_id: u32,
+    pub configuration_id: ConfigurationId,
     pub pid: NodeId,
-    pub peers: Vec<u64>,
+    pub peers: Vec<NodeId>,
+    pub batch_size: usize,
     pub buffer_size: usize,
     pub flexible_quorum: Option<FlexibleQuorum>,
+    pub election_tick_timeout: u64,
+    pub resend_message_tick_timeout: u64,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
@@ -50,7 +63,7 @@ impl OmniPaxosConfig {
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
+    pub fn build<T, B>(mut self, storage: B) -> OmniPaxos<T, B>
     where
         T: Entry,
         B: Storage<T>,
@@ -62,6 +75,10 @@ impl OmniPaxosConfig {
             !self.peers.contains(&self.pid),
             "Peers should not include self pid"
         );
+        assert!(
+            self.batch_size >= 1,
+            "Batch size must be greater than or equal to 1"
+        );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
         if let Some(x) = &self.initial_leader {
             assert_ne!(x.pid, 0, "Initial leader cannot be 0");
@@ -69,9 +86,16 @@ impl OmniPaxosConfig {
                 assert_eq!(x.priority, self.leader_priority, "Pid matches initial leader's pid {}, but priority {} does not match initial leader's priority {}", x.pid, self.leader_priority, x.priority);
             }
         }
-        // TODO: recover ballot from internal storage and use as initial leader
+
+        // Use stored ballot as initial leader for BLE
+        let seq_paxos_config = self.clone().into();
+        self.initial_leader = storage
+            .get_promise()
+            .expect("storage error while trying to read promise");
         OmniPaxos {
-            seq_paxos: SequencePaxos::with(self.clone().into(), storage),
+            seq_paxos: SequencePaxos::with(seq_paxos_config, storage),
+            election_clock: LogicalClock::with(self.election_tick_timeout),
+            resend_message_clock: LogicalClock::with(self.resend_message_tick_timeout),
             ble: BallotLeaderElection::with(self.into()),
         }
     }
@@ -85,8 +109,11 @@ impl Default for OmniPaxosConfig {
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
             flexible_quorum: None,
+            election_tick_timeout: ELECTION_TIMEOUT,
+            resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             #[cfg(feature = "logging")]
             logger_file_path: None,
+            batch_size: 1,
             leader_priority: 0,
             initial_leader: None,
         }
@@ -102,6 +129,8 @@ where
 {
     seq_paxos: SequencePaxos<T, B>,
     ble: BallotLeaderElection,
+    election_clock: LogicalClock,
+    resend_message_clock: LogicalClock,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -175,7 +204,12 @@ where
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
     pub fn read(&self, idx: u64) -> Option<LogEntry<T>> {
-        match self.seq_paxos.internal_storage.read(idx..idx + 1) {
+        match self
+            .seq_paxos
+            .internal_storage
+            .read(idx..idx + 1)
+            .expect("storage error while trying to read log entries")
+        {
             Some(mut v) => v.pop(),
             None => None,
         }
@@ -186,7 +220,10 @@ where
     where
         R: RangeBounds<u64>,
     {
-        self.seq_paxos.internal_storage.read(r)
+        self.seq_paxos
+            .internal_storage
+            .read(r)
+            .expect("storage error while trying to read log entries")
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
@@ -194,6 +231,7 @@ where
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
+            .expect("storage error while trying to read decided log suffix")
     }
 
     /// Handle an incoming message.
@@ -223,6 +261,17 @@ where
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub fn reconnected(&mut self, pid: NodeId) {
         self.seq_paxos.reconnected(pid)
+    }
+
+    /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
+    /// ticks. Also drives the detection and re-sending of dropped OmniPaxos messages every `resend_message_tick_timeout` ticks.
+    pub fn tick(&mut self) {
+        if self.election_clock.tick_and_check_timeout() {
+            self.election_timeout();
+        }
+        if self.resend_message_clock.tick_and_check_timeout() {
+            self.seq_paxos.resend_message_timeout();
+        }
     }
 
     /*** BLE calls ***/
@@ -285,4 +334,11 @@ pub enum CompactionErr {
     NotAllDecided(u64),
     /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
     NotCurrentLeader(NodeId),
+}
+
+impl Error for CompactionErr {}
+impl Display for CompactionErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(self, f)
+    }
 }

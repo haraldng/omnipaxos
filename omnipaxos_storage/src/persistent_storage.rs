@@ -7,7 +7,7 @@ use commitlog::{
 };
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSign, StopSignEntry, Storage},
+    storage::{Entry, StopSign, StopSignEntry, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -32,6 +32,7 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 #[repr(packed)]
 #[derive(Clone, Copy, AsBytes, FromBytes)]
 struct BallotStorage {
+    config_id: u32,
     n: u32,
     priority: u32,
     pid: u64,
@@ -40,6 +41,7 @@ struct BallotStorage {
 impl BallotStorage {
     fn with(b: Ballot) -> Self {
         BallotStorage {
+            config_id: b.config_id,
             n: b.n,
             priority: b.priority,
             pid: b.pid,
@@ -249,347 +251,331 @@ impl<T: Entry> PersistentStorage<T> {
     }
 }
 
-impl<T: Entry> Storage<T> for PersistentStorage<T>
+/// An error returning the proposal that was failed due to that the current configuration is stopped.
+#[derive(Copy, Clone, Debug)]
+pub struct ErrHelper {}
+impl std::error::Error for ErrHelper {}
+impl std::fmt::Display for ErrHelper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
+impl<T> Storage<T> for PersistentStorage<T>
 where
-    T: Serialize + for<'a> Deserialize<'a>,
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn append_entry(&mut self, entry: T) -> u64 {
-        let entry_bytes = bincode::serialize(&entry).expect("Failed to serialize log entry");
-        let offset = self
-            .commitlog
-            .append_msg(entry_bytes)
-            .expect("Failed to append log entry");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
-        offset + 1 // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
+    fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
+        let entry_bytes = bincode::serialize(&entry)?;
+        let offset = self.commitlog.append_msg(entry_bytes)?;
+        self.commitlog.flush()?; // ensure durable writes
+        Ok(offset + 1) // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> u64 {
-        let serialized = entries
-            .into_iter()
-            .map(|entry| bincode::serialize(&entry).expect("Failed to serialize log entries"));
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+        let mut serialized = vec![];
+        for entry in entries {
+            serialized.push(bincode::serialize(&entry)?)
+        }
         let offset = self
             .commitlog
-            .append(&mut MessageBuf::from_iter(serialized))
-            .expect("Falied to append log entries");
-        self.commitlog.flush().expect("Failed to flush Commitlog"); // ensure durable writes
-        offset.first() + offset.len() as u64
+            .append(&mut MessageBuf::from_iter(serialized))?;
+        self.commitlog.flush()?; // ensure durable writes
+        Ok(offset.first() + offset.len() as u64)
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
-        if from_idx > 0 && from_idx < self.get_log_len() {
-            self.commitlog
-                .truncate(from_idx)
-                .expect("Failed to truncate log");
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
+        if from_idx > 0 && from_idx < self.get_log_len()? {
+            self.commitlog.truncate(from_idx)?;
         }
         self.append_entries(entries)
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
+    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
         // Check if the commit log has entries up to the requested endpoint.
         if to > self.commitlog.next_offset() || from >= to {
-            return vec![]; // Do an early return
+            return Ok(vec![]); // Do an early return
         }
 
-        let buffer = self
-            .commitlog
-            .read(from, ReadLimit::default())
-            .expect("Failed to read from replicated log");
+        let buffer = self.commitlog.read(from, ReadLimit::default())?;
         let mut entries = Vec::<T>::with_capacity((to - from) as usize);
         let mut iter = buffer.iter();
         for _ in from..to {
-            let msg = iter.next().expect("Failed to get log entry from iterator");
-            entries.push(
-                bincode::deserialize(msg.payload()).expect("Failed to deserialize log entries"),
-            );
+            let msg = iter.next().ok_or(ErrHelper {})?;
+            entries.push(bincode::deserialize(msg.payload())?);
         }
-        entries
+        Ok(entries)
     }
 
-    fn get_log_len(&self) -> u64 {
-        self.commitlog.next_offset()
+    fn get_log_len(&self) -> StorageResult<u64> {
+        Ok(self.commitlog.next_offset())
     }
 
-    fn get_suffix(&self, from: u64) -> Vec<T> {
+    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
         self.get_entries(from, self.commitlog.next_offset())
     }
 
-    fn get_promise(&self) -> Ballot {
+    fn get_promise(&self) -> StorageResult<Option<Ballot>> {
         #[cfg(feature = "rocksdb")]
         {
-            let promised = self.rocksdb.get(NPROM).expect("Failed to retrieve 'NPROM'");
+            let promised = self.rocksdb.get(NPROM)?;
             match promised {
                 Some(prom_bytes) => {
-                    let b_store = BallotStorage::read_from(prom_bytes.as_slice())
-                        .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    let b_store =
+                        BallotStorage::read_from(prom_bytes.as_slice()).ok_or(ErrHelper {})?;
+                    Ok(Some(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    )))
                 }
-                None => Ballot::default(),
+                None => Ok(Ballot::default()),
             }
         }
         #[cfg(feature = "sled")]
         {
-            let promised = self.sled.get(NPROM).expect("Failed to retrieve 'NPROM'");
+            let promised = self.sled.get(NPROM)?;
             match promised {
                 Some(prom_bytes) => {
-                    let b_store = BallotStorage::read_from(prom_bytes.as_ref())
-                        .expect("Failed to deserialize the promised ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    let b_store =
+                        BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper {})?;
+                    Ok(Some(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    )))
                 }
-                None => Ballot::default(),
+                None => Ok(Some(Ballot::default())),
             }
         }
     }
 
-    fn set_promise(&mut self, n_prom: Ballot) {
+    fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
         let ballot_store = BallotStorage::with(n_prom);
         let prom_bytes = ballot_store.as_bytes();
         #[cfg(feature = "rocksdb")]
         {
-            self.rocksdb
-                .put(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'");
+            self.rocksdb.put(NPROM, prom_bytes)?;
         }
         #[cfg(feature = "sled")]
         {
-            self.sled
-                .insert(NPROM, prom_bytes)
-                .expect("Failed to set 'NPROM'");
+            self.sled.insert(NPROM, prom_bytes)?;
         }
+        Ok(())
     }
 
-    fn get_decided_idx(&self) -> u64 {
+    fn get_decided_idx(&self) -> StorageResult<u64> {
         #[cfg(feature = "rocksdb")]
         {
-            let decided = self
-                .rocksdb
-                .get(DECIDE)
-                .expect("Failed to retrieve 'DECIDE'");
+            let decided = self.rocksdb.get(DECIDE)?;
             match decided {
-                Some(ld_bytes) => u64::read_from(ld_bytes.as_slice())
-                    .expect("Failed to deserialize the decided index"),
-                None => 0,
+                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_slice()).ok_or(ErrHelper {})?),
+                None => Ok(0),
             }
         }
         #[cfg(feature = "sled")]
         {
-            let decided = self.sled.get(DECIDE).expect("Failed to retrieve 'DECIDE'");
+            let decided = self.sled.get(DECIDE)?;
             match decided {
-                Some(ld_bytes) => u64::read_from(ld_bytes.as_bytes())
-                    .expect("Failed to deserialize the decided index"),
-                None => 0,
+                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
+                None => Ok(0),
             }
         }
     }
 
-    fn set_decided_idx(&mut self, ld: u64) {
+    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
         let ld_bytes = u64::as_bytes(&ld);
         #[cfg(feature = "rocksdb")]
         {
-            self.rocksdb
-                .put(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'");
+            self.rocksdb.put(DECIDE, ld_bytes)?;
         }
         #[cfg(feature = "sled")]
         {
-            self.sled
-                .insert(DECIDE, ld_bytes)
-                .expect("Failed to set 'DECIDE'");
+            self.sled.insert(DECIDE, ld_bytes)?;
         }
+        Ok(())
     }
 
-    fn get_accepted_round(&self) -> Ballot {
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
         #[cfg(feature = "rocksdb")]
         {
-            let accepted = self.rocksdb.get(ACC).expect("Failed to retrieve 'ACC'");
+            let accepted = self.rocksdb.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store = BallotStorage::read_from(acc_bytes.as_slice())
-                        .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    let b_store =
+                        BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper {})?;
+                    Ok(Some(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    )))
                 }
-                None => Ballot::default(),
+                None => Ok(Some(Ballot::default())),
             }
         }
         #[cfg(feature = "sled")]
         {
-            let accepted = self.sled.get(ACC).expect("Failed to retrieve 'ACC'");
+            let accepted = self.sled.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store = BallotStorage::read_from(acc_bytes.as_bytes())
-                        .expect("Failed to deserialize the accepted ballot");
-                    Ballot::with(b_store.n, b_store.priority, b_store.pid)
+                    let b_store =
+                        BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper {})?;
+                    Ok(Some(Ballot::with(
+                        b_store.config_id,
+                        b_store.n,
+                        b_store.priority,
+                        b_store.pid,
+                    )))
                 }
-                None => Ballot::default(),
+                None => Ok(Some(Ballot::default())),
             }
         }
     }
 
-    fn set_accepted_round(&mut self, na: Ballot) {
+    fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
         let ballot_store = BallotStorage::with(na);
         let acc_bytes = ballot_store.as_bytes();
         #[cfg(feature = "rocksdb")]
         {
-            self.rocksdb
-                .put(ACC, acc_bytes)
-                .expect("Failed to set 'ACC'");
+            self.rocksdb.put(ACC, acc_bytes)?;
         }
         #[cfg(feature = "sled")]
         {
-            self.sled
-                .insert(ACC, acc_bytes)
-                .expect("Failed to set 'ACC'");
+            self.sled.insert(ACC, acc_bytes)?;
         }
+        Ok(())
     }
 
-    fn get_compacted_idx(&self) -> u64 {
+    fn get_compacted_idx(&self) -> StorageResult<u64> {
         #[cfg(feature = "rocksdb")]
         {
-            let trim = self.rocksdb.get(TRIM).expect("Failed to retrieve 'TRIM'");
+            let trim = self.rocksdb.get(TRIM)?;
             match trim {
-                Some(trim_bytes) => u64::read_from(trim_bytes.as_slice())
-                    .expect("Failed to deserialize the compacted index"),
-                None => 0,
+                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_slice()).ok_or(ErrHelper {})?),
+                None => Ok(0),
             }
         }
         #[cfg(feature = "sled")]
         {
-            let trim = self.sled.get(TRIM).expect("Failed to retrieve 'TRIM'");
+            let trim = self.sled.get(TRIM)?;
             match trim {
-                Some(trim_bytes) => u64::read_from(trim_bytes.as_bytes())
-                    .expect("Failed to deserialize the compacted index"),
-                None => 0,
+                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
+                None => Ok(0),
             }
         }
     }
 
-    fn set_compacted_idx(&mut self, trimmed_idx: u64) {
+    fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
         let trim_bytes = u64::as_bytes(&trimmed_idx);
         #[cfg(feature = "rocksdb")]
         {
-            self.rocksdb
-                .put(TRIM, trim_bytes)
-                .expect("Failed to set 'TRIM'");
+            self.rocksdb.put(TRIM, trim_bytes)?;
         }
         #[cfg(feature = "sled")]
         {
-            self.sled
-                .insert(TRIM, trim_bytes)
-                .expect("Failed to set 'TRIM'");
+            self.sled.insert(TRIM, trim_bytes)?;
         }
+        Ok(())
     }
 
-    fn get_stopsign(&self) -> Option<StopSignEntry> {
+    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
         #[cfg(feature = "rocksdb")]
         {
-            let stopsign = self
-                .rocksdb
-                .get(STOPSIGN)
-                .expect("Failed to retrieve 'STOPSIGN'");
+            let stopsign = self.rocksdb.get(STOPSIGN)?;
             match stopsign {
                 Some(ss_bytes) => {
-                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
-                        .expect("Failed to deserialize the stopsign");
-                    Some(StopSignEntry::with(
+                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)?;
+                    Ok(Some(StopSignEntry::with(
                         StopSign::with(
                             ss_entry_storage.ss.config_id,
                             ss_entry_storage.ss.nodes,
                             ss_entry_storage.ss.metadata,
                         ),
                         ss_entry_storage.decided,
-                    ))
+                    )))
                 }
-                None => None,
+                None => Ok(None),
             }
         }
         #[cfg(feature = "sled")]
         {
-            let stopsign = self
-                .sled
-                .get(STOPSIGN)
-                .expect("Failed to retrieve 'STOPSIGN'");
+            let stopsign = self.sled.get(STOPSIGN)?;
             match stopsign {
                 Some(ss_bytes) => {
-                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)
-                        .expect("Failed to deserialize the stopsign");
-                    Some(StopSignEntry::with(
+                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)?;
+                    Ok(Some(StopSignEntry::with(
                         StopSign::with(
                             ss_entry_storage.ss.config_id,
                             ss_entry_storage.ss.nodes,
                             ss_entry_storage.ss.metadata,
                         ),
                         ss_entry_storage.decided,
-                    ))
+                    )))
                 }
-                None => None,
+                None => Ok(None),
             }
         }
     }
 
-    fn set_stopsign(&mut self, s: StopSignEntry) {
+    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
         let ss_storage = StopSignEntryStorage::with(s);
-        let stopsign = bincode::serialize(&ss_storage).expect("Failed to serialize Stopsign entry");
+        let stopsign = bincode::serialize(&ss_storage)?;
         #[cfg(feature = "rocksdb")]
         {
-            self.rocksdb
-                .put(STOPSIGN, stopsign)
-                .expect("Failed to set 'STOPSIGN'");
+            self.rocksdb.put(STOPSIGN, stopsign)?;
         }
         #[cfg(feature = "sled")]
         {
-            self.sled
-                .insert(STOPSIGN, stopsign)
-                .expect("Failed to set 'STOPSIGN'");
+            self.sled.insert(STOPSIGN, stopsign)?;
+        }
+        Ok(())
+    }
+
+    fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
+        #[cfg(feature = "rocksdb")]
+        {
+            let snapshot = self.rocksdb.get(SNAPSHOT)?;
+            if let Some(snapshot_bytes) = snapshot {
+                Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
+            } else {
+                Ok(None)
+            }
+        }
+        #[cfg(feature = "sled")]
+        {
+            let snapshot = self.sled.get(SNAPSHOT)?;
+            if let Some(snapshot_bytes) = snapshot {
+                Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
+            } else {
+                Ok(None)
+            }
         }
     }
 
-    fn get_snapshot(&self) -> Option<T::Snapshot> {
+    fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
+        let stopsign = bincode::serialize(&snapshot)?;
         #[cfg(feature = "rocksdb")]
         {
-            let snapshot = self
-                .rocksdb
-                .get(SNAPSHOT)
-                .expect("Failed to retrieve 'SNAPSHOT'");
-            snapshot.map(|snapshot_bytes| {
-                bincode::deserialize(snapshot_bytes.as_slice())
-                    .expect("Failed to deserialize snapshot")
-            })
+            self.rocksdb.put(SNAPSHOT, stopsign)?;
         }
         #[cfg(feature = "sled")]
         {
-            let snapshot = self
-                .sled
-                .get(SNAPSHOT)
-                .expect("Failed to retrieve 'SNAPSHOT'");
-            snapshot.map(|snapshot_bytes| {
-                bincode::deserialize(snapshot_bytes.as_bytes())
-                    .expect("Failed to deserialize snapshot")
-            })
+            self.sled.insert(SNAPSHOT, stopsign)?;
         }
-    }
-
-    fn set_snapshot(&mut self, snapshot: T::Snapshot) {
-        let stopsign = bincode::serialize(&snapshot).expect("Failed to serialize snapshot");
-        #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb
-                .put(SNAPSHOT, stopsign)
-                .expect("Failed to set 'SNAPSHOT'");
-        }
-        #[cfg(feature = "sled")]
-        {
-            self.sled
-                .insert(SNAPSHOT, stopsign)
-                .expect("Failed to set 'SNAPSHOT'");
-        }
+        Ok(())
     }
 
     // TODO: A way to trim the commitlog without deleting and recreating the log
-    fn trim(&mut self, trimmed_idx: u64) {
-        let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset()); // get the log entries from 'trimmed_idx' to latest
-        let _ = std::fs::remove_dir_all(&self.log_path); // remove old log
+    fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
+        let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset())?; // get the log entries from 'trimmed_idx' to latest
+        std::fs::remove_dir_all(&self.log_path)?; // remove old log
         let c_opts = LogOptions::new(&self.log_path);
-        self.commitlog = CommitLog::new(c_opts).expect("Failed to recreate commitlog"); // create new commitlog
-        self.append_entries(trimmed_log);
+        self.commitlog = CommitLog::new(c_opts)?; // create new commitlog
+        self.append_entries(trimmed_log)?;
+        Ok(())
     }
 }

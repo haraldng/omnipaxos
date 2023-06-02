@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    util::{AcceptedMetaData, ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
 };
 #[cfg(feature = "logging")]
@@ -39,6 +39,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
+    cached_promise: Option<Promise<T>>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
@@ -59,31 +60,44 @@ where
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, lds) = match &config.initial_leader {
-            Some(l) => {
-                let (role, lds) = if l.pid == pid {
-                    // we are leader in new config
-                    let mut v = vec![None; max_pid];
-                    for idx in peers.iter().map(|pid| *pid as usize - 1) {
-                        // this works as a promise
-                        v[idx] = Some(0);
-                    }
-                    (Role::Leader, Some(v))
-                } else {
-                    (Role::Follower, None)
-                };
-                let state = (role, Phase::Accept);
-                (state, *l, lds)
+        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
+        let (state, leader, lds) = match storage.get_promise().expect("Storage error") {
+            // try to do fail recovery from storage, if None then we are starting from scratch
+            Some(b) => {
+                let state = (Role::Follower, Phase::Recover);
+                for peer_pid in &peers {
+                    outgoing.push(PaxosMessage {
+                        from: pid,
+                        to: *peer_pid,
+                        msg: PaxosMsg::PrepareReq,
+                    });
+                }
+                (state, b, None)
             }
             None => {
-                let state = (Role::Follower, Phase::None);
-                let lds = None;
-                (state, Ballot::default(), lds)
+                match &config.initial_leader {
+                    Some(l) => {
+                        if l.pid == pid {
+                            // we are leader in new config
+                            let mut v = vec![None; max_pid];
+                            for idx in peers.iter().map(|pid| *pid as usize - 1) {
+                                // this works as a promise
+                                v[idx] = Some(0);
+                            }
+                            let state = (Role::Leader, Phase::Accept);
+                            (state, *l, Some(v))
+                        } else {
+                            let state = (Role::Follower, Phase::Accept);
+                            (state, *l, None)
+                        }
+                    }
+                    None => ((Role::Follower, Phase::None), Ballot::default(), None),
+                }
             }
         };
 
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage),
+            internal_storage: InternalStorage::with(storage, config.batch_size),
             config_id,
             pid,
             peers,
@@ -91,10 +105,11 @@ where
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            outgoing: Vec::with_capacity(BUFFER_SIZE),
+            outgoing,
             leader_state: LeaderState::<T>::with(leader, lds, max_pid, quorum),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
+            cached_promise: None,
             buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
@@ -104,7 +119,10 @@ where
                 create_logger(s.as_str())
             },
         };
-        paxos.internal_storage.set_promise(leader);
+        paxos
+            .internal_storage
+            .set_promise(leader)
+            .expect("storage error while trying to write promise");
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -152,7 +170,10 @@ where
                         });
                     }
                 }
-                result
+                result.map_err(|e| {
+                    *e.downcast()
+                        .expect("storage error while trying to trim log")
+                })
             }
             _ => Err(CompactionErr::NotCurrentLeader(self.leader.pid)),
         }
@@ -179,7 +200,10 @@ where
                 });
             }
         }
-        result
+        result.map_err(|e| {
+            *e.downcast()
+                .expect("storage error while trying to snapshot log")
+        })
     }
 
     /// Return the decided index.
@@ -212,6 +236,77 @@ where
             }
             Compaction::Snapshot(idx) => {
                 let _ = self.snapshot(idx, true);
+            }
+        }
+    }
+
+    /// Detects if a Prepare, AcceptStopSign, or PrepareReq message has been sent but not received a reply.
+    /// If so resends them.
+    pub(crate) fn resend_message_timeout(&mut self) {
+        match &self.state {
+            (Role::Leader, phase) => {
+                // Resend AcceptStopSign
+                if *phase == Phase::Accept {
+                    // TODO: This is slow. Get stopsign from cache instead.
+                    if let Some(ss) = self
+                        .internal_storage
+                        .get_stopsign()
+                        .expect("storage error while trying to read stopsign")
+                    {
+                        if !ss.decided {
+                            for follower in self.leader_state.get_promised_followers() {
+                                if !self.leader_state.follower_has_accepted_stopsign(follower) {
+                                    self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
+                                }
+                            }
+                        }
+                        // TODO: resend decided stopsign
+                    }
+                }
+
+                // Resend Prepare
+                let unpromised_peers = self.leader_state.get_unpromised_peers();
+                for peer in unpromised_peers {
+                    self.send_prepare(peer)
+                        .expect("storage error while trying to read data for prepare");
+                }
+            }
+            (Role::Follower, phase) => {
+                match phase {
+                    Phase::Recover => {
+                        // Resend PrepareReq
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: self.leader.pid,
+                            msg: PaxosMsg::PrepareReq,
+                        });
+                    }
+                    Phase::Prepare => {
+                        // Resend Promise
+                        match &self.cached_promise {
+                            Some(promise) => {
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: promise.n.pid,
+                                    msg: PaxosMsg::Promise(promise.clone()),
+                                });
+                            }
+                            None => {
+                                // Shouldn't be possible to be in prepare phase without having
+                                // cached the promise sent as a response to the prepare
+                                #[cfg(feature = "logging")]
+                                warn!(self.logger, "In Prepare phase without a cached promise!");
+                                self.state = (Role::Follower, Phase::Recover);
+                                self.outgoing.push(PaxosMessage {
+                                    from: self.pid,
+                                    to: self.leader.pid,
+                                    msg: PaxosMsg::PrepareReq,
+                                });
+                            }
+                        }
+                    }
+                    _ => (),
+                }
             }
         }
     }
@@ -258,7 +353,11 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        match self.internal_storage.get_stopsign() {
+        match self
+            .internal_storage
+            .get_stopsign()
+            .expect("storage error while trying to read stopsign")
+        {
             Some(ss) if ss.decided => Some(ss.stopsign),
             _ => None,
         }
@@ -306,7 +405,9 @@ where
                     if !self.stopped() {
                         let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
                         self.accept_stopsign(ss.clone());
-                        self.send_accept_stopsign(ss);
+                        for pid in self.leader_state.get_promised_followers() {
+                            self.send_accept_stopsign(pid, ss.clone(), false);
+                        }
                     } else {
                         return Err(ProposeErr::Reconfiguration(new_configuration));
                     }
@@ -320,23 +421,27 @@ where
         }
     }
 
-    fn send_accept_stopsign(&mut self, ss: StopSign) {
+    fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign, resend: bool) {
+        let seq_num = match resend {
+            true => self.leader_state.get_seq_num(to),
+            false => self.leader_state.next_seq_num(to),
+        };
         let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
+            seq_num,
             n: self.leader_state.n_leader,
             ss,
         });
-        for pid in self.leader_state.get_promised_followers() {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: acc_ss.clone(),
-            });
-        }
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: acc_ss,
+        });
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, false));
+            .set_stopsign(StopSignEntry::with(ss, false))
+            .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
             self.leader_state.set_accepted_stopsign(self.pid);
         }
@@ -360,13 +465,16 @@ where
     fn propose_entry(&mut self, entry: T) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.send_accept(entry),
+            (Role::Leader, Phase::Accept) => self.accept_entry(entry),
             _ => self.forward_proposals(vec![entry]),
         }
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {
-        self.internal_storage.get_stopsign().map(|x| x.stopsign)
+        self.internal_storage
+            .get_stopsign()
+            .expect("storage error while trying to read stopsign")
+            .map(|x| x.stopsign)
     }
 }
 
@@ -398,6 +506,7 @@ pub struct SequencePaxosConfig {
     configuration_id: u32,
     pid: NodeId,
     peers: Vec<u64>,
+    batch_size: usize,
     buffer_size: usize,
     initial_leader: Option<Ballot>,
     flexible_quorum: Option<FlexibleQuorum>,
@@ -411,6 +520,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             configuration_id: config.configuration_id,
             pid: config.pid,
             peers: config.peers,
+            batch_size: config.batch_size,
             buffer_size: config.buffer_size,
             initial_leader: config.initial_leader,
             flexible_quorum: config.flexible_quorum,

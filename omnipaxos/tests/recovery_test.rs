@@ -47,7 +47,7 @@ fn leader_fail_follower_propose_test() {
             .expect("Cannot read decided log entry")
     });
 
-    verify_log(read_log, proposals, cfg.num_proposals);
+    verify_log(read_log, proposals);
 
     println!("Pass leader_fail_follower_propose!");
 
@@ -94,7 +94,7 @@ fn leader_fail_leader_propose_test() {
             .expect("Cannot read decided log entry")
     });
 
-    verify_log(read_log, proposals, cfg.num_proposals);
+    verify_log(read_log, proposals);
 
     println!("Pass leader_fail_leader_propose!");
 
@@ -145,7 +145,7 @@ fn follower_fail_leader_propose_test() {
             .expect("Cannot read decided log entry")
     });
 
-    verify_log(read_log, proposals, cfg.num_proposals);
+    verify_log(read_log, proposals);
 
     println!("Pass follower_fail_leader_propose");
 
@@ -196,7 +196,7 @@ fn follower_fail_follower_propose_test() {
             .expect("Cannot read decided log entry")
     });
 
-    verify_log(read_log, proposals, cfg.num_proposals);
+    verify_log(read_log, proposals);
 
     println!("Pass follower_fail_follower_propose");
 
@@ -255,6 +255,7 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         pid,
         cfg.num_nodes,
         cfg.election_timeout_ms,
+        cfg.resend_message_timeout_ms,
         cfg.storage_type,
         &storage_path,
         cfg.flexible_quorum,

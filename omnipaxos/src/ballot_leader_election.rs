@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 /// Ballot Leader Election algorithm for electing new leaders
-use crate::util::{defaults::*, FlexibleQuorum, Quorum};
+use crate::util::{defaults::*, ConfigurationId, FlexibleQuorum, Quorum};
 
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -21,6 +21,8 @@ use slog::{debug, info, trace, warn, Logger};
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ballot {
+    /// The identifier for the configuration that the replica with this ballot is part of.
+    pub config_id: ConfigurationId,
     /// Ballot number
     pub n: u32,
     /// Custom priority parameter
@@ -32,10 +34,16 @@ pub struct Ballot {
 impl Ballot {
     /// Creates a new Ballot
     /// # Arguments
+    /// * `config_id` - The identifier for the configuration that the replica with this ballot is part of.
     /// * `n` - Ballot number.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(n: u32, priority: u32, pid: NodeId) -> Ballot {
-        Ballot { n, priority, pid }
+    pub fn with(config_id: ConfigurationId, n: u32, priority: u32, pid: NodeId) -> Ballot {
+        Ballot {
+            config_id,
+            n,
+            priority,
+            pid,
+        }
     }
 }
 
@@ -58,6 +66,8 @@ type Connectivity = u8;
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub(crate) struct BallotLeaderElection {
+    /// The identifier for the configuration that this instance is part of.
+    configuration_id: ConfigurationId,
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
     /// Vector that holds all the other replicas.
@@ -85,18 +95,19 @@ pub(crate) struct BallotLeaderElection {
 impl BallotLeaderElection {
     /// Construct a new BallotLeaderElection node
     pub(crate) fn with(config: BLEConfig) -> Self {
+        let config_id = config.configuration_id;
         let pid = config.pid;
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let initial_leader = config.initial_leader;
-        // TODO: revisit initial_ballot when ballots can be recovered after failure
         let initial_ballot = match initial_leader {
             Some(ballot) if ballot.pid == pid => ballot,
-            _ => Ballot::with(0, config.priority, pid),
+            _ => Ballot::with(config_id, 0, config.priority, pid),
         };
 
         let mut ble = BallotLeaderElection {
+            configuration_id: config_id,
             pid,
             peers,
             hb_round: 0,
@@ -260,7 +271,7 @@ impl BallotLeaderElection {
     }
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
-        if rep.round == self.hb_round {
+        if rep.round == self.hb_round && rep.ballot.config_id == self.configuration_id {
             self.ballots.push((rep.ballot, rep.connectivity));
         } else {
             #[cfg(feature = "logging")]
@@ -274,6 +285,7 @@ impl BallotLeaderElection {
 
 /// Configuration for `BallotLeaderElection`.
 /// # Fields
+/// * `configuration_id`: The identifier for the configuration that this node is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
@@ -284,6 +296,7 @@ impl BallotLeaderElection {
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
+    configuration_id: ConfigurationId,
     pid: NodeId,
     peers: Vec<u64>,
     priority: u32,
@@ -299,6 +312,7 @@ pub(crate) struct BLEConfig {
 impl From<OmniPaxosConfig> for BLEConfig {
     fn from(config: OmniPaxosConfig) -> Self {
         Self {
+            configuration_id: config.configuration_id,
             pid: config.pid,
             peers: config.peers,
             priority: config.leader_priority,

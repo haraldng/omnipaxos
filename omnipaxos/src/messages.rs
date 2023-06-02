@@ -122,6 +122,8 @@ pub mod sequence_paxos {
     pub struct AcceptStopSign {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: SequenceNumber,
         /// The decided index.
         pub ss: StopSign,
     }
@@ -140,6 +142,8 @@ pub mod sequence_paxos {
     pub struct DecideStopSign {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: SequenceNumber,
     }
 
     /// Compaction Request

@@ -7,6 +7,12 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
+#[derive(Debug, Clone)]
+pub(crate) struct AcceptedMetaData<T: Entry> {
+    pub accepted_idx: u64,
+    pub flushed_entries: Vec<T>,
+}
+
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
@@ -111,6 +117,10 @@ where
         self.follower_seq_nums[idx]
     }
 
+    pub fn get_seq_num(&mut self, pid: NodeId) -> SequenceNumber {
+        self.follower_seq_nums[Self::pid_to_idx(pid)]
+    }
+
     pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
         self.decided_indexes[Self::pid_to_idx(pid)] = idx;
     }
@@ -143,8 +153,12 @@ where
         &self.max_promise_meta
     }
 
-    pub fn set_accepted_stopsign(&mut self, from: u64) {
+    pub fn set_accepted_stopsign(&mut self, from: NodeId) {
         self.accepted_stopsign[Self::pid_to_idx(from)] = true;
+    }
+
+    pub fn follower_has_accepted_stopsign(&mut self, from: NodeId) -> bool {
+        self.accepted_stopsign[Self::pid_to_idx(from)]
     }
 
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
@@ -165,12 +179,21 @@ where
         self.batch_accept_meta = vec![None; self.max_pid];
     }
 
-    pub fn get_promised_followers(&self) -> Vec<u64> {
+    pub fn get_promised_followers(&self) -> Vec<NodeId> {
         self.decided_indexes
             .iter()
             .enumerate()
             .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as u64)
+            .map(|(idx, _)| (idx + 1) as NodeId)
+            .collect()
+    }
+
+    pub fn get_unpromised_peers(&self) -> Vec<NodeId> {
+        self.decided_indexes
+            .iter()
+            .enumerate()
+            .filter(|(pid, x)| x.is_none() && *pid != Self::pid_to_idx(self.n_leader.pid))
+            .map(|(idx, _)| (idx + 1) as NodeId)
             .collect()
     }
 
@@ -269,6 +292,8 @@ where
 pub(crate) mod defaults {
     pub(crate) const BUFFER_SIZE: usize = 100000;
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
+    pub(crate) const ELECTION_TIMEOUT: u64 = 10;
+    pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 100;
 }
 
 #[allow(missing_docs)]
@@ -292,7 +317,7 @@ pub(crate) enum MessageStatus {
 }
 
 /// Keeps track of the ordering of messages in the accept phase
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SequenceNumber {
     /// Meant to refer to a TCP session
@@ -312,12 +337,33 @@ impl SequenceNumber {
     pub(crate) fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
         if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
             MessageStatus::First
-        } else if msg_seq_num.session < self.session {
+        } else if msg_seq_num <= *self {
             MessageStatus::Outdated
         } else if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
             MessageStatus::Expected
         } else {
             MessageStatus::DroppedPreceding
+        }
+    }
+}
+
+pub(crate) struct LogicalClock {
+    time: u64,
+    timeout: u64,
+}
+
+impl LogicalClock {
+    pub fn with(timeout: u64) -> Self {
+        Self { time: 0, timeout }
+    }
+
+    pub fn tick_and_check_timeout(&mut self) -> bool {
+        self.time += 1;
+        if self.time == self.timeout {
+            self.time = 0;
+            true
+        } else {
+            false
         }
     }
 }

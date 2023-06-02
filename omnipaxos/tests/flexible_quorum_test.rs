@@ -65,7 +65,7 @@ fn flexible_quorum_prepare_phase_test() {
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
-    verify_log(nodes_log, expected_log, cfg.num_proposals);
+    verify_log(nodes_log, expected_log);
 }
 
 /// Verifies that an OmniPaxos cluster with N nodes and a write quorum size of Q can still make
@@ -122,5 +122,5 @@ fn flexible_quorum_accept_phase_test() {
             .read_decided_suffix(0)
             .expect("Cannot read decided log entry")
     });
-    verify_log(leaders_log, expected_log, cfg.num_proposals);
+    verify_log(leaders_log, expected_log);
 }
