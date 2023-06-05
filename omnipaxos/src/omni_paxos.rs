@@ -398,7 +398,7 @@ pub enum ProposeErr<T>
 where
     T: Entry,
 {
-    /// Couldn't propose entry because cluster is stopped. Contains failed, proposed entry.
+    /// Couldn't propose entry because a reconfiguration is pending. Returns the failed, proposed entry.
     PendingReconfigEntry(T),
     /// Couldn't propose reconfiguration because a reconfiguration is already pending. Returns the failed, proposed `ClusterConfig` and the metadata.
     /// cluster config and metadata.
