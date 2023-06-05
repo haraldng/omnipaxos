@@ -27,7 +27,7 @@ use toml;
 /// Configuration for `OmniPaxos`.
 /// # Fields
 /// * `cluster_config`: The configuration settings that are cluster-wide.
-/// * `server_config`: The configuration settings that unique to this OmniPaxos server.
+/// * `server_config`: The configuration settings that are specific to this OmniPaxos server.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
@@ -92,7 +92,7 @@ pub struct ClusterConfig {
     /// The identifier for the cluster configuration that this OmniPaxos server is part of. Must
     /// not be 0 and be greater than the previous configuration's id.
     pub configuration_id: ConfigurationId,
-    /// The nodes in the cluster i.e. the `pid`s of the other servers in the configuration.
+    /// The nodes in the cluster i.e. the `pid`s of the servers in the configuration.
     pub nodes: Vec<NodeId>,
     /// Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
     pub flexible_quorum: Option<FlexibleQuorum>,
@@ -121,7 +121,6 @@ impl ClusterConfig {
                 write_quorum_size >= 2 && write_quorum_size <= num_nodes,
                 "Write quorum must be in range 2 to # of nodes in the cluster"
             );
-            // TODO: remove this when we start supporting linearizable reads
             valid_config!(
                 read_quorum_size >= write_quorum_size,
                 "Read quorum size must be >= the write quorum size."
@@ -339,7 +338,7 @@ where
 
     /// Propose a cluster reconfiguration. Returns an error if the current configuration has already been stopped
     /// by a previous reconfiguration request or if the `new_configuration` is invalid.
-    /// `new_configuration` defines the cluster-wide configuration settings for the next cluster.
+    /// `new_configuration` defines the cluster-wide configuration settings for the **next** cluster.
     /// `metadata` is optional data to commit alongside the reconfiguration.
     pub fn reconfigure(
         &mut self,
@@ -393,7 +392,6 @@ where
 
 /// An error indicating a failed proposal due to the current cluster configuration being already stopped
 /// or due to an invalid proposed configuration. Returns the failed proposal.
-#[allow(missing_docs)]
 #[derive(Debug)]
 pub enum ProposeErr<T>
 where

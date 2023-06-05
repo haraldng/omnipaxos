@@ -24,7 +24,7 @@ if let Some(de) = decided_entries {
             LogEntry::StopSign(stopsign) => {
                 let new_configuration = stopsign.next_config;
                 if new_configuration.nodes.contains(&my_pid) {
-                // we are in the new configuration, start new instance
+                // current configuration has been safely stopped. Start new instance
                     let new_storage = MemoryStorage::default();
                     let mut new_omnipaxos = new_configuration.build_for_server(current_config.server_config).unwrap();
  
