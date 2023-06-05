@@ -306,8 +306,6 @@ pub type ConfigurationId = u32;
 
 /// Used for checking the ordering of message sequences in the accept phase
 pub(crate) enum MessageStatus {
-    /// Beginning of a message sequence
-    First,
     /// Expected message sequence progression
     Expected,
     /// Identified a message sequence break
@@ -327,20 +325,12 @@ pub struct SequenceNumber {
 }
 
 impl SequenceNumber {
-    /// Used as a pseudo-AcceptSync for prepare-less reconfigurations
-    const PREDEFINED_LEADER_FIRST_ACCEPT: SequenceNumber = SequenceNumber {
-        session: 0,
-        counter: 1,
-    };
-
     /// Compares this sequence number with the sequence number of an incoming message.
     pub(crate) fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
-        if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
-            MessageStatus::First
+        if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
+            MessageStatus::Expected
         } else if msg_seq_num <= *self {
             MessageStatus::Outdated
-        } else if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
-            MessageStatus::Expected
         } else {
             MessageStatus::DroppedPreceding
         }

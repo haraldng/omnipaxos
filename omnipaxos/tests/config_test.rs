@@ -1,7 +1,7 @@
 #![cfg(feature = "toml_config")]
 pub mod utils;
 
-use omnipaxos::{ballot_leader_election::Ballot, util::FlexibleQuorum, OmniPaxosConfig};
+use omnipaxos::{util::FlexibleQuorum, OmniPaxosConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use serial_test::serial;
 use utils::Value;
@@ -32,15 +32,6 @@ fn config_all_fields_test() {
                 Some(FlexibleQuorum {
                     read_quorum_size: 4,
                     write_quorum_size: 2
-                })
-            );
-            assert_eq!(
-                omnipaxos_config.initial_leader,
-                Some(Ballot {
-                    config_id: 1,
-                    n: 1,
-                    priority: 3,
-                    pid: 1
                 })
             );
             // Make sure we pass asserts in build

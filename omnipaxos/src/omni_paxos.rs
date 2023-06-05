@@ -29,7 +29,6 @@ use toml;
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `initial_leader`: The initial leader of the cluster. Can be used in combination with reconfiguration to skip the first prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
 /// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
@@ -50,7 +49,6 @@ pub struct OmniPaxosConfig {
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
     pub leader_priority: u32,
-    pub initial_leader: Option<Ballot>,
 }
 
 impl OmniPaxosConfig {
@@ -63,7 +61,7 @@ impl OmniPaxosConfig {
     }
 
     /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, B>(mut self, storage: B) -> OmniPaxos<T, B>
+    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
     where
         T: Entry,
         B: Storage<T>,
@@ -80,23 +78,16 @@ impl OmniPaxosConfig {
             "Batch size must be greater than or equal to 1"
         );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = &self.initial_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0");
-            if x.pid == self.pid {
-                assert_eq!(x.priority, self.leader_priority, "Pid matches initial leader's pid {}, but priority {} does not match initial leader's priority {}", x.pid, self.leader_priority, x.priority);
-            }
-        }
 
-        // Use stored ballot as initial leader for BLE
-        let seq_paxos_config = self.clone().into();
-        self.initial_leader = storage
+        // Use stored ballot as initial BLE leader
+        let recovered_leader = storage
             .get_promise()
             .expect("storage error while trying to read promise");
         OmniPaxos {
-            seq_paxos: SequencePaxos::with(seq_paxos_config, storage),
+            ble: BallotLeaderElection::with(self.clone().into(), recovered_leader),
             election_clock: LogicalClock::with(self.election_tick_timeout),
             resend_message_clock: LogicalClock::with(self.resend_message_tick_timeout),
-            ble: BallotLeaderElection::with(self.into()),
+            seq_paxos: SequencePaxos::with(self.into(), storage),
         }
     }
 }
@@ -115,7 +106,6 @@ impl Default for OmniPaxosConfig {
             logger_file_path: None,
             batch_size: 1,
             leader_priority: 0,
-            initial_leader: None,
         }
     }
 }
@@ -165,11 +155,6 @@ where
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> u64 {
         self.seq_paxos.get_compacted_idx()
-    }
-
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    pub fn fail_recovery(&mut self) {
-        self.seq_paxos.fail_recovery()
     }
 
     /// Returns the id of the current leader.

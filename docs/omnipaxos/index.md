@@ -68,7 +68,7 @@ let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 
 ## Fail-recovery
-To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](../storage/#persistentstorage).
+To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. We show an example using [`PersistentStorage`](../storage/#persistentstorage).
 
 ```rust
 /* Re-creating our node after a crash... */
@@ -84,5 +84,4 @@ my_config.set_commitlog_options(my_log_opts);
 // Re-create storage with previous state, then create `OmniPaxos`
 let recovered_storage = PersistentStorage::open(persist_conf); 
 let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
-recovered_paxos.fail_recovery();
 ```

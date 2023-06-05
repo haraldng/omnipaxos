@@ -94,13 +94,12 @@ pub(crate) struct BallotLeaderElection {
 
 impl BallotLeaderElection {
     /// Construct a new BallotLeaderElection node
-    pub(crate) fn with(config: BLEConfig) -> Self {
+    pub(crate) fn with(config: BLEConfig, initial_leader: Option<Ballot>) -> Self {
         let config_id = config.configuration_id;
         let pid = config.pid;
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let initial_leader = config.initial_leader;
         let initial_ballot = match initial_leader {
             Some(ballot) if ballot.pid == pid => ballot,
             _ => Ballot::with(config_id, 0, config.priority, pid),
@@ -289,7 +288,6 @@ impl BallotLeaderElection {
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
-/// * `initial_leader`: The initial leader of the cluster.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `logger`: Custom logger for logging events of Ballot Leader Election.
@@ -300,7 +298,6 @@ pub(crate) struct BLEConfig {
     pid: NodeId,
     peers: Vec<u64>,
     priority: u32,
-    initial_leader: Option<Ballot>,
     flexible_quorum: Option<FlexibleQuorum>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
@@ -316,7 +313,6 @@ impl From<OmniPaxosConfig> for BLEConfig {
             pid: config.pid,
             peers: config.peers,
             priority: config.leader_priority,
-            initial_leader: config.initial_leader,
             buffer_size: BLE_BUFFER_SIZE,
             flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]

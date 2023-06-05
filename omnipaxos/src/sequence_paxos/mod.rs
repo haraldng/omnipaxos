@@ -2,7 +2,7 @@ use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::*,
     storage::{Entry, StopSign, StopSignEntry, Storage},
-    util::{defaults::BUFFER_SIZE, LeaderState},
+    util::LeaderState,
 };
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
@@ -60,9 +60,12 @@ where
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let mut outgoing = Vec::with_capacity(BUFFER_SIZE);
-        let (state, leader, lds) = match storage.get_promise().expect("Storage error") {
-            // try to do fail recovery from storage, if None then we are starting from scratch
+        let mut outgoing = Vec::with_capacity(config.buffer_size);
+        let (state, leader, lds) = match storage
+            .get_promise()
+            .expect("storage error while trying to read promise")
+        {
+            // if we recover a promise from storage then we must do failure recovery
             Some(b) => {
                 let state = (Role::Follower, Phase::Recover);
                 for peer_pid in &peers {
@@ -74,26 +77,7 @@ where
                 }
                 (state, b, None)
             }
-            None => {
-                match &config.initial_leader {
-                    Some(l) => {
-                        if l.pid == pid {
-                            // we are leader in new config
-                            let mut v = vec![None; max_pid];
-                            for idx in peers.iter().map(|pid| *pid as usize - 1) {
-                                // this works as a promise
-                                v[idx] = Some(0);
-                            }
-                            let state = (Role::Leader, Phase::Accept);
-                            (state, *l, Some(v))
-                        } else {
-                            let state = (Role::Follower, Phase::Accept);
-                            (state, *l, None)
-                        }
-                    }
-                    None => ((Role::Follower, Phase::None), Ballot::default(), None),
-                }
-            }
+            None => ((Role::Follower, Phase::None), Ballot::default(), None),
         };
 
         let mut paxos = SequencePaxos {
@@ -216,18 +200,6 @@ where
         self.internal_storage.get_compacted_idx()
     }
 
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    pub(crate) fn fail_recovery(&mut self) {
-        self.state = (Role::Follower, Phase::Recover);
-        for pid in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *pid,
-                msg: PaxosMsg::PrepareReq,
-            });
-        }
-    }
-
     fn handle_compaction(&mut self, c: Compaction) {
         // try trimming and snapshotting forwarded compaction. Errors are ignored as that the data will still be kept.
         match c {
@@ -267,8 +239,7 @@ where
                 // Resend Prepare
                 let unpromised_peers = self.leader_state.get_unpromised_peers();
                 for peer in unpromised_peers {
-                    self.send_prepare(peer)
-                        .expect("storage error while trying to read data for prepare");
+                    self.send_prepare(peer);
                 }
             }
             (Role::Follower, phase) => {
@@ -498,7 +469,6 @@ enum Role {
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `initial_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
@@ -508,7 +478,6 @@ pub struct SequencePaxosConfig {
     peers: Vec<u64>,
     batch_size: usize,
     buffer_size: usize,
-    initial_leader: Option<Ballot>,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
@@ -522,7 +491,6 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             peers: config.peers,
             batch_size: config.batch_size,
             buffer_size: config.buffer_size,
-            initial_leader: config.initial_leader,
             flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]
             logger_file_path: config.logger_file_path,

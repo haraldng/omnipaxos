@@ -261,11 +261,4 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
         cfg.flexible_quorum,
     );
     sys.start_node(pid);
-    let px = sys
-        .nodes
-        .get(&pid)
-        .expect("No SequencePaxos component found");
-    px.on_definition(|x| {
-        x.paxos.fail_recovery();
-    });
 }

@@ -6,7 +6,6 @@ buffer_size = 10000
 logger_file_path = "logs/paxos_1.log"
 leader_priority = 3
 flexible_quorum = { read_quorum_size = 4, write_quorum_size = 2 }
-initial_leader = { config_id = 1, n = 1, priority = 3, pid = 1 }
 # If `tick()` is called every 10ms then an election will be triggered every 100ms
 election_tick_timeout = 10
 # If `tick()` is called every 10ms then dropped messages will be resent every 1000ms

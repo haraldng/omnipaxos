@@ -6,8 +6,6 @@ use crate::{
     storage::{RollbackValue, Snapshot, SnapshotType, StorageResult},
     util::MessageStatus,
 };
-#[cfg(feature = "logging")]
-use slog::warn;
 
 impl<T, B> SequencePaxos<T, B>
 where
@@ -57,7 +55,7 @@ where
                     let suffix = self
                         .internal_storage
                         .get_suffix(decided_idx)
-                        .expect("storage error while trying to read decided index");
+                        .expect("storage error while trying to read log suffix");
                     (Some(delta_snapshot), suffix)
                 } else {
                     let suffix = self
@@ -148,7 +146,7 @@ where
                             RollbackValue::Log(old_log_res.unwrap()),
                             RollbackValue::Snapshot(old_compacted_idx, old_snapshot_res.unwrap()),
                         ],
-                        "storage error while trying to write snapshot",
+                        "storage error while trying to write log entries",
                     );
                     Accepted {
                         n: accsync.n,
@@ -224,88 +222,31 @@ where
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
+            && self.handle_sequence_num(acc.seq_num, acc.n.pid)
         {
-            let msg_status = self.current_seq_num.check_msg_status(acc.seq_num);
-            let old_decided_idx = self.get_decided_idx();
-            let old_accepted_round = match msg_status {
-                MessageStatus::First => {
-                    // psuedo-AcceptSync for reconfigurations
-                    let old_accepted_round = self.internal_storage.get_accepted_round();
-                    self.internal_storage
-                        .set_accepted_round(acc.n)
-                        .expect("storage error while trying to write accepted round");
-                    self.forward_pending_proposals();
-                    self.current_seq_num = acc.seq_num;
-                    Some(old_accepted_round)
-                }
-                MessageStatus::Expected => {
-                    self.current_seq_num = acc.seq_num;
-                    None
-                }
-                MessageStatus::DroppedPreceding => {
-                    self.reconnected(acc.n.pid);
-                    return;
-                }
-                MessageStatus::Outdated => return,
-            };
-
-            let entries = acc.entries;
             // handle decide
+            let old_decided_idx = self.get_decided_idx();
             if acc.decided_idx > old_decided_idx {
-                let result = self.internal_storage.set_decided_idx(acc.decided_idx);
-                if result.is_err() {
-                    if let Some(r) = old_accepted_round {
-                        self.internal_storage.rollback_and_panic(
-                            vec![RollbackValue::AcceptedRound(r)],
-                            "storage error while trying to write decided index.",
-                        )
-                    } else {
-                        panic!(
-                            "storage error while trying to write decided index: {}",
-                            result.unwrap_err()
-                        );
-                    }
-                }
+                self.internal_storage
+                    .set_decided_idx(acc.decided_idx)
+                    .expect("storage error while trying to write decided index");
             }
+            // handle accept
+            let entries = acc.entries;
             let result = self.accept_entries_follower(acc.n, entries);
-            if result.is_err() {
-                if let Some(r) = old_accepted_round {
-                    self.internal_storage.rollback_and_panic(
-                        vec![RollbackValue::AcceptedRound(r)],
-                        "storage error while trying to write decided index.",
-                    );
-                } else {
-                    self.internal_storage.rollback_and_panic(
-                        vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                        "storage error while trying to write log entries.",
-                    );
-                }
-            }
+            self.internal_storage.rollback_and_panic_if_err(
+                &result,
+                vec![RollbackValue::DecidedIdx(old_decided_idx)],
+                "storage error while trying to write log entries.",
+            );
         }
     }
 
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
         if self.internal_storage.get_promise() == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
+            && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid)
         {
-            let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
-            match msg_status {
-                MessageStatus::First => {
-                    // pseudo-AcceptSync for prepare-less reconfigurations
-                    self.internal_storage
-                        .set_accepted_round(acc_ss.n)
-                        .expect("storage error while trying to write accepted round");
-                    self.forward_pending_proposals();
-                    self.current_seq_num = acc_ss.seq_num;
-                }
-                MessageStatus::Expected => self.current_seq_num = acc_ss.seq_num,
-                MessageStatus::DroppedPreceding => {
-                    self.reconnected(acc_ss.n.pid);
-                    return;
-                }
-                MessageStatus::Outdated => return,
-            }
-
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign { n: acc_ss.n };
             self.outgoing.push(PaxosMessage {
@@ -317,24 +258,10 @@ where
     }
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
-        if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
-            match msg_status {
-                MessageStatus::First => {
-                    #[cfg(feature = "logging")]
-                    warn!(
-                        self.logger,
-                        "Decide cannot be the first message in a sequence!"
-                    );
-                    return;
-                }
-                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
-                MessageStatus::DroppedPreceding => {
-                    self.reconnected(dec.n.pid);
-                    return;
-                }
-                MessageStatus::Outdated => return,
-            }
+        if self.internal_storage.get_promise() == dec.n
+            && self.state.1 == Phase::Accept
+            && self.handle_sequence_num(dec.seq_num, dec.n.pid)
+        {
             self.internal_storage
                 .set_decided_idx(dec.decided_idx)
                 .expect("storage error while trying to write decided index");
@@ -342,25 +269,10 @@ where
     }
 
     pub(crate) fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
-        if self.internal_storage.get_promise() == dec.n && self.state.1 == Phase::Accept {
-            let msg_status = self.current_seq_num.check_msg_status(dec.seq_num);
-            match msg_status {
-                MessageStatus::First => {
-                    #[cfg(feature = "logging")]
-                    warn!(
-                        self.logger,
-                        "DecideStopSign cannot be the first message in a sequence!"
-                    );
-                    return;
-                }
-                MessageStatus::Expected => self.current_seq_num = dec.seq_num,
-                MessageStatus::DroppedPreceding => {
-                    self.reconnected(dec.n.pid);
-                    return;
-                }
-                MessageStatus::Outdated => return,
-            }
-
+        if self.internal_storage.get_promise() == dec.n
+            && self.state.1 == Phase::Accept
+            && self.handle_sequence_num(dec.seq_num, dec.n.pid)
+        {
             let mut ss = self
                 .internal_storage
                 .get_stopsign()
@@ -376,7 +288,7 @@ where
             self.internal_storage.rollback_and_panic_if_err(
                 &result,
                 vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                "storage error while trying to write decided index",
+                "storage error while trying to write stopsign",
             );
         }
     }
@@ -409,5 +321,21 @@ where
             };
         }
         Ok(())
+    }
+
+    /// Also returns if the incoming sequence number is the expected one.
+    fn handle_sequence_num(&mut self, seq_num: SequenceNumber, from: NodeId) -> bool {
+        let msg_status = self.current_seq_num.check_msg_status(seq_num);
+        match msg_status {
+            MessageStatus::Expected => {
+                self.current_seq_num = seq_num;
+                true
+            }
+            MessageStatus::DroppedPreceding => {
+                self.reconnected(from);
+                false
+            }
+            MessageStatus::Outdated => false,
+        }
     }
 }
