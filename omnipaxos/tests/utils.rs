@@ -45,6 +45,7 @@ pub struct TestConfig {
     pub num_proposals: u64,
     pub num_elections: u64,
     pub gc_idx: u64,
+    pub batch_size: usize,
 }
 
 impl TestConfig {
@@ -71,6 +72,7 @@ impl Default for TestConfig {
             num_proposals: 100,
             num_elections: 0,
             gc_idx: 0,
+            batch_size: 1,
         }
     }
 }
@@ -236,7 +238,7 @@ where
         }
     }
 
-    fn get_accepted_round(&self) -> StorageResult<Ballot> {
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
@@ -280,7 +282,7 @@ where
         }
     }
 
-    fn get_promise(&self) -> StorageResult<Ballot> {
+    fn get_promise(&self) -> StorageResult<Option<Ballot>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
@@ -382,6 +384,7 @@ impl TestSystem {
         resend_message_timeout_ms: u64,
         num_threads: usize,
         storage_type: StorageTypeSelector,
+        batch_size: usize,
     ) -> Self {
         let temp_dir_path = create_temp_dir();
 
@@ -407,6 +410,7 @@ impl TestSystem {
             op_config.pid = pid;
             op_config.peers = peers;
             op_config.configuration_id = 1;
+            op_config.batch_size = batch_size;
             // Make tick timeouts reletive to election timeout
             op_config.election_tick_timeout = 1;
             op_config.resend_message_tick_timeout = resend_message_timeout_ms / election_timeout_ms;

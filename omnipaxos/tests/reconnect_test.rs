@@ -31,6 +31,7 @@ fn increasing_accept_seq_num_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 
@@ -111,6 +112,7 @@ fn reconnect_after_dropped_accepts_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 
@@ -200,6 +202,7 @@ fn reconnect_after_dropped_prepare_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 
@@ -289,6 +292,7 @@ fn reconnect_after_dropped_promise_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 
@@ -384,6 +388,7 @@ fn reconnect_after_dropped_preparereq_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 
@@ -481,6 +486,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
     sys.start_all_nodes();
 

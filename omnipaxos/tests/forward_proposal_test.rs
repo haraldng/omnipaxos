@@ -20,6 +20,7 @@ fn forward_proposal_test() {
         cfg.resend_message_timeout_ms,
         cfg.num_threads,
         cfg.storage_type,
+        cfg.batch_size,
     );
 
     let first_node = sys.nodes.get(&1).unwrap();
