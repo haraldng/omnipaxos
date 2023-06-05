@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{RollbackValue, Snapshot, SnapshotType, StorageResult};
+use crate::storage::{RollbackValue, Snapshot, SnapshotType};
 
 use super::*;
 
@@ -23,12 +23,8 @@ where
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
-            self.leader_state = LeaderState::with(
-                n,
-                None,
-                self.leader_state.max_pid,
-                self.leader_state.majority,
-            );
+            self.leader_state =
+                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
             self.internal_storage
                 .flush_batch()
@@ -80,8 +76,7 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            self.send_prepare(from)
-                .expect("storage error while trying to read values for prepare message");
+            self.send_prepare(from);
         }
     }
 
@@ -156,7 +151,7 @@ where
         }
     }
 
-    pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
+    pub(crate) fn send_prepare(&mut self, to: NodeId) {
         let prep = Prepare {
             n: self.leader_state.n_leader,
             decided_idx: self.internal_storage.get_decided_idx(),
@@ -168,7 +163,6 @@ where
             to,
             msg: PaxosMsg::Prepare(prep),
         });
-        Ok(())
     }
 
     #[cfg(feature = "batch_accept")]

@@ -67,6 +67,7 @@ fn setup_leader() -> (
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
+    let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
     let n_old = n;
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
@@ -74,7 +75,7 @@ fn setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
-            quorum_connected: true,
+            connectivity: cfg.num_nodes as u8,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -85,7 +86,7 @@ fn setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 2,
             ballot: n_old,
-            quorum_connected: false,
+            connectivity: 0,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -96,7 +97,7 @@ fn setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 3,
             ballot: n_old,
-            quorum_connected: false,
+            connectivity: 0,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -484,6 +485,7 @@ fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
+        let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
         let n_old = n;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
@@ -491,7 +493,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
                 ballot: n_old,
-                quorum_connected: true,
+                connectivity: cfg.num_nodes as u8,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -502,7 +504,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                quorum_connected: false,
+                connectivity: 0,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -513,7 +515,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
                 ballot: n_old,
-                quorum_connected: false,
+                connectivity: 0,
             }),
         });
         op.handle_incoming(setup_msg);

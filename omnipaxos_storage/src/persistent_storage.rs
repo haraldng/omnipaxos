@@ -34,7 +34,7 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 struct BallotStorage {
     config_id: u32,
     n: u32,
-    priority: u64,
+    priority: u32,
     pid: u64,
 }
 

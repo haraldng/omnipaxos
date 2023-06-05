@@ -12,6 +12,12 @@ num_nodes = 5
 num_proposals = 10000
 storage_type = { type = "Memory" }
 
+[flexible_quorum_test]
+wait_timeout_ms = 3000
+num_threads = 8
+num_nodes = 8
+flexible_quorum = [6, 3]
+
 [proposal_test]
 wait_timeout_ms = 5000
 num_threads = 8

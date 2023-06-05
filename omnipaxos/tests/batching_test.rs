@@ -12,14 +12,7 @@ fn batching_test() {
     let wait_time_between_propose = Duration::from_millis(2);
 
     let cfg = TestConfig::load("batching_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-        cfg.batch_size,
-    );
+    let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     sys.start_all_nodes();
 

@@ -2,7 +2,7 @@ You are free to use any storage implementation with `OmniPaxos`. The only requir
 
 ## Importing `omnipaxos_storage`
 To use the provided storage implementations, we need to add `omnipaxos_storage` to the dependencies in the cargo file. You can find the latest version on [crates](https://crates.io/crates/omnipaxos_storage).
-```rust,edition2018,no_run,noplaypen
+```rust
 [dependencies]
 omnipaxos_storage = { version = "LATEST_VERSION", default-features = true } 
 ```
@@ -12,7 +12,7 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
 
 ## MemoryStorage
 `MemoryStorage` is an in-memory storage implementation and it will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction)).
-```rust,edition2018,no_run,noplaypen
+```rust
     // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]
     pub struct MemoryStorage<T>
@@ -100,7 +100,7 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
 
 ## PersistentStorage
 `PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature `rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments. 
-```rust,edition2018,no_run,noplaypen
+```rust
 use omnipaxos::{
     sequence_paxos::{OmniPaxos, OmniPaxosConfig},
 };
@@ -123,7 +123,7 @@ my_config.set_commitlog_options(my_logopts);
 my_config.set_sled_options(my_sled_opts);
 ```
 The same configuration can also be done with the constructor that takes arguments:
-```rust,edition2018,no_run,noplaypen
+```rust
 let my_path = "another_storage"
 let my_logopts = LogOptions::new(my_path);
 let mut my_sled_opts = Config::new();

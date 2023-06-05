@@ -19,18 +19,9 @@ use utils::{
 #[serial]
 fn consensus_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-        cfg.batch_size,
-    );
+    let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
-
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {

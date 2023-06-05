@@ -7,7 +7,7 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
-        LogEntry, LogicalClock, NodeId,
+        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
 };
 #[cfg(feature = "toml_config")]
@@ -29,29 +29,26 @@ use toml;
 /// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
 /// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `buffer_size`: The buffer size for outgoing messages.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
-/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered
-/// dropped and thus resent.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[allow(missing_docs)]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
-    pub configuration_id: u32,
+    pub configuration_id: ConfigurationId,
     pub pid: NodeId,
-    pub peers: Vec<u64>,
+    pub peers: Vec<NodeId>,
     pub batch_size: usize,
     pub buffer_size: usize,
+    pub flexible_quorum: Option<FlexibleQuorum>,
     pub election_tick_timeout: u64,
     pub resend_message_tick_timeout: u64,
-    pub skip_prepare_use_leader: Option<Ballot>,
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
     /*** BLE config fields ***/
-    pub leader_priority: u64,
-    pub initial_leader: Option<Ballot>,
+    pub leader_priority: u32,
 }
 
 impl OmniPaxosConfig {
@@ -81,14 +78,16 @@ impl OmniPaxosConfig {
             "Batch size must be greater than or equal to 1"
         );
         assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = self.skip_prepare_use_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
-        };
+
+        // Use stored ballot as initial BLE leader
+        let recovered_leader = storage
+            .get_promise()
+            .expect("storage error while trying to read promise");
         OmniPaxos {
-            seq_paxos: SequencePaxos::with(self.clone().into(), storage),
-            ble: BallotLeaderElection::with(self.clone().into()),
+            ble: BallotLeaderElection::with(self.clone().into(), recovered_leader),
             election_clock: LogicalClock::with(self.election_tick_timeout),
             resend_message_clock: LogicalClock::with(self.resend_message_tick_timeout),
+            seq_paxos: SequencePaxos::with(self.into(), storage),
         }
     }
 }
@@ -100,14 +99,13 @@ impl Default for OmniPaxosConfig {
             pid: 0,
             peers: Vec::new(),
             buffer_size: BUFFER_SIZE,
+            flexible_quorum: None,
             election_tick_timeout: ELECTION_TIMEOUT,
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
-            skip_prepare_use_leader: None,
             #[cfg(feature = "logging")]
             logger_file_path: None,
             batch_size: 1,
             leader_priority: 0,
-            initial_leader: None,
         }
     }
 }
@@ -157,11 +155,6 @@ where
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> u64 {
         self.seq_paxos.get_compacted_idx()
-    }
-
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    pub fn fail_recovery(&mut self) {
-        self.seq_paxos.fail_recovery()
     }
 
     /// Returns the id of the current leader.
@@ -267,14 +260,15 @@ where
     }
 
     /*** BLE calls ***/
-    /// Update the custom priority used in the Ballot for this server.
-    pub fn set_priority(&mut self, p: u64) {
+    /// Update the custom priority used in the Ballot for this server. Note that changing the
+    /// priority triggers a leader re-election.
+    pub fn set_priority(&mut self, p: u32) {
         self.ble.set_priority(p)
     }
 
     /// If the heartbeat of a leader is not received when election_timeout() is called, the server might attempt to become the leader.
     /// It is also used for the election process, where the server checks if it can become the leader.
-    /// This function should be called periodically to detect leader failure and drive the election process.
+    /// This function .should be called periodically to detect leader failure and drive the election process.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
     pub fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
