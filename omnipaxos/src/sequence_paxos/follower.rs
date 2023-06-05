@@ -30,8 +30,8 @@ where
                 .expect("storage error while trying to read accepted round");
             let accepted_idx = self
                 .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
+                .get_accepted_idx()
+                .expect("storage error while trying to read accepted_idx");
             let decided_idx = self.get_decided_idx();
             let stopsign = self.get_stopsign();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
@@ -189,7 +189,14 @@ where
                     } else {
                         self.accept_stopsign(ss);
                     }
-                    accepted.accepted_idx += 1;
+                    let ss_idx = self
+                        .internal_storage
+                        .get_stopsign()
+                        .expect("storage error while trying to read stopsign")
+                        .expect("stopsign should have been accepted")
+                        .log_idx;
+                    assert_eq!(ss_idx, accepted.accepted_idx);
+                    accepted.accepted_idx = ss_idx + 1;
                 }
                 None => self.forward_pending_proposals(),
             }
@@ -287,10 +294,6 @@ where
             && self.state == (Role::Follower, Phase::Accept)
         {
             let msg_status = self.current_seq_num.check_msg_status(acc_ss.seq_num);
-            let log_len = self
-                .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log_len");
             match msg_status {
                 MessageStatus::First => {
                     // pseudo-AcceptSync for prepare-less reconfigurations
@@ -309,9 +312,17 @@ where
             }
 
             self.accept_stopsign(acc_ss.ss);
+            let ss_idx = self.internal_storage
+                .get_accepted_idx()
+                .expect("storage error while trying to read accepted_idx");
+            let accepted_idx = self
+                .internal_storage
+                .get_accepted_idx()
+                .expect("storage error while trying to read accepted_idx");
+            assert_eq!(ss_idx + 1, accepted_idx);
             let a = Accepted {
                 n: acc_ss.n,
-                accepted_idx: log_len + 1,
+                accepted_idx,
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,

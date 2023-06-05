@@ -243,7 +243,8 @@ where
                             .expect("storage error while trying to read decided_idx");
                         if !ss.decided(decided_idx) {
                             for follower in self.leader_state.get_promised_followers() {
-                                if !self.leader_state.get_accepted_idx(follower) > ss.log_idx {
+                                // resend if the follower has not accepted the stopsign
+                                if !ss.decided(self.leader_state.get_accepted_idx(follower)) {
                                     self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
                                 }
                             }
@@ -428,15 +429,15 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
-        let log_len = self
+        let accepted_idx = self
             .internal_storage
-            .get_log_len()
-            .expect("storage error while trying to read log_len");
+            .get_accepted_idx()
+            .expect("storage error while trying to read accepted_idx");
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, log_len))
+            .set_stopsign(StopSignEntry::with(ss, accepted_idx))
             .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
-            self.leader_state.set_accepted_idx(self.pid, log_len + 1);
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx + 1);
         }
     }
 

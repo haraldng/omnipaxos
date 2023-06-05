@@ -284,7 +284,6 @@ where
         R: RangeBounds<u64>,
     {
         let decided_idx = self.get_decided_idx()?;
-        let virtual_log_len = self.get_log_len()?;
         let from_idx = match r.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(e) => *e + 1,
@@ -293,17 +292,12 @@ where
         let to_idx = match r.end_bound() {
             Bound::Included(i) => *i + 1,
             Bound::Excluded(e) => *e,
-            Bound::Unbounded => {
-                let idx = virtual_log_len;
-                match self.get_stopsign()? {
-                    Some(ss) if ss.decided(decided_idx) => idx + 1,
-                    _ => idx,
-                }
-            }
+            Bound::Unbounded => self.get_accepted_idx()?,
         };
         let compacted_idx = self.get_compacted_idx()?;
+        let log_len = self.state_cache.real_log_len;
         let to_type =
-            match self.get_entry_type(to_idx - 1, compacted_idx, decided_idx, virtual_log_len)? {
+            match self.get_entry_type(to_idx - 1, compacted_idx, decided_idx, log_len)? {
                 // use to_idx-1 when getting the entry type as to_idx is exclusive
                 Some(IndexEntry::Compacted) => {
                     return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
@@ -312,7 +306,7 @@ where
                 _ => return Ok(None),
             };
         let from_type =
-            match self.get_entry_type(from_idx, compacted_idx, decided_idx, virtual_log_len)? {
+            match self.get_entry_type(from_idx, compacted_idx, decided_idx, log_len)? {
                 Some(from_type) => from_type,
                 _ => return Ok(None),
             };
@@ -492,10 +486,13 @@ where
     }
 
     /// The length of the replicated log, as if log was never compacted.
-    pub(crate) fn get_log_len(&self) -> StorageResult<u64> {
+    pub(crate) fn get_accepted_idx(&self) -> StorageResult<u64> {
         let compacted_idx = self.storage.get_compacted_idx()?;
-        let len = self.get_real_log_len()?;
-        Ok(compacted_idx + len)
+        let mut log_len = self.get_real_log_len()?;
+        if let Some(_) = self.get_stopsign()? {
+            log_len += 1;
+        }
+        Ok(compacted_idx + log_len)
     }
 
     /// The length of the physical log, which can get smaller with compaction

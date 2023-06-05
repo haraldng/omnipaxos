@@ -43,8 +43,8 @@ where
             let decided_idx = self.get_decided_idx();
             let accepted_idx = self
                 .internal_storage
-                .get_log_len()
-                .expect("storage error while trying to read log length");
+                .get_accepted_idx()
+                .expect("storage error while trying to read accepted_idx");
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -169,7 +169,7 @@ where
             n: self.leader_state.n_leader,
             decided_idx: self.internal_storage.get_decided_idx()?,
             n_accepted: self.internal_storage.get_accepted_round()?,
-            accepted_idx: self.internal_storage.get_log_len()?,
+            accepted_idx: self.internal_storage.get_accepted_idx()?,
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
