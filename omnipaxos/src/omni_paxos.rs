@@ -1,5 +1,5 @@
-#[cfg(feature = "toml_config")]
-use crate::errors::ConfigError;
+use crate::errors::{valid_config, ConfigError};
+// use crate::valid_config;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
@@ -7,11 +7,13 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
-        LogEntry, LogicalClock, NodeId,
+        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
 };
-#[cfg(feature = "toml_config")]
+#[cfg(any(feature = "toml_config", feature = "serde"))]
 use serde::Deserialize;
+#[cfg(feature = "serde")]
+use serde::Serialize;
 #[cfg(feature = "toml_config")]
 use std::fs;
 use std::{
@@ -24,83 +26,186 @@ use toml;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
-/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
-/// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
-/// * `buffer_size`: The buffer size for outgoing messages.
-/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
-/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered
-/// dropped and thus resent.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
-/// * `logger_file_path`: The path where the default logger logs events.
+/// * `cluster_config`: The configuration settings that are cluster-wide.
+/// * `server_config`: The configuration settings that are specific to this OmniPaxos server.
 #[allow(missing_docs)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
 pub struct OmniPaxosConfig {
-    pub configuration_id: u32,
-    pub pid: NodeId,
-    pub peers: Vec<u64>,
-    pub buffer_size: usize,
-    pub election_tick_timeout: u64,
-    pub resend_message_tick_timeout: u64,
-    pub skip_prepare_use_leader: Option<Ballot>,
-    #[cfg(feature = "logging")]
-    pub logger_file_path: Option<String>,
-    /*** BLE config fields ***/
-    pub leader_priority: u64,
-    pub initial_leader: Option<Ballot>,
+    pub cluster_config: ClusterConfig,
+    pub server_config: ServerConfig,
 }
 
 impl OmniPaxosConfig {
+    /// Checks that all the fields of the cluster config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.cluster_config.validate()?;
+        self.server_config.validate()?;
+        valid_config!(
+            self.cluster_config.nodes.contains(&self.server_config.pid),
+            "Nodes must include own server pid"
+        );
+        Ok(())
+    }
+
     /// Creates a new `OmniPaxosConfig` from a `toml` file.
     #[cfg(feature = "toml_config")]
     pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
         let config_file = fs::read_to_string(file_path)?;
         let config: OmniPaxosConfig = toml::from_str(&config_file)?;
+        config.validate()?;
         Ok(config)
     }
 
-    /// Checks all configurations and returns the local OmniPaxos node if successful.
-    pub fn build<T, B>(self, storage: B) -> OmniPaxos<T, B>
+    /// Checks all configuration fields and returns the local OmniPaxos node if successful.
+    pub fn build<T, B>(self, storage: B) -> Result<OmniPaxos<T, B>, ConfigError>
     where
         T: Entry,
         B: Storage<T>,
     {
-        assert_ne!(self.pid, 0, "Pid cannot be 0");
-        assert_ne!(self.configuration_id, 0, "Configuration id cannot be 0");
-        assert!(!self.peers.is_empty(), "Peers cannot be empty");
-        assert!(
-            !self.peers.contains(&self.pid),
-            "Peers should not include self pid"
-        );
-        assert!(self.buffer_size > 0, "Buffer size must be greater than 0");
-        if let Some(x) = self.skip_prepare_use_leader {
-            assert_ne!(x.pid, 0, "Initial leader cannot be 0")
-        };
-        OmniPaxos {
-            seq_paxos: SequencePaxos::with(self.clone().into(), storage),
-            ble: BallotLeaderElection::with(self.clone().into()),
-            election_clock: LogicalClock::with(self.election_tick_timeout),
-            resend_message_clock: LogicalClock::with(self.resend_message_tick_timeout),
-        }
+        self.validate()?;
+        // Use stored ballot as initial BLE leader
+        let recovered_leader = storage
+            .get_promise()
+            .expect("storage error while trying to read promise");
+        Ok(OmniPaxos {
+            ble: BallotLeaderElection::with(self.clone().into(), recovered_leader),
+            election_clock: LogicalClock::with(self.server_config.election_tick_timeout),
+            resend_message_clock: LogicalClock::with(
+                self.server_config.resend_message_tick_timeout,
+            ),
+            seq_paxos: SequencePaxos::with(self.into(), storage),
+        })
     }
 }
 
-impl Default for OmniPaxosConfig {
+/// Configuration for an `OmniPaxos` cluster.
+/// # Fields
+/// * `configuration_id`: The identifier for the cluster configuration that this OmniPaxos server is part of.
+/// * `nodes`: The nodes in the cluster i.e. the `pid`s of the other servers in the configuration.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
+#[derive(Clone, Debug, PartialEq, Default)]
+#[cfg_attr(any(feature = "serde", feature = "toml_config"), derive(Deserialize))]
+#[cfg_attr(feature = "toml_config", serde(default))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct ClusterConfig {
+    /// The identifier for the cluster configuration that this OmniPaxos server is part of. Must
+    /// not be 0 and be greater than the previous configuration's id.
+    pub configuration_id: ConfigurationId,
+    /// The nodes in the cluster i.e. the `pid`s of the servers in the configuration.
+    pub nodes: Vec<NodeId>,
+    /// Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
+    pub flexible_quorum: Option<FlexibleQuorum>,
+}
+
+impl ClusterConfig {
+    /// Checks that all the fields of the cluster config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let num_nodes = self.nodes.len();
+        valid_config!(num_nodes > 1, "Need more than 1 node");
+        valid_config!(self.configuration_id != 0, "Configuration ID cannot be 0");
+        if let Some(FlexibleQuorum {
+            read_quorum_size,
+            write_quorum_size,
+        }) = self.flexible_quorum
+        {
+            valid_config!(
+                read_quorum_size + write_quorum_size > num_nodes,
+                "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
+            );
+            valid_config!(
+                read_quorum_size >= 2 && read_quorum_size <= num_nodes,
+                "Read quorum must be in range 2 to # of nodes in the cluster"
+            );
+            valid_config!(
+                write_quorum_size >= 2 && write_quorum_size <= num_nodes,
+                "Write quorum must be in range 2 to # of nodes in the cluster"
+            );
+            valid_config!(
+                read_quorum_size >= write_quorum_size,
+                "Read quorum size must be >= the write quorum size."
+            );
+        }
+        Ok(())
+    }
+
+    /// Checks all configuration fields and builds a local OmniPaxos node with settings for this
+    /// node defined in `server_config` and using storage `with_storage`.
+    pub fn build_for_server<T, B>(
+        self,
+        server_config: ServerConfig,
+        with_storage: B,
+    ) -> Result<OmniPaxos<T, B>, ConfigError>
+    where
+        T: Entry,
+        B: Storage<T>,
+    {
+        let op_config = OmniPaxosConfig {
+            cluster_config: self,
+            server_config,
+        };
+        op_config.build(with_storage)
+    }
+}
+
+/// Configuration for a singular `OmniPaxos` instance in a cluster.
+/// # Fields
+/// * `pid`: The unique identifier of this node. Must not be 0.
+/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
+/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
+/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
+/// * `logger_file_path`: The path where the default logger logs events.
+/// * `leader_priority` : Custom priority for this node to be elected as the leader.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
+pub struct ServerConfig {
+    /// The unique identifier of this node. Must not be 0.
+    pub pid: NodeId,
+    /// The number of calls to `tick()` before leader election is updated
+    pub election_tick_timeout: u64,
+    /// The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
+    pub resend_message_tick_timeout: u64,
+    /// The buffer size for outgoing messages.
+    pub buffer_size: usize,
+    /// The size of the buffer for log batching. The default is 1, which means no batching.
+    pub batch_size: usize,
+    /// The path where the default logger logs events.
+    #[cfg(feature = "logging")]
+    pub logger_file_path: Option<String>,
+    /// Custom priority for this node to be elected as the leader.
+    pub leader_priority: u32,
+}
+
+impl ServerConfig {
+    /// Checks that all the fields of the server config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        valid_config!(self.pid != 0, "Server pid cannot be 0");
+        valid_config!(self.buffer_size != 0, "Buffer size must be greater than 0");
+        valid_config!(self.batch_size != 0, "Batch size must be greater than 0");
+        valid_config!(
+            self.election_tick_timeout != 0,
+            "Election tick timeout must be greater than 0"
+        );
+        valid_config!(
+            self.resend_message_tick_timeout != 0,
+            "Resend message tick timeout must be greater than 0"
+        );
+        Ok(())
+    }
+}
+
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            configuration_id: 0,
             pid: 0,
-            peers: Vec::new(),
-            buffer_size: BUFFER_SIZE,
             election_tick_timeout: ELECTION_TIMEOUT,
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
-            skip_prepare_use_leader: None,
+            buffer_size: BUFFER_SIZE,
+            batch_size: 1,
             #[cfg(feature = "logging")]
             logger_file_path: None,
             leader_priority: 0,
-            initial_leader: None,
         }
     }
 }
@@ -152,11 +257,6 @@ where
         self.seq_paxos.get_compacted_idx()
     }
 
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    pub fn fail_recovery(&mut self) {
-        self.seq_paxos.fail_recovery()
-    }
-
     /// Returns the id of the current leader.
     pub fn get_current_leader(&self) -> Option<NodeId> {
         self.get_current_leader_ballot().map(|ballot| ballot.pid)
@@ -172,7 +272,7 @@ where
         }
     }
 
-    /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
+    /// Returns the outgoing messages from this server. The messages should then be sent via the network implementation.
     pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
         let paxos_msgs = self
             .seq_paxos
@@ -237,9 +337,23 @@ where
         self.seq_paxos.append(entry)
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    pub fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
-        self.seq_paxos.reconfigure(rc)
+    /// Propose a cluster reconfiguration. Returns an error if the current configuration has already been stopped
+    /// by a previous reconfiguration request or if the `new_configuration` is invalid.
+    /// `new_configuration` defines the cluster-wide configuration settings for the **next** cluster.
+    /// `metadata` is optional data to commit alongside the reconfiguration.
+    pub fn reconfigure(
+        &mut self,
+        new_configuration: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr<T>> {
+        if let Err(config_error) = new_configuration.validate() {
+            return Err(ProposeErr::ConfigError(
+                config_error,
+                new_configuration,
+                metadata,
+            ));
+        }
+        self.seq_paxos.reconfigure(new_configuration, metadata)
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.
@@ -260,14 +374,15 @@ where
     }
 
     /*** BLE calls ***/
-    /// Update the custom priority used in the Ballot for this server.
-    pub fn set_priority(&mut self, p: u64) {
+    /// Update the custom priority used in the Ballot for this server. Note that changing the
+    /// priority triggers a leader re-election.
+    pub fn set_priority(&mut self, p: u32) {
         self.ble.set_priority(p)
     }
 
     /// If the heartbeat of a leader is not received when election_timeout() is called, the server might attempt to become the leader.
     /// It is also used for the election process, where the server checks if it can become the leader.
-    /// This function should be called periodically to detect leader failure and drive the election process.
+    /// This function .should be called periodically to detect leader failure and drive the election process.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
     pub fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
@@ -276,37 +391,21 @@ where
     }
 }
 
-/// Used for proposing reconfiguration of the cluster.
-#[derive(Debug, Clone)]
-pub struct ReconfigurationRequest {
-    /// The id of the servers in the new configuration.
-    pub(crate) new_configuration: Vec<NodeId>,
-    /// Optional metadata to be decided with the reconfiguration.
-    pub(crate) metadata: Option<Vec<u8>>,
-}
-
-impl ReconfigurationRequest {
-    /// create a `ReconfigurationRequest`.
-    /// # Arguments
-    /// * `new_configuration`: The pids of the nodes in the new configuration.
-    /// * `metadata`: Some optional metadata in raw bytes. This could include some auxiliary data for the new configuration to start with.
-    pub fn with(new_configuration: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
-        Self {
-            new_configuration,
-            metadata,
-        }
-    }
-}
-
-/// An error returning the proposal that was failed due to that the current configuration is stopped.
-#[allow(missing_docs)]
+/// An error indicating a failed proposal due to the current cluster configuration being already stopped
+/// or due to an invalid proposed configuration. Returns the failed proposal.
 #[derive(Debug)]
 pub enum ProposeErr<T>
 where
     T: Entry,
 {
-    Normal(T),
-    Reconfiguration(Vec<NodeId>),
+    /// Couldn't propose entry because a reconfiguration is pending. Returns the failed, proposed entry.
+    PendingReconfigEntry(T),
+    /// Couldn't propose reconfiguration because a reconfiguration is already pending. Returns the failed, proposed `ClusterConfig` and the metadata.
+    /// cluster config and metadata.
+    PendingReconfigConfig(ClusterConfig, Option<Vec<u8>>),
+    /// Couldn't propose reconfiguration because of an invalid cluster config. Contains the config
+    /// error and the failed, proposed cluster config and metadata.
+    ConfigError(ConfigError, ClusterConfig, Option<Vec<u8>>),
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.

@@ -63,8 +63,8 @@ where
         Ok(())
     }
 
-    fn get_accepted_round(&self) -> StorageResult<Ballot> {
-        Ok(self.acc_round)
+    fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
+        Ok(Some(self.acc_round))
     }
 
     fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
@@ -86,8 +86,8 @@ where
         })
     }
 
-    fn get_promise(&self) -> StorageResult<Ballot> {
-        Ok(self.n_prom)
+    fn get_promise(&self) -> StorageResult<Option<Ballot>> {
+        Ok(Some(self.n_prom))
     }
 
     fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {

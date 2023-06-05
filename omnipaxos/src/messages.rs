@@ -177,8 +177,9 @@ pub mod sequence_paxos {
     }
 }
 
-/// The different messages BLE uses to communicate with other replicas.
+/// The different messages BLE uses to communicate with other servers.
 pub mod ballot_leader_election {
+
     use crate::{ballot_leader_election::Ballot, util::NodeId};
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
@@ -192,7 +193,7 @@ pub mod ballot_leader_election {
         Reply(HeartbeatReply),
     }
 
-    /// Requests a reply from all the other replicas.
+    /// Requests a reply from all the other servers.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatRequest {
@@ -204,12 +205,12 @@ pub mod ballot_leader_election {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatReply {
-        /// Number of the current round.
+        /// Number of the current heartbeat round.
         pub round: u32,
-        /// Ballot of a replica.
+        /// Ballot of a server.
         pub ballot: Ballot,
-        /// States if the replica is a candidate to become a leader.
-        pub quorum_connected: bool,
+        /// The number of replicas inside the cluster the sender is connected to (including itself)
+        pub connectivity: u8,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

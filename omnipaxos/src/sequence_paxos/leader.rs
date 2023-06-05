@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{RollbackValue, Snapshot, SnapshotType, StorageResult};
+use crate::storage::{RollbackValue, Snapshot, SnapshotType};
 
 use super::*;
 
@@ -16,35 +16,23 @@ where
     pub(crate) fn handle_leader(&mut self, n: Ballot) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
-        if n <= self.leader_state.n_leader
-            || n <= self
-                .internal_storage
-                .get_promise()
-                .expect("storage error while trying to read promise")
-        {
+        if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
-        if self.stopped() {
+        if self.pending_reconfiguration() {
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
-            self.leader_state = LeaderState::with(
-                n,
-                None,
-                self.leader_state.max_pid,
-                self.leader_state.majority,
-            );
+            self.leader_state =
+                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
+            self.internal_storage
+                .flush_batch()
+                .expect("storage error while trying to flush batch");
             /* insert my promise */
-            let na = self
-                .internal_storage
-                .get_accepted_round()
-                .expect("storage error while trying to read accepted round");
+            let na = self.internal_storage.get_accepted_round();
             let decided_idx = self.get_decided_idx();
-            let accepted_idx = self
-                .internal_storage
-                .get_accepted_idx()
-                .expect("storage error while trying to read accepted_idx");
+            let accepted_idx = self.internal_storage.get_accepted_idx();
             let my_promise = Promise {
                 n,
                 n_accepted: na,
@@ -88,8 +76,7 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            self.send_prepare(from)
-                .expect("storage error while trying to read values for prepare message");
+            self.send_prepare(from);
         }
     }
 
@@ -134,17 +121,17 @@ where
     }
 
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
-                (Role::Leader, Phase::Accept) => self.send_batch_accept(entries),
+                (Role::Leader, Phase::Accept) => self.accept_entries_leader(entries),
                 _ => self.forward_proposals(entries),
             }
         }
     }
 
     pub(crate) fn handle_forwarded_stopsign(&mut self, ss: StopSign) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.as_mut().is_none() {
@@ -164,19 +151,18 @@ where
         }
     }
 
-    pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
+    pub(crate) fn send_prepare(&mut self, to: NodeId) {
         let prep = Prepare {
             n: self.leader_state.n_leader,
-            decided_idx: self.internal_storage.get_decided_idx()?,
-            n_accepted: self.internal_storage.get_accepted_round()?,
-            accepted_idx: self.internal_storage.get_accepted_idx()?,
+            decided_idx: self.internal_storage.get_decided_idx(),
+            n_accepted: self.internal_storage.get_accepted_round(),
+            accepted_idx: self.internal_storage.get_accepted_idx(),
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::Prepare(prep),
         });
-        Ok(())
     }
 
     #[cfg(feature = "batch_accept")]
@@ -184,10 +170,7 @@ where
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: self
-                .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index"),
+            decided_idx: self.internal_storage.get_decided_idx(),
             entries,
         };
         self.outgoing.push(PaxosMessage {
@@ -199,81 +182,23 @@ where
             .set_batch_accept_meta(to, Some(self.outgoing.len() - 1));
     }
 
-    pub(crate) fn send_accept(&mut self, entry: T) {
-        let decided_idx = self
+    pub(crate) fn accept_entry(&mut self, entry: T) {
+        let accepted_metadata = self
             .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
-        let accepted_idx = self
-            .internal_storage
-            .append_entry(entry.clone())
+            .append_entry_with_batching(entry)
             .expect("storage error while trying to write an entry");
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
-            if cfg!(feature = "batch_accept") {
-                #[cfg(feature = "batch_accept")]
-                match self.leader_state.get_batch_accept_meta(pid) {
-                    Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
-                        let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
-                        match msg {
-                            PaxosMsg::AcceptDecide(a) => a.entries.push(entry.clone()),
-                            _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
-                        }
-                    }
-                    _ => self.send_accept_and_cache(pid, vec![entry.clone()]),
-                }
-            } else {
-                let acc = AcceptDecide {
-                    n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx,
-                    entries: vec![entry.clone()],
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: pid,
-                    msg: PaxosMsg::AcceptDecide(acc),
-                });
-            }
+        if let Some(am) = accepted_metadata {
+            self.send_acceptdecide(am);
         }
     }
 
-    fn send_batch_accept(&mut self, entries: Vec<T>) {
-        let decided_idx = self
+    fn accept_entries_leader(&mut self, entries: Vec<T>) {
+        let accepted_metadata = self
             .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
-        let accepted_idx = self
-            .internal_storage
-            .append_entries(entries.clone())
-            .expect("storage error while trying to write log entries");
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
-            if cfg!(feature = "batch_accept") {
-                #[cfg(feature = "batch_accept")]
-                match self.leader_state.get_batch_accept_meta(pid) {
-                    Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
-                        let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
-                        match msg {
-                            PaxosMsg::AcceptDecide(a) => a.entries.append(entries.clone().as_mut()),
-                            _ => self.send_accept_and_cache(pid, entries.clone()),
-                        }
-                    }
-                    _ => self.send_accept_and_cache(pid, entries.clone()),
-                }
-            } else {
-                let acc = AcceptDecide {
-                    n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx,
-                    entries: entries.clone(),
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: pid,
-                    msg: PaxosMsg::AcceptDecide(acc),
-                });
-            }
+            .append_entries_with_batching(entries)
+            .expect("storage error while trying to write entries");
+        if let Some(am) = accepted_metadata {
+            self.send_acceptdecide(am);
         }
     }
 
@@ -296,11 +221,7 @@ where
             .expect("Received PromiseMetaData but not found in ld");
         let (delta_snapshot, suffix, sync_idx) =
             if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
-                if self
-                    .internal_storage
-                    .get_compacted_idx()
-                    .expect("storage error while trying to read compacted index")
-                    > *promise_accepted_idx
+                if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
                     && T::Snapshot::use_snapshots()
                 {
                     let delta_snapshot = self
@@ -354,6 +275,45 @@ where
         self.outgoing.push(msg);
     }
 
+    pub(crate) fn send_acceptdecide(&mut self, am: AcceptedMetaData<T>) {
+        let AcceptedMetaData {
+            accepted_idx,
+            flushed_entries,
+        } = am;
+        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        let decided_idx = self.internal_storage.get_decided_idx();
+        for pid in self.leader_state.get_promised_followers() {
+            if cfg!(feature = "batch_accept") {
+                #[cfg(feature = "batch_accept")]
+                match self.leader_state.get_batch_accept_meta(pid) {
+                    Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
+                        let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
+                        match msg {
+                            PaxosMsg::AcceptDecide(a) => {
+                                a.entries.append(flushed_entries.clone().as_mut());
+                                a.decided_idx = decided_idx;
+                            }
+                            _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
+                        }
+                    }
+                    _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
+                }
+            } else {
+                let acc = AcceptDecide {
+                    n: self.leader_state.n_leader,
+                    seq_num: self.leader_state.next_seq_num(pid),
+                    decided_idx,
+                    entries: flushed_entries.clone(),
+                };
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: pid,
+                    msg: PaxosMsg::AcceptDecide(acc),
+                });
+            }
+        }
+    }
+
     fn send_decide(&mut self, to: NodeId, decided_idx: u64) {
         let d = Decide {
             n: self.leader_state.n_leader,
@@ -377,11 +337,13 @@ where
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
             // append new proposals in my sequence
-            let accepted_idx = self
+            let append_res = self
                 .internal_storage
-                .append_entries(new_entries)
+                .append_entries_and_get_accepted_idx(new_entries)
                 .expect("storage error while trying to write log entries");
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            if let Some(accepted_idx) = append_res {
+                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+            }
         }
     }
 
@@ -399,19 +361,13 @@ where
             .max()
             .unwrap()
             .unwrap();
-        let old_decided_idx = self
-            .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index");
-        let old_accepted_round = self
-            .internal_storage
-            .get_accepted_round()
-            .expect("storage error while trying to read accepted round");
+        let old_decided_idx = self.internal_storage.get_decided_idx();
+        let old_accepted_round = self.internal_storage.get_accepted_round();
         self.internal_storage
             .set_accepted_round(self.leader_state.n_leader)
             .expect("storage error while trying to write accepted round");
         let result = self.internal_storage.set_decided_idx(decided_idx);
-        self.internal_storage.rollback_if_err(
+        self.internal_storage.rollback_and_panic_if_err(
             &result,
             vec![RollbackValue::AcceptedRound(old_accepted_round)],
             "storage error while trying to write decided index",
@@ -423,11 +379,23 @@ where
             }) => {
                 match decided_snapshot {
                     Some(s) => {
+                        let old_compacted_idx = self.internal_storage.get_compacted_idx();
+                        let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
+                        let old_snapshot_res = self.internal_storage.get_snapshot();
+                        if old_log_res.is_err() || old_snapshot_res.is_err() {
+                            self.internal_storage.rollback_and_panic(
+                                vec![
+                                    RollbackValue::AcceptedRound(old_accepted_round),
+                                    RollbackValue::DecidedIdx(old_decided_idx),
+                                ],
+                                "storage error while trying to read old log or snapshot",
+                            );
+                        }
                         let decided_idx = self
                             .leader_state
                             .get_decided_idx(max_promise_meta.pid)
                             .unwrap();
-                        let result = match s {
+                        let snapshot_result = match s {
                             SnapshotType::Complete(c) => {
                                 self.internal_storage.set_snapshot(decided_idx, c)
                             }
@@ -435,18 +403,29 @@ where
                                 self.internal_storage.merge_snapshot(decided_idx, d)
                             }
                         };
-                        self.internal_storage.rollback_if_err(
-                            &result,
+                        self.internal_storage.rollback_and_panic_if_err(
+                            &snapshot_result,
                             vec![
                                 RollbackValue::AcceptedRound(old_accepted_round),
                                 RollbackValue::DecidedIdx(old_decided_idx),
                             ],
                             "storage error while trying to write snapshot",
                         );
-                        let result = self.internal_storage.append_entries(suffix);
-                        self.internal_storage.rollback_if_err(
-                            &result,
-                            vec![RollbackValue::AcceptedRound(old_accepted_round)],
+                        let accepted_res = self
+                            .internal_storage
+                            .append_entries_without_batching(suffix);
+                        // manually rollback snapshot and log if append suffix fails
+                        self.internal_storage.rollback_and_panic_if_err(
+                            &accepted_res,
+                            vec![
+                                RollbackValue::AcceptedRound(old_accepted_round),
+                                RollbackValue::DecidedIdx(old_decided_idx),
+                                RollbackValue::Log(old_log_res.unwrap()),
+                                RollbackValue::Snapshot(
+                                    old_compacted_idx,
+                                    old_snapshot_res.unwrap(),
+                                ),
+                            ],
                             "storage error while trying to write log entries",
                         );
                         if let Some(ss) = max_stopsign {
@@ -459,11 +438,12 @@ where
                     None => {
                         // no snapshot, only suffix
                         let result = if max_promise_meta.n == old_accepted_round {
-                            self.internal_storage.append_entries(suffix)
+                            self.internal_storage
+                                .append_entries_without_batching(suffix)
                         } else {
                             self.internal_storage.append_on_decided_prefix(suffix)
                         };
-                        self.internal_storage.rollback_if_err(
+                        self.internal_storage.rollback_and_panic_if_err(
                             &result,
                             vec![
                                 RollbackValue::AcceptedRound(old_accepted_round),
@@ -527,15 +507,10 @@ where
             "Got Accepted from {}, idx: {}, chosen_idx: {}",
             from,
             accepted.accepted_idx,
-            self.internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index")
+            self.internal_storage.get_decided_idx()
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
-            let old_decided_idx = self
-                .internal_storage
-                .get_decided_idx()
-                .expect("storage error while trying to read decided index");
+            let old_decided_idx = self.internal_storage.get_decided_idx();
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
             if accepted.accepted_idx > old_decided_idx

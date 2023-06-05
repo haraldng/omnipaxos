@@ -14,14 +14,7 @@ use utils::{TestConfig, TestSystem};
 #[serial]
 fn ble_test() {
     let cfg = TestConfig::load("ble_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
 
     let num_elections = cfg.num_nodes / 2;
     let mut promises = vec![];

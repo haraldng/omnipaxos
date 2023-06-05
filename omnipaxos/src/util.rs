@@ -7,6 +7,12 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
+#[derive(Debug, Clone)]
+pub(crate) struct AcceptedMetaData<T: Entry> {
+    pub accepted_idx: u64,
+    pub flushed_entries: Vec<T>,
+}
+
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
@@ -46,7 +52,7 @@ pub(crate) struct PromiseData<T: Entry> {
     pub suffix: Vec<T>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct LeaderState<T>
 where
     T: Entry,
@@ -62,7 +68,9 @@ where
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
-    pub majority: usize,
+    // The number of promises needed in the prepare phase to become synced and
+    // the number of accepteds needed in the accept phase to decide an entry.
+    pub quorum: Quorum,
 }
 
 impl<T> LeaderState<T>
@@ -73,7 +81,7 @@ where
         n_leader: Ballot,
         decided_indexes: Option<Vec<Option<u64>>>,
         max_pid: usize,
-        majority: usize,
+        quorum: Quorum,
     ) -> Self {
         Self {
             n_leader,
@@ -86,7 +94,7 @@ where
             #[cfg(feature = "batch_accept")]
             batch_accept_meta: vec![None; max_pid],
             max_pid,
-            majority,
+            quorum,
         }
     }
 
@@ -132,7 +140,7 @@ where
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
         let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
-        num_promised >= self.majority
+        self.quorum.is_prepare_quorum(num_promised)
     }
 
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
@@ -207,11 +215,12 @@ where
     }
 
     pub fn is_chosen(&self, idx: u64) -> bool {
-        self.accepted_indexes
+        let num_accepted = self
+            .accepted_indexes
             .iter()
             .filter(|la| **la >= idx)
-            .count()
-            >= self.majority
+            .count();
+        self.quorum.is_accept_quorum(num_accepted)
     }
 
     pub fn take_max_promise_stopsign(&mut self) -> Option<StopSign> {
@@ -285,9 +294,8 @@ pub type NodeId = u64;
 pub type ConfigurationId = u32;
 
 /// Used for checking the ordering of message sequences in the accept phase
-pub enum MessageStatus {
-    /// Beginning of a message sequence
-    First,
+#[derive(PartialEq, Eq)]
+pub(crate) enum MessageStatus {
     /// Expected message sequence progression
     Expected,
     /// Identified a message sequence break
@@ -297,7 +305,7 @@ pub enum MessageStatus {
 }
 
 /// Keeps track of the ordering of messages in the accept phase
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SequenceNumber {
     /// Meant to refer to a TCP session
@@ -307,20 +315,12 @@ pub struct SequenceNumber {
 }
 
 impl SequenceNumber {
-    /// Used as a pseudo-AcceptSync for prepare-less reconfigurations
-    const PREDEFINED_LEADER_FIRST_ACCEPT: SequenceNumber = SequenceNumber {
-        session: 0,
-        counter: 1,
-    };
-
     /// Compares this sequence number with the sequence number of an incoming message.
-    pub fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
-        if msg_seq_num == SequenceNumber::PREDEFINED_LEADER_FIRST_ACCEPT {
-            MessageStatus::First
-        } else if msg_seq_num.session < self.session {
-            MessageStatus::Outdated
-        } else if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
+    pub(crate) fn check_msg_status(&self, msg_seq_num: SequenceNumber) -> MessageStatus {
+        if msg_seq_num.session == self.session && msg_seq_num.counter == self.counter + 1 {
             MessageStatus::Expected
+        } else if msg_seq_num <= *self {
+            MessageStatus::Outdated
         } else {
             MessageStatus::DroppedPreceding
         }
@@ -344,6 +344,56 @@ impl LogicalClock {
             true
         } else {
             false
+        }
+    }
+}
+
+/// Flexible quorums can be used to increase/decrease the read and write quorum sizes,
+/// for different latency vs fault tolerance tradeoffs.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(feature = "serde", feature = "toml_config"), derive(Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct FlexibleQuorum {
+    /// The number of nodes a leader needs to consult to get an up-to-date view of the log.
+    pub read_quorum_size: usize,
+    /// The number of acknowledgments a leader needs to commit an entry to the log
+    pub write_quorum_size: usize,
+}
+
+/// The type of quorum used by the OmniPaxos cluster.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum Quorum {
+    /// Both the read quorum and the write quorums are a majority of nodes
+    Majority(usize),
+    /// The read and write quorum sizes are defined by a `FlexibleQuorum`
+    Flexible(FlexibleQuorum),
+}
+
+impl Quorum {
+    pub(crate) fn with(flexible_quorum_config: Option<FlexibleQuorum>, num_nodes: usize) -> Self {
+        match flexible_quorum_config {
+            Some(FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            }) => Quorum::Flexible(FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            }),
+            None => Quorum::Majority(num_nodes / 2 + 1),
+        }
+    }
+
+    pub(crate) fn is_prepare_quorum(&self, num_nodes: usize) -> bool {
+        match self {
+            Quorum::Majority(majority) => num_nodes >= *majority,
+            Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.read_quorum_size,
+        }
+    }
+
+    pub(crate) fn is_accept_quorum(&self, num_nodes: usize) -> bool {
+        match self {
+            Quorum::Majority(majority) => num_nodes >= *majority,
+            Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.write_quorum_size,
         }
     }
 }

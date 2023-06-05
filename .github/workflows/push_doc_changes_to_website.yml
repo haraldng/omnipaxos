@@ -25,4 +25,5 @@ jobs:
 
       - name: Update docs
         run: |
-          bash utils/fetch_docs_from_omnipaxos.sh
+          cd utils
+          ./fetch_docs_from_omnipaxos.sh

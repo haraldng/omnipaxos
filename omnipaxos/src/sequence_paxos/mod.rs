@@ -2,14 +2,14 @@ use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::*,
     storage::{Entry, StopSign, StopSignEntry, Storage},
-    util::{defaults::BUFFER_SIZE, LeaderState},
+    util::LeaderState,
 };
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{ConfigurationId, NodeId, SequenceNumber},
-    CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
+    util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
@@ -27,9 +27,8 @@ where
     B: Storage<T>,
 {
     pub(crate) internal_storage: InternalStorage<B, T>,
-    config_id: ConfigurationId,
     pid: NodeId,
-    peers: Vec<u64>, // excluding self pid
+    peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
     leader: Ballot,
     pending_proposals: Vec<T>,
@@ -55,45 +54,40 @@ where
     pub(crate) fn with(config: SequencePaxosConfig, storage: B) -> Self {
         let pid = config.pid;
         let peers = config.peers;
-        let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
-        let majority = num_nodes / 2 + 1;
+        let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
-        let (state, leader, lds) = match &config.skip_prepare_use_leader {
-            Some(l) => {
-                let (role, lds) = if l.pid == pid {
-                    // we are leader in new config
-                    let mut v = vec![None; max_pid];
-                    for idx in peers.iter().map(|pid| *pid as usize - 1) {
-                        // this works as a promise
-                        v[idx] = Some(0);
-                    }
-                    (Role::Leader, Some(v))
-                } else {
-                    (Role::Follower, None)
-                };
-                let state = (role, Phase::Accept);
-                (state, *l, lds)
+        let mut outgoing = Vec::with_capacity(config.buffer_size);
+        let (state, leader, lds) = match storage
+            .get_promise()
+            .expect("storage error while trying to read promise")
+        {
+            // if we recover a promise from storage then we must do failure recovery
+            Some(b) => {
+                let state = (Role::Follower, Phase::Recover);
+                for peer_pid in &peers {
+                    outgoing.push(PaxosMessage {
+                        from: pid,
+                        to: *peer_pid,
+                        msg: PaxosMsg::PrepareReq,
+                    });
+                }
+                (state, b, None)
             }
-            None => {
-                let state = (Role::Follower, Phase::None);
-                let lds = None;
-                (state, Ballot::default(), lds)
-            }
+            None => ((Role::Follower, Phase::None), Ballot::default(), None),
         };
 
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage),
-            config_id,
+            internal_storage: InternalStorage::with(storage, config.batch_size),
             pid,
             peers,
             state,
             pending_proposals: vec![],
             pending_stopsign: None,
             leader,
-            outgoing: Vec::with_capacity(BUFFER_SIZE),
-            leader_state: LeaderState::<T>::with(leader, lds, max_pid, majority),
+            outgoing,
+            leader_state: LeaderState::<T>::with(leader, lds, max_pid, quorum),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
             cached_promise: None,
@@ -113,6 +107,13 @@ where
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
+            if let Quorum::Flexible(flex_quorum) = quorum {
+                if flex_quorum.read_quorum_size > num_nodes - flex_quorum.write_quorum_size + 1 {
+                    warn!(
+                        paxos.logger,
+                        "Unnecessary overlaps in read and write quorums. Read and Write quorums only need to be overlapping by one node i.e., read_quorum_size + write_quorum_size = num_nodes + 1");
+                }
+            }
         }
         paxos
     }
@@ -188,28 +189,12 @@ where
 
     /// Return the decided index.
     pub(crate) fn get_decided_idx(&self) -> u64 {
-        self.internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided index")
+        self.internal_storage.get_decided_idx()
     }
 
     /// Return trim index from storage.
     pub(crate) fn get_compacted_idx(&self) -> u64 {
-        self.internal_storage
-            .get_compacted_idx()
-            .expect("storage error while trying to read compacted index")
-    }
-
-    /// Recover from failure. Goes into recover state and sends `PrepareReq` to all peers.
-    pub(crate) fn fail_recovery(&mut self) {
-        self.state = (Role::Follower, Phase::Recover);
-        for pid in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *pid,
-                msg: PaxosMsg::PrepareReq,
-            });
-        }
+        self.internal_storage.get_compacted_idx()
     }
 
     fn handle_compaction(&mut self, c: Compaction) {
@@ -232,15 +217,8 @@ where
                 // Resend AcceptStopSign
                 if *phase == Phase::Accept {
                     // TODO: This is slow. Get stopsign from cache instead.
-                    if let Some(ss) = self
-                        .internal_storage
-                        .get_stopsign()
-                        .expect("storage error while trying to read stopsign")
-                    {
-                        let decided_idx = self
-                            .internal_storage
-                            .get_decided_idx()
-                            .expect("storage error while trying to read decided_idx");
+                    if let Some(ss) = self.internal_storage.get_stopsign() {
+                        let decided_idx = self.internal_storage.get_decided_idx();
                         if !ss.decided(decided_idx) {
                             for follower in self.leader_state.get_promised_followers() {
                                 // resend if the follower has not accepted the stopsign
@@ -249,14 +227,14 @@ where
                                 }
                             }
                         }
+                        // TODO: resend decided stopsign
                     }
                 }
 
                 // Resend Prepare
                 let unpromised_peers = self.leader_state.get_unpromised_peers();
                 for peer in unpromised_peers {
-                    self.send_prepare(peer)
-                        .expect("storage error while trying to read data for prepare");
+                    self.send_prepare(peer);
                 }
             }
             (Role::Follower, phase) => {
@@ -339,71 +317,66 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        let decided_idx = self
-            .internal_storage
-            .get_decided_idx()
-            .expect("storage error while trying to read decided_idx");
-        match self
-            .internal_storage
-            .get_stopsign()
-            .expect("storage error while trying to read stopsign")
-        {
+        let decided_idx = self.internal_storage.get_decided_idx();
+        match self.internal_storage.get_stopsign() {
             Some(ss) if ss.decided(decided_idx) => Some(ss.stopsign),
             _ => None,
         }
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    fn stopped(&self) -> bool {
+    fn pending_reconfiguration(&self) -> bool {
         self.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
     pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
-        if self.stopped() {
-            Err(ProposeErr::Normal(entry))
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigEntry(entry))
         } else {
             self.propose_entry(entry);
             Ok(())
         }
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    pub(crate) fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
-        let ReconfigurationRequest {
-            new_configuration,
-            metadata,
-        } = rc;
+    /// Propose a reconfiguration. Returns an error if already stopped or `new_config` is invalid.
+    /// `new_config` defines the cluster-wide configuration settings for the next cluster.
+    /// `metadata` is optional data to commit alongside the reconfiguration.
+    pub(crate) fn reconfigure(
+        &mut self,
+        new_config: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr<T>> {
         #[cfg(feature = "logging")]
         info!(
             self.logger,
-            "Propose reconfiguration {:?}", new_configuration
+            "Propose reconfiguration {:?}", new_config.nodes
         );
-        if self.stopped() {
-            Err(ProposeErr::Reconfiguration(new_configuration))
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
         } else {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                        let ss = StopSign::with(new_config, metadata);
                         self.pending_stopsign = Some(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
-                    if !self.stopped() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    if !self.pending_reconfiguration() {
+                        let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         for pid in self.leader_state.get_promised_followers() {
                             self.send_accept_stopsign(pid, ss.clone(), false);
                         }
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 _ => {
-                    let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    let ss = StopSign::with(new_config, metadata);
                     self.forward_stopsign(ss);
                 }
             }
@@ -429,15 +402,13 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
-        let accepted_idx = self
-            .internal_storage
-            .get_accepted_idx()
-            .expect("storage error while trying to read accepted_idx");
+        let accepted_idx = self.internal_storage.get_accepted_idx();
         self.internal_storage
             .set_stopsign(StopSignEntry::with(ss, accepted_idx))
             .expect("storage error while trying to write stopsign");
         if self.state.0 == Role::Leader {
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx + 1);
+            self.leader_state
+                .set_accepted_idx(self.pid, accepted_idx + 1);
         }
     }
 
@@ -459,16 +430,13 @@ where
     fn propose_entry(&mut self, entry: T) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.send_accept(entry),
+            (Role::Leader, Phase::Accept) => self.accept_entry(entry),
             _ => self.forward_proposals(vec![entry]),
         }
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {
-        self.internal_storage
-            .get_stopsign()
-            .expect("storage error while trying to read stopsign")
-            .map(|x| x.stopsign)
+        self.internal_storage.get_stopsign().map(|x| x.stopsign)
     }
 }
 
@@ -488,34 +456,40 @@ enum Role {
 
 /// Configuration for `SequencePaxos`.
 /// # Fields
-/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
+/// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `skip_prepare_use_leader`: The initial leader of the cluster. Could be used in combination with reconfiguration to skip the prepare phase in the new configuration.
-/// * `logger`: Custom logger for logging events of Sequence Paxos.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
-pub struct SequencePaxosConfig {
-    configuration_id: u32,
+pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
-    peers: Vec<u64>,
+    peers: Vec<NodeId>,
     buffer_size: usize,
-    skip_prepare_use_leader: Option<Ballot>,
+    batch_size: usize,
+    flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
 
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
     fn from(config: OmniPaxosConfig) -> Self {
+        let pid = config.server_config.pid;
+        let peers = config
+            .cluster_config
+            .nodes
+            .into_iter()
+            .filter(|x| *x != pid)
+            .collect();
         SequencePaxosConfig {
-            configuration_id: config.configuration_id,
-            pid: config.pid,
-            peers: config.peers,
-            buffer_size: config.buffer_size,
-            skip_prepare_use_leader: config.skip_prepare_use_leader,
+            pid,
+            peers,
+            flexible_quorum: config.cluster_config.flexible_quorum,
+            buffer_size: config.server_config.buffer_size,
+            batch_size: config.server_config.batch_size,
             #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path,
+            logger_file_path: config.server_config.logger_file_path,
         }
     }
 }

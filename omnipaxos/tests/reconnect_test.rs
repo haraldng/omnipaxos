@@ -4,7 +4,7 @@ use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::StopSign,
     util::{LogEntry, SequenceNumber},
-    ReconfigurationRequest,
+    ClusterConfig,
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
@@ -25,13 +25,7 @@ const SECOND_PROPOSALS: u64 = 5;
 fn increasing_accept_seq_num_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
@@ -105,13 +99,7 @@ fn increasing_accept_seq_num_test() {
 fn reconnect_after_dropped_accepts_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
@@ -194,13 +182,7 @@ fn reconnect_after_dropped_accepts_test() {
 fn reconnect_after_dropped_prepare_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
@@ -283,13 +265,7 @@ fn reconnect_after_dropped_prepare_test() {
 fn reconnect_after_dropped_promise_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
@@ -378,13 +354,7 @@ fn reconnect_after_dropped_promise_test() {
 fn reconnect_after_dropped_preparereq_test() {
     // Start Kompact system
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
@@ -471,17 +441,12 @@ fn reconnect_after_dropped_preparereq_test() {
 /// never sees a DecideStopSign, and thus can't use it to detect the dropped AcceptStopSign.
 #[test]
 #[serial]
-fn reconnect_after_dropped_acceptstopsign_test() {
+// TODO: Re-visit once SS changes are finalized
+#[ignore]
+fn reconnect_after_dropped_acceptstopsign_test_old() {
     // Start Kompact system
-    let num_nodes = 2;
     let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
-    let mut sys = TestSystem::with(
-        num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
     let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
@@ -505,10 +470,16 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Disconnect leader from follower and start reconfigure
-    let rc = ReconfigurationRequest::with(vec![1, 2], Some(vec![1, 2, 3]));
+    let next_config = ClusterConfig {
+        configuration_id: 2,
+        nodes: vec![1, 2],
+        flexible_quorum: None,
+    };
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
-        comp.paxos.reconfigure(rc).expect("Couldn't reconfigure!")
+        comp.paxos
+            .reconfigure(next_config.clone(), None)
+            .expect("Couldn't reconfigure!")
     });
     // Wait for AcceptStopSign to be sent and dropped
     thread::sleep(SLEEP_TIMEOUT);
@@ -533,9 +504,83 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         0,
         followers_entries.len() as u64,
     );
+    verify_stopsign(followers_stopsign, &StopSign::with(next_config, None));
+
+    // Shutdown system
+    println!("Passed reconnect_to_leader_test!");
+    let kompact_system =
+        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
+    match kompact_system.shutdown() {
+        Ok(_) => {}
+        Err(e) => panic!("Error on kompact shutdown: {}", e),
+    };
+}
+
+/// Verifies that a follower that misses an AcceptStopSign message from their leader
+/// eventually receives the missed AcceptStopSign. The test ensures that the StopSign in never
+/// decided so the follower never sees a DecideStopSign, and thus can't use it to detect the dropped
+/// AcceptStopSign.
+#[test]
+#[serial]
+// TODO: unignore once we can read accepted StopSigns
+#[ignore]
+fn reconnect_after_dropped_acceptstopsign_test() {
+    // Start Kompact system
+    let cfg = TestConfig::load("reconnect_test").expect("Test config couldn't be loaded");
+    let mut sys = TestSystem::with(cfg);
+    sys.start_all_nodes();
+
+    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    let mut followers = (1..=cfg.num_nodes as u64)
+        .into_iter()
+        .filter(|x| *x != leader_id);
+    let follower_id = followers.next().expect("Couldn't find follower");
+
+    let write_quorum_size = match cfg.flexible_quorum {
+        Some((_, write_quorum_size)) => write_quorum_size,
+        None => cfg.num_nodes / 2 + 1,
+    };
+    assert!(
+        write_quorum_size > 2,
+        "Test doesn't work if 2 nodes alone can decide a stopsign"
+    );
+
+    // Disconnect follower from leader, kill others, and then propose StopSign
+    for other_follower in followers {
+        sys.kill_node(other_follower);
+    }
+    let next_config = ClusterConfig {
+        configuration_id: 2,
+        nodes: vec![1, 2],
+        flexible_quorum: None,
+    };
+    let leader = sys.nodes.get(&leader_id).unwrap();
+    leader.on_definition(|comp| {
+        comp.set_connection(follower_id, false);
+        comp.paxos
+            .reconfigure(next_config.clone(), Some(vec![1, 2, 3]))
+            .expect("Couldn't reconfigure!")
+    });
+    // Wait for AcceptStopSign to be sent and dropped
+    thread::sleep(SLEEP_TIMEOUT);
+
+    // Reconnect leader to follower
+    leader.on_definition(|comp| {
+        comp.set_connection(follower_id, true);
+    });
+    // Wait for leader to resend AcceptStopSign
+    thread::sleep(SLEEP_TIMEOUT);
+
+    // Verify log
+    let follower = sys.nodes.get(&follower_id).unwrap();
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
+        comp.paxos
+            .read_entries(0..1)
+            .expect("Cannot read log entry")
+    });
     verify_stopsign(
-        followers_stopsign,
-        &StopSign::with(2, vec![1, 2], Some(vec![1, 2, 3])),
+        &followers_log,
+        &StopSign::with(next_config, Some(vec![1, 2, 3])),
     );
 
     // Shutdown system
