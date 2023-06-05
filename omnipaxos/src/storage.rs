@@ -1,7 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    util::{AcceptedMetaData, ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
-    CompactionErr,
+    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
+    ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,7 @@ pub trait Entry: Clone + Debug {
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSignEntry {
     pub stopsign: StopSign,
     pub decided: bool,
@@ -39,31 +40,22 @@ impl StopSignEntry {
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSign {
-    /// The identifier for the new configuration.
-    pub config_id: ConfigurationId,
-    /// The process ids of the new configuration.
-    pub nodes: Vec<NodeId>,
-    /// Metadata for the reconfiguration. Can be used for pre-electing leader for the new configuration and skip prepare phase when starting the new configuration with the given leader.
+    /// The new `Omnipaxos` cluster configuration
+    pub next_config: ClusterConfig,
+    /// Metadata for the reconfiguration.
     pub metadata: Option<Vec<u8>>,
 }
 
 impl StopSign {
     /// Creates a [`StopSign`].
-    pub fn with(config_id: ConfigurationId, nodes: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
+    pub fn with(next_config: ClusterConfig, metadata: Option<Vec<u8>>) -> Self {
         StopSign {
-            config_id,
-            nodes,
+            next_config,
             metadata,
         }
-    }
-}
-
-impl PartialEq for StopSign {
-    fn eq(&self, other: &Self) -> bool {
-        self.config_id == other.config_id && self.nodes == other.nodes
     }
 }
 

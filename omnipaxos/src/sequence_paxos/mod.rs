@@ -8,8 +8,8 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{AcceptedMetaData, ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
-    CompactionErr, OmniPaxosConfig, ProposeErr, ReconfigurationRequest,
+    util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
@@ -27,9 +27,8 @@ where
     B: Storage<T>,
 {
     pub(crate) internal_storage: InternalStorage<B, T>,
-    config_id: ConfigurationId,
     pid: NodeId,
-    peers: Vec<u64>, // excluding self pid
+    peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
     leader: Ballot,
     pending_proposals: Vec<T>,
@@ -55,7 +54,6 @@ where
     pub(crate) fn with(config: SequencePaxosConfig, storage: B) -> Self {
         let pid = config.pid;
         let peers = config.peers;
-        let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
@@ -82,7 +80,6 @@ where
 
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(storage, config.batch_size),
-            config_id,
             pid,
             peers,
             state,
@@ -335,56 +332,58 @@ where
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    fn stopped(&self) -> bool {
+    fn pending_reconfiguration(&self) -> bool {
         self.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
     pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
-        if self.stopped() {
-            Err(ProposeErr::Normal(entry))
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigEntry(entry))
         } else {
             self.propose_entry(entry);
             Ok(())
         }
     }
 
-    /// Propose a reconfiguration. Returns error if already stopped or new configuration is empty.
-    pub(crate) fn reconfigure(&mut self, rc: ReconfigurationRequest) -> Result<(), ProposeErr<T>> {
-        let ReconfigurationRequest {
-            new_configuration,
-            metadata,
-        } = rc;
+    /// Propose a reconfiguration. Returns an error if already stopped or `new_config` is invalid.
+    /// `new_config` defines the cluster-wide configuration settings for the next cluster.
+    /// `metadata` is optional data to commit alongside the reconfiguration.
+    pub(crate) fn reconfigure(
+        &mut self,
+        new_config: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+    ) -> Result<(), ProposeErr<T>> {
         #[cfg(feature = "logging")]
         info!(
             self.logger,
-            "Propose reconfiguration {:?}", new_configuration
+            "Propose reconfiguration {:?}", new_config.nodes
         );
-        if self.stopped() {
-            Err(ProposeErr::Reconfiguration(new_configuration))
+        if self.pending_reconfiguration() {
+            Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
         } else {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                        let ss = StopSign::with(new_config, metadata);
                         self.pending_stopsign = Some(ss);
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 (Role::Leader, Phase::Accept) => {
-                    if !self.stopped() {
-                        let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    if !self.pending_reconfiguration() {
+                        let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         for pid in self.leader_state.get_promised_followers() {
                             self.send_accept_stopsign(pid, ss.clone(), false);
                         }
                     } else {
-                        return Err(ProposeErr::Reconfiguration(new_configuration));
+                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
                 }
                 _ => {
-                    let ss = StopSign::with(self.config_id + 1, new_configuration, metadata);
+                    let ss = StopSign::with(new_config, metadata);
                     self.forward_stopsign(ss);
                 }
             }
@@ -465,19 +464,18 @@ enum Role {
 
 /// Configuration for `SequencePaxos`.
 /// # Fields
-/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
-/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
+/// * `buffer_size`: The buffer size for outgoing messages.
+/// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
-pub struct SequencePaxosConfig {
-    configuration_id: u32,
+pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
-    peers: Vec<u64>,
-    batch_size: usize,
+    peers: Vec<NodeId>,
     buffer_size: usize,
+    batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
@@ -485,15 +483,21 @@ pub struct SequencePaxosConfig {
 
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
     fn from(config: OmniPaxosConfig) -> Self {
+        let pid = config.server_config.pid;
+        let peers = config
+            .cluster_config
+            .nodes
+            .into_iter()
+            .filter(|x| *x != pid)
+            .collect();
         SequencePaxosConfig {
-            configuration_id: config.configuration_id,
-            pid: config.pid,
-            peers: config.peers,
-            batch_size: config.batch_size,
-            buffer_size: config.buffer_size,
-            flexible_quorum: config.flexible_quorum,
+            pid,
+            peers,
+            flexible_quorum: config.cluster_config.flexible_quorum,
+            buffer_size: config.server_config.buffer_size,
+            batch_size: config.server_config.batch_size,
             #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path,
+            logger_file_path: config.server_config.logger_file_path,
         }
     }
 }

@@ -362,7 +362,8 @@ impl LogicalClock {
 /// Flexible quorums can be used to increase/decrease the read and write quorum sizes,
 /// for different latency vs fault tolerance tradeoffs.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "toml_config", derive(Deserialize))]
+#[cfg_attr(any(feature = "serde", feature = "toml_config"), derive(Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct FlexibleQuorum {
     /// The number of nodes a leader needs to consult to get an up-to-date view of the log.
     pub read_quorum_size: usize,
@@ -385,30 +386,10 @@ impl Quorum {
             Some(FlexibleQuorum {
                 read_quorum_size,
                 write_quorum_size,
-            }) => {
-                // Check that quorum sizes are sensible
-                assert!(
-                    read_quorum_size + write_quorum_size > num_nodes,
-                    "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
-                    );
-                assert!(
-                    read_quorum_size >= 2 && read_quorum_size <= num_nodes,
-                    "Read quorum must be in range 2 to # of nodes in the cluster"
-                );
-                assert!(
-                    write_quorum_size >= 2 && write_quorum_size <= num_nodes,
-                    "Write quorum must be in range 2 to # of nodes in the cluster"
-                );
-                // TODO: remove this when we start supporting linearizable reads
-                assert!(
-                    read_quorum_size >= write_quorum_size,
-                    "Read quorum size must be >= the write quorum size."
-                );
-                Quorum::Flexible(FlexibleQuorum {
-                    read_quorum_size,
-                    write_quorum_size,
-                })
-            }
+            }) => Quorum::Flexible(FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            }),
             None => Quorum::Majority(num_nodes / 2 + 1),
         }
     }

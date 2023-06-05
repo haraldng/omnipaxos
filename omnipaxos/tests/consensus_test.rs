@@ -3,7 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{
     storage::{Snapshot, StopSign, StopSignEntry, Storage},
-    OmniPaxosConfig,
+    ClusterConfig, OmniPaxosConfig,
 };
 use serial_test::serial;
 use std::time::Duration;
@@ -90,10 +90,10 @@ fn read_test() {
         .expect("Failed to set decided index");
 
     let mut op_config = OmniPaxosConfig::default();
-    op_config.pid = 1;
-    op_config.peers = vec![2, 3];
-    op_config.configuration_id = 1;
-    let mut omni_paxos = op_config.clone().build(storage);
+    op_config.server_config.pid = 1;
+    op_config.cluster_config.nodes = vec![1, 2, 3];
+    op_config.cluster_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage).unwrap();
 
     // read decided entries
     let entries = omni_paxos
@@ -125,7 +125,13 @@ fn read_test() {
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
-    let ss = StopSign::with(2, vec![], None);
+    let ss = StopSign::with(
+        ClusterConfig {
+            configuration_id: 2,
+            ..Default::default()
+        },
+        None,
+    );
     let log_len = log.len() as u64;
     stopped_storage
         .append_entries(log.clone())
@@ -137,7 +143,7 @@ fn read_test() {
         .set_decided_idx(log_len)
         .expect("Failed to set decided index");
 
-    let mut stopped_op = op_config.build(stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage).unwrap();
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -171,10 +177,10 @@ fn read_entries_test() {
         .set_decided_idx(decided_idx)
         .expect("Failed to set decided index");
     let mut op_config = OmniPaxosConfig::default();
-    op_config.pid = 1;
-    op_config.peers = vec![2, 3];
-    op_config.configuration_id = 1;
-    let mut omni_paxos = op_config.clone().build(storage);
+    op_config.server_config.pid = 1;
+    op_config.cluster_config.nodes = vec![1, 2, 3];
+    op_config.cluster_config.configuration_id = 1;
+    let mut omni_paxos = op_config.clone().build(storage).unwrap();
     omni_paxos
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");
@@ -212,7 +218,14 @@ fn read_entries_test() {
     // create stopped storage and SequencePaxos to test reading StopSign.
     let ss_temp_dir = create_temp_dir();
     let mut stopped_storage = StorageType::<Value>::with(cfg.storage_type, &ss_temp_dir);
-    let ss = StopSign::with(2, vec![], None);
+
+    let ss = StopSign::with(
+        ClusterConfig {
+            configuration_id: 2,
+            ..Default::default()
+        },
+        None,
+    );
     let log_len = log.len() as u64;
     stopped_storage
         .append_entries(log.clone())
@@ -222,7 +235,7 @@ fn read_entries_test() {
         .unwrap();
     stopped_storage.set_decided_idx(log_len).unwrap();
 
-    let mut stopped_op = op_config.build(stopped_storage);
+    let mut stopped_op = op_config.build(stopped_storage).unwrap();
     stopped_op
         .snapshot(Some(snapshotted_idx), true)
         .expect("Failed to snapshot");

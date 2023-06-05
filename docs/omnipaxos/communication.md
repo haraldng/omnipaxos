@@ -21,4 +21,4 @@ for out_msg in omni_paxos.outgoing_messages() {
 }
 ```
 
-> **Note:** The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. You have to periodically fetch these outgoing messages from `OmniPaxos`. 
+> **Note:** The networking i.e. how to actually send and receive messages needs to be implemented by you, the user. You have to periodically fetch these outgoing messages from `OmniPaxos`.

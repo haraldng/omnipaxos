@@ -101,9 +101,6 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
 ## PersistentStorage
 `PersistentStorage` is a persistent storage implementation that stores the replicated log and the state of OmniPaxos. The struct uses [Commitlog](https://crates.io/crates/commitlog) to store the replicated log, and the state is stored on [sled](https://crates.io/crates/sled) by default. The state can be changed to be stored on [RocksDB](https://crates.io/crates/rocksdb) instead of sled by using the feature `rocksdb`. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments. 
 ```rust
-use omnipaxos::{
-    sequence_paxos::{OmniPaxos, OmniPaxosConfig},
-};
 use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };

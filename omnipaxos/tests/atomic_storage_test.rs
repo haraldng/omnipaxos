@@ -24,7 +24,7 @@ use omnipaxos::{
     },
     storage::{Snapshot, SnapshotType, StopSign, Storage},
     util::{NodeId, SequenceNumber},
-    OmniPaxos, OmniPaxosConfig, ReconfigurationRequest,
+    ClusterConfig, OmniPaxos, OmniPaxosConfig,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use serial_test::serial;
@@ -50,10 +50,10 @@ fn basic_setup() -> (
         panic!("using wrong storage for atomic_storage_test")
     };
     let mut op_config = OmniPaxosConfig::default();
-    op_config.pid = 1;
-    op_config.peers = (2..=cfg.num_nodes).map(|x| x as NodeId).collect();
-    op_config.configuration_id = 1;
-    let op = op_config.build(storage);
+    op_config.server_config.pid = 1;
+    op_config.cluster_config.nodes = (1..=cfg.num_nodes as NodeId).collect();
+    op_config.cluster_config.configuration_id = 1;
+    let op = op_config.build(storage).unwrap();
     (mem_storage, storage_conf, op)
 }
 
@@ -194,6 +194,11 @@ fn atomic_storage_decide_stopsign_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
 
+        let setup_config = ClusterConfig {
+            configuration_id: 2,
+            nodes: vec![1, 2, 3],
+            flexible_quorum: None,
+        };
         let setup_msg = Message::<Value>::SequencePaxos(PaxosMessage {
             from: 2,
             to: 1,
@@ -204,8 +209,7 @@ fn atomic_storage_decide_stopsign_test() {
                     counter: 2,
                 },
                 ss: StopSign {
-                    config_id: 2,
-                    nodes: vec![1, 2, 3],
+                    next_config: setup_config,
                     metadata: None,
                 },
             }),
@@ -592,8 +596,12 @@ fn atomic_storage_majority_promises_test() {
 fn atomic_storage_majority_accepted_stopsign_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_leader();
-        op.reconfigure(ReconfigurationRequest::with(vec![1, 2, 3], None))
-            .unwrap();
+        let new_config = ClusterConfig {
+            configuration_id: 2,
+            nodes: vec![1, 2, 3],
+            flexible_quorum: None,
+        };
+        op.reconfigure(new_config, None).unwrap();
         op.outgoing_messages();
 
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();

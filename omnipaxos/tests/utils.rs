@@ -4,8 +4,9 @@ use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelu
 use omnipaxos::{
     ballot_leader_election::Ballot,
     messages::Message,
-    storage::{Entry, Snapshot, StopSign, Storage, StorageResult},
-    util::FlexibleQuorum,
+    storage::{Entry, Snapshot, Storage, StorageResult},
+    util::{FlexibleQuorum, NodeId},
+    ClusterConfig, ServerConfig,
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -26,7 +27,6 @@ const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
-pub const SS_METADATA: u8 = 255;
 const COMMITLOG: &str = "/commitlog/";
 
 use omnipaxos::OmniPaxosConfig;
@@ -59,6 +59,36 @@ impl TestConfig {
             .remove(name)
             .expect(&format!("Couldnt find config for {}", name));
         Ok(config)
+    }
+
+    pub fn into_omnipaxos_config(&self, pid: NodeId) -> OmniPaxosConfig {
+        let all_pids: Vec<u64> = (1..=self.num_nodes as u64).collect();
+        let flexible_quorum =
+            self.flexible_quorum
+                .and_then(|(read_quorum_size, write_quorum_size)| {
+                    Some(FlexibleQuorum {
+                        read_quorum_size,
+                        write_quorum_size,
+                    })
+                });
+        let cluster_config = ClusterConfig {
+            configuration_id: 1,
+            nodes: all_pids.clone(),
+            flexible_quorum,
+            ..Default::default()
+        };
+        let server_config = ServerConfig {
+            pid,
+            election_tick_timeout: 1,
+            // Make tick timeouts reletive to election timeout
+            resend_message_tick_timeout: self.resend_message_timeout_ms / self.election_timeout_ms,
+            batch_size: self.batch_size,
+            ..Default::default()
+        };
+        OmniPaxosConfig {
+            cluster_config,
+            server_config,
+        }
     }
 }
 
@@ -396,36 +426,16 @@ impl TestSystem {
         let system = conf.build().expect("KompactSystem");
 
         let mut nodes = HashMap::new();
-
-        let all_pids: Vec<u64> = (1..=test_config.num_nodes as u64).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
 
         for pid in 1..=test_config.num_nodes as u64 {
-            let peers: Vec<u64> = all_pids.iter().filter(|id| id != &&pid).cloned().collect();
-            let mut op_config = OmniPaxosConfig::default();
-            op_config.pid = pid;
-            op_config.peers = peers;
-            op_config.configuration_id = 1;
-            op_config.flexible_quorum =
-                test_config
-                    .flexible_quorum
-                    .and_then(|(read_quorum_size, write_quorum_size)| {
-                        Some(FlexibleQuorum {
-                            read_quorum_size,
-                            write_quorum_size,
-                        })
-                    });
-            op_config.batch_size = test_config.batch_size;
-            // Make tick timeouts reletive to election timeout
-            op_config.election_tick_timeout = 1;
-            op_config.resend_message_tick_timeout =
-                test_config.resend_message_timeout_ms / test_config.election_timeout_ms;
+            let op_config = test_config.into_omnipaxos_config(pid);
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
-                    op_config.build(storage),
+                    op_config.build(storage).unwrap(),
                     test_config.election_timeout_ms,
                 )
             });
@@ -480,30 +490,13 @@ impl TestSystem {
 
     pub fn create_node(
         &mut self,
-        pid: u64,
-        num_nodes: usize,
-        election_timeout_ms: u64,
-        resend_message_timeout_ms: u64,
+        pid: NodeId,
+        test_config: &TestConfig,
         storage_type: StorageTypeSelector,
         storage_path: &str,
-        flexible_quorum: Option<(usize, usize)>,
     ) {
-        let peers: Vec<u64> = (1..=num_nodes as u64).filter(|id| id != &pid).collect();
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
-        let mut op_config = OmniPaxosConfig::default();
-        op_config.pid = pid;
-        op_config.peers = peers;
-        op_config.configuration_id = 1;
-        op_config.flexible_quorum =
-            flexible_quorum.and_then(|(read_quorum_size, write_quorum_size)| {
-                Some(FlexibleQuorum {
-                    read_quorum_size,
-                    write_quorum_size,
-                })
-            });
-        // Make tick timeouts reletive to election timeout
-        op_config.election_tick_timeout = 1;
-        op_config.resend_message_tick_timeout = resend_message_timeout_ms / election_timeout_ms;
+        let op_config = test_config.into_omnipaxos_config(pid);
         let storage: StorageType<Value> =
             StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
@@ -511,7 +504,11 @@ impl TestSystem {
             .as_ref()
             .expect("No KompactSystem found!")
             .create_and_register(|| {
-                OmniPaxosComponent::with(pid, op_config.build(storage), election_timeout_ms)
+                OmniPaxosComponent::with(
+                    pid,
+                    op_config.build(storage).unwrap(),
+                    test_config.election_timeout_ms,
+                )
             });
 
         omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -777,7 +774,7 @@ pub mod omnireplica {
                                 .decided_futures
                                 .pop()
                                 .unwrap()
-                                .reply(stopsign_meta_to_value(&ss))
+                                .reply(Value(ss.next_config.configuration_id as u64))
                                 .expect("Failed to reply stopsign promise"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
@@ -828,16 +825,6 @@ impl Snapshot<Value> for LatestValue {
 
 impl Entry for Value {
     type Snapshot = LatestValue;
-}
-
-fn stopsign_meta_to_value(ss: &StopSign) -> Value {
-    let v = ss
-        .metadata
-        .as_ref()
-        .expect("StopSign Metadata was None")
-        .first()
-        .expect("Empty metadata");
-    Value(*v as u64)
 }
 
 /// Create a temporary directory in /tmp/

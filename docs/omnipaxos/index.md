@@ -22,48 +22,53 @@ pub struct KeyValue {
 
 `Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](../compaction/#snapshot).
 
-> **Note** To use the #[derive(Entry)] macro, please make sure to enable the `macros` feature.
+> **Note** To use the `#[derive(Entry)]` macro, please make sure to enable the `macros` feature.
 
 ## Creating a Node
 With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance. Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following:
 ```rust
 use omnipaxos::{
-   {OmniPaxos, OmniPaxosConfig},
+   {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
 };
 
-// configuration with id 1 and the following cluster
-let configuration_id = 1;
-let cluster = vec![1, 2, 3];
-
-// create the replica 2 in this cluster (other replica instances are created similarly with pid 1 and 3 on the other nodes)
-let my_pid = 2;
-let my_peers = vec![1, 3];
-
-let omnipaxos_config = OmniPaxosConfig {
-    configuration_id,
-    pid: my_pid,
-    peers: my_peers,
+// configuration with id 1 and a cluster with 3 nodes
+let cluster_config = ClusterConfig {
+    configuration_id: 1,
+    nodes: vec![1, 2, 3],
     ..Default::default()
 };
 
-let storage = MemoryStorage::default();
-let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage);
-```
-With the toml_config feature enabled, `OmniPaxosConfig` also features a constructor `OmniPaxosConfig::with_toml()` that loads the values using [TOML](https://toml.io). One could then instead have the parameters in a file `config/node1.toml`
+// create the replica 2 in this cluster (other replica instances are created similarly with pid 1 and 3 on the other nodes)
+let server_config = ServerConfig {
+    pid: 2,
+    ..Default::default()
+};
 
-```toml
-configuration_id = 1
-pid = 2
-peers = [1, 3]
-logger_file_path = "/omnipaxos/logs"
+// Combined OmniPaxos config with both clsuter-wide and server specific configurations
+let omnipaxos_config = OmniPaxosConfig {
+    cluster_config,
+    server_config,
+}
+
+let storage = MemoryStorage::default();
+let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage).unwrap();
 ```
-This can then be loaded to construct `OmniPaxosConfig`:
+With the `toml_config` feature enabled, the `OmniPaxosConfig` can instead be defined in [TOML](https://toml.io).
+```toml
+[cluster_config]
+configuration_id = 1
+nodes = [1, 2, 3]
+
+[server_config]
+pid = 2
+```
+If this file's path is `config/node2.toml` it could then be loaded to construct an `OmniPaxosConfig`:
 
 ```rust
-let config_file_path = "config/node1.toml"; 
+let config_file_path = "config/node2.toml"; 
 let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 

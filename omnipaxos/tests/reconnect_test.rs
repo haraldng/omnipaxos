@@ -4,7 +4,7 @@ use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::StopSign,
     util::{LogEntry, SequenceNumber},
-    ReconfigurationRequest,
+    ClusterConfig,
 };
 use serial_test::serial;
 use std::{thread, time::Duration};
@@ -470,10 +470,16 @@ fn reconnect_after_dropped_acceptstopsign_test_old() {
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Disconnect leader from follower and start reconfigure
-    let rc = ReconfigurationRequest::with(vec![1, 2], Some(vec![1, 2, 3]));
+    let next_config = ClusterConfig {
+        configuration_id: 2,
+        nodes: vec![1, 2],
+        flexible_quorum: None,
+    };
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
-        comp.paxos.reconfigure(rc).expect("Couldn't reconfigure!")
+        comp.paxos
+            .reconfigure(next_config.clone(), None)
+            .expect("Couldn't reconfigure!")
     });
     // Wait for AcceptStopSign to be sent and dropped
     thread::sleep(SLEEP_TIMEOUT);
@@ -498,10 +504,7 @@ fn reconnect_after_dropped_acceptstopsign_test_old() {
         0,
         followers_entries.len() as u64,
     );
-    verify_stopsign(
-        followers_stopsign,
-        &StopSign::with(2, vec![1, 2], Some(vec![1, 2, 3])),
-    );
+    verify_stopsign(followers_stopsign, &StopSign::with(next_config, None));
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
@@ -546,11 +549,17 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     for other_follower in followers {
         sys.kill_node(other_follower);
     }
-    let rc = ReconfigurationRequest::with(vec![1, 2], Some(vec![1, 2, 3]));
+    let next_config = ClusterConfig {
+        configuration_id: 2,
+        nodes: vec![1, 2],
+        flexible_quorum: None,
+    };
     let leader = sys.nodes.get(&leader_id).unwrap();
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
-        comp.paxos.reconfigure(rc).expect("Couldn't reconfigure!")
+        comp.paxos
+            .reconfigure(next_config.clone(), Some(vec![1, 2, 3]))
+            .expect("Couldn't reconfigure!")
     });
     // Wait for AcceptStopSign to be sent and dropped
     thread::sleep(SLEEP_TIMEOUT);
@@ -571,7 +580,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     });
     verify_stopsign(
         &followers_log,
-        &StopSign::with(2, vec![1, 2], Some(vec![1, 2, 3])),
+        &StopSign::with(next_config, Some(vec![1, 2, 3])),
     );
 
     // Shutdown system

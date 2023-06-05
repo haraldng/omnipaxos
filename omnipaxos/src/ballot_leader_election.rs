@@ -37,7 +37,12 @@ impl Ballot {
     /// * `config_id` - The identifier for the configuration that the replica with this ballot is part of.
     /// * `n` - Ballot number.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(config_id: ConfigurationId, n: u32, priority: u32, pid: NodeId) -> Ballot {
+    pub fn with(
+        config_id: ConfigurationId,
+        n: ConfigurationId,
+        priority: u32,
+        pid: NodeId,
+    ) -> Ballot {
         Ballot {
             config_id,
             n,
@@ -62,7 +67,7 @@ impl PartialOrd for Ballot {
 /// The connectivity of an OmniPaxos node
 type Connectivity = u8;
 
-/// A Ballot Leader Election component. Used in conjunction with Omni-Paxos handles the election of a leader for a group of omni-paxos replicas,
+/// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
 pub(crate) struct BallotLeaderElection {
@@ -70,8 +75,8 @@ pub(crate) struct BallotLeaderElection {
     configuration_id: ConfigurationId,
     /// Process identifier used to uniquely identify this instance.
     pid: NodeId,
-    /// Vector that holds all the other replicas.
-    peers: Vec<u64>,
+    /// Vector that holds the pids of all the other servers.
+    peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
     /// Vector which holds all the received heartbeats
@@ -118,11 +123,10 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-                let path = config.logger_file_path;
-                config.logger.unwrap_or_else(|| {
-                    let s = path.unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(s.as_str())
-                })
+                let s = config
+                    .logger_file_path
+                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                create_logger(s.as_str())
             },
         };
         #[cfg(feature = "logging")]
@@ -255,7 +259,7 @@ impl BallotLeaderElection {
         result
     }
 
-    fn handle_request(&mut self, from: u64, req: HeartbeatRequest) {
+    fn handle_request(&mut self, from: NodeId, req: HeartbeatRequest) {
         let hb_reply = HeartbeatReply {
             round: req.round,
             ballot: self.current_ballot,
@@ -286,39 +290,42 @@ impl BallotLeaderElection {
 /// # Fields
 /// * `configuration_id`: The identifier for the configuration that this node is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `peers`: The peers of this node i.e. the `pid`s of the other replicas in the configuration.
+/// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
 /// * `priority`: Set custom priority for this node to be elected as the leader.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
 /// * `buffer_size`: The buffer size for outgoing messages.
-/// * `logger`: Custom logger for logging events of Ballot Leader Election.
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub(crate) struct BLEConfig {
     configuration_id: ConfigurationId,
     pid: NodeId,
-    peers: Vec<u64>,
+    peers: Vec<NodeId>,
     priority: u32,
     flexible_quorum: Option<FlexibleQuorum>,
     buffer_size: usize,
-    #[cfg(feature = "logging")]
-    logger: Option<Logger>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
 
 impl From<OmniPaxosConfig> for BLEConfig {
     fn from(config: OmniPaxosConfig) -> Self {
+        let pid = config.server_config.pid;
+        let peers = config
+            .cluster_config
+            .nodes
+            .into_iter()
+            .filter(|x| *x != pid)
+            .collect();
+
         Self {
-            configuration_id: config.configuration_id,
-            pid: config.pid,
-            peers: config.peers,
-            priority: config.leader_priority,
+            configuration_id: config.cluster_config.configuration_id,
+            pid,
+            peers,
+            priority: config.server_config.leader_priority,
+            flexible_quorum: config.cluster_config.flexible_quorum,
             buffer_size: BLE_BUFFER_SIZE,
-            flexible_quorum: config.flexible_quorum,
             #[cfg(feature = "logging")]
-            logger: None,
-            #[cfg(feature = "logging")]
-            logger_file_path: config.logger_file_path,
+            logger_file_path: config.server_config.logger_file_path,
         }
     }
 }

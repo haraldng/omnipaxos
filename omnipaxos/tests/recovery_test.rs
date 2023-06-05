@@ -251,14 +251,6 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     thread::sleep(SLEEP_TIMEOUT);
 
     let storage_path = sys.temp_dir_path.clone();
-    sys.create_node(
-        pid,
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.storage_type,
-        &storage_path,
-        cfg.flexible_quorum,
-    );
+    sys.create_node(pid, cfg, cfg.storage_type, &storage_path);
     sys.start_node(pid);
 }

@@ -19,7 +19,7 @@ where
         if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
-        if self.stopped() {
+        if self.pending_reconfiguration() {
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
@@ -121,7 +121,7 @@ where
     }
 
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.accept_entries_leader(entries),
@@ -131,7 +131,7 @@ where
     }
 
     pub(crate) fn handle_forwarded_stopsign(&mut self, ss: StopSign) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.as_mut().is_none() {
