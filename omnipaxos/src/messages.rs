@@ -122,6 +122,8 @@ pub mod sequence_paxos {
     pub struct AcceptStopSign {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: SequenceNumber,
         /// The decided index.
         pub ss: StopSign,
     }
@@ -140,6 +142,8 @@ pub mod sequence_paxos {
     pub struct DecideStopSign {
         /// The current round.
         pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: SequenceNumber,
     }
 
     /// Compaction Request
@@ -195,6 +199,7 @@ pub mod sequence_paxos {
 
 /// The different messages BLE uses to communicate with other servers.
 pub mod ballot_leader_election {
+
     use crate::{ballot_leader_election::Ballot, util::NodeId};
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
@@ -220,12 +225,12 @@ pub mod ballot_leader_election {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatReply {
-        /// Number of the current round.
+        /// Number of the current heartbeat round.
         pub round: u32,
         /// Ballot of a server.
         pub ballot: Ballot,
-        /// States if the server is a candidate to become a leader.
-        pub quorum_connected: bool,
+        /// The number of replicas inside the cluster the sender is connected to (including itself)
+        pub connectivity: u8,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

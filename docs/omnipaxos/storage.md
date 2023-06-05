@@ -8,9 +8,10 @@ omnipaxos_storage = { version = "LATEST_VERSION", default-features = true }
 ```
 
 **If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
+Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omnipaxos tries to roll back incomplete changes, to enable crash-recovery, and then panicks.
 
 ## MemoryStorage
-`MemoryStorage` is an in-memory storage implementation and it will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction.md)).
+`MemoryStorage` is an in-memory storage implementation and it will be used in our examples. For simplicity, we leave out some parts of the implementation for now (such as [Snapshots](../compaction)).
 ```rust
     // from the module omnipaxos_storage::memory_storage
     #[derive(Clone)]
@@ -33,62 +34,65 @@ omnipaxos_storage = { version = "LATEST_VERSION", default-features = true }
     where
         T: Entry,
     {
-        fn append_entry(&mut self, entry: T) -> u64 {
+        fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
             self.log.push(entry);
             self.get_log_len()
         }
 
-        fn append_entries(&mut self, entries: Vec<T>) -> u64 {
+        fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
             let mut e = entries;
             self.log.append(&mut e);
             self.get_log_len()
         }
 
-        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> u64 {
+        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
             self.log.truncate(from_idx as usize);
             self.append_entries(entries)
         }
 
-        fn set_promise(&mut self, n_prom: Ballot) {
+        fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
             self.n_prom = n_prom;
+            Ok(())
         }
 
-        fn set_decided_idx(&mut self, ld: u64) {
+        fn set_decided_idx(&mut self, ld: u64) StorageResult<()> {
             self.ld = ld;
+            Ok(())
         }
 
-        fn get_decided_idx(&self) -> u64 {
-            self.ld
+        fn get_decided_idx(&self) -> StorageResult<u64> {
+            Ok(self.ld)
         }
 
-        fn set_accepted_round(&mut self, na: Ballot) {
+        fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
             self.acc_round = na;
+            Ok(())
         }
 
-        fn get_accepted_round(&self) -> Ballot {
-            self.acc_round
+        fn get_accepted_round(&self) -> StorageResult<Ballot> {
+            Ok(self.acc_round)
         }
 
-        fn get_entries(&self, from: u64, to: u64) -> Vec<T> {
-            self.log
+        fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
+            Ok(self.log
                 .get(from as usize..to as usize)
                 .unwrap_or(&[])
-                .to_vec()
+                .to_vec())
         }
 
-        fn get_log_len(&self) -> u64 {
-            self.log.len() as u64
+        fn get_log_len(&self) -> StorageResult<u64> {
+            Ok(self.log.len() as u64)
         }
 
-        fn get_suffix(&self, from: u64) -> Vec<T> {
+        fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
             match self.log.get(from as usize..) {
-                Some(s) => s.to_vec(),
-                None => vec![],
+                Some(s) => Ok(s.to_vec()),
+                None => Ok(vec![]),
             }
         }
 
-        fn get_promise(&self) -> Ballot {
-            self.n_prom
+        fn get_promise(&self) -> StorageResult<Ballot> {
+            Ok(self.n_prom)
         }
         ...
     }
@@ -126,3 +130,18 @@ my_sled_opts.new(true);
 // create configuration with given arguments
 let my_config = PersistentStorageConfig::with(my_path, my_logopts, my_sled_opts);
 ```
+## Batching
+OmniPaxos supports batching to reduce the number of IO operations to storage. We enable it by specifying the `batch_size` in `OmniPaxosConfig`.
+
+```rust
+let omnipaxos_config = OmniPaxosConfig {
+    batch_size: 100, // `batch_size = 1` by default
+    configuration_id,
+    pid: my_pid,
+    peers: my_peers,
+    ..Default::default()
+}
+// build omnipaxos instance
+```
+
+> **Note** OmniPaxos will wait until the batch size is reached before the entries get decided. A larger batch size may therefore incur higher latency before an append operation is decided. 

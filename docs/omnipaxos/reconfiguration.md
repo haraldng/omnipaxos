@@ -14,7 +14,7 @@ omni_paxos.reconfigure(new_configuration, metadata).expect("Failed to propose re
 Calling ``reconfigure()`` will propose a `StopSign` entry to be appended. If it gets decided, the log is sealed and prevented from being further appended. From the `StopSign` entry, all nodes will be able to see the new configuration. When you, the user, read from a node and find a `LogEntry::StopSign` in the log, you should start a new `OmniPaxos` instance at this node if it is part of the new configuration.
 
 ```rust
-let current_config = .. // the OmniPaxos config for this node
+let current_config = ... // the OmniPaxos config for this node
 let idx: u64 = ...  // some index we last read from
 let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omnipaxos.  read_decided_suffix(idx);
 

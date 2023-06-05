@@ -13,13 +13,21 @@ const SS_METADATA: u8 = 255;
 #[serial]
 fn reconfig_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
+    let mut sys = TestSystem::with(cfg);
 
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let first_node = sys.nodes.get(&1).unwrap();
+    let mut vec_proposals = vec![];
+    let mut futures = vec![];
+    for i in 1..=cfg.num_proposals {
+        let (kprom, kfuture) = promise::<Value>();
+        vec_proposals.push(Value(i));
+        first_node.on_definition(|x| {
+            x.paxos.append(Value(i)).expect("Failed to append");
+            x.decided_futures.push(Ask::new(kprom, ()))
+        });
+        futures.push(kfuture);
+    }
+
     sys.start_all_nodes();
 
     let vec_proposals = (1..=cfg.num_proposals)
@@ -33,7 +41,7 @@ fn reconfig_test() {
     let new_config = ClusterConfig {
         configuration_id: new_config_id,
         nodes: new_nodes.clone(),
-        initial_leader: None,
+        flexible_quorum: None,
     };
     let metadata = Some(vec![SS_METADATA]);
 

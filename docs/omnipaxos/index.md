@@ -20,12 +20,12 @@ pub struct KeyValue {
 }
 ``` 
 
-`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](compaction.md#snapshot).
+`Entry` is the trait for representing the entries stored in the replicated log of OmniPaxos. Here, we derive the implementation of it for our `KeyValue` using a macro. We will also show how to implement the trait manually when we discuss [`Snapshots`](../compaction/#snapshot).
 
 > **Note** To use the `#[derive(Entry)]` macro, please make sure to enable the `macros` feature.
 
 ## Creating a Node
-With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance.  Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following: 
+With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance. Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following:
 ```rust
 use omnipaxos::{
    {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
@@ -45,7 +45,7 @@ let cluster_config = ClusterConfig {
 let server_config = ServerConfig {
     pid: 2,
     ..Default::default()
-}
+};
 
 // Combined OmniPaxos config with both clsuter-wide and server specific configurations
 let omnipaxos_config = OmniPaxosConfig {
@@ -73,7 +73,7 @@ let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path);
 ```
 
 ## Fail-recovery
-To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we first re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. Lastly, we call `fail_recovery()` to correctly initialize the volatile state. We show an example using [`PersistentStorage`](storage.md#persistentstorage).
+To support Fail-recovery, we must ensure that our storage implementation can persist both the log entries and storage state. Upon recovery, we have to make sure that our ``OmniPaxos`` will start with the previously persisted state. To do so, we re-create our storage with the same storage path as the previous instance. Then we create a `OmniPaxos` instance but use the persisted state as the `storage` argument. We show an example using [`PersistentStorage`](../storage/#persistentstorage).
 
 ```rust
 /* Re-creating our node after a crash... */
@@ -89,5 +89,4 @@ my_config.set_commitlog_options(my_log_opts);
 // Re-create storage with previous state, then create `OmniPaxos`
 let recovered_storage = PersistentStorage::open(persist_conf); 
 let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
-recovered_paxos.fail_recovery();
 ```
