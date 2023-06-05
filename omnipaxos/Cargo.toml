@@ -34,10 +34,9 @@ rand = "0.8.4"
 
 [features]
 batch_accept = []
-continued_leader_reconfiguration = []
 logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
-default = ["continued_leader_reconfiguration", "batch_accept"]
+default = ["batch_accept"]
 macros = ["omnipaxos_macros"]
 
 [profile.release]
