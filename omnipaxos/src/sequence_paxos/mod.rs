@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::InternalStorage,
-    util::{AcceptedMetaData, ConfigurationId, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
@@ -27,9 +27,6 @@ where
     B: Storage<T>,
 {
     pub(crate) internal_storage: InternalStorage<B, T>,
-    // Will be needed after rebase
-    #[allow(dead_code)]
-    config_id: ConfigurationId,
     pid: NodeId,
     peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
@@ -57,7 +54,6 @@ where
     pub(crate) fn with(config: SequencePaxosConfig, storage: B) -> Self {
         let pid = config.pid;
         let peers = config.peers;
-        let config_id = config.configuration_id;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let max_peer_pid = peers.iter().max().unwrap();
@@ -84,7 +80,6 @@ where
 
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(storage, config.batch_size),
-            config_id,
             pid,
             peers,
             state,
@@ -469,7 +464,6 @@ enum Role {
 
 /// Configuration for `SequencePaxos`.
 /// # Fields
-/// * `configuration_id`: The identifier for the configuration that this Sequence Paxos replica is part of.
 /// * `pid`: The unique identifier of this node. Must not be 0.
 /// * `peers`: The peers of this node i.e. the `pid`s of the other servers in the configuration.
 /// * `flexible_quorum` : Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
@@ -478,7 +472,6 @@ enum Role {
 /// * `logger_file_path`: The path where the default logger logs events.
 #[derive(Clone, Debug)]
 pub(crate) struct SequencePaxosConfig {
-    configuration_id: ConfigurationId,
     pid: NodeId,
     peers: Vec<NodeId>,
     buffer_size: usize,
@@ -498,7 +491,6 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             .filter(|x| *x != pid)
             .collect();
         SequencePaxosConfig {
-            configuration_id: config.cluster_config.configuration_id,
             pid,
             peers,
             flexible_quorum: config.cluster_config.flexible_quorum,

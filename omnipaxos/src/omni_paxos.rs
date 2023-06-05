@@ -37,8 +37,8 @@ pub struct OmniPaxosConfig {
 }
 
 impl OmniPaxosConfig {
-    /// Checks that all the fields of the cluster config are valid
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Checks that all the fields of the cluster config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         self.cluster_config.validate()?;
         self.server_config.validate()?;
         valid_config!(
@@ -99,8 +99,8 @@ pub struct ClusterConfig {
 }
 
 impl ClusterConfig {
-    /// Checks that all the fields of the cluster config are valid
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Checks that all the fields of the cluster config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         let num_nodes = self.nodes.len();
         valid_config!(num_nodes > 1, "Need more than 1 node");
         valid_config!(self.configuration_id != 0, "Configuration ID cannot be 0");
@@ -178,7 +178,8 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Checks that all the fields of the server config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         valid_config!(self.pid != 0, "Server pid cannot be 0");
         valid_config!(self.buffer_size != 0, "Buffer size must be greater than 0");
         valid_config!(self.batch_size != 0, "Batch size must be greater than 0");
@@ -397,8 +398,13 @@ pub enum ProposeErr<T>
 where
     T: Entry,
 {
+    /// Couldn't propose entry because cluster is stopped. Contains failed, proposed entry.
     PendingReconfigEntry(T),
+    /// Couldn't propose reconfiguration because cluster is already stopped. Contains failed, proposed
+    /// cluster config and metadata.
     PendingReconfigConfig(ClusterConfig, Option<Vec<u8>>),
+    /// Couldn't propose reconfiguration because of an invalid cluster config. Contains the config
+    /// error and the failed, proposed cluster config and metadata.
     ConfigError(ConfigError, ClusterConfig, Option<Vec<u8>>),
 }
 
