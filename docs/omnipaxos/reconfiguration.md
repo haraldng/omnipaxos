@@ -1,4 +1,4 @@
-To change the configuration of the current cluster, we must first stop the current OmniPaxos cluster. This is done via the `reconfigure()` function, which takes a `ClusterConfig` that contains the settings for the next OmniPaxos cluster and some optional metadata.
+To change the servers in the cluster, we must first stop the current OmniPaxos cluster. This is done via the `reconfigure()` function, which takes a `ClusterConfig` that contains the settings for the next OmniPaxos cluster and some optional metadata.
 
 ```rust
 // Node 3 seems to have crashed... let's replace it with a new node 4.
