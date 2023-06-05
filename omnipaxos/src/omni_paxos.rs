@@ -400,7 +400,7 @@ where
 {
     /// Couldn't propose entry because cluster is stopped. Contains failed, proposed entry.
     PendingReconfigEntry(T),
-    /// Couldn't propose reconfiguration because cluster is already stopped. Contains failed, proposed
+    /// Couldn't propose reconfiguration because a reconfiguration is already pending. Returns the failed, proposed `ClusterConfig` and the metadata.
     /// cluster config and metadata.
     PendingReconfigConfig(ClusterConfig, Option<Vec<u8>>),
     /// Couldn't propose reconfiguration because of an invalid cluster config. Contains the config
