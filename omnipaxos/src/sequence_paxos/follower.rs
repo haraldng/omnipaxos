@@ -323,7 +323,7 @@ where
         Ok(())
     }
 
-    /// Also returns if the incoming sequence number is the expected one.
+    /// Also returns the MessageStatus of the sequence based on the incoming sequence number.
     fn handle_sequence_num(&mut self, seq_num: SequenceNumber, from: NodeId) -> MessageStatus {
         let msg_status = self.current_seq_num.check_msg_status(seq_num);
         match msg_status {
