@@ -305,6 +305,7 @@ pub type NodeId = u64;
 pub type ConfigurationId = u32;
 
 /// Used for checking the ordering of message sequences in the accept phase
+#[derive(PartialEq, Eq)]
 pub(crate) enum MessageStatus {
     /// Expected message sequence progression
     Expected,

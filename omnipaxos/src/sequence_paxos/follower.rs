@@ -222,7 +222,7 @@ where
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
         if self.internal_storage.get_promise() == acc.n
             && self.state == (Role::Follower, Phase::Accept)
-            && self.handle_sequence_num(acc.seq_num, acc.n.pid)
+            && self.handle_sequence_num(acc.seq_num, acc.n.pid) == MessageStatus::Expected
         {
             // handle decide
             let old_decided_idx = self.get_decided_idx();
@@ -245,7 +245,7 @@ where
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
         if self.internal_storage.get_promise() == acc_ss.n
             && self.state == (Role::Follower, Phase::Accept)
-            && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid)
+            && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
             self.accept_stopsign(acc_ss.ss);
             let a = AcceptedStopSign { n: acc_ss.n };
@@ -260,7 +260,7 @@ where
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
         if self.internal_storage.get_promise() == dec.n
             && self.state.1 == Phase::Accept
-            && self.handle_sequence_num(dec.seq_num, dec.n.pid)
+            && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
             self.internal_storage
                 .set_decided_idx(dec.decided_idx)
@@ -271,7 +271,7 @@ where
     pub(crate) fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
         if self.internal_storage.get_promise() == dec.n
             && self.state.1 == Phase::Accept
-            && self.handle_sequence_num(dec.seq_num, dec.n.pid)
+            && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
             let mut ss = self
                 .internal_storage
@@ -324,18 +324,13 @@ where
     }
 
     /// Also returns if the incoming sequence number is the expected one.
-    fn handle_sequence_num(&mut self, seq_num: SequenceNumber, from: NodeId) -> bool {
+    fn handle_sequence_num(&mut self, seq_num: SequenceNumber, from: NodeId) -> MessageStatus {
         let msg_status = self.current_seq_num.check_msg_status(seq_num);
         match msg_status {
-            MessageStatus::Expected => {
-                self.current_seq_num = seq_num;
-                true
-            }
-            MessageStatus::DroppedPreceding => {
-                self.reconnected(from);
-                false
-            }
-            MessageStatus::Outdated => false,
-        }
+            MessageStatus::Expected => self.current_seq_num = seq_num,
+            MessageStatus::DroppedPreceding => self.reconnected(from),
+            MessageStatus::Outdated => (),
+        };
+        msg_status
     }
 }

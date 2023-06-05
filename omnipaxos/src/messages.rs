@@ -227,7 +227,7 @@ pub mod ballot_leader_election {
     pub struct HeartbeatReply {
         /// Number of the current heartbeat round.
         pub round: u32,
-        /// BLEBallot of a replica.
+        /// Ballot of a replica.
         pub ballot: Ballot,
         /// The number of replicas inside the cluster the sender is connected to (including itself)
         pub connectivity: u8,
