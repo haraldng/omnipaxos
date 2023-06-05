@@ -113,16 +113,16 @@ impl ClusterConfig {
                 read_quorum_size + write_quorum_size > num_nodes,
                 "The quorums must overlap i.e., the sum of their sizes must exceed the # of nodes"
             );
-            assert!(
+            valid_config!(
                 read_quorum_size >= 2 && read_quorum_size <= num_nodes,
                 "Read quorum must be in range 2 to # of nodes in the cluster"
             );
-            assert!(
+            valid_config!(
                 write_quorum_size >= 2 && write_quorum_size <= num_nodes,
                 "Write quorum must be in range 2 to # of nodes in the cluster"
             );
             // TODO: remove this when we start supporting linearizable reads
-            assert!(
+            valid_config!(
                 read_quorum_size >= write_quorum_size,
                 "Read quorum size must be >= the write quorum size."
             );
