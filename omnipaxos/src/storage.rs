@@ -237,11 +237,12 @@ where
 
     // Returns the index of the last accepted entry.
     fn get_accepted_idx(&self) -> u64 {
-        let mut idx = self.compacted_idx + self.real_log_len;
+        let log_len = self.compacted_idx + self.real_log_len;
         if self.stopsign.is_some() {
-            idx += 1;
+            log_len + 1
+        } else {
+            log_len
         }
-        idx
     }
 
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
@@ -384,10 +385,7 @@ where
         } else if idx == virtual_log_len {
             match self.get_stopsign() {
                 Some(ss) => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
-                _ => {
-                    println!("HELLLOOO");
-                    Ok(None)
-                }
+                _ => Ok(None),
             }
         } else {
             Ok(None)
@@ -417,17 +415,11 @@ where
                 return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
             }
             Some(from_type) => from_type,
-            x => {
-                println!("TO {:?}", x);
-                return Ok(None);
-            }
+            _ => return Ok(None),
         };
         let from_type = match self.get_entry_type(from_idx, compacted_idx, log_len)? {
             Some(from_type) => from_type,
-            x => {
-                println!("TO {:?}", x);
-                return Ok(None);
-            }
+            _ => return Ok(None),
         };
         let decided_idx = self.get_decided_idx();
         match (from_type, to_type) {

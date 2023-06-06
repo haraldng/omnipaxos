@@ -402,13 +402,14 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
-        let accepted_idx = self.internal_storage.get_accepted_idx();
+        let ss_log_idx = self.internal_storage.get_accepted_idx();
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, accepted_idx))
+            .set_stopsign(StopSignEntry::with(ss, ss_log_idx))
             .expect("storage error while trying to write stopsign");
+        let accepted_idx = self.internal_storage.get_accepted_idx();
+        assert_eq!(accepted_idx, ss_log_idx + 1);
         if self.state.0 == Role::Leader {
-            self.leader_state
-                .set_accepted_idx(self.pid, accepted_idx + 1);
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }
 

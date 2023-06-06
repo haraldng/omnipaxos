@@ -183,13 +183,7 @@ where
                     } else {
                         self.accept_stopsign(ss);
                     }
-                    let ss_idx = self
-                        .internal_storage
-                        .get_stopsign()
-                        .expect("stopsign should have been accepted")
-                        .log_idx;
-                    assert_eq!(ss_idx, accepted.accepted_idx);
-                    accepted.accepted_idx = ss_idx + 1;
+                    accepted.accepted_idx = self.internal_storage.get_accepted_idx();
                 }
                 None => self.forward_pending_proposals(),
             }
@@ -241,16 +235,9 @@ where
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
             self.accept_stopsign(acc_ss.ss);
-            let ss_idx = self
-                .internal_storage
-                .get_stopsign()
-                .expect("stopsign not accepted")
-                .log_idx;
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            assert_eq!(ss_idx + 1, accepted_idx);
             let a = Accepted {
                 n: acc_ss.n,
-                accepted_idx,
+                accepted_idx: self.internal_storage.get_accepted_idx(),
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
