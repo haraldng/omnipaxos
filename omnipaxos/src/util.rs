@@ -67,7 +67,6 @@ where
     pub max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
     pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
-    pub accepted_stopsign: Vec<bool>,
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
@@ -94,7 +93,6 @@ where
             max_promise: None,
             #[cfg(feature = "batch_accept")]
             batch_accept_meta: vec![None; max_pid],
-            accepted_stopsign: vec![false; max_pid],
             max_pid,
             quorum,
         }
@@ -151,14 +149,6 @@ where
 
     pub fn get_max_promise_meta(&self) -> &PromiseMetaData {
         &self.max_promise_meta
-    }
-
-    pub fn set_accepted_stopsign(&mut self, from: NodeId) {
-        self.accepted_stopsign[Self::pid_to_idx(from)] = true;
-    }
-
-    pub fn follower_has_accepted_stopsign(&mut self, from: NodeId) -> bool {
-        self.accepted_stopsign[Self::pid_to_idx(from)]
     }
 
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
@@ -220,9 +210,8 @@ where
         self.decided_indexes.get(Self::pid_to_idx(pid)).unwrap()
     }
 
-    pub fn is_stopsign_chosen(&self) -> bool {
-        let num_accepted = self.accepted_stopsign.iter().filter(|x| **x).count();
-        self.quorum.is_accept_quorum(num_accepted)
+    pub fn get_accepted_idx(&self, pid: NodeId) -> u64 {
+        *self.accepted_indexes.get(Self::pid_to_idx(pid)).unwrap()
     }
 
     pub fn is_chosen(&self, idx: u64) -> bool {

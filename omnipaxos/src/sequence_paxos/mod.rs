@@ -217,14 +217,12 @@ where
                 // Resend AcceptStopSign
                 if *phase == Phase::Accept {
                     // TODO: This is slow. Get stopsign from cache instead.
-                    if let Some(ss) = self
-                        .internal_storage
-                        .get_stopsign()
-                        .expect("storage error while trying to read stopsign")
-                    {
-                        if !ss.decided {
+                    if let Some(ss) = self.internal_storage.get_stopsign() {
+                        let decided_idx = self.internal_storage.get_decided_idx();
+                        if !ss.decided(decided_idx) {
                             for follower in self.leader_state.get_promised_followers() {
-                                if !self.leader_state.follower_has_accepted_stopsign(follower) {
+                                // resend if the follower has not accepted the stopsign
+                                if !ss.decided(self.leader_state.get_accepted_idx(follower)) {
                                     self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
                                 }
                             }
@@ -313,20 +311,15 @@ where
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
-            PaxosMsg::AcceptedStopSign(acc_ss) => self.handle_accepted_stopsign(acc_ss, m.from),
-            PaxosMsg::DecideStopSign(d_ss) => self.handle_decide_stopsign(d_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
         }
     }
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        match self
-            .internal_storage
-            .get_stopsign()
-            .expect("storage error while trying to read stopsign")
-        {
-            Some(ss) if ss.decided => Some(ss.stopsign),
+        let decided_idx = self.internal_storage.get_decided_idx();
+        match self.internal_storage.get_stopsign() {
+            Some(ss) if ss.decided(decided_idx) => Some(ss.stopsign),
             _ => None,
         }
     }
@@ -409,11 +402,14 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
+        let ss_log_idx = self.internal_storage.get_accepted_idx();
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, false))
+            .set_stopsign(StopSignEntry::with(ss, ss_log_idx))
             .expect("storage error while trying to write stopsign");
+        let accepted_idx = self.internal_storage.get_accepted_idx();
+        assert_eq!(accepted_idx, ss_log_idx + 1);
         if self.state.0 == Role::Leader {
-            self.leader_state.set_accepted_stopsign(self.pid);
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }
 
@@ -441,10 +437,7 @@ where
     }
 
     fn get_stopsign(&self) -> Option<StopSign> {
-        self.internal_storage
-            .get_stopsign()
-            .expect("storage error while trying to read stopsign")
-            .map(|x| x.stopsign)
+        self.internal_storage.get_stopsign().map(|x| x.stopsign)
     }
 }
 

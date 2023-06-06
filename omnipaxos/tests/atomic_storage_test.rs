@@ -17,12 +17,12 @@ use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
-            AcceptDecide, AcceptStopSign, AcceptSync, AcceptedStopSign, Compaction, DecideStopSign,
-            PaxosMessage, PaxosMsg, Prepare, Promise,
+            AcceptDecide, AcceptSync, Accepted, Compaction, PaxosMessage, PaxosMsg, Prepare,
+            Promise,
         },
         Message,
     },
-    storage::{Snapshot, SnapshotType, StopSign, Storage},
+    storage::{Snapshot, SnapshotType, Storage},
     util::{NodeId, SequenceNumber},
     ClusterConfig, OmniPaxos, OmniPaxosConfig,
 };
@@ -186,70 +186,6 @@ fn setup_follower() -> (
         "node 2 should be leader"
     );
     (mem_storage, storage_conf, op)
-}
-
-#[test]
-#[serial]
-fn atomic_storage_decide_stopsign_test() {
-    fn run_single_test(fail_after_n_ops: usize) {
-        let (mem_storage, storage_conf, mut op) = setup_follower();
-
-        let setup_config = ClusterConfig {
-            configuration_id: 2,
-            nodes: vec![1, 2, 3],
-            flexible_quorum: None,
-        };
-        let setup_msg = Message::<Value>::SequencePaxos(PaxosMessage {
-            from: 2,
-            to: 1,
-            msg: PaxosMsg::AcceptStopSign(AcceptStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
-                seq_num: SequenceNumber {
-                    session: 1,
-                    counter: 2,
-                },
-                ss: StopSign {
-                    next_config: setup_config,
-                    metadata: None,
-                },
-            }),
-        });
-        op.handle_incoming(setup_msg);
-
-        let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
-        storage_conf
-            .lock()
-            .unwrap()
-            .schedule_failure_in(fail_after_n_ops);
-
-        // Test handle DecideStopsign rollback
-        let msg = Message::<Value>::SequencePaxos(PaxosMessage {
-            from: 2,
-            to: 1,
-            msg: PaxosMsg::DecideStopSign(DecideStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
-                seq_num: SequenceNumber {
-                    session: 1,
-                    counter: 3,
-                },
-            }),
-        });
-        let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
-
-        // check consistency
-        let s = mem_storage.lock().unwrap();
-        let new_decided_idx = s.get_decided_idx().unwrap();
-        let ss_decided = s.get_stopsign().unwrap().unwrap().decided;
-        assert!(
-            (!ss_decided && new_decided_idx == old_decided_idx)
-                || (ss_decided && new_decided_idx == old_decided_idx + 1),
-            "decided_idx and stopsign should be updated atomically"
-        );
-    }
-    // run the test with injected failures at different points in time
-    for i in 1..10 {
-        run_single_test(i);
-    }
 }
 
 #[test]
@@ -611,11 +547,19 @@ fn atomic_storage_majority_accepted_stopsign_test() {
             .unwrap()
             .schedule_failure_in(fail_after_n_ops);
 
+        let stopsign_idx = mem_storage
+            .lock()
+            .unwrap()
+            .get_stopsign()
+            .unwrap()
+            .unwrap()
+            .log_idx;
         let msg = Message::<Value>::SequencePaxos(PaxosMessage {
             from: 2,
             to: 1,
-            msg: PaxosMsg::AcceptedStopSign(AcceptedStopSign {
+            msg: PaxosMsg::Accepted(Accepted {
                 n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
+                accepted_idx: stopsign_idx + 1,
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
@@ -625,12 +569,12 @@ fn atomic_storage_majority_accepted_stopsign_test() {
         let new_decided_idx = s.get_decided_idx().unwrap();
         let new_stopsign = s.get_stopsign().unwrap().unwrap();
         assert!(
-            !old_stopsign.decided,
+            !old_stopsign.decided(old_decided_idx),
             "sanity check failed: newly proposed stopsign is decided"
         );
         assert!(
-            (new_decided_idx == old_decided_idx && !new_stopsign.decided)
-                || (new_decided_idx > old_decided_idx && new_stopsign.decided),
+            (new_decided_idx == old_decided_idx && !new_stopsign.decided(new_decided_idx))
+                || (new_decided_idx > old_decided_idx && new_stopsign.decided(new_decided_idx)),
             "decided_idx and decided_stopsign should be updated atomically"
         );
     }

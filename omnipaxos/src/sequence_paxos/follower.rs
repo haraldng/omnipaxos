@@ -105,7 +105,7 @@ where
                 vec![RollbackValue::AcceptedRound(old_accepted_round)],
                 "storage error while trying to write decided index",
             );
-            let accepted = match accsync.decided_snapshot {
+            let mut accepted = match accsync.decided_snapshot {
                 Some(s) => {
                     let old_compacted_idx = self.internal_storage.get_compacted_idx();
                     let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
@@ -174,6 +174,19 @@ where
                     }
                 }
             };
+            match accsync.stopsign {
+                Some(ss) => {
+                    if let Some(ss_entry) = self.internal_storage.get_stopsign() {
+                        if !ss_entry.decided(old_decided_idx) {
+                            self.accept_stopsign(ss);
+                        }
+                    } else {
+                        self.accept_stopsign(ss);
+                    }
+                    accepted.accepted_idx = self.internal_storage.get_accepted_idx();
+                }
+                None => self.forward_pending_proposals(),
+            }
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
@@ -183,32 +196,6 @@ where
                 to: from,
                 msg: PaxosMsg::Accepted(accepted),
             });
-            match accsync.stopsign {
-                Some(ss) => {
-                    if let Some(ss_entry) = self
-                        .internal_storage
-                        .get_stopsign()
-                        .expect("storage error while trying to read stopsign")
-                    {
-                        let StopSignEntry {
-                            decided: has_decided,
-                            stopsign: _my_ss,
-                        } = ss_entry;
-                        if !has_decided {
-                            self.accept_stopsign(ss);
-                        }
-                    } else {
-                        self.accept_stopsign(ss);
-                    }
-                    let a = AcceptedStopSign { n: accsync.n };
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: from,
-                        msg: PaxosMsg::AcceptedStopSign(a),
-                    });
-                }
-                None => self.forward_pending_proposals(),
-            }
         }
     }
 
@@ -248,11 +235,14 @@ where
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
             self.accept_stopsign(acc_ss.ss);
-            let a = AcceptedStopSign { n: acc_ss.n };
+            let a = Accepted {
+                n: acc_ss.n,
+                accepted_idx: self.internal_storage.get_accepted_idx(),
+            };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: self.leader.pid,
-                msg: PaxosMsg::AcceptedStopSign(a),
+                msg: PaxosMsg::Accepted(a),
             });
         }
     }
@@ -265,31 +255,6 @@ where
             self.internal_storage
                 .set_decided_idx(dec.decided_idx)
                 .expect("storage error while trying to write decided index");
-        }
-    }
-
-    pub(crate) fn handle_decide_stopsign(&mut self, dec: DecideStopSign) {
-        if self.internal_storage.get_promise() == dec.n
-            && self.state.1 == Phase::Accept
-            && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
-        {
-            let mut ss = self
-                .internal_storage
-                .get_stopsign()
-                .expect("storage error while trying to read stopsign")
-                .expect("No stopsign found when deciding!");
-            ss.decided = true;
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            let old_decided_idx = self.get_decided_idx();
-            self.internal_storage
-                .set_decided_idx(accepted_idx + 1)
-                .expect("storage error while trying to write decided index");
-            let result = self.internal_storage.set_stopsign(ss); // need to set it again now with the modified decided flag
-            self.internal_storage.rollback_and_panic_if_err(
-                &result,
-                vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                "storage error while trying to write stopsign",
-            );
         }
     }
 

@@ -137,10 +137,10 @@ fn read_test() {
         .append_entries(log.clone())
         .expect("Failed to append entries");
     stopped_storage
-        .set_stopsign(StopSignEntry::with(ss.clone(), true))
+        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
         .expect("Failed to set StopSign");
     stopped_storage
-        .set_decided_idx(log_len)
+        .set_decided_idx(log_len + 1)
         .expect("Failed to set decided index");
 
     let mut stopped_op = op_config.build(stopped_storage).unwrap();
@@ -231,9 +231,9 @@ fn read_entries_test() {
         .append_entries(log.clone())
         .expect("Failed to append entries");
     stopped_storage
-        .set_stopsign(StopSignEntry::with(ss.clone(), true))
+        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
         .unwrap();
-    stopped_storage.set_decided_idx(log_len).unwrap();
+    stopped_storage.set_decided_idx(log_len + 1).unwrap();
 
     let mut stopped_op = op_config.build(stopped_storage).unwrap();
     stopped_op

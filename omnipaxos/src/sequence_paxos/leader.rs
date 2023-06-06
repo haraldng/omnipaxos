@@ -327,18 +327,6 @@ where
         });
     }
 
-    fn send_decide_stopsign(&mut self, to: NodeId) {
-        let d = DecideStopSign {
-            seq_num: self.leader_state.next_seq_num(to),
-            n: self.leader_state.n_leader,
-        };
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: PaxosMsg::DecideStopSign(d),
-        });
-    }
-
     fn adopt_pending_stopsign(&mut self) {
         if let Some(ss) = self.pending_stopsign.take() {
             self.accept_stopsign(ss);
@@ -552,39 +540,6 @@ where
                     } else {
                         self.send_decide(pid, decided_idx);
                     }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn handle_accepted_stopsign(
-        &mut self,
-        acc_stopsign: AcceptedStopSign,
-        from: NodeId,
-    ) {
-        if acc_stopsign.n == self.leader_state.n_leader
-            && self.state == (Role::Leader, Phase::Accept)
-        {
-            self.leader_state.set_accepted_stopsign(from);
-            if self.leader_state.is_stopsign_chosen() {
-                let mut ss = self
-                    .internal_storage
-                    .get_stopsign()
-                    .expect("storage error while trying to read stopsign")
-                    .expect("No stopsign found when deciding!");
-                ss.decided = true;
-                let old_decided_idx = self.internal_storage.get_decided_idx();
-                self.internal_storage
-                    .set_decided_idx(self.internal_storage.get_accepted_idx() + 1)
-                    .expect("storage error while trying to write decided index");
-                let result = self.internal_storage.set_stopsign(ss);
-                self.internal_storage.rollback_and_panic_if_err(
-                    &result,
-                    vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                    "storage error while trying to write stopsign",
-                );
-                for pid in self.leader_state.get_promised_followers() {
-                    self.send_decide_stopsign(pid);
                 }
             }
         }
