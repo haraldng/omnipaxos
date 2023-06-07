@@ -214,20 +214,21 @@ where
     pub(crate) fn resend_message_timeout(&mut self) {
         match &self.state {
             (Role::Leader, phase) => {
-                // Resend AcceptStopSign
+                // Resend AcceptStopSign or StopSign's decide
                 if *phase == Phase::Accept {
-                    // TODO: This is slow. Get stopsign from cache instead.
                     if let Some(ss) = self.internal_storage.get_stopsign() {
                         let decided_idx = self.internal_storage.get_decided_idx();
-                        if !ss.decided(decided_idx) {
-                            for follower in self.leader_state.get_promised_followers() {
-                                // resend if the follower has not accepted the stopsign
-                                if !ss.decided(self.leader_state.get_accepted_idx(follower)) {
-                                    self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
-                                }
+
+                        for follower in self.leader_state.get_promised_followers() {
+                            if !ss.decided(decided_idx)
+                                && !ss.decided(self.leader_state.get_accepted_idx(follower))
+                            {
+                                self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
+                            }
+                            if ss.decided(decided_idx) {
+                                self.send_decide(follower, decided_idx, true);
                             }
                         }
-                        // TODO: resend decided stopsign
                     }
                 }
 

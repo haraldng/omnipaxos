@@ -314,10 +314,14 @@ where
         }
     }
 
-    fn send_decide(&mut self, to: NodeId, decided_idx: u64) {
+    pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: u64, resend: bool) {
+        let seq_num = match resend {
+            true => self.leader_state.get_seq_num(to),
+            false => self.leader_state.next_seq_num(to),
+        };
         let d = Decide {
             n: self.leader_state.n_leader,
-            seq_num: self.leader_state.next_seq_num(to),
+            seq_num,
             decided_idx,
         };
         self.outgoing.push(PaxosMessage {
@@ -532,13 +536,13 @@ where
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.decided_idx = decided_idx;
                                     }
-                                    _ => self.send_decide(pid, decided_idx),
+                                    _ => self.send_decide(pid, decided_idx, false),
                                 }
                             }
-                            _ => self.send_decide(pid, decided_idx),
+                            _ => self.send_decide(pid, decided_idx, false),
                         }
                     } else {
-                        self.send_decide(pid, decided_idx);
+                        self.send_decide(pid, decided_idx, false);
                     }
                 }
             }
