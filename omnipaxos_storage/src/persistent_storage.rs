@@ -7,7 +7,7 @@ use commitlog::{
 };
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSignEntry, Storage, StorageResult},
+    storage::{Entry, StopSign, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -391,7 +391,7 @@ where
         Ok(())
     }
 
-    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
+    fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
         #[cfg(feature = "rocksdb")]
         {
             let stopsign = self.rocksdb.get(STOPSIGN)?;
@@ -410,7 +410,7 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
+    fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&s)?;
         #[cfg(feature = "rocksdb")]
         {

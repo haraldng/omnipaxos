@@ -326,7 +326,7 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos::storage::StopSignEntry) -> StorageResult<()> {
+    fn set_stopsign(&mut self, s: Option<omnipaxos::storage::StopSign>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
@@ -337,7 +337,7 @@ where
         }
     }
 
-    fn get_stopsign(&self) -> StorageResult<Option<omnipaxos::storage::StopSignEntry>> {
+    fn get_stopsign(&self) -> StorageResult<Option<omnipaxos::storage::StopSign>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),

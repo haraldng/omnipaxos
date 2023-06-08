@@ -25,7 +25,7 @@ where
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_accepted_idx();
             let decided_idx = self.get_decided_idx();
-            let stopsign = self.get_stopsign();
+            let stopsign = self.internal_storage.get_stopsign();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
                 if ld < decided_idx && T::Snapshot::use_snapshots() {
@@ -105,7 +105,7 @@ where
                 vec![RollbackValue::AcceptedRound(old_accepted_round)],
                 "storage error while trying to write decided index",
             );
-            let mut accepted = match accsync.decided_snapshot {
+            match accsync.decided_snapshot {
                 Some(s) => {
                     let old_compacted_idx = self.internal_storage.get_compacted_idx();
                     let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
@@ -119,12 +119,19 @@ where
                             "storage error while trying to read old log or snapshot",
                         );
                     }
+                    // Compact index of snapshot depends on if incoming stopsign is decided
+                    let new_compact_idx = match accsync.stopsign {
+                        Some(_) if accsync.decided_idx == accsync.accepted_idx => {
+                            accsync.decided_idx - 1
+                        }
+                        _ => accsync.decided_idx,
+                    };
                     let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
-                            self.internal_storage.set_snapshot(accsync.decided_idx, c)
+                            self.internal_storage.set_snapshot(new_compact_idx, c)
                         }
                         SnapshotType::Delta(d) => {
-                            self.internal_storage.merge_snapshot(accsync.decided_idx, d)
+                            self.internal_storage.merge_snapshot(new_compact_idx, d)
                         }
                     };
                     self.internal_storage.rollback_and_panic_if_err(
@@ -148,11 +155,6 @@ where
                         ],
                         "storage error while trying to write log entries",
                     );
-                    Accepted {
-                        n: accsync.n,
-                        accepted_idx: accepted_res
-                            .expect("storage error while trying to write log entries"),
-                    }
                 }
                 None => {
                     // no snapshot, only suffix
@@ -167,26 +169,19 @@ where
                         ],
                         "storage error while trying to write log entries",
                     );
-                    Accepted {
-                        n: accsync.n,
-                        accepted_idx: accepted_idx
-                            .expect("storage error while trying to write log entries"),
-                    }
                 }
             };
-            match accsync.stopsign {
-                Some(ss) => {
-                    if let Some(ss_entry) = self.internal_storage.get_stopsign() {
-                        if !ss_entry.decided(old_decided_idx) {
-                            self.accept_stopsign(ss);
-                        }
-                    } else {
-                        self.accept_stopsign(ss);
-                    }
-                    accepted.accepted_idx = self.internal_storage.get_accepted_idx();
-                }
-                None => self.forward_pending_proposals(),
+            if accsync.stopsign.is_none() {
+                self.forward_pending_proposals();
+                //TODO: foward pending stopsign like in handle_majority_promises?
             }
+            self.internal_storage
+                .set_stopsign(accsync.stopsign)
+                .expect("storage error while trying to write stopsign");
+            let accepted = Accepted {
+                n: accsync.n,
+                accepted_idx: self.internal_storage.get_accepted_idx(),
+            };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();

@@ -40,7 +40,7 @@ where
                 decided_idx,
                 accepted_idx,
                 suffix: vec![],
-                stopsign: self.get_stopsign(),
+                stopsign: self.internal_storage.get_stopsign(),
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
@@ -265,7 +265,8 @@ where
             suffix,
             sync_idx,
             decided_idx: my_decided_idx,
-            stopsign: self.get_stopsign(),
+            accepted_idx: self.internal_storage.get_accepted_idx(),
+            stopsign: self.internal_storage.get_stopsign(),
         };
         let msg = PaxosMessage {
             from: self.pid,
@@ -432,12 +433,13 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if let Some(ss) = max_stopsign {
-                            self.accept_stopsign(ss);
-                        } else {
+                        if max_stopsign.is_none() {
                             self.append_pending_proposals();
                             self.adopt_pending_stopsign();
                         }
+                        self.internal_storage
+                            .set_stopsign(max_stopsign)
+                            .expect("storage error while trying to write stopsign");
                     }
                     None => {
                         // no snapshot, only suffix
@@ -455,12 +457,13 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if let Some(ss) = max_stopsign {
-                            self.accept_stopsign(ss);
-                        } else {
+                        if max_stopsign.is_none() {
                             self.append_pending_proposals();
                             self.adopt_pending_stopsign();
                         }
+                        self.internal_storage
+                            .set_stopsign(max_stopsign)
+                            .expect("storage error while trying to write stopsign");
                     }
                 }
             }

@@ -24,31 +24,6 @@ pub trait Entry: Clone + Debug {
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
-#[derive(Clone, Debug)]
-#[allow(missing_docs)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct StopSignEntry {
-    pub stopsign: StopSign,
-    /// The log index of the StopSign
-    pub log_idx: u64,
-}
-
-impl StopSignEntry {
-    /// Creates a [`StopSign`].
-    pub fn with(stopsign: StopSign, idx: u64) -> Self {
-        StopSignEntry {
-            stopsign,
-            log_idx: idx,
-        }
-    }
-
-    /// Checks if the stopsign is decided.
-    pub fn decided(&self, decided_idx: u64) -> bool {
-        self.log_idx < decided_idx
-    }
-}
-
-/// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSign {
@@ -144,10 +119,10 @@ where
     fn get_promise(&self) -> StorageResult<Option<Ballot>>;
 
     /// Sets the StopSign used for reconfiguration.
-    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()>;
+    fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()>;
 
     /// Returns the stored StopSign, returns `None` if no StopSign has been stored.
-    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>>;
+    fn get_stopsign(&self) -> StorageResult<Option<StopSign>>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64) -> StorageResult<()>;
@@ -215,7 +190,7 @@ where
     /// Real length of logs in the storage.
     real_log_len: u64,
     /// Stopsign entry.
-    stopsign: Option<StopSignEntry>,
+    stopsign: Option<StopSign>,
 }
 
 impl<T> StateCache<T>
@@ -243,6 +218,11 @@ where
         } else {
             log_len
         }
+    }
+
+    // Returns whether a stopsign is decided
+    fn stopsign_is_decided(&self) -> bool {
+        self.stopsign.is_some() && self.decided_idx == self.get_accepted_idx()
     }
 
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
@@ -384,7 +364,7 @@ where
             Ok(Some(IndexEntry::Entry))
         } else if idx == virtual_log_len {
             match self.get_stopsign() {
-                Some(ss) => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
+                Some(ss) => Ok(Some(IndexEntry::StopSign(ss))),
                 _ => Ok(None),
             }
         } else {
@@ -686,13 +666,18 @@ where
         self.state_cache.promise
     }
 
-    pub(crate) fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
-        self.state_cache.stopsign = Some(s.clone());
+    pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
+        self.state_cache.stopsign = s.clone();
         self.storage.set_stopsign(s)
     }
 
-    pub(crate) fn get_stopsign(&self) -> Option<StopSignEntry> {
+    pub(crate) fn get_stopsign(&self) -> Option<StopSign> {
         self.state_cache.stopsign.clone()
+    }
+
+    // Returns whether a stopsign is decided
+    pub(crate) fn stopsign_is_decided(&self) -> bool {
+        self.state_cache.stopsign_is_decided()
     }
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {

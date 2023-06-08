@@ -73,6 +73,8 @@ pub mod sequence_paxos {
         pub sync_idx: u64,
         /// The decided index
         pub decided_idx: u64,
+        /// The accepted index
+        pub accepted_idx: u64,
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
     }

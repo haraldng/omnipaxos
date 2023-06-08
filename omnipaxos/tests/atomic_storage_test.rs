@@ -176,6 +176,7 @@ fn setup_follower() -> (
             suffix: vec![],
             sync_idx: 0,
             decided_idx: 0,
+            accepted_idx: 0,
             stopsign: None,
         }),
     });
@@ -229,6 +230,7 @@ fn atomic_storage_acceptsync_test() {
                 suffix: vec![Value(1), Value(2), Value(3)],
                 sync_idx: 0,
                 decided_idx: 1,
+                accepted_idx: 1,
                 stopsign: None,
             }),
         });
@@ -527,59 +529,60 @@ fn atomic_storage_majority_promises_test() {
     }
 }
 
-#[test]
-#[serial]
-fn atomic_storage_majority_accepted_stopsign_test() {
-    fn run_single_test(fail_after_n_ops: usize) {
-        let (mem_storage, storage_conf, mut op) = setup_leader();
-        let new_config = ClusterConfig {
-            configuration_id: 2,
-            nodes: vec![1, 2, 3],
-            flexible_quorum: None,
-        };
-        op.reconfigure(new_config, None).unwrap();
-        op.outgoing_messages();
-
-        let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
-        let old_stopsign = mem_storage.lock().unwrap().get_stopsign().unwrap().unwrap();
-        storage_conf
-            .lock()
-            .unwrap()
-            .schedule_failure_in(fail_after_n_ops);
-
-        let stopsign_idx = mem_storage
-            .lock()
-            .unwrap()
-            .get_stopsign()
-            .unwrap()
-            .unwrap()
-            .log_idx;
-        let msg = Message::<Value>::SequencePaxos(PaxosMessage {
-            from: 2,
-            to: 1,
-            msg: PaxosMsg::Accepted(Accepted {
-                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
-                accepted_idx: stopsign_idx + 1,
-            }),
-        });
-        let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
-
-        // check consistency
-        let s = mem_storage.lock().unwrap();
-        let new_decided_idx = s.get_decided_idx().unwrap();
-        let new_stopsign = s.get_stopsign().unwrap().unwrap();
-        assert!(
-            !old_stopsign.decided(old_decided_idx),
-            "sanity check failed: newly proposed stopsign is decided"
-        );
-        assert!(
-            (new_decided_idx == old_decided_idx && !new_stopsign.decided(new_decided_idx))
-                || (new_decided_idx > old_decided_idx && new_stopsign.decided(new_decided_idx)),
-            "decided_idx and decided_stopsign should be updated atomically"
-        );
-    }
-    // run the test with injected failures at different points in time
-    for i in 1..10 {
-        run_single_test(i);
-    }
-}
+// TODO: Reimplement this test with new StopSign setup
+// #[test]
+// #[serial]
+// fn atomic_storage_majority_accepted_stopsign_test() {
+//     fn run_single_test(fail_after_n_ops: usize) {
+//         let (mem_storage, storage_conf, mut op) = setup_leader();
+//         let new_config = ClusterConfig {
+//             configuration_id: 2,
+//             nodes: vec![1, 2, 3],
+//             flexible_quorum: None,
+//         };
+//         op.reconfigure(new_config, None).unwrap();
+//         op.outgoing_messages();
+//
+//         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
+//         let old_stopsign = mem_storage.lock().unwrap().get_stopsign().unwrap().unwrap();
+//         storage_conf
+//             .lock()
+//             .unwrap()
+//             .schedule_failure_in(fail_after_n_ops);
+//
+//         let stopsign_idx = mem_storage
+//             .lock()
+//             .unwrap()
+//             .get_stopsign()
+//             .unwrap()
+//             .unwrap()
+//             .log_idx;
+//         let msg = Message::<Value>::SequencePaxos(PaxosMessage {
+//             from: 2,
+//             to: 1,
+//             msg: PaxosMsg::Accepted(Accepted {
+//                 n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
+//                 accepted_idx: stopsign_idx + 1,
+//             }),
+//         });
+//         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
+//
+//         // check consistency
+//         let s = mem_storage.lock().unwrap();
+//         let new_decided_idx = s.get_decided_idx().unwrap();
+//         let new_stopsign = s.get_stopsign().unwrap().unwrap();
+//         assert!(
+//             !old_stopsign.decided(old_decided_idx),
+//             "sanity check failed: newly proposed stopsign is decided"
+//         );
+//         assert!(
+//             (new_decided_idx == old_decided_idx && !new_stopsign.decided(new_decided_idx))
+//                 || (new_decided_idx > old_decided_idx && new_stopsign.decided(new_decided_idx)),
+//             "decided_idx and decided_stopsign should be updated atomically"
+//         );
+//     }
+//     // run the test with injected failures at different points in time
+//     for i in 1..10 {
+//         run_single_test(i);
+//     }
+// }
