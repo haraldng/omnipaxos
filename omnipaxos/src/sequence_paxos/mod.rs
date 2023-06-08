@@ -218,11 +218,8 @@ where
                 if *phase == Phase::Accept {
                     if let Some(ss) = self.internal_storage.get_stopsign() {
                         let decided_idx = self.internal_storage.get_decided_idx();
-
                         for follower in self.leader_state.get_promised_followers() {
-                            if !ss.decided(decided_idx)
-                                && !ss.decided(self.leader_state.get_accepted_idx(follower))
-                            {
+                            if !ss.decided(self.leader_state.get_accepted_idx(follower)) {
                                 self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
                             }
                             if ss.decided(decided_idx) {
@@ -231,7 +228,6 @@ where
                         }
                     }
                 }
-
                 // Resend Prepare
                 let unpromised_peers = self.leader_state.get_unpromised_peers();
                 for peer in unpromised_peers {
