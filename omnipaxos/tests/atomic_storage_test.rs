@@ -53,6 +53,7 @@ fn basic_setup() -> (
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = (1..=cfg.num_nodes as NodeId).collect();
     op_config.cluster_config.configuration_id = 1;
+    op_config.server_config.election_tick_timeout = 1; // set tick timeout to 1 as we need to trigger leader change when we call tick() in the tests.
     let op = op_config.build(storage).unwrap();
     (mem_storage, storage_conf, op)
 }
@@ -79,7 +80,7 @@ fn setup_leader() -> (
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
@@ -90,7 +91,7 @@ fn setup_leader() -> (
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
@@ -101,7 +102,7 @@ fn setup_leader() -> (
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let msgs = op.outgoing_messages();
     for msg in msgs {
         if let Message::SequencePaxos(ref px_msg) = msg {
@@ -437,7 +438,7 @@ fn atomic_storage_majority_promises_test() {
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
@@ -448,7 +449,7 @@ fn atomic_storage_majority_promises_test() {
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
@@ -459,7 +460,7 @@ fn atomic_storage_majority_promises_test() {
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let msgs = op.outgoing_messages();
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {

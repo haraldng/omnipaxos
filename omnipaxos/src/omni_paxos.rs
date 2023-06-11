@@ -151,8 +151,9 @@ impl ClusterConfig {
 /// Configuration for a singular `OmniPaxos` instance in a cluster.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated
-/// * `resend_message_tick_timeout`: The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
+/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated.
+/// If this is set to 5 and `tick()` is called every 10ms, then the election timeout will be 50ms. Must not be 0.
+/// * `resend_message_tick_timeout`: The number of calls to `tick()` before a message is considered dropped and thus resent. Must not be 0.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
 /// * `logger_file_path`: The path where the default logger logs events.
@@ -162,9 +163,9 @@ impl ClusterConfig {
 pub struct ServerConfig {
     /// The unique identifier of this node. Must not be 0.
     pub pid: NodeId,
-    /// The number of calls to `tick()` before leader election is updated
+    /// The number of calls to `tick()` before leader election is updated. If this is set to 5 and `tick()` is called every 10ms, then the election timeout will be 50ms.
     pub election_tick_timeout: u64,
-    /// The number of calls to `tick()` before an omnipaxos message is considered dropped and thus resent.
+    /// The number of calls to `tick()` before a message is considered dropped and thus resent. Must not be 0.
     pub resend_message_tick_timeout: u64,
     /// The buffer size for outgoing messages.
     pub buffer_size: usize,
@@ -362,8 +363,8 @@ where
         self.seq_paxos.reconnected(pid)
     }
 
-    /// Drives the election process (see `election_timeout()`) every `election_tick_timeout`
-    /// ticks. Also drives the detection and re-sending of dropped OmniPaxos messages every `resend_message_tick_timeout` ticks.
+    /// Increments the internal logical clock. Will trigger leader changes and resend dropped messages (if required)
+    /// after every `election_tick_timeout` and `resend_message_tick_timeout` number of calls to this function (See how to set these in `ServerConfig`).
     pub fn tick(&mut self) {
         if self.election_clock.tick_and_check_timeout() {
             self.election_timeout();
@@ -382,9 +383,8 @@ where
 
     /// If the heartbeat of a leader is not received when election_timeout() is called, the server might attempt to become the leader.
     /// It is also used for the election process, where the server checks if it can become the leader.
-    /// This function .should be called periodically to detect leader failure and drive the election process.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
-    pub fn election_timeout(&mut self) {
+    fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
             self.seq_paxos.handle_leader(b);
         }
