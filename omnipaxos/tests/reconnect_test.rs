@@ -573,7 +573,6 @@ fn reconnect_after_dropped_acceptstopsign_test() {
 
 /// Verifies that a follower that misses DecideStopSign message from their leader
 /// eventually receives the missed DecideStopSign.
-/// TODO: Follower detects sequence break since leader repeated(from too many accepteds) decide
 #[test]
 #[serial]
 fn reconnect_after_dropped_decidestopsign_test() {

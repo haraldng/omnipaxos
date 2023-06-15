@@ -31,7 +31,7 @@ where
                 if ld < decided_idx && T::Snapshot::use_snapshots() {
                     let delta_snapshot = self
                         .internal_storage
-                        .create_diff_snapshot(ld, decided_idx)
+                        .create_diff_snapshot(ld)
                         .expect("storage error while trying to read diff snapshot");
                     let suffix = self
                         .internal_storage
@@ -50,7 +50,7 @@ where
                 if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
                     let delta_snapshot = self
                         .internal_storage
-                        .create_diff_snapshot(prep.decided_idx, decided_idx)
+                        .create_diff_snapshot(prep.decided_idx)
                         .expect("storage error while trying to read diff snapshot");
                     let suffix = self
                         .internal_storage
@@ -119,19 +119,12 @@ where
                             "storage error while trying to read old log or snapshot",
                         );
                     }
-                    // Compact index of snapshot depends on if incoming stopsign is decided
-                    let new_compact_idx = match accsync.stopsign {
-                        Some(_) if accsync.decided_idx == accsync.accepted_idx => {
-                            accsync.decided_idx - 1
-                        }
-                        _ => accsync.decided_idx,
-                    };
                     let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
-                            self.internal_storage.set_snapshot(new_compact_idx, c)
+                            self.internal_storage.set_snapshot(accsync.compacted_idx, c)
                         }
                         SnapshotType::Delta(d) => {
-                            self.internal_storage.merge_snapshot(new_compact_idx, d)
+                            self.internal_storage.merge_snapshot(accsync.compacted_idx, d)
                         }
                     };
                     self.internal_storage.rollback_and_panic_if_err(
@@ -173,7 +166,6 @@ where
             };
             if accsync.stopsign.is_none() {
                 self.forward_pending_proposals();
-                //TODO: foward pending stopsign like in handle_majority_promises?
             }
             self.internal_storage
                 .set_stopsign(accsync.stopsign)

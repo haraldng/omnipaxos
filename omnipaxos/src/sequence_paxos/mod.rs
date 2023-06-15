@@ -217,15 +217,15 @@ where
                 // Resend AcceptStopSign or StopSign's decide
                 if *phase == Phase::Accept {
                     if let Some(ss) = self.internal_storage.get_stopsign() {
+                        let decided_idx = self.internal_storage.get_decided_idx();
                         for follower in self.leader_state.get_promised_followers() {
-                            let decided_idx = self.internal_storage.get_decided_idx();
-                            if self.leader_state.get_accepted_idx(follower)
+                            if self.internal_storage.stopsign_is_decided() {
+                                self.send_decide(follower, decided_idx, true);
+                            }
+                            else if self.leader_state.get_accepted_idx(follower)
                                 != self.internal_storage.get_accepted_idx()
                             {
                                 self.send_accept_stopsign(follower, ss.clone(), true);
-                            }
-                            if self.internal_storage.stopsign_is_decided() {
-                                self.send_decide(follower, decided_idx, true);
                             }
                         }
                     }
@@ -403,13 +403,6 @@ where
         self.internal_storage
             .set_stopsign(Some(ss))
             .expect("storage error while trying to write stopsign");
-        // TODO: we don't use leader_state.accepted_idx[self.pid] ATM
-        // (also its not set correctly when we use set_stopsign in
-        // handle_majority_promises)
-        if self.state.0 == Role::Leader {
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        }
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.

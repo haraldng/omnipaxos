@@ -693,6 +693,10 @@ where
         }
     }
 
+    fn create_decided_snapshot(&mut self) -> StorageResult<T::Snapshot> {
+        self.create_snapshot(self.get_decided_idx())
+    }
+
     pub(crate) fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
         self.storage.get_snapshot()
     }
@@ -700,12 +704,11 @@ where
     pub(crate) fn create_diff_snapshot(
         &mut self,
         from_idx: u64,
-        to_idx: u64,
     ) -> StorageResult<SnapshotType<T>> {
         if self.get_compacted_idx() >= from_idx {
-            Ok(SnapshotType::Complete(self.create_snapshot(to_idx)?))
+            Ok(SnapshotType::Complete(self.create_decided_snapshot()?))
         } else {
-            let diff_entries = self.get_entries(from_idx, to_idx)?;
+            let diff_entries = self.get_entries(from_idx, self.get_decided_idx())?;
             Ok(SnapshotType::Delta(T::Snapshot::create(
                 diff_entries.as_slice(),
             )))
@@ -739,11 +742,10 @@ where
     }
 
     pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: T::Snapshot) -> StorageResult<()> {
-        let log_len = self.state_cache.real_log_len;
         let mut snapshot = if let Some(snap) = self.storage.get_snapshot()? {
             snap
         } else {
-            self.create_snapshot(log_len)?
+            self.create_decided_snapshot()?
         };
         snapshot.merge(delta);
         self.set_snapshot(idx, snapshot)
