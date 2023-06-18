@@ -187,6 +187,10 @@ where
             ),
         }
     }
+
+    pub fn with_memory(mem: MemoryStorage<T>) -> Self {
+        StorageType::Memory(mem)
+    }
 }
 
 impl<T> Storage<T> for StorageType<T>
@@ -492,13 +496,10 @@ impl TestSystem {
         &mut self,
         pid: NodeId,
         test_config: &TestConfig,
-        storage_type: StorageTypeSelector,
-        storage_path: &str,
+        storage: StorageType<Value>,
     ) {
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
         let op_config = test_config.into_omnipaxos_config(pid);
-        let storage: StorageType<Value> =
-            StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
@@ -556,19 +557,23 @@ impl TestSystem {
 
     /// Return the elected leader from `node`'s viewpoint. If there is no leader yet then
     /// wait until a leader is elected in the allocated time.
-    pub fn get_elected_leader(&self, node: u64, wait_timeout: Duration) -> u64 {
-        let node = self.nodes.get(&node).expect("No BLE component found");
+    pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+        let node = self.nodes.get(&node_id).expect("No BLE component found");
 
         let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
-        leader_pid.unwrap_or_else(|| {
-            // Leader is not elected yet
-            let (kprom, kfuture) = promise::<Ballot>();
-            node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
-            let ballot = kfuture
-                .wait_timeout(wait_timeout)
-                .expect("No leader has been elected in the allocated time!");
-            ballot.pid
-        })
+        leader_pid.unwrap_or_else(|| self.get_next_leader(node_id, wait_timeout))
+    }
+
+    /// Return the next new elected leader from `node`'s viewpoint. If there is no leader yet then
+    /// wait until a leader is elected in the allocated time.
+    pub fn get_next_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+        let node = self.nodes.get(&node_id).expect("No BLE component found");
+        let (kprom, kfuture) = promise::<Ballot>();
+        node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
+        let ballot = kfuture
+            .wait_timeout(wait_timeout)
+            .expect("No leader has been elected in the allocated time!");
+        ballot.pid
     }
 
     /// Use node `proposer` to propose `proposals` then waits for the proposals
@@ -862,6 +867,11 @@ pub mod verification {
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);
                 verify_entries(decided_entries, last_proposals, 0, num_proposals);
             }
+            [] => assert!(
+                proposals.len() == 0,
+                "Log is empty but should be {:?}",
+                proposals
+            ),
             _ => panic!("Unexpected entries in the log: {:?} ", read_log),
         }
     }

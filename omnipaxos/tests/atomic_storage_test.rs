@@ -17,8 +17,7 @@ use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
-            AcceptDecide, AcceptSync, Compaction, PaxosMessage, PaxosMsg, Prepare,
-            Promise,
+            AcceptDecide, AcceptSync, Compaction, PaxosMessage, PaxosMsg, Prepare, Promise,
         },
         Message,
     },

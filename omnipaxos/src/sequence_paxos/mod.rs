@@ -221,8 +221,7 @@ where
                         for follower in self.leader_state.get_promised_followers() {
                             if self.internal_storage.stopsign_is_decided() {
                                 self.send_decide(follower, decided_idx, true);
-                            }
-                            else if self.leader_state.get_accepted_idx(follower)
+                            } else if self.leader_state.get_accepted_idx(follower)
                                 != self.internal_storage.get_accepted_idx()
                             {
                                 self.send_accept_stopsign(follower, ss.clone(), true);

@@ -236,7 +236,7 @@ where
                         true => my_decided_idx - 1,
                         false => my_decided_idx,
                     };
-                    (Some(delta_snapshot), suffix, follower_decided_idx, compacted_idx)
+                    (delta_snapshot, suffix, follower_decided_idx, compacted_idx)
                 } else {
                     let sfx = self
                         .internal_storage
@@ -245,7 +245,6 @@ where
                     (None, sfx, *promise_accepted_idx, 0)
                 }
             } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
-                println!("Followers ballot was outdated");
                 let delta_snapshot = self
                     .internal_storage
                     .create_diff_snapshot(follower_decided_idx)
@@ -258,7 +257,7 @@ where
                     true => my_decided_idx - 1,
                     false => my_decided_idx,
                 };
-                (Some(delta_snapshot), suffix, follower_decided_idx, compacted_idx)
+                (delta_snapshot, suffix, follower_decided_idx, compacted_idx)
             } else {
                 let suffix = self
                     .internal_storage

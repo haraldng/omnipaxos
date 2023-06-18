@@ -37,7 +37,7 @@ where
                         .internal_storage
                         .get_suffix(decided_idx)
                         .expect("storage error while trying to read log suffix");
-                    (Some(delta_snapshot), suffix)
+                    (delta_snapshot, suffix)
                 } else {
                     let suffix = self
                         .internal_storage
@@ -56,7 +56,7 @@ where
                         .internal_storage
                         .get_suffix(decided_idx)
                         .expect("storage error while trying to read log suffix");
-                    (Some(delta_snapshot), suffix)
+                    (delta_snapshot, suffix)
                 } else {
                     let suffix = self
                         .internal_storage
@@ -123,9 +123,9 @@ where
                         SnapshotType::Complete(c) => {
                             self.internal_storage.set_snapshot(accsync.compacted_idx, c)
                         }
-                        SnapshotType::Delta(d) => {
-                            self.internal_storage.merge_snapshot(accsync.compacted_idx, d)
-                        }
+                        SnapshotType::Delta(d) => self
+                            .internal_storage
+                            .merge_snapshot(accsync.compacted_idx, d),
                     };
                     self.internal_storage.rollback_and_panic_if_err(
                         &snapshot_res,

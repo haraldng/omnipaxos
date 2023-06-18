@@ -682,6 +682,10 @@ where
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
         let compacted_idx = self.get_compacted_idx();
+        assert!(
+            compact_idx >= compacted_idx,
+            "Can't create snapshot, index {compact_idx} already trimmed"
+        );
         let entries = self.storage.get_entries(0, compact_idx - compacted_idx)?;
         let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot()? {
@@ -694,7 +698,11 @@ where
     }
 
     fn create_decided_snapshot(&mut self) -> StorageResult<T::Snapshot> {
-        self.create_snapshot(self.get_decided_idx())
+        let log_decided_idx = match self.stopsign_is_decided() {
+            true => self.get_decided_idx() - 1,
+            false => self.get_decided_idx(),
+        };
+        self.create_snapshot(log_decided_idx)
     }
 
     pub(crate) fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
@@ -704,14 +712,25 @@ where
     pub(crate) fn create_diff_snapshot(
         &mut self,
         from_idx: u64,
-    ) -> StorageResult<SnapshotType<T>> {
-        if self.get_compacted_idx() >= from_idx {
-            Ok(SnapshotType::Complete(self.create_decided_snapshot()?))
+    ) -> StorageResult<Option<SnapshotType<T>>> {
+        let log_decided_idx = match self.stopsign_is_decided() {
+            true => self.get_decided_idx() - 1,
+            false => self.get_decided_idx(),
+        };
+        let compacted_idx = self.get_compacted_idx();
+        if from_idx <= compacted_idx {
+            if compacted_idx < log_decided_idx {
+                Ok(Some(SnapshotType::Complete(
+                    self.create_snapshot(log_decided_idx)?,
+                )))
+            } else {
+                Ok(self.get_snapshot()?.map(|s| SnapshotType::Complete(s)))
+            }
         } else {
-            let diff_entries = self.get_entries(from_idx, self.get_decided_idx())?;
-            Ok(SnapshotType::Delta(T::Snapshot::create(
+            let diff_entries = self.get_entries(from_idx, log_decided_idx)?;
+            Ok(Some(SnapshotType::Delta(T::Snapshot::create(
                 diff_entries.as_slice(),
-            )))
+            ))))
         }
     }
 

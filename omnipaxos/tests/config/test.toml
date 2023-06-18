@@ -60,3 +60,6 @@ storage_type = { type = "Persistent" }
 [atomic_storage_test]
 num_nodes = 3
 storage_type = { type = "Broken" }
+
+[sync_test]
+num_nodes = 3
