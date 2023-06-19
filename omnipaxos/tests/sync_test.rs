@@ -1,6 +1,7 @@
 pub mod utils;
 
 use omnipaxos::{
+    ballot_leader_election::Ballot,
     storage::{Snapshot, StopSign, Storage},
     ClusterConfig,
 };
@@ -24,7 +25,7 @@ struct SyncTest {
     followers_log: Vec<Value>,
     followers_ss: Option<StopSign>,
     followers_dec_idx: u64,
-    followers_ballot_is_outdated: bool,
+    followers_accepted_round: Ballot,
 }
 
 fn sync_test(sync_test: SyncTest) {
@@ -67,6 +68,9 @@ fn sync_test(sync_test: SyncTest) {
     followers_memory
         .set_decided_idx(sync_test.followers_dec_idx)
         .unwrap();
+    followers_memory
+        .set_accepted_round(sync_test.followers_accepted_round)
+        .unwrap();
 
     // Start a Kompact system with no nodes
     let cfg = TestConfig::load("sync_test").expect("Test config couldn't be loaded");
@@ -77,25 +81,27 @@ fn sync_test(sync_test: SyncTest) {
     }
 
     // Re-create nodes with initial memory
-    sys.create_node(1, &cfg, StorageType::with_memory(followers_memory));
-    sys.create_node(2, &cfg, StorageType::with_memory(leaders_memory.clone()));
-    sys.create_node(3, &cfg, StorageType::with_memory(leaders_memory));
-    sys.start_node(2);
-    sys.start_node(3);
-
-    // Force a leader change to increase ballot number and make followers ballot outdated
-    if sync_test.followers_ballot_is_outdated {
-        let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
-        let leader = sys.nodes.get(&leader_id).unwrap();
-        leader.on_definition(|comp| {
-            comp.paxos.election_timeout();
-            comp.paxos.election_timeout();
-        });
-        sys.get_next_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    let followers_id = 1;
+    sys.create_node(
+        followers_id,
+        &cfg,
+        StorageType::with_memory(followers_memory),
+    );
+    for node_id in 2..=cfg.num_nodes as u64 {
+        sys.create_node(
+            node_id,
+            &cfg,
+            StorageType::with_memory(leaders_memory.clone()),
+        );
+    }
+    for node_id in 2..=cfg.num_nodes as u64 {
+        sys.start_node(node_id);
     }
 
-    // Wait for follower to finish syncing
-    sys.start_node(1);
+    // Start follower last so it doesn't become leader and wait for it to finish syncing
+    sys.start_node(followers_id);
+    let leaders_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    assert_ne!(followers_id, leaders_id, "follower must not be the leader");
     thread::sleep(Duration::from_millis(100));
 
     // Verify log
@@ -135,6 +141,8 @@ fn sync_basic_test() {
     // Define follower's log
     let followers_log = [1, 2, 3, 6, 7].into_iter().map(|x| Value(x)).collect();
     let followers_dec_idx = 3;
+    // fake ballot so that followers promise is seen as out of date
+    let followers_accepted_round = Ballot::with(4, 0, 0, 0);
 
     let test = SyncTest {
         leaders_snapshot: Some(leaders_snapshot),
@@ -144,7 +152,7 @@ fn sync_basic_test() {
         leaders_dec_idx,
         followers_log,
         followers_dec_idx,
-        followers_ballot_is_outdated: true,
+        followers_accepted_round,
         ..Default::default()
     };
     sync_test(test);
@@ -163,6 +171,8 @@ fn sync_decided_stopsign_test() {
     // Define follower's log
     let followers_log = [1, 2, 3, 6, 7].into_iter().map(|x| Value(x)).collect();
     let followers_dec_idx = 3;
+    // fake ballot so that followers promise is seen as out of date
+    let followers_accepted_round = Ballot::with(4, 0, 0, 0);
 
     let test = SyncTest {
         leaders_log,
@@ -170,7 +180,7 @@ fn sync_decided_stopsign_test() {
         leaders_dec_idx,
         followers_log,
         followers_dec_idx,
-        followers_ballot_is_outdated: true,
+        followers_accepted_round,
         ..Default::default()
     };
     sync_test(test);
