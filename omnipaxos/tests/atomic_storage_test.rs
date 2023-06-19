@@ -175,7 +175,6 @@ fn setup_follower() -> (
             suffix: vec![],
             sync_idx: 0,
             decided_idx: 0,
-            compacted_idx: 0,
             stopsign: None,
         }),
     });
@@ -229,7 +228,6 @@ fn atomic_storage_acceptsync_test() {
                 suffix: vec![Value(1), Value(2), Value(3)],
                 sync_idx: 0,
                 decided_idx: 1,
-                compacted_idx: 0,
                 stopsign: None,
             }),
         });

@@ -709,29 +709,36 @@ where
         self.storage.get_snapshot()
     }
 
+    // Creates a Delta snapshot of entries from `from_idx` to the end of the decided log and also
+    // returns the compacted idx of the created snapshot. If the range of entries contains entries
+    // which have already been compacted a valid delta cannot be created, so creates a Complete
+    // snapshot of the entire decided log instead.
     pub(crate) fn create_diff_snapshot(
         &mut self,
         from_idx: u64,
-    ) -> StorageResult<Option<SnapshotType<T>>> {
+    ) -> StorageResult<(Option<SnapshotType<T>>, u64)> {
         let log_decided_idx = match self.stopsign_is_decided() {
             true => self.get_decided_idx() - 1,
             false => self.get_decided_idx(),
         };
         let compacted_idx = self.get_compacted_idx();
-        if from_idx <= compacted_idx {
+        let snapshot = if from_idx <= compacted_idx {
+            // Some entries in range are compacted, snapshot entire decided log
             if compacted_idx < log_decided_idx {
-                Ok(Some(SnapshotType::Complete(
+                Some(SnapshotType::Complete(
                     self.create_snapshot(log_decided_idx)?,
-                )))
+                ))
             } else {
-                Ok(self.get_snapshot()?.map(|s| SnapshotType::Complete(s)))
+                // Entire decided log already snapshotted
+                self.get_snapshot()?.map(|s| SnapshotType::Complete(s))
             }
         } else {
             let diff_entries = self.get_entries(from_idx, log_decided_idx)?;
-            Ok(Some(SnapshotType::Delta(T::Snapshot::create(
+            Some(SnapshotType::Delta(T::Snapshot::create(
                 diff_entries.as_slice(),
-            ))))
-        }
+            )))
+        };
+        Ok((snapshot, log_decided_idx))
     }
 
     pub(crate) fn reset_snapshot(&mut self) -> StorageResult<()> {

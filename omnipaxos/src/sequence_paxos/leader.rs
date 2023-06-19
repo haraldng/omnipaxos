@@ -205,65 +205,44 @@ where
     fn send_accsync(&mut self, to: NodeId) {
         let my_decided_idx = self.get_decided_idx();
         let PromiseMetaData {
-            n: max_promise_n,
-            accepted_idx: max_accepted_idx,
-            ..
+            n: max_promise_n, ..
         } = &self.leader_state.get_max_promise_meta();
         let PromiseMetaData {
-            n: promise_n,
-            accepted_idx: promise_accepted_idx,
+            n: followers_promise_n,
+            accepted_idx: followers_accepted_idx,
             pid,
             ..
         } = self.leader_state.get_promise_meta(to);
-        let follower_decided_idx = self
+        let followers_decided_idx = self
             .leader_state
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
-        let (delta_snapshot, suffix, sync_idx, compacted_idx) =
-            if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
-                if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
-                    && T::Snapshot::use_snapshots()
-                {
-                    let delta_snapshot = self
-                        .internal_storage
-                        .create_diff_snapshot(follower_decided_idx)
-                        .expect("storage error while trying to read diff snapshot");
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(my_decided_idx)
-                        .expect("storage error while trying to read log suffix");
-                    let compacted_idx = match self.internal_storage.stopsign_is_decided() {
-                        true => my_decided_idx - 1,
-                        false => my_decided_idx,
-                    };
-                    (delta_snapshot, suffix, follower_decided_idx, compacted_idx)
-                } else {
-                    let sfx = self
-                        .internal_storage
-                        .get_suffix(*promise_accepted_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (None, sfx, *promise_accepted_idx, 0)
-                }
-            } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
-                let delta_snapshot = self
+        let (delta_snapshot, suffix, sync_idx) =
+            if followers_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
+                // Send missing decided entries in snapshot and accepted entries in suffix
+                let (delta_snapshot, compacted_idx) = self
                     .internal_storage
-                    .create_diff_snapshot(follower_decided_idx)
+                    .create_diff_snapshot(followers_decided_idx)
                     .expect("storage error while trying to read diff snapshot");
                 let suffix = self
                     .internal_storage
                     .get_suffix(my_decided_idx)
                     .expect("storage error while trying to read log suffix");
-                let compacted_idx = match self.internal_storage.stopsign_is_decided() {
-                    true => my_decided_idx - 1,
-                    false => my_decided_idx,
-                };
-                (delta_snapshot, suffix, follower_decided_idx, compacted_idx)
+                (delta_snapshot, suffix, compacted_idx)
+            } else if followers_promise_n == max_promise_n {
+                // Follower's accepted entries are valid, send any new entries after
+                let sfx = self
+                    .internal_storage
+                    .get_suffix(*followers_accepted_idx)
+                    .expect("storage error while trying to read log suffix");
+                (None, sfx, *followers_accepted_idx)
             } else {
+                // Only follower's decided entries are valid, send everything after
                 let suffix = self
                     .internal_storage
-                    .get_suffix(follower_decided_idx)
+                    .get_suffix(followers_decided_idx)
                     .expect("storage error while trying to read log suffix");
-                (None, suffix, follower_decided_idx, 0)
+                (None, suffix, followers_decided_idx)
             };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
@@ -273,7 +252,6 @@ where
             suffix,
             sync_idx,
             decided_idx: my_decided_idx,
-            compacted_idx,
             stopsign: self.internal_storage.get_stopsign(),
         };
         let msg = PaxosMessage {

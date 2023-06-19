@@ -69,12 +69,10 @@ pub mod sequence_paxos {
         pub decided_snapshot: Option<SnapshotType<T>>,
         /// The log suffix.
         pub suffix: Vec<T>,
-        /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
+        /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists)
         pub sync_idx: u64,
         /// The decided index
         pub decided_idx: u64,
-        /// The compacted index of the `decided_snapshot`
-        pub compacted_idx: u64,
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
     }

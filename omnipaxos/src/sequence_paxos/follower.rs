@@ -29,7 +29,7 @@ where
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
                 if ld < decided_idx && T::Snapshot::use_snapshots() {
-                    let delta_snapshot = self
+                    let (delta_snapshot, _) = self
                         .internal_storage
                         .create_diff_snapshot(ld)
                         .expect("storage error while trying to read diff snapshot");
@@ -48,7 +48,7 @@ where
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 let compacted_idx = self.internal_storage.get_compacted_idx();
                 if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
-                    let delta_snapshot = self
+                    let (delta_snapshot, _) = self
                         .internal_storage
                         .create_diff_snapshot(prep.decided_idx)
                         .expect("storage error while trying to read diff snapshot");
@@ -121,11 +121,11 @@ where
                     }
                     let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
-                            self.internal_storage.set_snapshot(accsync.compacted_idx, c)
+                            self.internal_storage.set_snapshot(accsync.sync_idx, c)
                         }
-                        SnapshotType::Delta(d) => self
-                            .internal_storage
-                            .merge_snapshot(accsync.compacted_idx, d),
+                        SnapshotType::Delta(d) => {
+                            self.internal_storage.merge_snapshot(accsync.sync_idx, d)
+                        }
                     };
                     self.internal_storage.rollback_and_panic_if_err(
                         &snapshot_res,
@@ -137,7 +137,7 @@ where
                     );
                     let accepted_res = self
                         .internal_storage
-                        .append_entries_without_batching(accsync.suffix);
+                        .append_on_prefix(accsync.sync_idx, accsync.suffix);
                     self.internal_storage.rollback_and_panic_if_err(
                         &accepted_res,
                         vec![

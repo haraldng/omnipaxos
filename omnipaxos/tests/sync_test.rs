@@ -139,7 +139,10 @@ fn sync_basic_test() {
     leaders_ss.next_config.nodes = vec![1, 2, 3];
 
     // Define follower's log
-    let followers_log = [1, 2, 3, 6, 7].into_iter().map(|x| Value(x)).collect();
+    let followers_log = [1, 2, 3, 6, 7, 8, 9, 10]
+        .into_iter()
+        .map(|x| Value(x))
+        .collect();
     let followers_dec_idx = 3;
     // fake ballot so that followers promise is seen as out of date
     let followers_accepted_round = Ballot::with(4, 0, 0, 0);
