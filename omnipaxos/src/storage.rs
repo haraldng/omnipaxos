@@ -682,10 +682,9 @@ where
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
         let compacted_idx = self.get_compacted_idx();
-        assert!(
-            compact_idx >= compacted_idx,
-            "Can't create snapshot, index {compact_idx} already trimmed"
-        );
+        if compact_idx < compacted_idx {
+            Err(CompactionErr::TrimmedIndex(compacted_idx))?
+        }
         let entries = self.storage.get_entries(0, compact_idx - compacted_idx)?;
         let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot()? {

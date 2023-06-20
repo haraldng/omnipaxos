@@ -217,9 +217,11 @@ where
             .leader_state
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
-        let (delta_snapshot, suffix, sync_idx) =
-            if followers_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
-                // Send missing decided entries in snapshot and accepted entries in suffix
+        let (delta_snapshot, suffix, sync_idx) = if followers_promise_n == max_promise_n {
+            // Follower's accepted entries are valid, send any new entries after
+            if T::Snapshot::use_snapshots() && *followers_accepted_idx < my_decided_idx {
+                // Note: we snapshot from follower's decided and not follower's accepted because
+                // snapshots currently can't handle merging onto accepted entries.
                 let (delta_snapshot, compacted_idx) = self
                     .internal_storage
                     .create_diff_snapshot(followers_decided_idx)
@@ -229,21 +231,33 @@ where
                     .get_suffix(my_decided_idx)
                     .expect("storage error while trying to read log suffix");
                 (delta_snapshot, suffix, compacted_idx)
-            } else if followers_promise_n == max_promise_n {
-                // Follower's accepted entries are valid, send any new entries after
+            } else {
                 let sfx = self
                     .internal_storage
                     .get_suffix(*followers_accepted_idx)
                     .expect("storage error while trying to read log suffix");
                 (None, sfx, *followers_accepted_idx)
+            }
+        } else {
+            // Follower's accepted entries are not valid, send everying after follower's decided
+            if T::Snapshot::use_snapshots() && followers_decided_idx < my_decided_idx {
+                let (delta_snapshot, compacted_idx) = self
+                    .internal_storage
+                    .create_diff_snapshot(followers_decided_idx)
+                    .expect("storage error while trying to read diff snapshot");
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(my_decided_idx)
+                    .expect("storage error while trying to read log suffix");
+                (delta_snapshot, suffix, compacted_idx)
             } else {
-                // Only follower's decided entries are valid, send everything after
                 let suffix = self
                     .internal_storage
                     .get_suffix(followers_decided_idx)
                     .expect("storage error while trying to read log suffix");
                 (None, suffix, followers_decided_idx)
-            };
+            }
+        };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
             n: self.leader_state.n_leader,
