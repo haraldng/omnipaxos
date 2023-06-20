@@ -219,6 +219,11 @@ where
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+        // Required check because Commitlog has a bug where appending an empty set of entries will
+        // always return an offset.first() with 0 despite entries being in the log.
+        if entries.is_empty() {
+            return self.get_log_len();
+        }
         let mut serialized = vec![];
         for entry in entries {
             serialized.push(bincode::serialize(&entry)?)
@@ -396,7 +401,7 @@ where
         {
             let stopsign = self.rocksdb.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
+                Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
                 None => Ok(None),
             }
         }
@@ -404,7 +409,7 @@ where
         {
             let stopsign = self.sled.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
+                Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
                 None => Ok(None),
             }
         }
