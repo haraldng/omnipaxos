@@ -217,7 +217,7 @@ where
             .leader_state
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
-        let (delta_snapshot, suffix, sync_idx) = if followers_promise_n == max_promise_n {
+        let (delta_snapshot, suffix, sync_idx) = if (followers_promise_n == max_promise_n) || (*followers_promise_n == self.leader_state.n_leader) {
             // Follower's accepted entries are valid, send any new entries after
             if T::Snapshot::use_snapshots() && *followers_accepted_idx < my_decided_idx {
                 // Note: we snapshot from follower's decided and not follower's accepted because
