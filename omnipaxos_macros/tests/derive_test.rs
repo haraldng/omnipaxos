@@ -11,7 +11,7 @@ fn derive_entry_test() {
 
 #[test]
 fn build_op_test() {
-    use omnipaxos::{macros::Entry, OmniPaxos, OmniPaxosConfig};
+    use omnipaxos::{macros::Entry, ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
     use omnipaxos_storage::memory_storage::MemoryStorage;
 
     #[derive(Clone, Debug, Entry)]
@@ -20,13 +20,20 @@ fn build_op_test() {
         pub _field2: String,
     }
 
-    let config = OmniPaxosConfig {
+    let cluster_config = ClusterConfig {
         configuration_id: 1,
-        pid: 1,
-        peers: vec![2, 3],
+        nodes: vec![1, 2, 3],
         ..Default::default()
+    };
+    let server_config = ServerConfig {
+        pid: 1,
+        ..Default::default()
+    };
+    let config = OmniPaxosConfig {
+        cluster_config,
+        server_config,
     };
 
     let _omnipaxos: OmniPaxos<TestEntry, MemoryStorage<TestEntry>> =
-        config.build(MemoryStorage::default());
+        config.build(MemoryStorage::default()).unwrap();
 }

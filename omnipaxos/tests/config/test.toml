@@ -12,6 +12,12 @@ num_nodes = 5
 num_proposals = 10000
 storage_type = { type = "Memory" }
 
+[flexible_quorum_test]
+wait_timeout_ms = 3000
+num_threads = 8
+num_nodes = 8
+flexible_quorum = [6, 3]
+
 [proposal_test]
 wait_timeout_ms = 5000
 num_threads = 8
@@ -42,13 +48,13 @@ storage_type = { type = "Memory" }
 
 [batching_test]
 wait_timeout_ms = 3000
-num_threads= 8
-num_nodes= 3
-batch_size= 31
-election_timeout_ms= 50
-increment_delay= 2
-num_proposals= 310
-gc_idx= 1000
+num_thread = 8
+num_node = 3
+batch_siz = 31
+election_timeout_m = 50
+increment_dela = 2
+num_proposal = 310
+gc_id = 1000
 storage_type = { type = "Persistent" }
 
 [atomic_storage_test]

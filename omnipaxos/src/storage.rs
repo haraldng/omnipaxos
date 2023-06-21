@@ -1,7 +1,7 @@
 use super::ballot_leader_election::Ballot;
 use crate::{
-    util::{AcceptedMetaData, ConfigurationId, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
-    CompactionErr,
+    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
+    ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -26,44 +26,45 @@ pub trait Entry: Clone + Debug {
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSignEntry {
     pub stopsign: StopSign,
-    pub decided: bool,
+    /// The log index of the StopSign
+    pub log_idx: u64,
 }
 
 impl StopSignEntry {
     /// Creates a [`StopSign`].
-    pub fn with(stopsign: StopSign, decided: bool) -> Self {
-        StopSignEntry { stopsign, decided }
+    pub fn with(stopsign: StopSign, idx: u64) -> Self {
+        StopSignEntry {
+            stopsign,
+            log_idx: idx,
+        }
+    }
+
+    /// Checks if the stopsign is decided.
+    pub fn decided(&self, decided_idx: u64) -> bool {
+        self.log_idx < decided_idx
     }
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StopSign {
-    /// The identifier for the new configuration.
-    pub config_id: ConfigurationId,
-    /// The process ids of the new configuration.
-    pub nodes: Vec<NodeId>,
-    /// Metadata for the reconfiguration. Can be used for pre-electing leader for the new configuration and skip prepare phase when starting the new configuration with the given leader.
+    /// The new `Omnipaxos` cluster configuration
+    pub next_config: ClusterConfig,
+    /// Metadata for the reconfiguration.
     pub metadata: Option<Vec<u8>>,
 }
 
 impl StopSign {
     /// Creates a [`StopSign`].
-    pub fn with(config_id: ConfigurationId, nodes: Vec<NodeId>, metadata: Option<Vec<u8>>) -> Self {
+    pub fn with(next_config: ClusterConfig, metadata: Option<Vec<u8>>) -> Self {
         StopSign {
-            config_id,
-            nodes,
+            next_config,
             metadata,
         }
-    }
-}
-
-impl PartialEq for StopSign {
-    fn eq(&self, other: &Self) -> bool {
-        self.config_id == other.config_id && self.nodes == other.nodes
     }
 }
 
@@ -213,6 +214,8 @@ where
     compacted_idx: u64,
     /// Real length of logs in the storage.
     real_log_len: u64,
+    /// Stopsign entry.
+    stopsign: Option<StopSignEntry>,
 }
 
 impl<T> StateCache<T>
@@ -228,12 +231,18 @@ where
             decided_idx: 0,
             compacted_idx: 0,
             real_log_len: 0,
+            stopsign: None,
         }
     }
 
     // Returns the index of the last accepted entry.
     fn get_accepted_idx(&self) -> u64 {
-        self.compacted_idx + self.real_log_len
+        let log_len = self.compacted_idx + self.real_log_len;
+        if self.stopsign.is_some() {
+            log_len + 1
+        } else {
+            log_len
+        }
     }
 
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
@@ -374,8 +383,8 @@ where
         } else if idx < virtual_log_len {
             Ok(Some(IndexEntry::Entry))
         } else if idx == virtual_log_len {
-            match self.get_stopsign()? {
-                Some(ss) if ss.decided => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
+            match self.get_stopsign() {
+                Some(ss) => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
                 _ => Ok(None),
             }
         } else {
@@ -388,7 +397,6 @@ where
     where
         R: RangeBounds<u64>,
     {
-        let accepted_idx = self.get_accepted_idx();
         let from_idx = match r.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(e) => *e + 1,
@@ -397,19 +405,11 @@ where
         let to_idx = match r.end_bound() {
             Bound::Included(i) => *i + 1,
             Bound::Excluded(e) => *e,
-            Bound::Unbounded => {
-                let idx = self.get_accepted_idx();
-                match self
-                    .get_stopsign()
-                    .expect("storage error while trying to read stopsign")
-                {
-                    Some(ss) if ss.decided => idx + 1,
-                    _ => idx,
-                }
-            }
+            Bound::Unbounded => self.get_accepted_idx(),
         };
         let compacted_idx = self.get_compacted_idx();
-        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, accepted_idx)? {
+        let log_len = self.state_cache.real_log_len + self.state_cache.compacted_idx;
+        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, log_len)? {
             // use to_idx-1 when getting the entry type as to_idx is exclusive
             Some(IndexEntry::Compacted) => {
                 return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
@@ -417,7 +417,7 @@ where
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
-        let from_type = match self.get_entry_type(from_idx, compacted_idx, accepted_idx)? {
+        let from_type = match self.get_entry_type(from_idx, compacted_idx, log_len)? {
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
@@ -544,6 +544,7 @@ where
                 .unwrap_or_default();
             self.state_cache.compacted_idx = self.storage.get_compacted_idx().unwrap();
             self.state_cache.real_log_len = self.storage.get_log_len().unwrap();
+            self.state_cache.stopsign = self.storage.get_stopsign().unwrap();
         }
     }
 
@@ -686,11 +687,12 @@ where
     }
 
     pub(crate) fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
+        self.state_cache.stopsign = Some(s.clone());
         self.storage.set_stopsign(s)
     }
 
-    pub(crate) fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
-        self.storage.get_stopsign()
+    pub(crate) fn get_stopsign(&self) -> Option<StopSignEntry> {
+        self.state_cache.stopsign.clone()
     }
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {

@@ -6,7 +6,6 @@
 //! # Crate feature flags
 //! The following crate feature flags are available. They are configured in your Cargo.toml.
 //! * `batch_accept` - Batch multiple log entries into a single message to reduce overhead.
-//! * `continued_leader_reconfiguration` - Let the cluster pick the current leader as the initial leader in the new configuration (if possible) to shorten down-time during reconfiguration.
 //! * `logging` - System-wide logging with the slog crate
 //! * `toml_config` - Create an OmniPaxos instance from a TOML configuration file
 //! * `serde` - Serialization and deserialization of messages and internal structs with serde. Disable this if you want to implement your own custom ser/deserialization or want to store data that is not serde-supported.
@@ -16,19 +15,18 @@
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod ballot_leader_election;
 /// OmniPaxos error definitions
-#[cfg(feature = "toml_config")]
 pub mod errors;
-/// The different messages Omni-Paxos replicas can communicate to each other with.
+/// The different messages OmniPaxos servers can communicate to each other with.
 pub mod messages;
-/// The user-facing Omni-Paxos struct.
+/// The user-facing OmniPaxos struct.
 mod omni_paxos;
 /// Re-export the contents of the omni_paxos module
 pub use omni_paxos::*;
 
 pub(crate) mod sequence_paxos;
-/// The core replication algorithm of Omni-Paxos.
+/// The core replication algorithm of OmniPaxos.
 // pub mod sequence_paxos;
-/// Traits and structs related to the backend storage of an Omni-Paxos replica.
+/// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
 /// A module containing helper functions and structs.
 pub mod util;

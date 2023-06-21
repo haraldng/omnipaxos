@@ -1,6 +1,6 @@
 We now show how to read and write the replicated log. The replicated log is *append-only*. To append an entry we call the following:
 
-```rust,edition2018,no_run,noplaypen
+```rust
 let write_entry = KeyValue { key: String::from("a"), value: 123 };
 
 omni_paxos.append(write_entry).expect("Failed to append");
@@ -11,7 +11,7 @@ This will cause our `write_entry` to be proposed to get decided in the replicate
 ## Reading the Log
 Reads are also handled by calling various functions on `OmniPaxos`. To read the entry at a specific index `idx` of the log we call `omni_paxos.read_entry(idx)`. We can also read a specific range of log entries with `omni_paxos.read_entries()`. 
 
-```rust,edition2018,no_run,noplaypen
+```rust
 /*** Read a single entry ***/
 let idx = 5;
 let read_entry = omni_paxos.read(idx);

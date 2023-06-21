@@ -1,28 +1,21 @@
 pub mod utils;
 
-use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::ReconfigurationRequest;
+use kompact::prelude::{promise, Ask};
+use omnipaxos::ClusterConfig;
 use serial_test::serial;
 use std::time::Duration;
-use utils::{TestConfig, TestSystem, Value, SS_METADATA};
+use utils::{TestConfig, TestSystem, Value};
+
+const SS_METADATA: u8 = 255;
 
 /// Verifies that the decided StopSign is correct and error is returned when trying to append after decided StopSign.
 #[test]
 #[serial]
 fn reconfig_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
-
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-        cfg.batch_size,
-    );
+    let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
-
     let mut vec_proposals = vec![];
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
@@ -37,33 +30,41 @@ fn reconfig_test() {
 
     sys.start_all_nodes();
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
+    let vec_proposals = (1..=cfg.num_proposals)
+        .into_iter()
+        .map(|v| Value(v))
+        .collect();
+    sys.make_proposals(1, vec_proposals, Duration::from_millis(cfg.wait_timeout_ms));
 
-    let new_config: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
-    let rc = ReconfigurationRequest::with(new_config.clone(), Some(vec![SS_METADATA]));
+    let new_config_id = 2;
+    let new_nodes: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
+    let new_config = ClusterConfig {
+        configuration_id: new_config_id,
+        nodes: new_nodes.clone(),
+        flexible_quorum: None,
+    };
+    let metadata = Some(vec![SS_METADATA]);
 
+    let first_node = sys.nodes.get(&1).unwrap();
     let reconfig_f = first_node.on_definition(|x| {
         let (kprom, kfuture) = promise::<Value>();
-        x.paxos.reconfigure(rc).expect("Failed to reconfigure");
+        x.paxos
+            .reconfigure(new_config.clone(), metadata.clone())
+            .expect("Failed to reconfigure");
         x.decided_futures.push(Ask::new(kprom, ()));
         kfuture
     });
 
-    let decided_ss_metadata = reconfig_f
+    let decided_ss_config = reconfig_f
         .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("Failed to collect reconfiguration future");
-    assert_eq!(decided_ss_metadata, Value(SS_METADATA as u64));
+    assert_eq!(decided_ss_config, Value(new_config_id as u64));
 
     let decided_nodes = sys.nodes.iter().fold(vec![], |mut x, (pid, paxos)| {
         let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());
         if let Some(stop_sign) = ss {
-            assert_eq!(stop_sign.nodes, new_config);
+            assert_eq!(stop_sign.next_config, new_config);
+            assert_eq!(stop_sign.metadata, metadata);
             x.push(pid);
         }
         x

@@ -7,7 +7,7 @@ use commitlog::{
 };
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSign, StopSignEntry, Storage, StorageResult},
+    storage::{Entry, StopSignEntry, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -27,61 +27,6 @@ const DECIDE: &[u8] = b"DECIDE";
 const TRIM: &[u8] = b"TRIM";
 const STOPSIGN: &[u8] = b"STOPSIGN";
 const SNAPSHOT: &[u8] = b"SNAPSHOT";
-
-/// Wrapper struct that represents a `Ballot` type. Implements AsBytes and FromBytes.
-#[repr(packed)]
-#[derive(Clone, Copy, AsBytes, FromBytes)]
-struct BallotStorage {
-    config_id: u32,
-    n: u32,
-    priority: u64,
-    pid: u64,
-}
-
-impl BallotStorage {
-    fn with(b: Ballot) -> Self {
-        BallotStorage {
-            config_id: b.config_id,
-            n: b.n,
-            priority: b.priority,
-            pid: b.pid,
-        }
-    }
-}
-
-/// Wrapper struct that represents a `StopSignEntry` type. Implements Serialize and Deserialize.
-#[derive(Clone, Serialize, Deserialize)]
-struct StopSignEntryStorage {
-    ss: StopSignStorage,
-    decided: bool,
-}
-
-impl StopSignEntryStorage {
-    fn with(ss_entry: StopSignEntry) -> Self {
-        StopSignEntryStorage {
-            ss: StopSignStorage::with(ss_entry.stopsign),
-            decided: ss_entry.decided,
-        }
-    }
-}
-
-/// Wrapper struct that represents a `StopSign` type. Implements Serialize and Deserialize.
-#[derive(Clone, Serialize, Deserialize)]
-struct StopSignStorage {
-    config_id: u32,
-    nodes: Vec<u64>,
-    metadata: Option<Vec<u8>>,
-}
-
-impl StopSignStorage {
-    fn with(ss: StopSign) -> Self {
-        StopSignStorage {
-            config_id: ss.config_id,
-            nodes: ss.nodes,
-            metadata: ss.metadata,
-        }
-    }
-}
 
 // Configuration for `PersistentStorage`.
 /// # Fields
@@ -339,14 +284,8 @@ where
             let promised = self.sled.get(NPROM)?;
             match promised {
                 Some(prom_bytes) => {
-                    let b_store =
-                        BallotStorage::read_from(prom_bytes.as_ref()).ok_or(ErrHelper {})?;
-                    Ok(Some(Ballot::with(
-                        b_store.config_id,
-                        b_store.n,
-                        b_store.priority,
-                        b_store.pid,
-                    )))
+                    let ballot = bincode::deserialize(&prom_bytes)?;
+                    Ok(Some(ballot))
                 }
                 None => Ok(Some(Ballot::default())),
             }
@@ -354,16 +293,11 @@ where
     }
 
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
-        let ballot_store = BallotStorage::with(n_prom);
-        let prom_bytes = ballot_store.as_bytes();
+        let prom_bytes = bincode::serialize(&n_prom)?;
         #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb.put(NPROM, prom_bytes)?;
-        }
+        self.rocksdb.put(NPROM, prom_bytes)?;
         #[cfg(feature = "sled")]
-        {
-            self.sled.insert(NPROM, prom_bytes)?;
-        }
+        self.sled.insert(NPROM, prom_bytes)?;
         Ok(())
     }
 
@@ -389,13 +323,9 @@ where
     fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
         let ld_bytes = u64::as_bytes(&ld);
         #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb.put(DECIDE, ld_bytes)?;
-        }
+        self.rocksdb.put(DECIDE, ld_bytes)?;
         #[cfg(feature = "sled")]
-        {
-            self.sled.insert(DECIDE, ld_bytes)?;
-        }
+        self.sled.insert(DECIDE, ld_bytes)?;
         Ok(())
     }
 
@@ -405,14 +335,8 @@ where
             let accepted = self.rocksdb.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store =
-                        BallotStorage::read_from(acc_bytes.as_slice()).ok_or(ErrHelper {})?;
-                    Ok(Some(Ballot::with(
-                        b_store.config_id,
-                        b_store.n,
-                        b_store.priority,
-                        b_store.pid,
-                    )))
+                    let ballot = bincode::deserialize(&acc_bytes)?;
+                    Ok(Some(ballot))
                 }
                 None => Ok(Some(Ballot::default())),
             }
@@ -422,14 +346,8 @@ where
             let accepted = self.sled.get(ACC)?;
             match accepted {
                 Some(acc_bytes) => {
-                    let b_store =
-                        BallotStorage::read_from(acc_bytes.as_bytes()).ok_or(ErrHelper {})?;
-                    Ok(Some(Ballot::with(
-                        b_store.config_id,
-                        b_store.n,
-                        b_store.priority,
-                        b_store.pid,
-                    )))
+                    let ballot = bincode::deserialize(&acc_bytes)?;
+                    Ok(Some(ballot))
                 }
                 None => Ok(Some(Ballot::default())),
             }
@@ -437,16 +355,11 @@ where
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        let ballot_store = BallotStorage::with(na);
-        let acc_bytes = ballot_store.as_bytes();
+        let acc_bytes = bincode::serialize(&na)?;
         #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb.put(ACC, acc_bytes)?;
-        }
+        self.rocksdb.put(ACC, acc_bytes)?;
         #[cfg(feature = "sled")]
-        {
-            self.sled.insert(ACC, acc_bytes)?;
-        }
+        self.sled.insert(ACC, acc_bytes)?;
         Ok(())
     }
 
@@ -472,13 +385,9 @@ where
     fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
         let trim_bytes = u64::as_bytes(&trimmed_idx);
         #[cfg(feature = "rocksdb")]
-        {
-            self.rocksdb.put(TRIM, trim_bytes)?;
-        }
+        self.rocksdb.put(TRIM, trim_bytes)?;
         #[cfg(feature = "sled")]
-        {
-            self.sled.insert(TRIM, trim_bytes)?;
-        }
+        self.sled.insert(TRIM, trim_bytes)?;
         Ok(())
     }
 
@@ -487,17 +396,7 @@ where
         {
             let stopsign = self.rocksdb.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => {
-                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)?;
-                    Ok(Some(StopSignEntry::with(
-                        StopSign::with(
-                            ss_entry_storage.ss.config_id,
-                            ss_entry_storage.ss.nodes,
-                            ss_entry_storage.ss.metadata,
-                        ),
-                        ss_entry_storage.decided,
-                    )))
-                }
+                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
                 None => Ok(None),
             }
         }
@@ -505,25 +404,14 @@ where
         {
             let stopsign = self.sled.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => {
-                    let ss_entry_storage: StopSignEntryStorage = bincode::deserialize(&ss_bytes)?;
-                    Ok(Some(StopSignEntry::with(
-                        StopSign::with(
-                            ss_entry_storage.ss.config_id,
-                            ss_entry_storage.ss.nodes,
-                            ss_entry_storage.ss.metadata,
-                        ),
-                        ss_entry_storage.decided,
-                    )))
-                }
+                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
                 None => Ok(None),
             }
         }
     }
 
     fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
-        let ss_storage = StopSignEntryStorage::with(s);
-        let stopsign = bincode::serialize(&ss_storage)?;
+        let stopsign = bincode::serialize(&s)?;
         #[cfg(feature = "rocksdb")]
         {
             self.rocksdb.put(STOPSIGN, stopsign)?;

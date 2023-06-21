@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
-use crate::storage::{RollbackValue, Snapshot, SnapshotType, StorageResult};
+use crate::storage::{RollbackValue, Snapshot, SnapshotType};
 
 use super::*;
 
@@ -19,16 +19,12 @@ where
         if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
-        if self.stopped() {
+        if self.pending_reconfiguration() {
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
-            self.leader_state = LeaderState::with(
-                n,
-                None,
-                self.leader_state.max_pid,
-                self.leader_state.majority,
-            );
+            self.leader_state =
+                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
             self.internal_storage
                 .flush_batch()
@@ -80,8 +76,7 @@ where
             {
                 self.leader_state.set_batch_accept_meta(from, None);
             }
-            self.send_prepare(from)
-                .expect("storage error while trying to read values for prepare message");
+            self.send_prepare(from);
         }
     }
 
@@ -126,7 +121,7 @@ where
     }
 
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.accept_entries_leader(entries),
@@ -136,7 +131,7 @@ where
     }
 
     pub(crate) fn handle_forwarded_stopsign(&mut self, ss: StopSign) {
-        if !self.stopped() {
+        if !self.pending_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => {
                     if self.pending_stopsign.as_mut().is_none() {
@@ -156,7 +151,7 @@ where
         }
     }
 
-    pub(crate) fn send_prepare(&mut self, to: NodeId) -> StorageResult<()> {
+    pub(crate) fn send_prepare(&mut self, to: NodeId) {
         let prep = Prepare {
             n: self.leader_state.n_leader,
             decided_idx: self.internal_storage.get_decided_idx(),
@@ -168,7 +163,6 @@ where
             to,
             msg: PaxosMsg::Prepare(prep),
         });
-        Ok(())
     }
 
     #[cfg(feature = "batch_accept")]
@@ -330,18 +324,6 @@ where
             from: self.pid,
             to,
             msg: PaxosMsg::Decide(d),
-        });
-    }
-
-    fn send_decide_stopsign(&mut self, to: NodeId) {
-        let d = DecideStopSign {
-            seq_num: self.leader_state.next_seq_num(to),
-            n: self.leader_state.n_leader,
-        };
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: PaxosMsg::DecideStopSign(d),
         });
     }
 
@@ -558,39 +540,6 @@ where
                     } else {
                         self.send_decide(pid, decided_idx);
                     }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn handle_accepted_stopsign(
-        &mut self,
-        acc_stopsign: AcceptedStopSign,
-        from: NodeId,
-    ) {
-        if acc_stopsign.n == self.leader_state.n_leader
-            && self.state == (Role::Leader, Phase::Accept)
-        {
-            self.leader_state.set_accepted_stopsign(from);
-            if self.leader_state.is_stopsign_chosen() {
-                let mut ss = self
-                    .internal_storage
-                    .get_stopsign()
-                    .expect("storage error while trying to read stopsign")
-                    .expect("No stopsign found when deciding!");
-                ss.decided = true;
-                let old_decided_idx = self.internal_storage.get_decided_idx();
-                self.internal_storage
-                    .set_decided_idx(self.internal_storage.get_accepted_idx() + 1)
-                    .expect("storage error while trying to write decided index");
-                let result = self.internal_storage.set_stopsign(ss);
-                self.internal_storage.rollback_and_panic_if_err(
-                    &result,
-                    vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                    "storage error while trying to write stopsign",
-                );
-                for pid in self.leader_state.get_promised_followers() {
-                    self.send_decide_stopsign(pid);
                 }
             }
         }

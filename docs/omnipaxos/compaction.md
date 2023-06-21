@@ -3,7 +3,7 @@ As time passes, the replicated log in `OmniPaxos` will grow large. To avoid lett
 ## Trim
 Trimming the log removes all entries up to a certain index. Since the entries are deleted from the log, a trim operation can only be done if **ALL** nodes in the cluster have decided up to that index. Example:
 
-```rust,edition2018,no_run,noplaypen
+```rust
 use omnipaxos::sequence_paxos::CompactionErr;
 
 // we will try trimming the first 100 entries of the log.
@@ -29,7 +29,7 @@ match omni_paxos.trim(trim_idx) {
 ## Snapshot
 Trimming compacts the log and discards any data preceding the trim index. For safety, it therefore requires all servers to have decided the trim index. If you don't want to discard any data and the entries in the log are such that they can be compacted into a snapshot, `OmniPaxos` supports snapshotting decided entries of the log. For instance, in our kv-store example, we don't need to keep every log entry that changes the kv-pairs. Instead, if we want to snapshot the log, it is sufficient to keep the latest value for every key. We implement our snapshot as a struct called `KVSnapshot` which is just a wrapper for a `HashMap` that will hold the latest value for every key in the log. To make it work with `OmniPaxos`, we need to implement the trait `Snapshot` for `KVSnapshot`:
 
-```rust,edition2018,no_run,noplaypen
+```rust
 use std::collections::HashMap;
 use omnipaxos::storage::Snapshot;
 
@@ -63,7 +63,7 @@ impl Snapshot<KeyValue> for KVSnapshot {
 The ``create()`` function tells `OmniPaxos` how to create a snapshot given a slice of entries of our `KeyValue` type. In our case, we simply want to insert the kv-pair into the hashmap. The `merge()` function defines how we can merge two snapshots. In our case, we will just insert/update the kv-pairs from the other snapshot. The `use_snapshots()` function tells `OmniPaxos` if snapshots should be used in the protocol. 
 
 With ``KVSnapshot``, we would have instead implemented our [`KeyValue`](../omnipaxos) that we defined earlier like this:
-```rust,edition2018,no_run,noplaypen
+```rust
 use omnipaxos::storage::Entry;
 
 #[derive(Clone, Debug)]
@@ -80,7 +80,7 @@ impl Entry for KeyValue {
 > **Note:** If you do not wish to use snapshots, then simply derive the blanket implementation for `Entry` using the macro we showed [here](../omnipaxos)
 
 We can now create snapshots and read snapshots from `OmniPaxos`. Furthermore, snapshotting allows us to either just do the snapshot locally or request all nodes in the cluster to do it with the boolean parameter `local_only`.
-```rust,edition2018,no_run,noplaypen
+```rust
 // we will try snapshotting the first 100 entries of the log.
 let snapshot_idx = Some(100);  // using `None` will use the highest snapshottable index
 let local_only = false; // snapshots will be taken by all nodes.

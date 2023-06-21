@@ -17,14 +17,14 @@ use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
-            AcceptDecide, AcceptStopSign, AcceptSync, AcceptedStopSign, Compaction, DecideStopSign,
-            PaxosMessage, PaxosMsg, Prepare, Promise,
+            AcceptDecide, AcceptSync, Accepted, Compaction, PaxosMessage, PaxosMsg, Prepare,
+            Promise,
         },
         Message,
     },
-    storage::{Snapshot, SnapshotType, StopSign, Storage},
+    storage::{Snapshot, SnapshotType, Storage},
     util::{NodeId, SequenceNumber},
-    OmniPaxos, OmniPaxosConfig, ReconfigurationRequest,
+    ClusterConfig, OmniPaxos, OmniPaxosConfig,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use serial_test::serial;
@@ -50,10 +50,11 @@ fn basic_setup() -> (
         panic!("using wrong storage for atomic_storage_test")
     };
     let mut op_config = OmniPaxosConfig::default();
-    op_config.pid = 1;
-    op_config.peers = (2..=cfg.num_nodes).map(|x| x as NodeId).collect();
-    op_config.configuration_id = 1;
-    let op = op_config.build(storage);
+    op_config.server_config.pid = 1;
+    op_config.cluster_config.nodes = (1..=cfg.num_nodes as NodeId).collect();
+    op_config.cluster_config.configuration_id = 1;
+    op_config.server_config.election_tick_timeout = 1; // set tick timeout to 1 as we need to trigger leader change when we call tick() in the tests.
+    let op = op_config.build(storage).unwrap();
     (mem_storage, storage_conf, op)
 }
 
@@ -67,6 +68,7 @@ fn setup_leader() -> (
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
+    let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
     let n_old = n;
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
@@ -74,33 +76,33 @@ fn setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
-            quorum_connected: true,
+            connectivity: cfg.num_nodes as u8,
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 2,
             ballot: n_old,
-            quorum_connected: false,
+            connectivity: 0,
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 3,
             ballot: n_old,
-            quorum_connected: false,
+            connectivity: 0,
         }),
     });
     op.handle_incoming(setup_msg);
-    op.election_timeout();
+    op.tick(); // trigger leader change
     let msgs = op.outgoing_messages();
     for msg in msgs {
         if let Message::SequencePaxos(ref px_msg) = msg {
@@ -185,66 +187,6 @@ fn setup_follower() -> (
         "node 2 should be leader"
     );
     (mem_storage, storage_conf, op)
-}
-
-#[test]
-#[serial]
-fn atomic_storage_decide_stopsign_test() {
-    fn run_single_test(fail_after_n_ops: usize) {
-        let (mem_storage, storage_conf, mut op) = setup_follower();
-
-        let setup_msg = Message::<Value>::SequencePaxos(PaxosMessage {
-            from: 2,
-            to: 1,
-            msg: PaxosMsg::AcceptStopSign(AcceptStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
-                seq_num: SequenceNumber {
-                    session: 1,
-                    counter: 2,
-                },
-                ss: StopSign {
-                    config_id: 2,
-                    nodes: vec![1, 2, 3],
-                    metadata: None,
-                },
-            }),
-        });
-        op.handle_incoming(setup_msg);
-
-        let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
-        storage_conf
-            .lock()
-            .unwrap()
-            .schedule_failure_in(fail_after_n_ops);
-
-        // Test handle DecideStopsign rollback
-        let msg = Message::<Value>::SequencePaxos(PaxosMessage {
-            from: 2,
-            to: 1,
-            msg: PaxosMsg::DecideStopSign(DecideStopSign {
-                n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
-                seq_num: SequenceNumber {
-                    session: 1,
-                    counter: 3,
-                },
-            }),
-        });
-        let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
-
-        // check consistency
-        let s = mem_storage.lock().unwrap();
-        let new_decided_idx = s.get_decided_idx().unwrap();
-        let ss_decided = s.get_stopsign().unwrap().unwrap().decided;
-        assert!(
-            (!ss_decided && new_decided_idx == old_decided_idx)
-                || (ss_decided && new_decided_idx == old_decided_idx + 1),
-            "decided_idx and stopsign should be updated atomically"
-        );
-    }
-    // run the test with injected failures at different points in time
-    for i in 1..10 {
-        run_single_test(i);
-    }
 }
 
 #[test]
@@ -484,6 +426,7 @@ fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
+        let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
         let n_old = n;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
@@ -491,33 +434,33 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
                 ballot: n_old,
-                quorum_connected: true,
+                connectivity: cfg.num_nodes as u8,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                quorum_connected: false,
+                connectivity: 0,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
                 ballot: n_old,
-                quorum_connected: false,
+                connectivity: 0,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.election_timeout();
+        op.tick(); // trigger leader change
         let msgs = op.outgoing_messages();
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {
@@ -590,8 +533,12 @@ fn atomic_storage_majority_promises_test() {
 fn atomic_storage_majority_accepted_stopsign_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_leader();
-        op.reconfigure(ReconfigurationRequest::with(vec![1, 2, 3], None))
-            .unwrap();
+        let new_config = ClusterConfig {
+            configuration_id: 2,
+            nodes: vec![1, 2, 3],
+            flexible_quorum: None,
+        };
+        op.reconfigure(new_config, None).unwrap();
         op.outgoing_messages();
 
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
@@ -601,11 +548,19 @@ fn atomic_storage_majority_accepted_stopsign_test() {
             .unwrap()
             .schedule_failure_in(fail_after_n_ops);
 
+        let stopsign_idx = mem_storage
+            .lock()
+            .unwrap()
+            .get_stopsign()
+            .unwrap()
+            .unwrap()
+            .log_idx;
         let msg = Message::<Value>::SequencePaxos(PaxosMessage {
             from: 2,
             to: 1,
-            msg: PaxosMsg::AcceptedStopSign(AcceptedStopSign {
+            msg: PaxosMsg::Accepted(Accepted {
                 n: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
+                accepted_idx: stopsign_idx + 1,
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
@@ -615,12 +570,12 @@ fn atomic_storage_majority_accepted_stopsign_test() {
         let new_decided_idx = s.get_decided_idx().unwrap();
         let new_stopsign = s.get_stopsign().unwrap().unwrap();
         assert!(
-            !old_stopsign.decided,
+            !old_stopsign.decided(old_decided_idx),
             "sanity check failed: newly proposed stopsign is decided"
         );
         assert!(
-            (new_decided_idx == old_decided_idx && !new_stopsign.decided)
-                || (new_decided_idx > old_decided_idx && new_stopsign.decided),
+            (new_decided_idx == old_decided_idx && !new_stopsign.decided(new_decided_idx))
+                || (new_decided_idx > old_decided_idx && new_stopsign.decided(new_decided_idx)),
             "decided_idx and decided_stopsign should be updated atomically"
         );
     }
