@@ -239,7 +239,7 @@ where
                 (None, sfx, *followers_accepted_idx)
             }
         } else {
-            // Follower's accepted entries are not valid, send everying after follower's decided
+            // Follower's accepted entries are not valid. Synchronize by sending a snapshot from the follower's decided index up to leader's decided index and any suffix.
             if T::Snapshot::use_snapshots() && followers_decided_idx < my_decided_idx {
                 let (delta_snapshot, compacted_idx) = self
                     .internal_storage
