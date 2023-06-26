@@ -204,11 +204,14 @@ where
 
     fn send_accsync(&mut self, to: NodeId) {
         let my_decided_idx = self.get_decided_idx();
+        let my_n = self.leader_state.n_leader;
         let PromiseMetaData {
-            n: max_promise_n, ..
+            n_accepted: prev_round_max_promise_n,
+            accepted_idx: prev_round_max_accepted_idx,
+            ..
         } = &self.leader_state.get_max_promise_meta();
         let PromiseMetaData {
-            n: followers_promise_n,
+            n_accepted: followers_promise_n,
             accepted_idx: followers_accepted_idx,
             pid,
             ..
@@ -217,10 +220,19 @@ where
             .leader_state
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
-        let (delta_snapshot, suffix, sync_idx) = if (followers_promise_n == max_promise_n) || (*followers_promise_n == self.leader_state.n_leader) {
-            // Follower's accepted entries are valid, send any new entries after
-            if T::Snapshot::use_snapshots() && *followers_accepted_idx < my_decided_idx {
-                // Note: we snapshot from follower's decided and not follower's accepted because
+        // Follower can have valid accepted entries depending on which leader they were previously following
+        let followers_valid_entries_idx = if *followers_promise_n == my_n {
+            *followers_accepted_idx
+        } else if *followers_promise_n == *prev_round_max_promise_n {
+            *prev_round_max_accepted_idx
+        } else {
+            followers_decided_idx
+        };
+        let (delta_snapshot, suffix, sync_idx) =
+            if T::Snapshot::use_snapshots() && followers_valid_entries_idx < my_decided_idx {
+                // Synchronize by sending a snapshot from the follower's decided index up to
+                // leader's decided index and any suffix.
+                // Note: we snapshot from follower's decided and not follower's valid because
                 // snapshots currently can't handle merging onto accepted entries.
                 let (delta_snapshot, compacted_idx) = self
                     .internal_storage
@@ -234,33 +246,13 @@ where
             } else {
                 let sfx = self
                     .internal_storage
-                    .get_suffix(*followers_accepted_idx)
+                    .get_suffix(followers_valid_entries_idx)
                     .expect("storage error while trying to read log suffix");
-                (None, sfx, *followers_accepted_idx)
-            }
-        } else {
-            // Follower's accepted entries are not valid. Synchronize by sending a snapshot from the follower's decided index up to leader's decided index and any suffix.
-            if T::Snapshot::use_snapshots() && followers_decided_idx < my_decided_idx {
-                let (delta_snapshot, compacted_idx) = self
-                    .internal_storage
-                    .create_diff_snapshot(followers_decided_idx)
-                    .expect("storage error while trying to read diff snapshot");
-                let suffix = self
-                    .internal_storage
-                    .get_suffix(my_decided_idx)
-                    .expect("storage error while trying to read log suffix");
-                (delta_snapshot, suffix, compacted_idx)
-            } else {
-                let suffix = self
-                    .internal_storage
-                    .get_suffix(followers_decided_idx)
-                    .expect("storage error while trying to read log suffix");
-                (None, suffix, followers_decided_idx)
-            }
-        };
+                (None, sfx, followers_valid_entries_idx)
+            };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
-            n: self.leader_state.n_leader,
+            n: my_n,
             seq_num: self.leader_state.next_seq_num(to),
             decided_snapshot: delta_snapshot,
             suffix,
@@ -443,7 +435,7 @@ where
                     }
                     None => {
                         // no snapshot, only suffix
-                        let result = if max_promise_meta.n == old_accepted_round {
+                        let result = if max_promise_meta.n_accepted == old_accepted_round {
                             self.internal_storage
                                 .append_entries_without_batching(suffix)
                         } else {

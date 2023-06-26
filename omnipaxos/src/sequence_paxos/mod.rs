@@ -402,6 +402,10 @@ where
         self.internal_storage
             .set_stopsign(Some(ss))
             .expect("storage error while trying to write stopsign");
+        if self.state.0 == Role::Leader {
+            let accepted_idx = self.internal_storage.get_accepted_idx();
+            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        }
     }
 
     /// Handles re-establishing a connection to a previously disconnected peer.

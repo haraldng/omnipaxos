@@ -555,6 +555,23 @@ impl TestSystem {
             .expect("ReplicaComp never stopped!");
     }
 
+    pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
+        // Remove outgoing connections
+        let node = self.nodes.get(&pid).expect("Cannot find {pid}");
+        node.on_definition(|comp| {
+            for node_id in self.nodes.keys() {
+                comp.set_connection(*node_id, connection_status);
+            }
+        });
+        // Remove incoming connections
+        for node_id in self.nodes.keys() {
+            let node = self.nodes.get(&node_id).expect("Cannot find {pid}");
+            node.on_definition(|comp| {
+                comp.set_connection(pid, connection_status);
+            });
+        }
+    }
+
     /// Return the elected leader from `node`'s viewpoint. If there is no leader yet then
     /// wait until a leader is elected in the allocated time.
     pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
@@ -585,19 +602,45 @@ impl TestSystem {
             .expect("No SequencePaxos component found");
 
         let mut proposal_futures = vec![];
-        for val in proposals {
-            let (kprom, kfuture) = promise::<Value>();
-            proposer.on_definition(|x| {
+        proposer.on_definition(|x| {
+            for val in proposals {
+                let (kprom, kfuture) = promise::<Value>();
                 x.paxos.append(val).expect("Failed to append");
                 x.decided_futures.push(Ask::new(kprom, ()));
-            });
-            proposal_futures.push(kfuture);
-        }
+                proposal_futures.push(kfuture);
+            }
+        });
 
         match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, timeout) {
             Ok(_) => {}
             Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
         }
+    }
+
+    pub fn reconfigure(
+        &self,
+        proposer: u64,
+        new_configuration: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+        timeout: Duration,
+    ) {
+        let proposer = self
+            .nodes
+            .get(&proposer)
+            .expect("No SequencePaxos component found");
+
+        let reconfig_future = proposer.on_definition(|x| {
+            let (kprom, kfuture) = promise::<Value>();
+            x.paxos
+                .reconfigure(new_configuration, metadata)
+                .expect("Failed to reconfigure");
+            x.decided_futures.push(Ask::new(kprom, ()));
+            kfuture
+        });
+
+        reconfig_future
+            .wait_timeout(timeout)
+            .expect("Failed to collect reconfiguration future");
     }
 
     fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
