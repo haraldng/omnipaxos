@@ -4,7 +4,7 @@ Thanks for showing interest in improving OmniPaxos! All contributions (small or 
 For bug reports and feature requests, please create an issue following the appropriate template. Questions and other general discussions related to OmniPaxos should be posted as a [GitHub discussion](https://github.com/haraldng/omnipaxos/discussions).
 
 ## Pull Requests
-Pull requests ise the way to make concrete changes to the code, documentation, and other things related to the OmniPaxos repository. Before implementing a new feature or a big change, please first create an issue that describes the motivation and goal of it. This enables others to give feedback and guidance that will make the PR more likely to get merged.
+Pull requests are the way to make concrete changes to the code, documentation, and other things related to the OmniPaxos repository. Before implementing a new feature or a big change, please first create an issue that describes the motivation and goal of it. This enables others to give feedback and guidance that will make the PR more likely to get merged.
 
 ### Commands
 Before making a PR, please make sure that your branch passes the local checker:
