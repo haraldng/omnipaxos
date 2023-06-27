@@ -21,7 +21,7 @@ let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omnipaxos.  read_decided_
 if let Some(de) = decided_entries {
     for d in de {
         match d {
-            LogEntry::StopSign(stopsign) => {
+            LogEntry::StopSign(stopsign, _stopsign_is_decided) => {
                 let new_configuration = stopsign.next_config;
                 if new_configuration.nodes.contains(&my_pid) {
                 // current configuration has been safely stopped. Start new instance
