@@ -6,6 +6,7 @@ use crate::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     error::Error,
     fmt::Debug,
     marker::PhantomData,
@@ -814,15 +815,11 @@ where
         let decided_idx = self.get_decided_idx();
         let log_decided_idx = self.get_decided_idx_without_stopsign();
         let idx = match snapshot_idx {
-            Some(i) => {
-                if i > decided_idx {
-                    Err(CompactionErr::UndecidedIndex(decided_idx))?
-                } else if i == decided_idx {
-                    log_decided_idx
-                } else {
-                    i
-                }
-            }
+            Some(i) => match i.cmp(&decided_idx) {
+                Ordering::Less => i,
+                Ordering::Equal => log_decided_idx,
+                Ordering::Greater => Err(CompactionErr::UndecidedIndex(decided_idx))?,
+            },
             None => log_decided_idx,
         };
         if idx > self.get_compacted_idx() {
