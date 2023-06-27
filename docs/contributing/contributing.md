@@ -34,7 +34,7 @@ upper-level-menu:
 ```
 
 #### Cross-references
-To make a cross-reference in the documentation, please make sure to remove the ``.md`` suffix from the relative path. For instance, to make a cross-reference from `docs/omnipaxos/compaction.md` to `docs/omnipaxos/logging.md`:
+To make a cross-reference in the documentation, **please make sure to remove the ``.md`` suffix from the relative path**. For instance, to make a cross-reference from `docs/omnipaxos/compaction.md` to `docs/omnipaxos/logging.md`:
 
 ```
 // in docs/omnipaxos/compaction.md
