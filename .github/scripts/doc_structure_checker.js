@@ -1,3 +1,9 @@
+// The script checks the document structure defined in docs/structure.yml
+// and also checks if the cross-references in the documents are valid
+// (i.e. a cross-reference should not end up with '.md').
+// To run the script, use the following command from the root directory:
+// node .github\scripts\doc_structure_checker.js
+
 const yaml = require('js-yaml');
 const fs = require('fs'); // Required for reading the file
 
@@ -16,6 +22,7 @@ function check_docs(docStructure) {
         if (section.hasOwnProperty('path')) {
             checkDocIndex(title, section)
             checkFilePath(`${OmniPaxosDocBasePath}/${section.path}`)
+            checkCrossReferences(`${OmniPaxosDocBasePath}/${section.path}`)
         } else {
             check_docs(section);
         }
@@ -47,4 +54,20 @@ function checkFilePath(filePath) {
     } catch (error) {
         throw new Error(`File "${filePath}" does not exist`);
     }
+}
+
+function checkCrossReferences(filePath) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const regex = /\[(.*?)\]\((.*?)(\.md)\)/g;
+    const crossReferences = [];
+
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        const reference = match[0];
+        crossReferences.push(reference);
+    }
+    if (crossReferences.length !== 0) {
+        throw new Error(`Invalid cross references found in file "${filePath}": "${crossReferences}"`);
+    }
+    return crossReferences;
 }

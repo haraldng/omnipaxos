@@ -13,7 +13,7 @@ Before making a PR, please make sure that your branch passes the local checker:
 ./check.sh
 ```
 
-This runs a check for formatting and all tests using the default features. Since OmniPaxos has quite a few [feature flags](../docs/omnipaxos/features.md), please make sure that you run tests with the appropriate features:
+This runs a check for formatting and all tests using the default features. Since OmniPaxos has quite a few [feature flags](../docs/omnipaxos/features), please make sure that you run tests with the appropriate features:
 
 ```
 cargo test --features <your_features>
