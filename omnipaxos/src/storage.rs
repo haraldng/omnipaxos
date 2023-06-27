@@ -632,7 +632,7 @@ where
         self.state_cache.decided_idx
     }
 
-    fn get_log_decided_idx(&self) -> u64 {
+    fn get_decided_idx_without_stopsign(&self) -> u64 {
         match self.stopsign_is_decided() {
             true => self.get_decided_idx() - 1,
             false => self.get_decided_idx(),
@@ -707,7 +707,7 @@ where
     }
 
     fn create_decided_snapshot(&mut self) -> StorageResult<T::Snapshot> {
-        let log_decided_idx = self.get_log_decided_idx();
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
         self.create_snapshot(log_decided_idx)
     }
 
@@ -723,7 +723,7 @@ where
         &mut self,
         from_idx: u64,
     ) -> StorageResult<(Option<SnapshotType<T>>, u64)> {
-        let log_decided_idx = self.get_log_decided_idx();
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
         let compacted_idx = self.get_compacted_idx();
         let snapshot = if from_idx <= compacted_idx {
             // Some entries in range are compacted, snapshot entire decided log
@@ -812,7 +812,7 @@ where
 
     pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<u64>) -> StorageResult<()> {
         let decided_idx = self.get_decided_idx();
-        let log_decided_idx = self.get_log_decided_idx();
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
         let idx = match snapshot_idx {
             Some(i) => {
                 if i > decided_idx {

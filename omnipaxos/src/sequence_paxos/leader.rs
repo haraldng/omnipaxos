@@ -204,7 +204,7 @@ where
 
     fn send_accsync(&mut self, to: NodeId) {
         let my_decided_idx = self.get_decided_idx();
-        let my_n = self.leader_state.n_leader;
+        let current_n = self.leader_state.n_leader;
         let PromiseMetaData {
             n_accepted: prev_round_max_promise_n,
             accepted_idx: prev_round_max_accepted_idx,
@@ -221,7 +221,7 @@ where
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
         // Follower can have valid accepted entries depending on which leader they were previously following
-        let followers_valid_entries_idx = if *followers_promise_n == my_n {
+        let followers_valid_entries_idx = if *followers_promise_n == current_n {
             *followers_accepted_idx
         } else if *followers_promise_n == *prev_round_max_promise_n {
             *prev_round_max_accepted_idx
@@ -252,7 +252,7 @@ where
             };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
-            n: my_n,
+            n: current_n,
             seq_num: self.leader_state.next_seq_num(to),
             decided_snapshot: delta_snapshot,
             suffix,
