@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-omnipaxos = { version = "0.1.0", features = ["macros"] }
-omnipaxos_storage = { version = "0.1.0" }
+omnipaxos = { path = "../../omnipaxos", features = ["macros"] }
+omnipaxos_storage = { path = "../../omnipaxos_storage"}
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 
