@@ -20,6 +20,9 @@ struct SyncTest {
     followers_compacted_idx: Option<u64>,
 }
 
+/// Tests that a leader whose log consists of everything a log can be made up of (snapshot, decided entries,
+/// undecided entries, stopsign), correctly syncs a follower who is missing decided entries and
+/// has invalid undecided entries.
 #[test]
 #[serial]
 fn sync_full_test() {
@@ -53,6 +56,8 @@ fn sync_full_test() {
     sync_test(test);
 }
 
+/// Tests that a leader, who has a decided stopsign, correctly syncs a follower who is missing
+/// decided entries and has invalid undecided entries.
 #[test]
 #[serial]
 fn sync_decided_ss_test() {
@@ -78,6 +83,7 @@ fn sync_decided_ss_test() {
     sync_test(test);
 }
 
+/// Tests that a leader whose log consists of only a stopsign correctly syncs the follower.
 #[test]
 #[serial]
 fn sync_only_stopsign_test() {
@@ -99,6 +105,8 @@ fn sync_only_stopsign_test() {
     sync_test(test);
 }
 
+/// Tests that the leader syncs the follower using a decided snapshot which the follower correctly
+/// merges onto their empty log.
 #[test]
 #[serial]
 fn sync_only_snapshot_test() {
@@ -120,6 +128,8 @@ fn sync_only_snapshot_test() {
     sync_test(test);
 }
 
+/// Tests that the leader syncs the follower using a decided snapshot which correctly merges onto
+/// the partly-snapshotted decided entries of the follower.
 #[test]
 #[serial]
 fn sync_follower_snapshot_test() {
