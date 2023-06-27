@@ -246,7 +246,7 @@ where
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T>),
     /// This Sequence Paxos instance has been stopped for reconfiguration. The accompanying bool
-    /// indicates whether the reconfiguration has been decided or not.
+    /// indicates whether the reconfiguration has been decided or not. If it is `true`, then the OmniPaxos instance for the new configuration can be started.
     StopSign(StopSign, bool),
 }
 
