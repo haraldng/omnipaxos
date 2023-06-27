@@ -422,7 +422,7 @@ where
                     compacted_idx,
                     decided_idx,
                 )?;
-                entries.push(LogEntry::StopSign(ss));
+                entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::Entry) => {
@@ -453,11 +453,14 @@ where
                     decided_idx,
                 )?;
                 entries.append(&mut e);
-                entries.push(LogEntry::StopSign(ss));
+                entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
             }
             (IndexEntry::StopSign(ss), IndexEntry::StopSign(_)) => {
-                Ok(Some(vec![LogEntry::StopSign(ss)]))
+                Ok(Some(vec![LogEntry::StopSign(
+                    ss,
+                    self.stopsign_is_decided(),
+                )]))
             }
             e => {
                 unimplemented!("{}", format!("Unexpected read combination: {:?}", e))

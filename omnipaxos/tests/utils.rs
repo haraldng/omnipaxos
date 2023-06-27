@@ -818,7 +818,7 @@ pub mod omnireplica {
                                     .reply(s.snapshot.value)
                                     .expect("Failed to reply promise!");
                             }
-                            LogEntry::StopSign(ss) => self
+                            LogEntry::StopSign(ss, _is_decided) => self
                                 .decided_futures
                                 .pop()
                                 .unwrap()
@@ -984,7 +984,7 @@ pub mod verification {
             read_entries
         );
         match read_entries.first().unwrap() {
-            LogEntry::StopSign(ss) => {
+            LogEntry::StopSign(ss, _is_decided) => {
                 assert_eq!(ss, exp_stopsign);
             }
             e => {

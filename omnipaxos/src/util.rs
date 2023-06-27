@@ -245,8 +245,9 @@ where
     Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T>),
-    /// This Sequence Paxos instance has been stopped for reconfiguration.
-    StopSign(StopSign),
+    /// This Sequence Paxos instance has been stopped for reconfiguration. The accompanying bool
+    /// indicates whether the reconfiguration has been decided or not.
+    StopSign(StopSign, bool),
 }
 
 /// Convenience struct for checking if a certain index exists, is compacted or is a StopSign.
