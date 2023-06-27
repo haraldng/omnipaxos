@@ -209,23 +209,29 @@ where
         }
     }
 
-    /// Detects if a Prepare, AcceptStopSign, or PrepareReq message has been sent but not received a reply.
-    /// If so resends them.
+    /// Detects if a Prepare, Promise, AcceptStopSign, Decide of a Stopsign, or PrepareReq message
+    /// has been sent but not been received. If so resends them. Note: We can't detect if a
+    /// StopSign's Decide message has been received so we always resend to be safe.
     pub(crate) fn resend_message_timeout(&mut self) {
         match &self.state {
-            (Role::Leader, phase) => {
+            (Role::Leader, Phase::Prepare) => {
+                // Resend Prepare
+                let unpromised_peers = self.leader_state.get_unpromised_peers();
+                for peer in unpromised_peers {
+                    self.send_prepare(peer);
+                }
+            }
+            (Role::Leader, Phase::Accept) => {
                 // Resend AcceptStopSign or StopSign's decide
-                if *phase == Phase::Accept {
-                    if let Some(ss) = self.internal_storage.get_stopsign() {
-                        let decided_idx = self.internal_storage.get_decided_idx();
-                        for follower in self.leader_state.get_promised_followers() {
-                            if self.internal_storage.stopsign_is_decided() {
-                                self.send_decide(follower, decided_idx, true);
-                            } else if self.leader_state.get_accepted_idx(follower)
-                                != self.internal_storage.get_accepted_idx()
-                            {
-                                self.send_accept_stopsign(follower, ss.clone(), true);
-                            }
+                if let Some(ss) = self.internal_storage.get_stopsign() {
+                    let decided_idx = self.internal_storage.get_decided_idx();
+                    for follower in self.leader_state.get_promised_followers() {
+                        if self.internal_storage.stopsign_is_decided() {
+                            self.send_decide(follower, decided_idx, true);
+                        } else if self.leader_state.get_accepted_idx(follower)
+                            != self.internal_storage.get_accepted_idx()
+                        {
+                            self.send_accept_stopsign(follower, ss.clone(), true);
                         }
                     }
                 }
@@ -235,43 +241,39 @@ where
                     self.send_prepare(peer);
                 }
             }
-            (Role::Follower, phase) => {
-                match phase {
-                    Phase::Recover => {
-                        // Resend PrepareReq
+            (Role::Follower, Phase::Prepare) => {
+                // Resend Promise
+                match &self.cached_promise {
+                    Some(promise) => {
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: promise.n.pid,
+                            msg: PaxosMsg::Promise(promise.clone()),
+                        });
+                    }
+                    None => {
+                        // Shouldn't be possible to be in prepare phase without having
+                        // cached the promise sent as a response to the prepare
+                        #[cfg(feature = "logging")]
+                        warn!(self.logger, "In Prepare phase without a cached promise!");
+                        self.state = (Role::Follower, Phase::Recover);
                         self.outgoing.push(PaxosMessage {
                             from: self.pid,
                             to: self.leader.pid,
                             msg: PaxosMsg::PrepareReq,
                         });
                     }
-                    Phase::Prepare => {
-                        // Resend Promise
-                        match &self.cached_promise {
-                            Some(promise) => {
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: promise.n.pid,
-                                    msg: PaxosMsg::Promise(promise.clone()),
-                                });
-                            }
-                            None => {
-                                // Shouldn't be possible to be in prepare phase without having
-                                // cached the promise sent as a response to the prepare
-                                #[cfg(feature = "logging")]
-                                warn!(self.logger, "In Prepare phase without a cached promise!");
-                                self.state = (Role::Follower, Phase::Recover);
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: self.leader.pid,
-                                    msg: PaxosMsg::PrepareReq,
-                                });
-                            }
-                        }
-                    }
-                    _ => (),
                 }
             }
+            (Role::Follower, Phase::Recover) => {
+                // Resend PrepareReq
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: self.leader.pid,
+                    msg: PaxosMsg::PrepareReq,
+                });
+            }
+            _ => (),
         }
     }
 
