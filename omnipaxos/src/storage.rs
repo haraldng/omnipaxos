@@ -6,6 +6,7 @@ use crate::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     error::Error,
     fmt::Debug,
     marker::PhantomData,
@@ -21,31 +22,6 @@ pub trait Entry: Clone + Debug {
     #[cfg(feature = "serde")]
     /// The snapshot type for this entry type.
     type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
-}
-
-/// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
-#[derive(Clone, Debug)]
-#[allow(missing_docs)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct StopSignEntry {
-    pub stopsign: StopSign,
-    /// The log index of the StopSign
-    pub log_idx: u64,
-}
-
-impl StopSignEntry {
-    /// Creates a [`StopSign`].
-    pub fn with(stopsign: StopSign, idx: u64) -> Self {
-        StopSignEntry {
-            stopsign,
-            log_idx: idx,
-        }
-    }
-
-    /// Checks if the stopsign is decided.
-    pub fn decided(&self, decided_idx: u64) -> bool {
-        self.log_idx < decided_idx
-    }
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -144,10 +120,10 @@ where
     fn get_promise(&self) -> StorageResult<Option<Ballot>>;
 
     /// Sets the StopSign used for reconfiguration.
-    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()>;
+    fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()>;
 
     /// Returns the stored StopSign, returns `None` if no StopSign has been stored.
-    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>>;
+    fn get_stopsign(&self) -> StorageResult<Option<StopSign>>;
 
     /// Removes elements up to the given [`idx`] from storage.
     fn trim(&mut self, idx: u64) -> StorageResult<()>;
@@ -215,7 +191,7 @@ where
     /// Real length of logs in the storage.
     real_log_len: u64,
     /// Stopsign entry.
-    stopsign: Option<StopSignEntry>,
+    stopsign: Option<StopSign>,
 }
 
 impl<T> StateCache<T>
@@ -243,6 +219,11 @@ where
         } else {
             log_len
         }
+    }
+
+    // Returns whether a stopsign is decided
+    fn stopsign_is_decided(&self) -> bool {
+        self.stopsign.is_some() && self.decided_idx == self.get_accepted_idx()
     }
 
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
@@ -384,7 +365,7 @@ where
             Ok(Some(IndexEntry::Entry))
         } else if idx == virtual_log_len {
             match self.get_stopsign() {
-                Some(ss) => Ok(Some(IndexEntry::StopSign(ss.stopsign))),
+                Some(ss) => Ok(Some(IndexEntry::StopSign(ss))),
                 _ => Ok(None),
             }
         } else {
@@ -442,7 +423,7 @@ where
                     compacted_idx,
                     decided_idx,
                 )?;
-                entries.push(LogEntry::StopSign(ss));
+                entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::Entry) => {
@@ -473,11 +454,14 @@ where
                     decided_idx,
                 )?;
                 entries.append(&mut e);
-                entries.push(LogEntry::StopSign(ss));
+                entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
             }
             (IndexEntry::StopSign(ss), IndexEntry::StopSign(_)) => {
-                Ok(Some(vec![LogEntry::StopSign(ss)]))
+                Ok(Some(vec![LogEntry::StopSign(
+                    ss,
+                    self.stopsign_is_decided(),
+                )]))
             }
             e => {
                 unimplemented!("{}", format!("Unexpected read combination: {:?}", e))
@@ -649,6 +633,13 @@ where
         self.state_cache.decided_idx
     }
 
+    fn get_decided_idx_without_stopsign(&self) -> u64 {
+        match self.stopsign_is_decided() {
+            true => self.get_decided_idx() - 1,
+            false => self.get_decided_idx(),
+        }
+    }
+
     pub(crate) fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
         self.state_cache.accepted_round = na;
         self.storage.set_accepted_round(na)
@@ -686,17 +677,25 @@ where
         self.state_cache.promise
     }
 
-    pub(crate) fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
-        self.state_cache.stopsign = Some(s.clone());
+    pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
+        self.state_cache.stopsign = s.clone();
         self.storage.set_stopsign(s)
     }
 
-    pub(crate) fn get_stopsign(&self) -> Option<StopSignEntry> {
+    pub(crate) fn get_stopsign(&self) -> Option<StopSign> {
         self.state_cache.stopsign.clone()
+    }
+
+    // Returns whether a stopsign is decided
+    pub(crate) fn stopsign_is_decided(&self) -> bool {
+        self.state_cache.stopsign_is_decided()
     }
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
         let compacted_idx = self.get_compacted_idx();
+        if compact_idx < compacted_idx {
+            Err(CompactionErr::TrimmedIndex(compacted_idx))?
+        }
         let entries = self.storage.get_entries(0, compact_idx - compacted_idx)?;
         let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot()? {
@@ -708,23 +707,42 @@ where
         }
     }
 
+    fn create_decided_snapshot(&mut self) -> StorageResult<T::Snapshot> {
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
+        self.create_snapshot(log_decided_idx)
+    }
+
     pub(crate) fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
         self.storage.get_snapshot()
     }
 
+    // Creates a Delta snapshot of entries from `from_idx` to the end of the decided log and also
+    // returns the compacted idx of the created snapshot. If the range of entries contains entries
+    // which have already been compacted a valid delta cannot be created, so creates a Complete
+    // snapshot of the entire decided log instead.
     pub(crate) fn create_diff_snapshot(
         &mut self,
         from_idx: u64,
-        to_idx: u64,
-    ) -> StorageResult<SnapshotType<T>> {
-        if self.get_compacted_idx() >= from_idx {
-            Ok(SnapshotType::Complete(self.create_snapshot(to_idx)?))
+    ) -> StorageResult<(Option<SnapshotType<T>>, u64)> {
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
+        let compacted_idx = self.get_compacted_idx();
+        let snapshot = if from_idx <= compacted_idx {
+            // Some entries in range are compacted, snapshot entire decided log
+            if compacted_idx < log_decided_idx {
+                Some(SnapshotType::Complete(
+                    self.create_snapshot(log_decided_idx)?,
+                ))
+            } else {
+                // Entire decided log already snapshotted
+                self.get_snapshot()?.map(|s| SnapshotType::Complete(s))
+            }
         } else {
-            let diff_entries = self.get_entries(from_idx, to_idx)?;
-            Ok(SnapshotType::Delta(T::Snapshot::create(
+            let diff_entries = self.get_entries(from_idx, log_decided_idx)?;
+            Some(SnapshotType::Delta(T::Snapshot::create(
                 diff_entries.as_slice(),
             )))
-        }
+        };
+        Ok((snapshot, log_decided_idx))
     }
 
     pub(crate) fn reset_snapshot(&mut self) -> StorageResult<()> {
@@ -754,11 +772,10 @@ where
     }
 
     pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: T::Snapshot) -> StorageResult<()> {
-        let log_len = self.state_cache.real_log_len;
         let mut snapshot = if let Some(snap) = self.storage.get_snapshot()? {
             snap
         } else {
-            self.create_snapshot(log_len)?
+            self.create_decided_snapshot()?
         };
         snapshot.merge(delta);
         self.set_snapshot(idx, snapshot)
@@ -796,15 +813,14 @@ where
 
     pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<u64>) -> StorageResult<()> {
         let decided_idx = self.get_decided_idx();
+        let log_decided_idx = self.get_decided_idx_without_stopsign();
         let idx = match snapshot_idx {
-            Some(i) => {
-                if i <= decided_idx {
-                    i
-                } else {
-                    Err(CompactionErr::UndecidedIndex(decided_idx))?
-                }
-            }
-            None => decided_idx,
+            Some(i) => match i.cmp(&decided_idx) {
+                Ordering::Less => i,
+                Ordering::Equal => log_decided_idx,
+                Ordering::Greater => Err(CompactionErr::UndecidedIndex(decided_idx))?,
+            },
+            None => log_decided_idx,
         };
         if idx > self.get_compacted_idx() {
             let snapshot = self.create_snapshot(idx)?;

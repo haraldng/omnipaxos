@@ -7,7 +7,7 @@ use commitlog::{
 };
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSignEntry, Storage, StorageResult},
+    storage::{Entry, StopSign, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
 use std::{iter::FromIterator, marker::PhantomData};
@@ -219,6 +219,11 @@ where
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+        // Required check because Commitlog has a bug where appending an empty set of entries will
+        // always return an offset.first() with 0 despite entries being in the log.
+        if entries.is_empty() {
+            return self.get_log_len();
+        }
         let mut serialized = vec![];
         for entry in entries {
             serialized.push(bincode::serialize(&entry)?)
@@ -391,12 +396,12 @@ where
         Ok(())
     }
 
-    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
+    fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
         #[cfg(feature = "rocksdb")]
         {
             let stopsign = self.rocksdb.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
+                Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
                 None => Ok(None),
             }
         }
@@ -404,13 +409,13 @@ where
         {
             let stopsign = self.sled.get(STOPSIGN)?;
             match stopsign {
-                Some(ss_bytes) => Ok(Some(bincode::deserialize(&ss_bytes)?)),
+                Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
                 None => Ok(None),
             }
         }
     }
 
-    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
+    fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&s)?;
         #[cfg(feature = "rocksdb")]
         {

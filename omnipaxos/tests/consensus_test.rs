@@ -2,7 +2,7 @@ pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{
-    storage::{Snapshot, StopSign, StopSignEntry, Storage},
+    storage::{Snapshot, StopSign, Storage},
     ClusterConfig, OmniPaxosConfig,
 };
 use serial_test::serial;
@@ -137,7 +137,7 @@ fn read_test() {
         .append_entries(log.clone())
         .expect("Failed to append entries");
     stopped_storage
-        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
+        .set_stopsign(Some(ss.clone()))
         .expect("Failed to set StopSign");
     stopped_storage
         .set_decided_idx(log_len + 1)
@@ -230,9 +230,7 @@ fn read_entries_test() {
     stopped_storage
         .append_entries(log.clone())
         .expect("Failed to append entries");
-    stopped_storage
-        .set_stopsign(StopSignEntry::with(ss.clone(), log_len))
-        .unwrap();
+    stopped_storage.set_stopsign(Some(ss.clone())).unwrap();
     stopped_storage.set_decided_idx(log_len + 1).unwrap();
 
     let mut stopped_op = op_config.build(stopped_storage).unwrap();
