@@ -1,7 +1,7 @@
 use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::*,
-    storage::{Entry, StopSign, StopSignEntry, Storage},
+    storage::{Entry, StopSign, Storage},
     util::LeaderState,
 };
 #[cfg(feature = "logging")]
@@ -209,71 +209,71 @@ where
         }
     }
 
-    /// Detects if a Prepare, AcceptStopSign, or PrepareReq message has been sent but not received a reply.
-    /// If so resends them.
+    /// Detects if a Prepare, Promise, AcceptStopSign, Decide of a Stopsign, or PrepareReq message
+    /// has been sent but not been received. If so resends them. Note: We can't detect if a
+    /// StopSign's Decide message has been received so we always resend to be safe.
     pub(crate) fn resend_message_timeout(&mut self) {
         match &self.state {
-            (Role::Leader, phase) => {
-                // Resend AcceptStopSign
-                if *phase == Phase::Accept {
-                    // TODO: This is slow. Get stopsign from cache instead.
-                    if let Some(ss) = self.internal_storage.get_stopsign() {
-                        let decided_idx = self.internal_storage.get_decided_idx();
-                        if !ss.decided(decided_idx) {
-                            for follower in self.leader_state.get_promised_followers() {
-                                // resend if the follower has not accepted the stopsign
-                                if !ss.decided(self.leader_state.get_accepted_idx(follower)) {
-                                    self.send_accept_stopsign(follower, ss.stopsign.clone(), true);
-                                }
-                            }
-                        }
-                        // TODO: resend decided stopsign
-                    }
-                }
-
+            (Role::Leader, Phase::Prepare) => {
                 // Resend Prepare
                 let unpromised_peers = self.leader_state.get_unpromised_peers();
                 for peer in unpromised_peers {
                     self.send_prepare(peer);
                 }
             }
-            (Role::Follower, phase) => {
-                match phase {
-                    Phase::Recover => {
-                        // Resend PrepareReq
+            (Role::Leader, Phase::Accept) => {
+                // Resend AcceptStopSign or StopSign's decide
+                if let Some(ss) = self.internal_storage.get_stopsign() {
+                    let decided_idx = self.internal_storage.get_decided_idx();
+                    for follower in self.leader_state.get_promised_followers() {
+                        if self.internal_storage.stopsign_is_decided() {
+                            self.send_decide(follower, decided_idx, true);
+                        } else if self.leader_state.get_accepted_idx(follower)
+                            != self.internal_storage.get_accepted_idx()
+                        {
+                            self.send_accept_stopsign(follower, ss.clone(), true);
+                        }
+                    }
+                }
+                // Resend Prepare
+                let unpromised_peers = self.leader_state.get_unpromised_peers();
+                for peer in unpromised_peers {
+                    self.send_prepare(peer);
+                }
+            }
+            (Role::Follower, Phase::Prepare) => {
+                // Resend Promise
+                match &self.cached_promise {
+                    Some(promise) => {
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: promise.n.pid,
+                            msg: PaxosMsg::Promise(promise.clone()),
+                        });
+                    }
+                    None => {
+                        // Shouldn't be possible to be in prepare phase without having
+                        // cached the promise sent as a response to the prepare
+                        #[cfg(feature = "logging")]
+                        warn!(self.logger, "In Prepare phase without a cached promise!");
+                        self.state = (Role::Follower, Phase::Recover);
                         self.outgoing.push(PaxosMessage {
                             from: self.pid,
                             to: self.leader.pid,
                             msg: PaxosMsg::PrepareReq,
                         });
                     }
-                    Phase::Prepare => {
-                        // Resend Promise
-                        match &self.cached_promise {
-                            Some(promise) => {
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: promise.n.pid,
-                                    msg: PaxosMsg::Promise(promise.clone()),
-                                });
-                            }
-                            None => {
-                                // Shouldn't be possible to be in prepare phase without having
-                                // cached the promise sent as a response to the prepare
-                                #[cfg(feature = "logging")]
-                                warn!(self.logger, "In Prepare phase without a cached promise!");
-                                self.state = (Role::Follower, Phase::Recover);
-                                self.outgoing.push(PaxosMessage {
-                                    from: self.pid,
-                                    to: self.leader.pid,
-                                    msg: PaxosMsg::PrepareReq,
-                                });
-                            }
-                        }
-                    }
-                    _ => (),
                 }
             }
+            (Role::Follower, Phase::Recover) => {
+                // Resend PrepareReq
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: self.leader.pid,
+                    msg: PaxosMsg::PrepareReq,
+                });
+            }
+            _ => (),
         }
     }
 
@@ -317,16 +317,15 @@ where
 
     /// Returns whether this Sequence Paxos has been reconfigured
     pub(crate) fn is_reconfigured(&self) -> Option<StopSign> {
-        let decided_idx = self.internal_storage.get_decided_idx();
         match self.internal_storage.get_stopsign() {
-            Some(ss) if ss.decided(decided_idx) => Some(ss.stopsign),
+            Some(ss) if self.internal_storage.stopsign_is_decided() => Some(ss),
             _ => None,
         }
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
     fn pending_reconfiguration(&self) -> bool {
-        self.get_stopsign().is_some()
+        self.internal_storage.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
@@ -402,13 +401,11 @@ where
     }
 
     fn accept_stopsign(&mut self, ss: StopSign) {
-        let ss_log_idx = self.internal_storage.get_accepted_idx();
         self.internal_storage
-            .set_stopsign(StopSignEntry::with(ss, ss_log_idx))
+            .set_stopsign(Some(ss))
             .expect("storage error while trying to write stopsign");
-        let accepted_idx = self.internal_storage.get_accepted_idx();
-        assert_eq!(accepted_idx, ss_log_idx + 1);
         if self.state.0 == Role::Leader {
+            let accepted_idx = self.internal_storage.get_accepted_idx();
             self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         }
     }
@@ -434,10 +431,6 @@ where
             (Role::Leader, Phase::Accept) => self.accept_entry(entry),
             _ => self.forward_proposals(vec![entry]),
         }
-    }
-
-    fn get_stopsign(&self) -> Option<StopSign> {
-        self.internal_storage.get_stopsign().map(|x| x.stopsign)
     }
 }
 

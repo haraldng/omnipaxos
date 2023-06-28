@@ -1,6 +1,6 @@
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSignEntry, Storage, StorageResult},
+    storage::{Entry, StopSign, Storage, StorageResult},
 };
 /// An in-memory storage implementation for SequencePaxos.
 #[derive(Clone)]
@@ -21,7 +21,7 @@ where
     /// Stored snapshot
     snapshot: Option<T::Snapshot>,
     /// Stored StopSign
-    stopsign: Option<StopSignEntry>,
+    stopsign: Option<StopSign>,
 }
 
 impl<T> Storage<T> for MemoryStorage<T>
@@ -90,12 +90,12 @@ where
         Ok(Some(self.n_prom))
     }
 
-    fn set_stopsign(&mut self, s: StopSignEntry) -> StorageResult<()> {
-        self.stopsign = Some(s);
+    fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
+        self.stopsign = s;
         Ok(())
     }
 
-    fn get_stopsign(&self) -> StorageResult<Option<StopSignEntry>> {
+    fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
         Ok(self.stopsign.clone())
     }
 

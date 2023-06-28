@@ -40,7 +40,7 @@ where
                 decided_idx,
                 accepted_idx,
                 suffix: vec![],
-                stopsign: self.get_stopsign(),
+                stopsign: self.internal_storage.get_stopsign(),
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
@@ -204,68 +204,61 @@ where
 
     fn send_accsync(&mut self, to: NodeId) {
         let my_decided_idx = self.get_decided_idx();
+        let current_n = self.leader_state.n_leader;
         let PromiseMetaData {
-            n: max_promise_n,
-            accepted_idx: max_accepted_idx,
+            n_accepted: prev_round_max_promise_n,
+            accepted_idx: prev_round_max_accepted_idx,
             ..
         } = &self.leader_state.get_max_promise_meta();
         let PromiseMetaData {
-            n: promise_n,
-            accepted_idx: promise_accepted_idx,
+            n_accepted: followers_promise_n,
+            accepted_idx: followers_accepted_idx,
             pid,
             ..
         } = self.leader_state.get_promise_meta(to);
-        let follower_decided_idx = self
+        let followers_decided_idx = self
             .leader_state
             .get_decided_idx(*pid)
             .expect("Received PromiseMetaData but not found in ld");
+        // Follower can have valid accepted entries depending on which leader they were previously following
+        let followers_valid_entries_idx = if *followers_promise_n == current_n {
+            *followers_accepted_idx
+        } else if *followers_promise_n == *prev_round_max_promise_n {
+            *prev_round_max_accepted_idx
+        } else {
+            followers_decided_idx
+        };
         let (delta_snapshot, suffix, sync_idx) =
-            if (promise_n == max_promise_n) && (promise_accepted_idx < max_accepted_idx) {
-                if self.internal_storage.get_compacted_idx() > *promise_accepted_idx
-                    && T::Snapshot::use_snapshots()
-                {
-                    let delta_snapshot = self
-                        .internal_storage
-                        .create_diff_snapshot(follower_decided_idx, my_decided_idx)
-                        .expect("storage error while trying to read diff snapshot");
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(my_decided_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (Some(delta_snapshot), suffix, follower_decided_idx)
-                } else {
-                    let sfx = self
-                        .internal_storage
-                        .get_suffix(*promise_accepted_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (None, sfx, *promise_accepted_idx)
-                }
-            } else if follower_decided_idx < my_decided_idx && T::Snapshot::use_snapshots() {
-                let delta_snapshot = self
+            if T::Snapshot::use_snapshots() && followers_valid_entries_idx < my_decided_idx {
+                // Synchronize by sending a snapshot from the follower's decided index up to
+                // leader's decided index and any suffix.
+                // Note: we snapshot from follower's decided and not follower's valid because
+                // snapshots currently can't handle merging onto accepted entries.
+                let (delta_snapshot, compacted_idx) = self
                     .internal_storage
-                    .create_diff_snapshot(follower_decided_idx, my_decided_idx)
+                    .create_diff_snapshot(followers_decided_idx)
                     .expect("storage error while trying to read diff snapshot");
                 let suffix = self
                     .internal_storage
                     .get_suffix(my_decided_idx)
                     .expect("storage error while trying to read log suffix");
-                (Some(delta_snapshot), suffix, follower_decided_idx)
+                (delta_snapshot, suffix, compacted_idx)
             } else {
-                let suffix = self
+                let sfx = self
                     .internal_storage
-                    .get_suffix(follower_decided_idx)
+                    .get_suffix(followers_valid_entries_idx)
                     .expect("storage error while trying to read log suffix");
-                (None, suffix, follower_decided_idx)
+                (None, sfx, followers_valid_entries_idx)
             };
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
-            n: self.leader_state.n_leader,
+            n: current_n,
             seq_num: self.leader_state.next_seq_num(to),
             decided_snapshot: delta_snapshot,
             suffix,
             sync_idx,
             decided_idx: my_decided_idx,
-            stopsign: self.get_stopsign(),
+            stopsign: self.internal_storage.get_stopsign(),
         };
         let msg = PaxosMessage {
             from: self.pid,
@@ -314,10 +307,14 @@ where
         }
     }
 
-    fn send_decide(&mut self, to: NodeId, decided_idx: u64) {
+    pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: u64, resend: bool) {
+        let seq_num = match resend {
+            true => self.leader_state.get_seq_num(to),
+            false => self.leader_state.next_seq_num(to),
+        };
         let d = Decide {
             n: self.leader_state.n_leader,
-            seq_num: self.leader_state.next_seq_num(to),
+            seq_num,
             decided_idx,
         };
         self.outgoing.push(PaxosMessage {
@@ -428,16 +425,17 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if let Some(ss) = max_stopsign {
-                            self.accept_stopsign(ss);
-                        } else {
+                        if max_stopsign.is_none() {
                             self.append_pending_proposals();
                             self.adopt_pending_stopsign();
                         }
+                        self.internal_storage
+                            .set_stopsign(max_stopsign)
+                            .expect("storage error while trying to write stopsign");
                     }
                     None => {
                         // no snapshot, only suffix
-                        let result = if max_promise_meta.n == old_accepted_round {
+                        let result = if max_promise_meta.n_accepted == old_accepted_round {
                             self.internal_storage
                                 .append_entries_without_batching(suffix)
                         } else {
@@ -451,12 +449,13 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if let Some(ss) = max_stopsign {
-                            self.accept_stopsign(ss);
-                        } else {
+                        if max_stopsign.is_none() {
                             self.append_pending_proposals();
                             self.adopt_pending_stopsign();
                         }
+                        self.internal_storage
+                            .set_stopsign(max_stopsign)
+                            .expect("storage error while trying to write stopsign");
                     }
                 }
             }
@@ -532,13 +531,13 @@ where
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.decided_idx = decided_idx;
                                     }
-                                    _ => self.send_decide(pid, decided_idx),
+                                    _ => self.send_decide(pid, decided_idx, false),
                                 }
                             }
-                            _ => self.send_decide(pid, decided_idx),
+                            _ => self.send_decide(pid, decided_idx, false),
                         }
                     } else {
-                        self.send_decide(pid, decided_idx);
+                        self.send_decide(pid, decided_idx, false);
                     }
                 }
             }

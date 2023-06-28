@@ -4,7 +4,7 @@ use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
 use omnipaxos::util::LogEntry;
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{verification::verify_log, TestConfig, TestSystem, Value};
+use utils::{verification::verify_log, StorageType, TestConfig, TestSystem, Value};
 
 const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -251,6 +251,8 @@ pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
     thread::sleep(SLEEP_TIMEOUT);
 
     let storage_path = sys.temp_dir_path.clone();
-    sys.create_node(pid, cfg, cfg.storage_type, &storage_path);
+    let storage: StorageType<Value> =
+        StorageType::with(cfg.storage_type, &format!("{storage_path}{pid}"));
+    sys.create_node(pid, cfg, storage);
     sys.start_node(pid);
 }

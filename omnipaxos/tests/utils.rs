@@ -187,6 +187,10 @@ where
             ),
         }
     }
+
+    pub fn with_memory(mem: MemoryStorage<T>) -> Self {
+        StorageType::Memory(mem)
+    }
 }
 
 impl<T> Storage<T> for StorageType<T>
@@ -326,7 +330,7 @@ where
         }
     }
 
-    fn set_stopsign(&mut self, s: omnipaxos::storage::StopSignEntry) -> StorageResult<()> {
+    fn set_stopsign(&mut self, s: Option<omnipaxos::storage::StopSign>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
@@ -337,7 +341,7 @@ where
         }
     }
 
-    fn get_stopsign(&self) -> StorageResult<Option<omnipaxos::storage::StopSignEntry>> {
+    fn get_stopsign(&self) -> StorageResult<Option<omnipaxos::storage::StopSign>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
@@ -492,13 +496,10 @@ impl TestSystem {
         &mut self,
         pid: NodeId,
         test_config: &TestConfig,
-        storage_type: StorageTypeSelector,
-        storage_path: &str,
+        storage: StorageType<Value>,
     ) {
         let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
         let op_config = test_config.into_omnipaxos_config(pid);
-        let storage: StorageType<Value> =
-            StorageType::with(storage_type, &format!("{storage_path}{pid}"));
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
@@ -554,21 +555,42 @@ impl TestSystem {
             .expect("ReplicaComp never stopped!");
     }
 
+    pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
+        // Remove outgoing connections
+        let node = self.nodes.get(&pid).expect("Cannot find {pid}");
+        node.on_definition(|comp| {
+            for node_id in self.nodes.keys() {
+                comp.set_connection(*node_id, connection_status);
+            }
+        });
+        // Remove incoming connections
+        for node_id in self.nodes.keys() {
+            let node = self.nodes.get(&node_id).expect("Cannot find {pid}");
+            node.on_definition(|comp| {
+                comp.set_connection(pid, connection_status);
+            });
+        }
+    }
+
     /// Return the elected leader from `node`'s viewpoint. If there is no leader yet then
     /// wait until a leader is elected in the allocated time.
-    pub fn get_elected_leader(&self, node: u64, wait_timeout: Duration) -> u64 {
-        let node = self.nodes.get(&node).expect("No BLE component found");
+    pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+        let node = self.nodes.get(&node_id).expect("No BLE component found");
 
         let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
-        leader_pid.unwrap_or_else(|| {
-            // Leader is not elected yet
-            let (kprom, kfuture) = promise::<Ballot>();
-            node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
-            let ballot = kfuture
-                .wait_timeout(wait_timeout)
-                .expect("No leader has been elected in the allocated time!");
-            ballot.pid
-        })
+        leader_pid.unwrap_or_else(|| self.get_next_leader(node_id, wait_timeout))
+    }
+
+    /// Return the next new elected leader from `node`'s viewpoint. If there is no leader yet then
+    /// wait until a leader is elected in the allocated time.
+    pub fn get_next_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+        let node = self.nodes.get(&node_id).expect("No BLE component found");
+        let (kprom, kfuture) = promise::<Ballot>();
+        node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
+        let ballot = kfuture
+            .wait_timeout(wait_timeout)
+            .expect("No leader has been elected in the allocated time!");
+        ballot.pid
     }
 
     /// Use node `proposer` to propose `proposals` then waits for the proposals
@@ -580,19 +602,45 @@ impl TestSystem {
             .expect("No SequencePaxos component found");
 
         let mut proposal_futures = vec![];
-        for val in proposals {
-            let (kprom, kfuture) = promise::<Value>();
-            proposer.on_definition(|x| {
+        proposer.on_definition(|x| {
+            for val in proposals {
+                let (kprom, kfuture) = promise::<Value>();
                 x.paxos.append(val).expect("Failed to append");
                 x.decided_futures.push(Ask::new(kprom, ()));
-            });
-            proposal_futures.push(kfuture);
-        }
+                proposal_futures.push(kfuture);
+            }
+        });
 
         match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, timeout) {
             Ok(_) => {}
             Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
         }
+    }
+
+    pub fn reconfigure(
+        &self,
+        proposer: u64,
+        new_configuration: ClusterConfig,
+        metadata: Option<Vec<u8>>,
+        timeout: Duration,
+    ) {
+        let proposer = self
+            .nodes
+            .get(&proposer)
+            .expect("No SequencePaxos component found");
+
+        let reconfig_future = proposer.on_definition(|x| {
+            let (kprom, kfuture) = promise::<Value>();
+            x.paxos
+                .reconfigure(new_configuration, metadata)
+                .expect("Failed to reconfigure");
+            x.decided_futures.push(Ask::new(kprom, ()));
+            kfuture
+        });
+
+        reconfig_future
+            .wait_timeout(timeout)
+            .expect("Failed to collect reconfiguration future");
     }
 
     fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
@@ -770,7 +818,7 @@ pub mod omnireplica {
                                     .reply(s.snapshot.value)
                                     .expect("Failed to reply promise!");
                             }
-                            LogEntry::StopSign(ss) => self
+                            LogEntry::StopSign(ss, _is_decided) => self
                                 .decided_futures
                                 .pop()
                                 .unwrap()
@@ -862,6 +910,11 @@ pub mod verification {
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);
                 verify_entries(decided_entries, last_proposals, 0, num_proposals);
             }
+            [] => assert!(
+                proposals.len() == 0,
+                "Log is empty but should be {:?}",
+                proposals
+            ),
             _ => panic!("Unexpected entries in the log: {:?} ", read_log),
         }
     }
@@ -931,7 +984,7 @@ pub mod verification {
             read_entries
         );
         match read_entries.first().unwrap() {
-            LogEntry::StopSign(ss) => {
+            LogEntry::StopSign(ss, _is_decided) => {
                 assert_eq!(ss, exp_stopsign);
             }
             e => {
