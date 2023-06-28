@@ -51,7 +51,7 @@ let server_config = ServerConfig {
 let omnipaxos_config = OmniPaxosConfig {
     cluster_config,
     server_config,
-}
+};
 
 let storage = MemoryStorage::default();
 let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage).unwrap();
