@@ -12,9 +12,11 @@ Similar to Raft, OmniPaxos can be used to build strongly consistent services suc
 
 An OmniPaxos node is implemented as a plain Rust `struct`. This allows it to be used with any desired storage, network, and runtime implementations.
 
-For more detailed explanations and tutorials showcasing our features, check out https://omnipaxos.com.
+For more detailed explanations and tutorials showcasing our features, check out https://omnipaxos.com. 
 
 To learn more about OmniPaxos, check out our [EuroSys'23 paper](https://dl.acm.org/doi/pdf/10.1145/3552326.3587441).
+
+For a tutorial on OmniPaxos, checkout our blog post and video of how to build a distributed RocksDB [here](https://omnipaxos.com/blog/building-distributed-rocksdb-with-omnipaxos-in-8-minutes/).
 
 ## License
 This project is licensed under the [Apache-2.0 license](LICENSE).

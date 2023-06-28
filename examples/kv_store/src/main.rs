@@ -47,15 +47,23 @@ fn main() {
     let (sender_channels, mut receiver_channels) = initialise_channels();
 
     for pid in SERVERS {
-        let peers = SERVERS.iter().filter(|&&p| p != pid).copied().collect();
-        let op_config = OmniPaxosConfig {
+        let server_config = ServerConfig {
             pid,
-            configuration_id,
-            peers,
+            election_tick_timeout: ELECTION_TICK_TIMEOUT,
             ..Default::default()
         };
-        let omni_paxos: Arc<Mutex<OmniPaxosKV>> =
-            Arc::new(Mutex::new(op_config.build(MemoryStorage::default())));
+        let cluster_config = ClusterConfig {
+            configuration_id,
+            nodes: SERVERS.into(),
+            ..Default::default()
+        };
+        let op_config = OmniPaxosConfig {
+            server_config,
+            cluster_config,
+        };
+        let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
+            op_config.build(MemoryStorage::default()).unwrap(),
+        ));
         let mut op_server = OmniPaxosServer {
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),

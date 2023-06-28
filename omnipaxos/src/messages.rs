@@ -69,7 +69,7 @@ pub mod sequence_paxos {
         pub decided_snapshot: Option<SnapshotType<T>>,
         /// The log suffix.
         pub suffix: Vec<T>,
-        /// The index of the log where the entries from `sync_item` should be applied at or the compacted idx
+        /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists)
         pub sync_idx: u64,
         /// The decided index
         pub decided_idx: u64,
@@ -128,24 +128,6 @@ pub mod sequence_paxos {
         pub ss: StopSign,
     }
 
-    /// Message sent by followers to leader when accepted StopSign
-    #[derive(Copy, Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct AcceptedStopSign {
-        /// The current round.
-        pub n: Ballot,
-    }
-
-    /// Message sent by leader to decide a StopSign
-    #[derive(Copy, Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct DecideStopSign {
-        /// The current round.
-        pub n: Ballot,
-        /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: SequenceNumber,
-    }
-
     /// Compaction Request
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
@@ -176,8 +158,6 @@ pub mod sequence_paxos {
         ProposalForward(Vec<T>),
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
-        AcceptedStopSign(AcceptedStopSign),
-        DecideStopSign(DecideStopSign),
         ForwardStopSign(StopSign),
     }
 
@@ -197,8 +177,9 @@ pub mod sequence_paxos {
     }
 }
 
-/// The different messages BLE uses to communicate with other replicas.
+/// The different messages BLE uses to communicate with other servers.
 pub mod ballot_leader_election {
+
     use crate::{ballot_leader_election::Ballot, util::NodeId};
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
@@ -212,7 +193,7 @@ pub mod ballot_leader_election {
         Reply(HeartbeatReply),
     }
 
-    /// Requests a reply from all the other replicas.
+    /// Requests a reply from all the other servers.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatRequest {
@@ -224,12 +205,12 @@ pub mod ballot_leader_election {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HeartbeatReply {
-        /// Number of the current round.
+        /// Number of the current heartbeat round.
         pub round: u32,
-        /// Ballot of a replica.
+        /// Ballot of a server.
         pub ballot: Ballot,
-        /// States if the replica is a candidate to become a leader.
-        pub quorum_connected: bool,
+        /// The number of replicas inside the cluster the sender is connected to (including itself)
+        pub connectivity: u8,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

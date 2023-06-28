@@ -15,13 +15,7 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 #[serial]
 fn trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
@@ -86,13 +80,7 @@ fn trim_test() {
 #[serial]
 fn double_trim_test() {
     let cfg = TestConfig::load("gc_test").expect("Test config loaded");
-    let mut sys = TestSystem::with(
-        cfg.num_nodes,
-        cfg.election_timeout_ms,
-        cfg.resend_message_timeout_ms,
-        cfg.num_threads,
-        cfg.storage_type,
-    );
+    let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));

@@ -22,6 +22,8 @@ OmniPaxos:
     path: "omnipaxos/compaction.md"
   Reconfiguration:
     path: "omnipaxos/reconfiguration.md"
+  Flexible Quorums:
+    path: "omnipaxos/flexible_quorums.md"
   Features:
     path: "omnipaxos/features.md"
   Logging:
