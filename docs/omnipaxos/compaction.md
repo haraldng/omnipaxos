@@ -4,7 +4,7 @@ As time passes, the replicated log in `OmniPaxos` will grow large. To avoid lett
 Trimming the log removes all entries up to a certain index. Since the entries are deleted from the log, a trim operation can only be done if **ALL** nodes in the cluster have decided up to that index. Example:
 
 ```rust
-use omnipaxos::sequence_paxos::CompactionErr;
+use omnipaxos::CompactionErr;
 
 // we will try trimming the first 100 entries of the log.
 let trim_idx = Some(100);  // using `None` will use the highest trimmable index
@@ -18,7 +18,7 @@ match omni_paxos.trim(trim_idx) {
                 // Our provided trim index was not decided by all servers yet. All servers have currently only decided up to `idx`.
                 // If desired, users can retry with omni_paxos.trim(Some(idx)) which will then succeed.
             }
-            ...
+            _ => {}
         }
     }
 }
@@ -108,6 +108,7 @@ if let Some(e) = omni_paxos.read(20) {
             // ...can query the latest value for a key in snapshot
         }
         ...
+    }
 }
 ```
 

@@ -84,7 +84,7 @@ let my_log_opts = LogOptions::new(my_path);
 let persist_conf = PersistentStorageConfig::default();
 
 persist_conf.set_path(my_path); // set the path to the persistent storage
-my_config.set_commitlog_options(my_log_opts);
+persist_conf.set_commitlog_options(my_log_opts);
 
 // Re-create storage with previous state, then create `OmniPaxos`
 let recovered_storage = PersistentStorage::open(persist_conf); 
