@@ -16,7 +16,7 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
-    pub n: Ballot,
+    pub n_accepted: Ballot,
     pub accepted_idx: u64,
     pub pid: NodeId,
     pub stopsign: Option<StopSign>,
@@ -24,12 +24,13 @@ pub(crate) struct PromiseMetaData {
 
 impl PartialOrd for PromiseMetaData {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let ordering = if self.n == other.n
+        let ordering = if self.n_accepted == other.n_accepted
             && self.accepted_idx == other.accepted_idx
             && self.pid == other.pid
         {
             Ordering::Equal
-        } else if self.n > other.n || (self.n == other.n && self.accepted_idx > other.accepted_idx)
+        } else if self.n_accepted > other.n_accepted
+            || (self.n_accepted == other.n_accepted && self.accepted_idx > other.accepted_idx)
         {
             Ordering::Greater
         } else {
@@ -41,7 +42,9 @@ impl PartialOrd for PromiseMetaData {
 
 impl PartialEq for PromiseMetaData {
     fn eq(&self, other: &Self) -> bool {
-        self.n == other.n && self.accepted_idx == other.accepted_idx && self.pid == other.pid
+        self.n_accepted == other.n_accepted
+            && self.accepted_idx == other.accepted_idx
+            && self.pid == other.pid
     }
 }
 
@@ -125,7 +128,7 @@ where
 
     pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
-            n: prom.n_accepted,
+            n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
             pid: from,
             stopsign: prom.stopsign,
@@ -242,8 +245,9 @@ where
     Trimmed(TrimmedIndex),
     /// The entry has been snapshotted.
     Snapshotted(SnapshottedEntry<T>),
-    /// This Sequence Paxos instance has been stopped for reconfiguration.
-    StopSign(StopSign),
+    /// This Sequence Paxos instance has been stopped for reconfiguration. The accompanying bool
+    /// indicates whether the reconfiguration has been decided or not. If it is `true`, then the OmniPaxos instance for the new configuration can be started.
+    StopSign(StopSign, bool),
 }
 
 /// Convenience struct for checking if a certain index exists, is compacted or is a StopSign.

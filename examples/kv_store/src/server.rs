@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    util::{ELECTION_TIMEOUT, OUTGOING_MESSAGE_PERIOD},
+    util::{OUTGOING_MESSAGE_PERIOD, TICK_PERIOD},
     OmniPaxosKV,
 };
 use tokio::{sync::mpsc, time};
@@ -32,12 +32,12 @@ impl OmniPaxosServer {
 
     pub(crate) async fn run(&mut self) {
         let mut outgoing_interval = time::interval(OUTGOING_MESSAGE_PERIOD);
-        let mut election_interval = time::interval(ELECTION_TIMEOUT);
+        let mut tick_interval = time::interval(TICK_PERIOD);
         loop {
             tokio::select! {
                 biased;
 
-                _ = election_interval.tick() => { self.omni_paxos.lock().unwrap().election_timeout(); },
+                _ = tick_interval.tick() => { self.omni_paxos.lock().unwrap().tick(); },
                 _ = outgoing_interval.tick() => { self.send_outgoing_msgs().await; },
                 Some(in_msg) = self.incoming.recv() => { self.omni_paxos.lock().unwrap().handle_incoming(in_msg); },
                 else => { }

@@ -1,11 +1,11 @@
 Foreword:
   Foreword:
-    path: "foreword.md"
+    path: "foreword/foreword.md"
     tags: [ "omnipaxos", "rust" ]
   Getting Started:
-    path: "getting-started.md"
+    path: "foreword/getting-started.md"
   Introduction:
-    path: "introduction.md"
+    path: "foreword/introduction.md"
 
 OmniPaxos:
   OmniPaxos:
@@ -29,13 +29,19 @@ OmniPaxos:
   Logging:
     path: "omnipaxos/logging.md"
 
-##Des: how to define nested structure
+Contributing:
+  Contributing to OmniPaxos:
+    path: "contributing/contributing.md"
+
+## Example: how to define nested structure
 #Temp1:
 #  T1:
 #    path: "foreword.md"
+#    tags: [ "tag1", "tag2" ]
 #  T2:
 #    T2-1:
 #      path: "foreword.md"
+#      tags: []
 #    T2-2:
 #      path: "foreword.md"
 #  T3:

@@ -25,19 +25,19 @@ where
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_accepted_idx();
             let decided_idx = self.get_decided_idx();
-            let stopsign = self.get_stopsign();
+            let stopsign = self.internal_storage.get_stopsign();
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 let ld = prep.decided_idx;
                 if ld < decided_idx && T::Snapshot::use_snapshots() {
-                    let delta_snapshot = self
+                    let (delta_snapshot, _) = self
                         .internal_storage
-                        .create_diff_snapshot(ld, decided_idx)
+                        .create_diff_snapshot(ld)
                         .expect("storage error while trying to read diff snapshot");
                     let suffix = self
                         .internal_storage
                         .get_suffix(decided_idx)
                         .expect("storage error while trying to read log suffix");
-                    (Some(delta_snapshot), suffix)
+                    (delta_snapshot, suffix)
                 } else {
                     let suffix = self
                         .internal_storage
@@ -48,15 +48,15 @@ where
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 let compacted_idx = self.internal_storage.get_compacted_idx();
                 if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
-                    let delta_snapshot = self
+                    let (delta_snapshot, _) = self
                         .internal_storage
-                        .create_diff_snapshot(prep.decided_idx, decided_idx)
+                        .create_diff_snapshot(prep.decided_idx)
                         .expect("storage error while trying to read diff snapshot");
                     let suffix = self
                         .internal_storage
                         .get_suffix(decided_idx)
                         .expect("storage error while trying to read log suffix");
-                    (Some(delta_snapshot), suffix)
+                    (delta_snapshot, suffix)
                 } else {
                     let suffix = self
                         .internal_storage
@@ -105,7 +105,7 @@ where
                 vec![RollbackValue::AcceptedRound(old_accepted_round)],
                 "storage error while trying to write decided index",
             );
-            let mut accepted = match accsync.decided_snapshot {
+            match accsync.decided_snapshot {
                 Some(s) => {
                     let old_compacted_idx = self.internal_storage.get_compacted_idx();
                     let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
@@ -121,10 +121,10 @@ where
                     }
                     let snapshot_res = match s {
                         SnapshotType::Complete(c) => {
-                            self.internal_storage.set_snapshot(accsync.decided_idx, c)
+                            self.internal_storage.set_snapshot(accsync.sync_idx, c)
                         }
                         SnapshotType::Delta(d) => {
-                            self.internal_storage.merge_snapshot(accsync.decided_idx, d)
+                            self.internal_storage.merge_snapshot(accsync.sync_idx, d)
                         }
                     };
                     self.internal_storage.rollback_and_panic_if_err(
@@ -137,7 +137,7 @@ where
                     );
                     let accepted_res = self
                         .internal_storage
-                        .append_entries_without_batching(accsync.suffix);
+                        .append_on_prefix(accsync.sync_idx, accsync.suffix);
                     self.internal_storage.rollback_and_panic_if_err(
                         &accepted_res,
                         vec![
@@ -148,11 +148,6 @@ where
                         ],
                         "storage error while trying to write log entries",
                     );
-                    Accepted {
-                        n: accsync.n,
-                        accepted_idx: accepted_res
-                            .expect("storage error while trying to write log entries"),
-                    }
                 }
                 None => {
                     // no snapshot, only suffix
@@ -167,26 +162,18 @@ where
                         ],
                         "storage error while trying to write log entries",
                     );
-                    Accepted {
-                        n: accsync.n,
-                        accepted_idx: accepted_idx
-                            .expect("storage error while trying to write log entries"),
-                    }
                 }
             };
-            match accsync.stopsign {
-                Some(ss) => {
-                    if let Some(ss_entry) = self.internal_storage.get_stopsign() {
-                        if !ss_entry.decided(old_decided_idx) {
-                            self.accept_stopsign(ss);
-                        }
-                    } else {
-                        self.accept_stopsign(ss);
-                    }
-                    accepted.accepted_idx = self.internal_storage.get_accepted_idx();
-                }
-                None => self.forward_pending_proposals(),
+            if accsync.stopsign.is_none() {
+                self.forward_pending_proposals();
             }
+            self.internal_storage
+                .set_stopsign(accsync.stopsign)
+                .expect("storage error while trying to write stopsign");
+            let accepted = Accepted {
+                n: accsync.n,
+                accepted_idx: self.internal_storage.get_accepted_idx(),
+            };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();

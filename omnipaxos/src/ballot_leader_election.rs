@@ -37,12 +37,7 @@ impl Ballot {
     /// * `config_id` - The identifier for the configuration that the replica with this ballot is part of.
     /// * `n` - Ballot number.
     /// * `pid` -  Used as tiebreaker for total ordering of ballots.
-    pub fn with(
-        config_id: ConfigurationId,
-        n: ConfigurationId,
-        priority: u32,
-        pid: NodeId,
-    ) -> Ballot {
+    pub fn with(config_id: ConfigurationId, n: u32, priority: u32, pid: NodeId) -> Ballot {
         Ballot {
             config_id,
             n,
@@ -105,11 +100,7 @@ impl BallotLeaderElection {
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let initial_ballot = match initial_leader {
-            Some(ballot) if ballot.pid == pid => ballot,
-            _ => Ballot::with(config_id, 0, config.priority, pid),
-        };
-
+        let initial_ballot = Ballot::with(config_id, 0, config.priority, pid);
         let mut ble = BallotLeaderElection {
             configuration_id: config_id,
             pid,

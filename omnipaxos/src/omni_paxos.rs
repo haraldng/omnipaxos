@@ -413,6 +413,8 @@ where
 pub enum CompactionErr {
     /// Snapshot was called with an index that is not decided yet. Returns the currently decided index.
     UndecidedIndex(u64),
+    /// Snapshot was called with an index which is already trimmed. Returns the currently compacted index.
+    TrimmedIndex(u64),
     /// Trim was called with an index that is not decided by all servers yet. Returns the index decided by ALL servers currently.
     NotAllDecided(u64),
     /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
