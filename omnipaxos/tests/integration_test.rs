@@ -1,19 +1,17 @@
-
 // To run: cargo test --test integration_test --features "toml_config macros"
 #![cfg(feature = "macros")]
-use omnipaxos::macros::Entry;
-use serde::{Deserialize, Serialize};
+#![cfg(feature = "toml_config")]
 use commitlog::LogOptions;
-use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig};
-use omnipaxos::messages::ballot_leader_election::BLEMessage;
+use omnipaxos::macros::Entry;
 use omnipaxos::messages::Message;
-use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
-use omnipaxos::storage::Snapshot;
 #[cfg(not(feature = "macros"))]
 use omnipaxos::storage::Entry;
-use std::collections::HashMap;
+use omnipaxos::storage::Snapshot;
 use omnipaxos::util::LogEntry;
-
+use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
+use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
 #[cfg_attr(feature = "macros", derive(Entry))]
@@ -23,7 +21,6 @@ pub struct KeyValue {
     pub value: u64,
 }
 
-
 #[cfg(not(feature = "macros"))]
 impl Entry for KeyValue {
     type Snapshot = KVSnapshot;
@@ -32,7 +29,7 @@ impl Entry for KeyValue {
 // Original: https://omnipaxos.com/docs/omnipaxos/compaction/
 #[derive(Clone, Debug)]
 pub struct KVSnapshot {
-    snapshotted: HashMap<String, u64>
+    snapshotted: HashMap<String, u64>,
 }
 
 impl Snapshot<KeyValue> for KVSnapshot {
@@ -56,18 +53,12 @@ impl Snapshot<KeyValue> for KVSnapshot {
     }
 }
 
-
 // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
 #[test]
 fn omnipaxos() {
     // Use case of creating a node
     // https://omnipaxos.com/docs/omnipaxos/omnipaxos/
-    use omnipaxos::{
-        {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
-    };
-    use omnipaxos_storage::{
-        memory_storage::MemoryStorage,
-    };
+    use omnipaxos_storage::memory_storage::MemoryStorage;
 
     // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
     // configuration with id 1 and a cluster with 3 nodes
@@ -90,14 +81,13 @@ fn omnipaxos() {
     };
 
     let storage = MemoryStorage::default();
-    let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> = omnipaxos_config.build(storage).unwrap();
-
+    let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> =
+        omnipaxos_config.build(storage).unwrap();
 
     // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
     // Use case of creating a node with TOML config
     let config_file_path = "tests/config/node1.toml";
     let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path).unwrap();
-
 
     // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
     /* Re-creating our node after a crash... */
@@ -115,7 +105,6 @@ fn omnipaxos() {
     let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
     let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
 
-
     // Original: https://omnipaxos.com/docs/omnipaxos/communication/
     // send outgoing messages. This should be called periodically, e.g. every ms
     for out_msg in omni_paxos.outgoing_messages() {
@@ -127,11 +116,12 @@ fn omnipaxos() {
     // let msg: Message<KeyValue> = ...;   // message to this node e.g. `msg.get_receiver() == 2`
     // omni_paxos.handle_incoming(msg);
 
-
     // Original: https://omnipaxos.com/docs/omnipaxos/reading-and-writing/
-    let write_entry = KeyValue { key: String::from("a"), value: 123 };
+    let write_entry = KeyValue {
+        key: String::from("a"),
+        value: 123,
+    };
     omni_paxos.append(write_entry).expect("Failed to append");
-
 
     // Original: https://omnipaxos.com/docs/omnipaxos/reading-and-writing/
     /*** Read a single entry ***/
@@ -141,17 +131,15 @@ fn omnipaxos() {
     /*** Read a range ***/
     let read_entries = omni_paxos.read_entries(2..5);
 
-
     // Original: https://omnipaxos.com/docs/omnipaxos/leader-election/
     // Call this periodically
     omni_paxos.tick();
-
 
     // Original: https://omnipaxos.com/docs/omnipaxos/compaction/
     use omnipaxos::CompactionErr;
 
     // we will try trimming the first 100 entries of the log.
-    let trim_idx = Some(100);  // using `None` will use the highest trimmable index
+    let trim_idx = Some(100); // using `None` will use the highest trimmable index
     match omni_paxos.trim(trim_idx) {
         Ok(_) => {
             // later, we can see that the trim succeeded with `omni_paxos.get_compacted_idx()`
@@ -167,10 +155,9 @@ fn omnipaxos() {
         }
     }
 
-
     // Original: https://omnipaxos.com/docs/omnipaxos/compaction/
     // we will try snapshotting the first 100 entries of the log.
-    let snapshot_idx = Some(100);  // using `None` will use the highest snapshottable index
+    let snapshot_idx = Some(100); // using `None` will use the highest snapshottable index
     let local_only = false; // snapshots will be taken by all nodes.
     match omni_paxos.snapshot(snapshot_idx, local_only) {
         Ok(_) => {
@@ -199,7 +186,6 @@ fn omnipaxos() {
         }
     }
 
-
     // Original: https://omnipaxos.com/docs/omnipaxos/reconfiguration/
     // Node 3 seems to have crashed... let's replace it with a new node 4.
     let new_configuration = ClusterConfig {
@@ -208,8 +194,9 @@ fn omnipaxos() {
         ..Default::default()
     };
     let metadata = None;
-    omni_paxos.reconfigure(new_configuration, metadata).expect("Failed to propose reconfiguration");
-
+    omni_paxos
+        .reconfigure(new_configuration, metadata)
+        .expect("Failed to propose reconfiguration");
 
     // the ServerConfig config for current node
     let current_config = ServerConfig {
@@ -218,7 +205,7 @@ fn omnipaxos() {
     };
     let my_pid = current_config.pid;
 
-    let idx: u64 = 2;  // some index we last read from
+    let idx: u64 = 2; // some index we last read from
     let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omni_paxos.read_decided_suffix(idx);
 
     if let Some(de) = decided_entries {
@@ -229,7 +216,10 @@ fn omnipaxos() {
                     if new_configuration.nodes.contains(&my_pid) {
                         // current configuration has been safely stopped. Start new instance
                         let new_storage = MemoryStorage::default();
-                        let mut new_omnipaxos :OmniPaxos<KeyValue, MemoryStorage<KeyValue>>  = new_configuration.build_for_server(current_config.clone(), new_storage).unwrap();
+                        let mut new_omnipaxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> =
+                            new_configuration
+                                .build_for_server(current_config.clone(), new_storage)
+                                .unwrap();
 
                         // use new_omnipaxos
                         // ...
@@ -261,7 +251,7 @@ fn storage() {
 #[test]
 fn flexible_quorums() {
     // Original: https://omnipaxos.com/docs/omnipaxos/flexible-quorums/
-    use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig, util::FlexibleQuorum};
+    use omnipaxos::{util::FlexibleQuorum, ClusterConfig, OmniPaxosConfig, ServerConfig};
 
     let flex_quorum = FlexibleQuorum {
         read_quorum_size: 5,
@@ -282,4 +272,3 @@ fn flexible_quorums() {
         server_config,
     };
 }
-
