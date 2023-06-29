@@ -1,5 +1,6 @@
 pub mod utils;
 
+use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{storage::StopSign, ClusterConfig};
 use serial_test::serial;
 use std::time::Duration;
@@ -175,6 +176,11 @@ fn sync_test(test: SyncTest) {
     let leaders_new_decided =
         test.leaders_log[test.followers_dec_idx..leaders_log_dec_idx].to_vec();
     let leaders_accepted = test.leaders_log[leaders_log_dec_idx..].to_vec();
+    let followers_new_decided_len = if test.leaders_ss.is_some() {
+        1 + test.leaders_log.len() - test.followers_dec_idx
+    } else {
+        test.leaders_log.len() - test.followers_dec_idx
+    };
 
     // Set up followers log
     let follower_id = sys.get_elected_leader(1, wait_timeout);
@@ -194,7 +200,7 @@ fn sync_test(test: SyncTest) {
 
     // Set up leaders log
     // Wait a bit so next leader is stabilized (otherwise we can lose proposals)
-    std::thread::sleep(Duration::from_millis(4 * cfg.election_timeout_ms));
+    std::thread::sleep(Duration::from_millis(5 * cfg.election_timeout_ms));
     let leader_id = sys.get_elected_leader(1, wait_timeout);
     assert_ne!(follower_id, leader_id, "New leader must be chosen!");
     let leader = sys.nodes.get(&leader_id).unwrap();
@@ -237,10 +243,20 @@ fn sync_test(test: SyncTest) {
         }
     });
 
-    // Reconnect follower and wait for sync
+    // Reconnect follower and wait for new entries from AccSync to be decided so we can verify log
+    let mut proposal_futures = vec![];
+    follower.on_definition(|comp| {
+        for _ in 0..followers_new_decided_len {
+            let (kprom, kfuture) = promise::<Value>();
+            comp.decided_futures.push(Ask::new(kprom, ()));
+            proposal_futures.push(kfuture);
+        }
+    });
     sys.set_node_connections(follower_id, true);
-    let wait_timeout = Duration::from_millis(500);
-    std::thread::sleep(wait_timeout);
+    match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, wait_timeout) {
+        Ok(_) => {}
+        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+    }
 
     // Verify log
     let mut followers_entries = follower.on_definition(|comp| {
