@@ -1,21 +1,39 @@
-// To run: cargo test --test integration_test --features "toml_config macros"
+// This test is to test the all the code examples on the OmniPaxos website:
+// https://omnipaxos.com/docs/foreword/foreword/. Every code example on the website are
+// separated into different functions.
+// To run: cargo test --test docs_integration_test --features "toml_config macros"
 #![cfg(feature = "macros")]
 #![cfg(feature = "toml_config")]
+
 use commitlog::LogOptions;
-use omnipaxos::macros::Entry;
 use omnipaxos::messages::Message;
-#[cfg(not(feature = "macros"))]
-use omnipaxos::storage::Entry;
 use omnipaxos::storage::Snapshot;
 use omnipaxos::util::LogEntry;
 use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use omnipaxos_storage::memory_storage::MemoryStorage;
 
-// Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#example-key-value-store
+// CODE_EXAMPLE
+use omnipaxos::macros::Entry;
+
 #[cfg_attr(feature = "macros", derive(Entry))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct KeyValue {
+    pub key: String,
+    pub value: u64,
+}
+// END_CODE_EXAMPLE
+
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#snapshot
+// CODE_EXAMPLE
+#[cfg(not(feature = "macros"))]
+use omnipaxos::storage::Entry;
+
+#[cfg(not(feature = "macros"))]
+#[derive(Clone, Debug)]
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
@@ -25,8 +43,10 @@ pub struct KeyValue {
 impl Entry for KeyValue {
     type Snapshot = KVSnapshot;
 }
+// END_CODE_EXAMPLE
 
-// Original: https://omnipaxos.com/docs/omnipaxos/compaction/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#snapshot
+// CODE_EXAMPLE
 #[derive(Clone, Debug)]
 pub struct KVSnapshot {
     snapshotted: HashMap<String, u64>,
@@ -52,15 +72,18 @@ impl Snapshot<KeyValue> for KVSnapshot {
         true
     }
 }
+// END_CODE_EXAMPLE
 
-// Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
-#[test]
-fn omnipaxos() {
-    // Use case of creating a node
-    // https://omnipaxos.com/docs/omnipaxos/omnipaxos/
-    use omnipaxos_storage::memory_storage::MemoryStorage;
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#creating-a-node
+fn creating_a_node() -> OmniPaxos<KeyValue, MemoryStorage<KeyValue>> {
+    // CODE_EXAMPLE
+    use omnipaxos::{
+        {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
+    };
+    use omnipaxos_storage::{
+        memory_storage::MemoryStorage,
+    };
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
     // configuration with id 1 and a cluster with 3 nodes
     let cluster_config = ClusterConfig {
         configuration_id: 1,
@@ -83,13 +106,27 @@ fn omnipaxos() {
     let storage = MemoryStorage::default();
     let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> =
         omnipaxos_config.build(storage).unwrap();
+    // END_CODE_EXAMPLE
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
-    // Use case of creating a node with TOML config
+    return omni_paxos;
+}
+
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#creating-a-node
+fn toml_config() -> OmniPaxosConfig {
+    // CODE_EXAMPLE
     let config_file_path = "tests/config/node1.toml";
     let omnipaxos_config = OmniPaxosConfig::with_toml(config_file_path).unwrap();
+    // END_CODE_EXAMPLE
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/omnipaxos/
+    omnipaxos_config
+}
+
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#fail-recovery
+#[test]
+fn fail_recovery() {
+    let omnipaxos_config = toml_config();
+
+    // CODE_EXAMPLE
     /* Re-creating our node after a crash... */
 
     // Use case of creating a node from fail-recovery
@@ -104,38 +141,99 @@ fn omnipaxos() {
     // Re-create storage with previous state, then create `OmniPaxos`
     let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
     let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/communication/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/storage.md#batching
+#[test]
+fn batch_config() {
+    // CODE_EXAMPLE
+    let omnipaxos_config = OmniPaxosConfig {
+        server_config: ServerConfig {
+            batch_size: 100, // `batch_size = 1` by default
+            ..Default::default()
+        },
+        cluster_config: ClusterConfig {
+            configuration_id: 1,
+            nodes: vec![1, 2, 3],
+            ..Default::default()
+        },
+    };
+    // build omnipaxos instance
+    // END_CODE_EXAMPLE
+}
+
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/communication.md#incoming-and-outgoing
+fn incoming_messages(in_msg: Message<KeyValue>) {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
+    use omnipaxos::messages::Message;
+
+    // handle incoming message from network layer
+    let msg: Message<KeyValue> = in_msg;   // message to this node e.g. `msg.get_receiver() == 2`
+    omni_paxos.handle_incoming(msg);
+    // END_CODE_EXAMPLE
+}
+
+#[test]
+fn outgoing_messages() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     // send outgoing messages. This should be called periodically, e.g. every ms
     for out_msg in omni_paxos.outgoing_messages() {
         let receiver = out_msg.get_receiver();
         // send out_msg to receiver on network layer
     }
+    // END_CODE_EXAMPLE
+}
 
-    // handle incoming message from network layer
-    // let msg: Message<KeyValue> = ...;   // message to this node e.g. `msg.get_receiver() == 2`
-    // omni_paxos.handle_incoming(msg);
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/log.md
+#[test]
+fn append_log() {
+    let mut omni_paxos = creating_a_node();
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/reading-and-writing/
+    // CODE_EXAMPLE
     let write_entry = KeyValue {
         key: String::from("a"),
         value: 123,
     };
     omni_paxos.append(write_entry).expect("Failed to append");
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/reading-and-writing/
+#[test]
+fn read_log() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     /*** Read a single entry ***/
     let idx = 5;
     let read_entry = omni_paxos.read(idx);
 
     /*** Read a range ***/
     let read_entries = omni_paxos.read_entries(2..5);
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/leader-election/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/leader_election.md
+#[test]
+fn tick() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     // Call this periodically
     omni_paxos.tick();
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/compaction/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#trim
+#[test]
+fn trim() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     use omnipaxos::CompactionErr;
 
     // we will try trimming the first 100 entries of the log.
@@ -154,8 +252,16 @@ fn omnipaxos() {
             }
         }
     }
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/compaction/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#snapshot
+#[test]
+fn snapshot() {
+    use omnipaxos::CompactionErr;
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     // we will try snapshotting the first 100 entries of the log.
     let snapshot_idx = Some(100); // using `None` will use the highest snapshottable index
     let local_only = false; // snapshots will be taken by all nodes.
@@ -185,8 +291,15 @@ fn omnipaxos() {
             _ => {}
         }
     }
+    // END_CODE_EXAMPLE
+}
 
-    // Original: https://omnipaxos.com/docs/omnipaxos/reconfiguration/
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/reconfiguration.md
+#[test]
+fn reconfiguration() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     // Node 3 seems to have crashed... let's replace it with a new node 4.
     let new_configuration = ClusterConfig {
         configuration_id: 2,
@@ -197,7 +310,15 @@ fn omnipaxos() {
     omni_paxos
         .reconfigure(new_configuration, metadata)
         .expect("Failed to propose reconfiguration");
+    // END_CODE_EXAMPLE
+}
 
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/reconfiguration.md
+#[test]
+fn get_stop_sign() {
+    let mut omni_paxos = creating_a_node();
+
+    // CODE_EXAMPLE
     // the ServerConfig config for current node
     let current_config = ServerConfig {
         pid: 2,
@@ -229,28 +350,13 @@ fn omnipaxos() {
             }
         }
     }
+    // END_CODE_EXAMPLE
 }
 
-// Original: https://omnipaxos.com/docs/omnipaxos/storage/
-#[test]
-fn storage() {
-    let omnipaxos_config = OmniPaxosConfig {
-        server_config: ServerConfig {
-            batch_size: 100, // `batch_size = 1` by default
-            ..Default::default()
-        },
-        cluster_config: ClusterConfig {
-            configuration_id: 1,
-            nodes: vec![1, 2, 3],
-            ..Default::default()
-        },
-    };
-    // build omnipaxos instance
-}
-
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/flexible_quorums.md
 #[test]
 fn flexible_quorums() {
-    // Original: https://omnipaxos.com/docs/omnipaxos/flexible-quorums/
+    // CODE_EXAMPLE
     use omnipaxos::{util::FlexibleQuorum, ClusterConfig, OmniPaxosConfig, ServerConfig};
 
     let flex_quorum = FlexibleQuorum {
@@ -271,4 +377,5 @@ fn flexible_quorums() {
         cluster_config,
         server_config,
     };
+    // END_CODE_EXAMPLE
 }
