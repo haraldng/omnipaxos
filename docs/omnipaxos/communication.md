@@ -7,7 +7,7 @@ When a message is received from the network layer intended for our node, we need
 use omnipaxos::messages::Message;
 
 // handle incoming message from network layer
-let msg: Message<KeyValue> = in_msg;    // message to this node e.g. `msg.get_receiver() == 2`
+let msg: Message<KeyValue> = in_msg;    // in_msg is a received message for this node e.g. `in_msg.get_receiver() == 2`
 omni_paxos.handle_incoming(msg);
 ```
 
