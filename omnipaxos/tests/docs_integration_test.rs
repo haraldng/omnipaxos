@@ -1,19 +1,23 @@
 // This test is to test the all the code examples on the OmniPaxos website:
-// https://omnipaxos.com/docs/foreword/foreword/. Every code example on the website are
-// separated into different functions.
+// https://omnipaxos.com/docs/omnipaxos/omnipaxos/
+// Every code example on the website are separated into different functions with a link
+// to the corresponding docs file. If you change any code here,
+// please update the code example in the corresponding md file.
 // To run: cargo test --test docs_integration_test --features "toml_config macros"
 #![cfg(feature = "macros")]
 #![cfg(feature = "toml_config")]
 
 use commitlog::LogOptions;
-use omnipaxos::messages::Message;
-use omnipaxos::storage::Snapshot;
-use omnipaxos::util::LogEntry;
-use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
-use omnipaxos_storage::persistent_storage::{PersistentStorage, PersistentStorageConfig};
+use omnipaxos::{
+    messages::Message, storage::Snapshot, util::LogEntry, ClusterConfig, OmniPaxos,
+    OmniPaxosConfig, ServerConfig,
+};
+use omnipaxos_storage::{
+    memory_storage::MemoryStorage,
+    persistent_storage::{PersistentStorage, PersistentStorageConfig},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use omnipaxos_storage::memory_storage::MemoryStorage;
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#example-key-value-store
 // CODE_EXAMPLE
@@ -77,12 +81,8 @@ impl Snapshot<KeyValue> for KVSnapshot {
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#creating-a-node
 fn creating_a_node() -> OmniPaxos<KeyValue, MemoryStorage<KeyValue>> {
     // CODE_EXAMPLE
-    use omnipaxos::{
-        {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
-    };
-    use omnipaxos_storage::{
-        memory_storage::MemoryStorage,
-    };
+    use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
+    use omnipaxos_storage::memory_storage::MemoryStorage;
 
     // configuration with id 1 and a cluster with 3 nodes
     let cluster_config = ClusterConfig {
@@ -171,7 +171,7 @@ fn incoming_messages(in_msg: Message<KeyValue>) {
     use omnipaxos::messages::Message;
 
     // handle incoming message from network layer
-    let msg: Message<KeyValue> = in_msg;   // message to this node e.g. `msg.get_receiver() == 2`
+    let msg: Message<KeyValue> = in_msg; // message to this node e.g. `msg.get_receiver() == 2`
     omni_paxos.handle_incoming(msg);
     // END_CODE_EXAMPLE
 }
