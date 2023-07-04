@@ -14,29 +14,34 @@ omni_paxos.reconfigure(new_configuration, metadata).expect("Failed to propose re
 Calling ``reconfigure()`` will propose a `StopSign` entry to be appended. If it gets decided, the log is sealed and prevented from being further appended. From the `StopSign` entry, all nodes will be able to see the new configuration. When you, the user, read from a node and find a `LogEntry::StopSign` in the log, you should start a new `OmniPaxos` instance at this node if it is part of the new configuration.
 
 ```rust
-let current_config = ... // the OmniPaxos config for this node
-let idx: u64 = ...  // some index we last read from
-let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omnipaxos.  read_decided_suffix(idx);
+    // the ServerConfig config for current node
+    let current_config = ServerConfig {
+        pid: 2,
+        ..Default::default()
+    };
+    let my_pid = current_config.pid;
+    
+    let idx: u64 = 2;  // some index we last read from
+    let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omni_paxos.read_decided_suffix(idx);
 
-if let Some(de) = decided_entries {
-    for d in de {
-        match d {
-            LogEntry::StopSign(stopsign, true) => {
-                let new_configuration = stopsign.next_config;
-                if new_configuration.nodes.contains(&my_pid) {
-                // current configuration has been safely stopped. Start new instance
-                    let new_storage = MemoryStorage::default();
-                    let mut new_omnipaxos = new_configuration.build_for_server(current_config.server_config).unwrap();
- 
-                    ... // use new_omnipaxos
+    if let Some(de) = decided_entries {
+        for d in de {
+            match d {
+                LogEntry::StopSign(stopsign, true) => {
+                    let new_configuration = stopsign.next_config;
+                    if new_configuration.nodes.contains(&my_pid) {
+                        // current configuration has been safely stopped. Start new instance
+                        let new_storage = MemoryStorage::default();
+                        let mut new_omnipaxos = new_configuration.build_for_server(current_config.clone(), MemoryStorage::default()).unwrap();
+
+                        // use new_omnipaxos
+                        // ...
+                    }
                 }
-            }
-            _ => {
-                todo!()
+                _ => {}
             }
         }
     }
-}
 ```
 
 > **Note:** New nodes will not see the `StopSign` since they were not part of the old configuration. The user themselves must notify and start these new nodes. Furthermore,the user must ensure these new nodes have the application state or log up to the stopsign before starting their `OmniPaxos` instance.

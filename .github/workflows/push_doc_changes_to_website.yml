@@ -1,14 +1,15 @@
 name: Push docs to omnipaxos-website
 
 on:
-  push:
-    branches:
-      - master
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
 
 jobs:
   doc_dispatch:
     runs-on: ubuntu-latest
-    if: github.repository == 'haraldng/omnipaxos'
+    if: github.repository == 'haraldng/omnipaxos' && github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - name: Set SSH key
         run: echo "$SSH_DEPLOY_KEY" > ssh_deploy_key.pem
