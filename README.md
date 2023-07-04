@@ -2,7 +2,7 @@ OmniPaxos
 ============
 
 ![ci](https://github.com/haraldng/omnipaxos/actions/workflows/ci.yml/badge.svg)
-[![Cargo](https://img.shields.io/badge/crates.io-v0.2.0-orange)](https://crates.io/crates/omnipaxos)
+[![Cargo](https://img.shields.io/badge/crates.io-v0.2.1-orange)](https://crates.io/crates/omnipaxos)
 [![Documentation](https://docs.rs/omnipaxos/badge.svg)](https://docs.rs/omnipaxos)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/haraldng/omnipaxos)
 
