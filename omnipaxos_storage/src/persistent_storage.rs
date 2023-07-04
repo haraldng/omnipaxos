@@ -123,7 +123,7 @@ impl<T: Entry> PersistentStorage<T> {
         }
     }
 
-    /// Creates a new storage instance, panics if a commitlog or rocksDB/sled instance exists in the given path
+    /// Creates a new storage instance, panics if a commitlog or sled instance already exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
         let path = storage_config
             .path
