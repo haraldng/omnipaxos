@@ -9,7 +9,7 @@ on:
 jobs:
   doc_dispatch:
     runs-on: ubuntu-latest
-    if: github.repository == 'haraldng/omnipaxos' && github.ref == 'refs/heads/master' && github.event_name == 'push'
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' && github.event_name == 'push'
     steps:
       - name: Set SSH key
         run: echo "$SSH_DEPLOY_KEY" > ssh_deploy_key.pem
