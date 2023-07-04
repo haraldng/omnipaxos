@@ -14,7 +14,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-omnipaxos = { path = "../omnipaxos", features = ["serde"] }
+omnipaxos = { version = "0.2.1", path = "../omnipaxos", features = ["serde"] }
 sled = { version = "0.34.7" }
 serde = { version = "1.0", features = ["derive"] }
 commitlog = "0.2.0"
