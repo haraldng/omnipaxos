@@ -7,10 +7,9 @@ use omnipaxos::{
     storage::{Entry, StopSign, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
+use sled::{Config, Db};
 use std::{iter::FromIterator, marker::PhantomData};
 use zerocopy::{AsBytes, FromBytes};
-#[cfg(feature = "sled")]
-use sled::{Config, Db};
 
 const DEFAULT: &str = "/default_storage/";
 const COMMITLOG: &str = "/commitlog/";
@@ -30,7 +29,6 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 pub struct PersistentStorageConfig {
     path: Option<String>,
     commitlog_options: LogOptions,
-    #[cfg(feature = "sled")]
     sled_options: Config,
 }
 
@@ -55,19 +53,16 @@ impl PersistentStorageConfig {
         self.commitlog_options = commitlog_opts;
     }
 
-    #[cfg(feature = "sled")]
     /// Returns the options for the sled store.
     pub fn get_database_options(&self) -> Config {
         self.sled_options.clone()
     }
 
-    #[cfg(feature = "sled")]
     /// Sets the options for the sled store.
     pub fn set_database_options(&mut self, opts: Config) {
         self.sled_options = opts;
     }
 
-    #[cfg(feature = "sled")]
     /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and sled
     pub fn with(path: String, commitlog_options: LogOptions, sled_options: Config) -> Self {
         Self {
@@ -85,7 +80,6 @@ impl Default for PersistentStorageConfig {
         Self {
             path: Some(DEFAULT.to_string()),
             commitlog_options,
-            #[cfg(feature = "sled")]
             sled_options: Config::new(),
         }
     }
@@ -103,7 +97,6 @@ where
     /// The path to the directory containing a commitlog
     log_path: String,
     /// Local sled key-value store, enabled by default
-    #[cfg(feature = "sled")]
     sled: Db,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
@@ -120,7 +113,6 @@ impl<T: Entry> PersistentStorage<T> {
         Self {
             commitlog,
             log_path: format!("{path}{COMMITLOG}"),
-            #[cfg(feature = "sled")]
             sled: {
                 let opts = storage_config
                     .sled_options
@@ -222,7 +214,6 @@ where
     }
 
     fn get_promise(&self) -> StorageResult<Option<Ballot>> {
-        #[cfg(feature = "sled")]
         {
             let promised = self.sled.get(NPROM)?;
             match promised {
@@ -237,114 +228,81 @@ where
 
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
         let prom_bytes = bincode::serialize(&n_prom)?;
-        #[cfg(feature = "rocksdb")]
-        self.rocksdb.put(NPROM, prom_bytes)?;
-        #[cfg(feature = "sled")]
         self.sled.insert(NPROM, prom_bytes)?;
         Ok(())
     }
 
     fn get_decided_idx(&self) -> StorageResult<u64> {
-        #[cfg(feature = "sled")]
-        {
-            let decided = self.sled.get(DECIDE)?;
-            match decided {
-                Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
-                None => Ok(0),
-            }
+        let decided = self.sled.get(DECIDE)?;
+        match decided {
+            Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
+            None => Ok(0),
         }
     }
 
     fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
         let ld_bytes = u64::as_bytes(&ld);
-        #[cfg(feature = "rocksdb")]
-        self.rocksdb.put(DECIDE, ld_bytes)?;
-        #[cfg(feature = "sled")]
         self.sled.insert(DECIDE, ld_bytes)?;
         Ok(())
     }
 
     fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
-        #[cfg(feature = "sled")]
-        {
-            let accepted = self.sled.get(ACC)?;
-            match accepted {
-                Some(acc_bytes) => {
-                    let ballot = bincode::deserialize(&acc_bytes)?;
-                    Ok(Some(ballot))
-                }
-                None => Ok(Some(Ballot::default())),
+        let accepted = self.sled.get(ACC)?;
+        match accepted {
+            Some(acc_bytes) => {
+                let ballot = bincode::deserialize(&acc_bytes)?;
+                Ok(Some(ballot))
             }
+            None => Ok(Some(Ballot::default())),
         }
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
         let acc_bytes = bincode::serialize(&na)?;
-        #[cfg(feature = "rocksdb")]
-        self.rocksdb.put(ACC, acc_bytes)?;
-        #[cfg(feature = "sled")]
         self.sled.insert(ACC, acc_bytes)?;
         Ok(())
     }
 
     fn get_compacted_idx(&self) -> StorageResult<u64> {
-        #[cfg(feature = "sled")]
-        {
-            let trim = self.sled.get(TRIM)?;
-            match trim {
-                Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
-                None => Ok(0),
-            }
+        let trim = self.sled.get(TRIM)?;
+        match trim {
+            Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
+            None => Ok(0),
         }
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
         let trim_bytes = u64::as_bytes(&trimmed_idx);
-        #[cfg(feature = "rocksdb")]
-        self.rocksdb.put(TRIM, trim_bytes)?;
-        #[cfg(feature = "sled")]
         self.sled.insert(TRIM, trim_bytes)?;
         Ok(())
     }
 
     fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
-        #[cfg(feature = "sled")]
-        {
-            let stopsign = self.sled.get(STOPSIGN)?;
-            match stopsign {
-                Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
-                None => Ok(None),
-            }
+        let stopsign = self.sled.get(STOPSIGN)?;
+        match stopsign {
+            Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
+            None => Ok(None),
         }
     }
 
     fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&s)?;
-        #[cfg(feature = "sled")]
-        {
-            self.sled.insert(STOPSIGN, stopsign)?;
-        }
+        self.sled.insert(STOPSIGN, stopsign)?;
         Ok(())
     }
 
     fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
-        #[cfg(feature = "sled")]
-        {
-            let snapshot = self.sled.get(SNAPSHOT)?;
-            if let Some(snapshot_bytes) = snapshot {
-                Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
-            } else {
-                Ok(None)
-            }
+        let snapshot = self.sled.get(SNAPSHOT)?;
+        if let Some(snapshot_bytes) = snapshot {
+            Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
+        } else {
+            Ok(None)
         }
     }
 
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&snapshot)?;
-        #[cfg(feature = "sled")]
-        {
-            self.sled.insert(SNAPSHOT, stopsign)?;
-        }
+        self.sled.insert(SNAPSHOT, stopsign)?;
         Ok(())
     }
 
