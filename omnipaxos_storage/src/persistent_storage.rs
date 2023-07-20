@@ -119,7 +119,7 @@ impl<T: Entry> PersistentStorage<T> {
                     .path(format!("{path}{DATABASE}"));
                 Config::open(&opts).expect("Failed to create sled database")
             },
-            t: PhantomData::default(),
+            t: PhantomData,
         }
     }
 
