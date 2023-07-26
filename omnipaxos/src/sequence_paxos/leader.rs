@@ -224,7 +224,7 @@ where
         let followers_valid_entries_idx = if *followers_promise_n == current_n {
             *followers_accepted_idx
         } else if *followers_promise_n == *prev_round_max_promise_n {
-            *prev_round_max_accepted_idx
+            *prev_round_max_accepted_idx.min(followers_accepted_idx)
         } else {
             followers_decided_idx
         };

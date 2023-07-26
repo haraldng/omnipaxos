@@ -20,7 +20,6 @@ pub mod errors;
 pub mod messages;
 /// The user-facing OmniPaxos struct.
 mod omni_paxos;
-/// Re-export the contents of the omni_paxos module
 pub use omni_paxos::*;
 
 pub(crate) mod sequence_paxos;
