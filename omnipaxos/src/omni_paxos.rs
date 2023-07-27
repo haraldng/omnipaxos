@@ -389,6 +389,10 @@ where
             self.seq_paxos.handle_leader(b);
         }
     }
+
+    /// Clear the terminal and render the ui.
+    #[cfg(feature = "ui")]
+    pub fn show_ui(&self) {}
 }
 
 /// An error indicating a failed proposal due to the current cluster configuration being already stopped
