@@ -164,4 +164,7 @@ fn main() {
         // ignore uncommitted entries
     }
     println!("KV store: {:?}", simple_kv_store);
+
+    leader_server.lock().unwrap().start_ui();
+    std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
 }

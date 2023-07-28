@@ -23,6 +23,8 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
+#[cfg(feature = "ui")]
+use crate::utils::ui::UI;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -75,6 +77,8 @@ impl OmniPaxosConfig {
                 self.server_config.resend_message_tick_timeout,
             ),
             seq_paxos: SequencePaxos::with(self.into(), storage),
+            #[cfg(feature = "ui")]
+            ui: None,
         })
     }
 }
@@ -222,6 +226,8 @@ where
     ble: BallotLeaderElection,
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
+    #[cfg(feature = "ui")]
+    ui: Option<UI>,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -392,7 +398,18 @@ where
 
     /// Clear the terminal and render the ui.
     #[cfg(feature = "ui")]
-    pub fn show_ui(&self) {}
+    pub fn start_ui(&mut self) {
+        let mut ui = UI::new();
+        ui.start();
+        self.ui = Some(ui);
+    }
+
+    #[cfg(feature = "ui")]
+    fn update_ui_if_started(&mut self) {
+        if let Some(ui) = &mut self.ui {
+            // ui.update(self);
+        }
+    }
 }
 
 /// An error indicating a failed proposal due to the current cluster configuration being already stopped
