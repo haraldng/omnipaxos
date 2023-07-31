@@ -22,6 +22,8 @@ where
             [
                 // Title
                 Constraint::Length(3),
+                // Temp
+                Constraint::Length(3),
             ]
             .as_ref(),
         )
@@ -30,10 +32,34 @@ where
     // Title
     let title = draw_title();
     rect.render_widget(title, chunks[0]);
+
+    // Temp
+    let temp = draw_temp(&app);
+    rect.render_widget(temp, chunks[1]);
 }
 
 fn draw_title<'a>() -> Paragraph<'a> {
     Paragraph::new(UI_TITLE)
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::White))
+                .border_type(BorderType::Plain),
+        )
+}
+
+fn draw_temp<'a>(app: &App) -> Paragraph<'a> {
+    let mut temp = match app.current_leader {
+        Some(ref ballot) => format!("Current Leader: {:?}", ballot),
+        None => "No leader yet".to_string(),
+    };
+
+    temp.push_str(&format!("\nPID: {}", app.pid));
+    temp.push_str(&format!("\nPeers: {:?}", app.peers));
+    temp.push_str(&format!("\nConfiguration ID: {}", app.configuration_id));
+    Paragraph::new(temp)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
         .block(

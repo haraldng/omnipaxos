@@ -1,5 +1,7 @@
 use crate::errors::{valid_config, ConfigError};
 // use crate::valid_config;
+#[cfg(feature = "ui")]
+use crate::utils::ui::UI;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
@@ -23,8 +25,6 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
-#[cfg(feature = "ui")]
-use crate::utils::ui::UI;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -76,9 +76,9 @@ impl OmniPaxosConfig {
             resend_message_clock: LogicalClock::with(
                 self.server_config.resend_message_tick_timeout,
             ),
-            seq_paxos: SequencePaxos::with(self.into(), storage),
             #[cfg(feature = "ui")]
-            ui: None,
+            ui: UI::new(self.clone().into()),
+            seq_paxos: SequencePaxos::with(self.into(), storage),
         })
     }
 }
@@ -227,7 +227,7 @@ where
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
     #[cfg(feature = "ui")]
-    ui: Option<UI>,
+    ui: UI,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -399,16 +399,14 @@ where
     /// Clear the terminal and render the ui.
     #[cfg(feature = "ui")]
     pub fn start_ui(&mut self) {
-        let mut ui = UI::new();
-        ui.start();
-        self.ui = Some(ui);
+        self.ui.set_current_leader(self.get_current_leader_ballot());
+        self.ui.start();
     }
 
+    /// Stop the ui.
     #[cfg(feature = "ui")]
-    fn update_ui_if_started(&mut self) {
-        if let Some(ui) = &mut self.ui {
-            // ui.update(self);
-        }
+    pub fn stop_ui(&mut self) {
+        self.ui.stop();
     }
 }
 

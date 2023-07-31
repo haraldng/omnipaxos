@@ -167,4 +167,5 @@ fn main() {
 
     leader_server.lock().unwrap().start_ui();
     std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
+    leader_server.lock().unwrap().stop_ui();
 }
