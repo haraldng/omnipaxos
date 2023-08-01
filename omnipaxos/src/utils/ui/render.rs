@@ -59,6 +59,10 @@ fn draw_temp<'a>(app: &App) -> Paragraph<'a> {
     temp.push_str(&format!("\nPID: {}", app.pid));
     temp.push_str(&format!("\nPeers: {:?}", app.peers));
     temp.push_str(&format!("\nConfiguration ID: {}", app.configuration_id));
+    temp.push_str(&format!("\nDecided Index: {}", app.decided_idx));
+    temp.push_str(&format!("\nBallot: {:?}", app.ballot));
+    temp.push_str(&format!("\nConnectivity: {}", app.connectivity));
+    temp.push_str(&format!("\nBallots: {:?}", app.ballots));
     Paragraph::new(temp)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)

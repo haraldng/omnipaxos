@@ -70,7 +70,7 @@ fn main() {
             outgoing: sender_channels.clone(),
         };
         let join_handle = runtime.spawn({
-            async move {
+async move {
                 op_server.run().await;
             }
         });
@@ -80,13 +80,13 @@ fn main() {
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     let (first_server, _) = op_server_handles.get(&1).unwrap();
+    first_server.lock().unwrap().start_ui();
     // check which server is the current leader
     let leader = first_server
         .lock()
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
-    println!("Elected leader: {}", leader);
 
     let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
     let (follower_server, _) = op_server_handles.get(follower).unwrap();
@@ -95,7 +95,7 @@ fn main() {
         key: "a".to_string(),
         value: 1,
     };
-    println!("Adding value: {:?} via server {}", kv1, follower);
+    // println!("Adding value: {:?} via server {}", kv1, follower);
     follower_server
         .lock()
         .unwrap()
@@ -106,7 +106,7 @@ fn main() {
         key: "b".to_string(),
         value: 2,
     };
-    println!("Adding value: {:?} via server {}", kv2, leader);
+    // println!("Adding value: {:?} via server {}", kv2, leader);
     let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
     leader_server
         .lock()
@@ -128,8 +128,9 @@ fn main() {
         }
         // ignore uncommitted entries
     }
-    println!("KV store: {:?}", simple_kv_store);
-    println!("Killing leader: {}...", leader);
+    // println!("KV store: {:?}", simple_kv_store);
+    // println!("Killing leader: {}...", leader);
+    std::thread::sleep(WAIT_UI_UPDATE_TIMEOUT);
     leader_join_handle.abort();
     // wait for new leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
@@ -138,12 +139,12 @@ fn main() {
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
-    println!("Elected new leader: {}", leader);
+    // println!("Elected new leader: {}", leader);
     let kv3 = KeyValue {
         key: "b".to_string(),
         value: 3,
     };
-    println!("Adding value: {:?} via server {}", kv3, leader);
+    // println!("Adding value: {:?} via server {}", kv3, leader);
     let (leader_server, _) = op_server_handles.get(&leader).unwrap();
     leader_server
         .lock()
@@ -163,5 +164,8 @@ fn main() {
         }
         // ignore uncommitted entries
     }
-    println!("KV store: {:?}", simple_kv_store);
+    // println!("KV store: {:?}", simple_kv_store);
+
+    std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
+    first_server.lock().unwrap().stop_ui();
 }

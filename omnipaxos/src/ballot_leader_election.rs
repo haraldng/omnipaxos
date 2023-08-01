@@ -275,6 +275,20 @@ impl BallotLeaderElection {
             );
         }
     }
+
+    // temp: for ui
+    pub(crate) fn get_current_ballot(&self) -> Ballot {
+        self.current_ballot
+    }
+
+    pub(crate) fn get_ballots(&self) -> Vec<(Ballot, Connectivity)> {
+        self.ballots.clone()
+    }
+
+    pub(crate) fn get_connectivity(&self) -> Connectivity {
+        self.connectivity
+    }
+    // end-temp
 }
 
 /// Configuration for `BallotLeaderElection`.

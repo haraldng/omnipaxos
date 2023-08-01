@@ -11,13 +11,14 @@ mod render;
 mod util;
 
 pub struct UI {
-    app: App,
+    // temp: pub
+    pub(crate) app: App,
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     started: bool,
 }
 
 impl UI {
-    pub(crate) fn new(config: UIAppConfig) -> Self {
+    pub(crate) fn with(config: UIAppConfig) -> Self {
         // Configure Crossterm backend for tui
         let stdout = stdout();
         let backend = CrosstermBackend::new(stdout);
@@ -33,7 +34,7 @@ impl UI {
         enable_raw_mode().unwrap();
         self.terminal.clear().unwrap();
         self.terminal.hide_cursor().unwrap();
-        self.render();
+        self.redraw();
         self.started = true;
     }
 
@@ -54,7 +55,8 @@ impl UI {
         self.started
     }
 
-    pub(crate) fn render(&mut self) {
+    // Redraw the ui, should be called manually after updating the ui state
+    pub(crate) fn redraw(&mut self) {
         self.terminal
             .draw(|rect| {
                 render::render(rect, &self.app);
@@ -62,6 +64,7 @@ impl UI {
             .unwrap();
     }
 
+    // Only update the ui state without redrawing
     pub(crate) fn set_current_leader(&mut self, leader: Option<Ballot>) {
         self.app.current_leader = leader;
     }

@@ -77,7 +77,7 @@ impl OmniPaxosConfig {
                 self.server_config.resend_message_tick_timeout,
             ),
             #[cfg(feature = "ui")]
-            ui: UI::new(self.clone().into()),
+            ui: UI::with(self.clone().into()),
             seq_paxos: SequencePaxos::with(self.into(), storage),
         })
     }
@@ -332,6 +332,9 @@ where
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
             Message::BLE(b) => self.ble.handle(b),
         }
+        // Update the UI
+        #[cfg(feature = "ui")]
+        self.update_ui_if_started();
     }
 
     /// Returns whether this Sequence Paxos has been reconfigured
@@ -399,7 +402,6 @@ where
     /// Clear the terminal and render the ui.
     #[cfg(feature = "ui")]
     pub fn start_ui(&mut self) {
-        self.ui.set_current_leader(self.get_current_leader_ballot());
         self.ui.start();
     }
 
@@ -407,6 +409,19 @@ where
     #[cfg(feature = "ui")]
     pub fn stop_ui(&mut self) {
         self.ui.stop();
+    }
+
+    #[cfg(feature = "ui")]
+    fn update_ui_if_started(&mut self) {
+        if self.ui.is_started() {
+            self.ui.set_current_leader(self.get_current_leader_ballot());
+            // temp: directly access the ui app
+            self.ui.app.decided_idx = self.get_decided_idx();
+            self.ui.app.ballot = self.ble.get_current_ballot();
+            self.ui.app.connectivity = self.ble.get_connectivity();
+            self.ui.app.ballots = self.ble.get_ballots();
+            self.ui.redraw();
+        }
     }
 }
 
