@@ -8,7 +8,7 @@ use crate::{
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
     util::{
-        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
+        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT, UI_UPDATE_TIMEOUT},
         ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
 };
@@ -78,6 +78,8 @@ impl OmniPaxosConfig {
             ),
             #[cfg(feature = "ui")]
             ui: UI::with(self.clone().into()),
+            #[cfg(feature = "ui")]
+            ui_update_clock: LogicalClock::with(self.server_config.ui_update_tick_timeout),
             seq_paxos: SequencePaxos::with(self.into(), storage),
         })
     }
@@ -171,6 +173,9 @@ pub struct ServerConfig {
     pub election_tick_timeout: u64,
     /// The number of calls to `tick()` before a message is considered dropped and thus resent. Must not be 0.
     pub resend_message_tick_timeout: u64,
+    /// The number of calls to `tick()` before the UI is updated. Must not be 0.
+    #[cfg(feature = "ui")]
+    pub ui_update_tick_timeout: u64,
     /// The buffer size for outgoing messages.
     pub buffer_size: usize,
     /// The size of the buffer for log batching. The default is 1, which means no batching.
@@ -206,6 +211,8 @@ impl Default for ServerConfig {
             pid: 0,
             election_tick_timeout: ELECTION_TIMEOUT,
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
+            #[cfg(feature = "ui")]
+            ui_update_tick_timeout: UI_UPDATE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
             batch_size: 1,
             #[cfg(feature = "logging")]
@@ -228,6 +235,8 @@ where
     resend_message_clock: LogicalClock,
     #[cfg(feature = "ui")]
     ui: UI,
+    #[cfg(feature = "ui")]
+    ui_update_clock: LogicalClock,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -326,20 +335,7 @@ where
             .expect("storage error while trying to read decided log suffix")
     }
 
-    /// Handle an incoming message and update ui if necessary.
-    #[cfg(feature = "ui")]
-    pub fn handle_incoming(&mut self, m: Message<T>) {
-        match m {
-            Message::SequencePaxos(p) => self.seq_paxos.handle(p),
-            Message::BLE(b) => self.ble.handle(b),
-        }
-        // Update the UI
-        #[cfg(feature = "ui")]
-        self.update_ui_if_started();
-    }
-
-    /// Handle an incoming message.
-    #[cfg(not(feature = "ui"))]
+    /// Handle an incoming message
     pub fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
@@ -390,6 +386,11 @@ where
         }
         if self.resend_message_clock.tick_and_check_timeout() {
             self.seq_paxos.resend_message_timeout();
+        }
+        #[cfg(feature = "ui")]
+        if self.ui_update_clock.tick_and_check_timeout() {
+            // Update the UI if it has been started
+            self.update_ui_if_started();
         }
     }
 
