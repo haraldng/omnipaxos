@@ -326,7 +326,8 @@ where
             .expect("storage error while trying to read decided log suffix")
     }
 
-    /// Handle an incoming message.
+    /// Handle an incoming message and update ui if necessary.
+    #[cfg(feature = "ui")]
     pub fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
@@ -335,6 +336,15 @@ where
         // Update the UI
         #[cfg(feature = "ui")]
         self.update_ui_if_started();
+    }
+
+    /// Handle an incoming message.
+    #[cfg(not(feature = "ui"))]
+    pub fn handle_incoming(&mut self, m: Message<T>) {
+        match m {
+            Message::SequencePaxos(p) => self.seq_paxos.handle(p),
+            Message::BLE(b) => self.ble.handle(b),
+        }
     }
 
     /// Returns whether this Sequence Paxos has been reconfigured
