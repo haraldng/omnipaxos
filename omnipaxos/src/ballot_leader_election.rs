@@ -74,7 +74,9 @@ pub(crate) struct BallotLeaderElection {
     peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
-    /// Vector which holds all the received heartbeats
+    /// Vector which temporarily holds all the received heartbeats from one heartbeat round, including the current node.
+    ballots_temp: Vec<(Ballot, Connectivity)>,
+    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node, which indicates the current connectivity of the cluster.
     ballots: Vec<(Ballot, Connectivity)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
@@ -106,6 +108,7 @@ impl BallotLeaderElection {
             pid,
             peers,
             hb_round: 0,
+            ballots_temp: Vec::with_capacity(num_nodes),
             ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             connectivity: num_nodes as Connectivity,
@@ -153,8 +156,7 @@ impl BallotLeaderElection {
     }
 
     fn check_leader(&mut self) -> Option<Ballot> {
-        let ballots = std::mem::take(&mut self.ballots);
-        let top_accept_ballot = ballots
+        let top_accept_ballot = self.ballots
             .iter()
             .filter_map(|&(ballot, connectivity)| {
                 if self.quorum.is_accept_quorum(connectivity as usize) {
@@ -171,7 +173,7 @@ impl BallotLeaderElection {
             None
         } else {
             // leader is dead || changed priority || doesn't have an accept quorum
-            let top_prepare_ballot = ballots
+            let top_prepare_ballot = self.ballots
                 .iter()
                 .filter_map(|&(ballot, connectivity)| {
                     if self.quorum.is_prepare_quorum(connectivity as usize) {
@@ -225,15 +227,16 @@ impl BallotLeaderElection {
     }
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
-        let my_connectivity = self.ballots.len() + 1;
+        let my_connectivity = self.ballots_temp.len() + 1;
         self.connectivity = my_connectivity as Connectivity;
+        self.ballots_temp.push((self.current_ballot, self.connectivity));
+        self.ballots = std::mem::take(&mut self.ballots_temp);
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
-            self.ballots.push((self.current_ballot, self.connectivity));
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -243,7 +246,6 @@ impl BallotLeaderElection {
                 self.hb_round,
                 self.ballots
             );
-            self.ballots.clear();
             None
         };
         self.new_hb_round();
@@ -266,7 +268,7 @@ impl BallotLeaderElection {
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round && rep.ballot.config_id == self.configuration_id {
-            self.ballots.push((rep.ballot, rep.connectivity));
+            self.ballots_temp.push((rep.ballot, rep.connectivity));
         } else {
             #[cfg(feature = "logging")]
             warn!(
