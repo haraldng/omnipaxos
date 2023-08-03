@@ -1,10 +1,11 @@
 use crate::ballot_leader_election::Ballot;
 use crate::utils::ui::app::{App, UIAppConfig};
-use crate::OmniPaxosConfig;
-use crossterm::event::DisableMouseCapture;
+use crossterm::{event::DisableMouseCapture};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
+use crossterm::event::{Event, KeyCode};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::stdout;
+use std::time::Duration;
 
 mod app;
 mod render;
@@ -33,7 +34,7 @@ impl UI {
         enable_raw_mode().unwrap();
         self.terminal.clear().unwrap();
         self.terminal.hide_cursor().unwrap();
-        self.redraw();
+        self.update();
         self.started = true;
     }
 
@@ -54,13 +55,22 @@ impl UI {
         self.started
     }
 
-    // Redraw the ui, should be called manually after updating the ui state
-    pub(crate) fn redraw(&mut self) {
+    // Handle user input, redraw the ui, should be called manually after updating the ui app
+    pub(crate) fn update(&mut self) {
+        // Redraw
         self.terminal
             .draw(|rect| {
                 render::render(rect, &self.app);
             })
             .unwrap();
+        // Handle user input
+        if crossterm::event::poll(Duration::from_millis(0)).unwrap() {
+            if let Event::Key(key) = crossterm::event::read().unwrap() {
+                if let KeyCode::Char('q') = key.code {
+                    self.stop();
+                }
+            }
+        }
     }
 
     // Only update the ui state without redrawing

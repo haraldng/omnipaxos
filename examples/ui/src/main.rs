@@ -169,4 +169,5 @@ fn main() {
 
     std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
     first_server.lock().unwrap().stop_ui();
+    println!("Program stopping...");
 }

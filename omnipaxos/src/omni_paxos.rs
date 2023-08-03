@@ -429,7 +429,7 @@ where
             self.ui.app.decided_idx = self.get_decided_idx();
             self.ui.app.ballot = self.ble.get_current_ballot();
             self.ui.app.ballots = self.ble.get_ballots();
-            self.ui.redraw();
+            self.ui.update();
         }
     }
 }
