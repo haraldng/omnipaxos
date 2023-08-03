@@ -50,6 +50,7 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
+            ui_update_tick_timeout: UI_UPDATE_TICK_TIMEOUT,
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
@@ -70,7 +71,7 @@ fn main() {
             outgoing: sender_channels.clone(),
         };
         let join_handle = runtime.spawn({
-async move {
+            async move {
                 op_server.run().await;
             }
         });

@@ -60,7 +60,7 @@ impl PartialOrd for Ballot {
 }
 
 /// The connectivity of an OmniPaxos node
-type Connectivity = u8;
+pub(crate) type Connectivity = u8;
 
 /// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
@@ -156,7 +156,8 @@ impl BallotLeaderElection {
     }
 
     fn check_leader(&mut self) -> Option<Ballot> {
-        let top_accept_ballot = self.ballots
+        let top_accept_ballot = self
+            .ballots
             .iter()
             .filter_map(|&(ballot, connectivity)| {
                 if self.quorum.is_accept_quorum(connectivity as usize) {
@@ -173,7 +174,8 @@ impl BallotLeaderElection {
             None
         } else {
             // leader is dead || changed priority || doesn't have an accept quorum
-            let top_prepare_ballot = self.ballots
+            let top_prepare_ballot = self
+                .ballots
                 .iter()
                 .filter_map(|&(ballot, connectivity)| {
                     if self.quorum.is_prepare_quorum(connectivity as usize) {
@@ -229,7 +231,8 @@ impl BallotLeaderElection {
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         let my_connectivity = self.ballots_temp.len() + 1;
         self.connectivity = my_connectivity as Connectivity;
-        self.ballots_temp.push((self.current_ballot, self.connectivity));
+        self.ballots_temp
+            .push((self.current_ballot, self.connectivity));
         self.ballots = std::mem::take(&mut self.ballots_temp);
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
@@ -278,7 +281,6 @@ impl BallotLeaderElection {
         }
     }
 
-    // temp: for ui
     pub(crate) fn get_current_ballot(&self) -> Ballot {
         self.current_ballot
     }
@@ -290,7 +292,6 @@ impl BallotLeaderElection {
     pub(crate) fn get_connectivity(&self) -> Connectivity {
         self.connectivity
     }
-    // end-temp
 }
 
 /// Configuration for `BallotLeaderElection`.

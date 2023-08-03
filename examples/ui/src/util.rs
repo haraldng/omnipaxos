@@ -2,6 +2,7 @@ use std::time::Duration;
 
 pub const BUFFER_SIZE: usize = 10000;
 pub const ELECTION_TICK_TIMEOUT: u64 = 5;
+pub const UI_UPDATE_TICK_TIMEOUT: u64 = 5;
 pub const TICK_PERIOD: Duration = Duration::from_millis(10);
 pub const OUTGOING_MESSAGE_PERIOD: Duration = Duration::from_millis(1);
 

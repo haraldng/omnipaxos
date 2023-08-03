@@ -426,10 +426,8 @@ where
     fn update_ui_if_started(&mut self) {
         if self.ui.is_started() {
             self.ui.set_current_leader(self.get_current_leader_ballot());
-            // temp: directly access the ui app
             self.ui.app.decided_idx = self.get_decided_idx();
             self.ui.app.ballot = self.ble.get_current_ballot();
-            self.ui.app.connectivity = self.ble.get_connectivity();
             self.ui.app.ballots = self.ble.get_ballots();
             self.ui.redraw();
         }

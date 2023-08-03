@@ -1,8 +1,6 @@
-use crate::ballot_leader_election::Ballot;
-use crate::OmniPaxosConfig;
+use crate::ballot_leader_election::{Ballot, Connectivity};
 use crate::util::ConfigurationId;
-
-type Connectivity = u8;
+use crate::OmniPaxosConfig;
 
 /// Ui application, containing the ui states
 pub(crate) struct App {
@@ -18,9 +16,7 @@ pub(crate) struct App {
     pub(crate) current_leader: Option<Ballot>,
     // Max index of the decided log entry.
     pub(crate) decided_idx: u64,
-    // Connectivity of the current node.
-    pub(crate) connectivity: Connectivity,
-    // Ballots of the nodes in the cluster that current node is receiving messages from.
+    // Ballots of the nodes in the cluster that are active, including the current node.
     pub(crate) ballots: Vec<(Ballot, Connectivity)>,
 }
 
@@ -33,7 +29,6 @@ impl App {
             current_leader: None,
             decided_idx: 0,
             ballot: Default::default(),
-            connectivity: 0,
             ballots: vec![],
         }
     }
@@ -62,4 +57,3 @@ impl From<OmniPaxosConfig> for UIAppConfig {
         }
     }
 }
-

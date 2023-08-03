@@ -1,17 +1,16 @@
 use crate::ballot_leader_election::Ballot;
 use crate::utils::ui::app::{App, UIAppConfig};
+use crate::OmniPaxosConfig;
 use crossterm::event::DisableMouseCapture;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::stdout;
-use crate::OmniPaxosConfig;
 
 mod app;
 mod render;
 mod util;
 
 pub struct UI {
-    // temp: pub
     pub(crate) app: App,
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     started: bool,
