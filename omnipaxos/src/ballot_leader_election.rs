@@ -76,7 +76,7 @@ pub(crate) struct BallotLeaderElection {
     hb_round: u32,
     /// Vector which temporarily holds all the received heartbeats from one heartbeat round, including the current node.
     ballots_temp: Vec<(Ballot, Connectivity)>,
-    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node, which indicates the current connectivity of the cluster.
+    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node. Represents nodes that are currently alive from the view of the current node.
     ballots: Vec<(Ballot, Connectivity)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
@@ -285,13 +285,10 @@ impl BallotLeaderElection {
         self.current_ballot
     }
 
-    pub(crate) fn get_ballots(&self) -> Vec<(Ballot, Connectivity)> {
-        self.ballots.clone()
+    pub(crate) fn get_ballots(&self) -> &Vec<(Ballot, Connectivity)> {
+        &self.ballots
     }
 
-    pub(crate) fn get_connectivity(&self) -> Connectivity {
-        self.connectivity
-    }
 }
 
 /// Configuration for `BallotLeaderElection`.

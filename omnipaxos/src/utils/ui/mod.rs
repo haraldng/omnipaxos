@@ -72,9 +72,4 @@ impl UI {
             }
         }
     }
-
-    // Only update the ui state without redrawing
-    pub(crate) fn set_current_leader(&mut self, leader: Option<Ballot>) {
-        self.app.current_leader = leader;
-    }
 }
