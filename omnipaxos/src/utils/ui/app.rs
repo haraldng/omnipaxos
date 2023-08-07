@@ -5,7 +5,7 @@ use crate::OmniPaxosConfig;
 #[derive(Debug, Clone)]
 pub(crate) struct  Node {
     pub(crate) pid: NodeId,
-    pub(crate) configuration_id: u32,
+    pub(crate) configuration_id: ConfigurationId,
     pub(crate) ballot_number: u32,
 }
 

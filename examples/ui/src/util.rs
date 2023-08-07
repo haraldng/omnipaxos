@@ -9,4 +9,4 @@ pub const OUTGOING_MESSAGE_PERIOD: Duration = Duration::from_millis(1);
 pub const WAIT_LEADER_TIMEOUT: Duration = Duration::from_millis(500);
 pub const WAIT_DECIDED_TIMEOUT: Duration = Duration::from_millis(50);
 pub const WAIT_UI_UPDATE_TIMEOUT: Duration = Duration::from_secs(1);
-pub const WAIT_UI_QUIT_TIMEOUT: Duration = Duration::from_secs(5);
+pub const WAIT_UI_QUIT_TIMEOUT: Duration = Duration::from_secs(10);

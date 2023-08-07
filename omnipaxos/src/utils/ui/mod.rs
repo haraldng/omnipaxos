@@ -57,7 +57,7 @@ impl UI {
 
     // Handle user input, redraw the ui, should be called manually after updating the ui app
     pub(crate) fn update(&mut self) {
-        // Redraw
+        // Redraw the UI
         self.terminal
             .draw(|rect| {
                 render::render(rect, &self.app);
