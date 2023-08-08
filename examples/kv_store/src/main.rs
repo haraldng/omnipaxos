@@ -50,6 +50,8 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
+            #[cfg(feature = "with_omnipaxos_ui")]
+            ui_update_tick_timeout: UI_UPDATE_TICK_TIMEOUT,
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
@@ -80,12 +82,16 @@ fn main() {
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     let (first_server, _) = op_server_handles.get(&1).unwrap();
+    // start the UI if feature is enabled
+    #[cfg(feature = "with_omnipaxos_ui")]
+    first_server.lock().unwrap().start_ui();
     // check which server is the current leader
     let leader = first_server
         .lock()
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Elected leader: {}", leader);
 
     let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
@@ -95,6 +101,7 @@ fn main() {
         key: "a".to_string(),
         value: 1,
     };
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv1, follower);
     follower_server
         .lock()
@@ -106,6 +113,7 @@ fn main() {
         key: "b".to_string(),
         value: 2,
     };
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv2, leader);
     let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
     leader_server
@@ -128,8 +136,14 @@ fn main() {
         }
         // ignore uncommitted entries
     }
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("KV store: {:?}", simple_kv_store);
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Killing leader: {}...", leader);
+    // wait for the UI to update...
+    #[cfg(feature = "with_omnipaxos_ui")]
+    std::thread::sleep(WAIT_UI_UPDATE_TIMEOUT);
+
     leader_join_handle.abort();
     // wait for new leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
@@ -138,11 +152,13 @@ fn main() {
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Elected new leader: {}", leader);
     let kv3 = KeyValue {
         key: "b".to_string(),
         value: 3,
     };
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv3, leader);
     let (leader_server, _) = op_server_handles.get(&leader).unwrap();
     leader_server
@@ -163,5 +179,12 @@ fn main() {
         }
         // ignore uncommitted entries
     }
+    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("KV store: {:?}", simple_kv_store);
+
+    // clean up ui
+    #[cfg(feature = "with_omnipaxos_ui")]
+    std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
+    #[cfg(feature = "with_omnipaxos_ui")]
+    first_server.lock().unwrap().stop_ui();
 }
