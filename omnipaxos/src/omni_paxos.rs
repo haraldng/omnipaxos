@@ -1,14 +1,11 @@
 use crate::errors::{valid_config, ConfigError};
-// use crate::valid_config;
-#[cfg(feature = "ui")]
-use crate::utils::ui::UI;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
     util::{
-        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT, UI_UPDATE_TIMEOUT},
+        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
         ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
 };
@@ -25,6 +22,12 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
+// use crate::valid_config;
+#[cfg(feature = "ui")]
+use crate::utils::ui::UI;
+#[cfg(feature = "ui")]
+use crate::util::defaults::UI_UPDATE_TIMEOUT;
+
 
 /// Configuration for `OmniPaxos`.
 /// # Fields

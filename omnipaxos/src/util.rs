@@ -287,6 +287,7 @@ pub(crate) mod defaults {
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
     pub(crate) const ELECTION_TIMEOUT: u64 = 10;
     pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 100;
+    #[cfg(feature = "ui")]
     pub(crate) const UI_UPDATE_TIMEOUT: u64 = 50;
 }
 
