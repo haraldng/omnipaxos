@@ -1,3 +1,8 @@
+use crate::app::App;
+use crate::util::*;
+use ratatui::symbols::Marker;
+use ratatui::text::Span;
+use ratatui::widgets::canvas::{Canvas, Line, Rectangle};
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -5,13 +10,8 @@ use ratatui::{
     widgets::*,
     Frame,
 };
-use ratatui::symbols::Marker;
-use ratatui::text::Span;
-use ratatui::widgets::canvas::{Canvas, Line, Rectangle};
 use std::collections::HashMap;
 use std::f64::consts::PI;
-use crate::util::NodeId;
-use crate::utils::ui::{app::App, util::*};
 
 // render ui components
 pub(crate) fn render<B>(rect: &mut Frame<B>, app: &App)
@@ -19,7 +19,7 @@ where
     B: Backend,
 {
     let size = rect.size();
-    let window_width: usize = size.width.into();
+    // let window_width: usize = size.width.into();
 
     // Vertical layout
     let chunks = Layout::default()
@@ -54,7 +54,7 @@ where
         .x_bounds([-90.0, 90.0])
         .y_bounds([-60.0, 60.0])
         .paint(|ctx| {
-            let canvas_components = make_canvas(&app);
+            let canvas_components = make_canvas(app);
             for node in canvas_components.nodes.values() {
                 ctx.draw(node);
             }
@@ -69,7 +69,7 @@ where
         .x_bounds([-90.0, 90.0])
         .y_bounds([-60.0, 60.0])
         .paint(|ctx| {
-            let canvas_components = make_canvas(&app);
+            let canvas_components = make_canvas(app);
 
             for line in canvas_components.connections.values() {
                 ctx.draw(line);
@@ -81,9 +81,8 @@ where
     rect.render_widget(canvas_line_lable, body_chunks[1]);
     rect.render_widget(canvas_node, body_chunks[1]);
 
-
     // Temp
-    let temp = draw_temp(&app);
+    let temp = draw_temp(app);
     rect.render_widget(temp, body_chunks[0]);
 }
 
@@ -135,7 +134,11 @@ fn make_canvas(app: &App) -> CanvasComponents {
     let num_of_nodes = app.peers.len() + 1;
     // Ids of all nodes, including the current one.
     // temp: for now the first node is the current node
-    let node_ids = vec![app.current_node.pid].iter().chain(app.peers.iter()).map(|p| *p).collect::<Vec<NodeId>>();
+    let node_ids = vec![app.current_node.pid]
+        .iter()
+        .chain(app.peers.iter())
+        .map(|p| *p)
+        .collect::<Vec<NodeId>>();
     let node_width = UI_CANVAS_NODE_WIDTH;
     let radius = UI_CANVAS_RADIUS;
     let center_x = -node_width / 2.0; // X-coordinate of the circle's center
@@ -166,23 +169,23 @@ fn make_canvas(app: &App) -> CanvasComponents {
     let mut lines = HashMap::new();
     let i = 0;
     // for i in 0..num_of_nodes {
-        for j in i..num_of_nodes {
-            let node1_id = node_ids[i];
-            let node2_id = node_ids[j];
-            let current_rect = nodes_with_rects.get(&node1_id).unwrap();
-            let next_rect = nodes_with_rects.get(&node2_id).unwrap();
+    for j in i..num_of_nodes {
+        let node1_id = node_ids[i];
+        let node2_id = node_ids[j];
+        let current_rect = nodes_with_rects.get(&node1_id).unwrap();
+        let next_rect = nodes_with_rects.get(&node2_id).unwrap();
 
-            if app.active_peers.iter().any(|node| node.pid == node2_id) {
-                let line = Line {
-                    x1: current_rect.x + current_rect.width / 2.0,
-                    y1: current_rect.y + current_rect.height / 2.0,
-                    x2: next_rect.x + next_rect.width / 2.0,
-                    y2: next_rect.y + next_rect.height / 2.0,
-                    color: Color::LightCyan,
-                };
-                lines.insert((i as u64, j as u64), line);
-            }
+        if app.active_peers.iter().any(|node| node.pid == node2_id) {
+            let line = Line {
+                x1: current_rect.x + current_rect.width / 2.0,
+                y1: current_rect.y + current_rect.height / 2.0,
+                x2: next_rect.x + next_rect.width / 2.0,
+                y2: next_rect.y + next_rect.height / 2.0,
+                color: Color::LightCyan,
+            };
+            lines.insert((i as u64, j as u64), line);
         }
+    }
     // }
 
     // Labels
@@ -205,4 +208,3 @@ fn make_canvas(app: &App) -> CanvasComponents {
         labels,
     }
 }
-

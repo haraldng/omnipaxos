@@ -24,10 +24,9 @@ use std::{
 use toml;
 // use crate::valid_config;
 #[cfg(feature = "ui")]
-use crate::utils::ui::UI;
-#[cfg(feature = "ui")]
 use crate::util::defaults::UI_UPDATE_TIMEOUT;
-
+#[cfg(feature = "ui")]
+use omnipaxos_ui::UI;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -434,12 +433,11 @@ where
             self.ui.app.current_leader = self.get_current_leader();
             self.ui.app.decided_idx = self.get_decided_idx();
             self.ui.app.active_peers.clear();
-            self.ble.get_ballots()
+            self.ble
+                .get_ballots()
                 .iter()
-                .filter(|(b,_)| b.pid != self.ui.app.current_node.pid)
-                .for_each(|(b,_)| {
-                    self.ui.app.active_peers.push((*b).into())
-                });
+                .filter(|(b, _)| b.pid != self.ui.app.current_node.pid)
+                .for_each(|(b, _)| self.ui.app.active_peers.push((*b).into()));
             self.ui.update();
         }
     }

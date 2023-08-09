@@ -287,7 +287,6 @@ impl BallotLeaderElection {
         }
     }
 
-
     #[cfg(feature = "ui")]
     pub(crate) fn get_current_ballot(&self) -> Ballot {
         self.current_ballot

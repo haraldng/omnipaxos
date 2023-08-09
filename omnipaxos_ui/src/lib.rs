@@ -1,24 +1,23 @@
-use crate::ballot_leader_election::Ballot;
-use crate::utils::ui::app::{App, UIAppConfig};
-use crossterm::{event::DisableMouseCapture};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
+use crate::app::{App, UIAppConfig};
+use crossterm::event::DisableMouseCapture;
 use crossterm::event::{Event, KeyCode};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::stdout;
 use std::time::Duration;
 
-mod app;
+pub mod app;
 mod render;
 mod util;
 
 pub struct UI {
-    pub(crate) app: App,
+    pub app: App,
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     started: bool,
 }
 
 impl UI {
-    pub(crate) fn with(config: UIAppConfig) -> Self {
+    pub fn with(config: UIAppConfig) -> Self {
         // Configure Crossterm backend for tui
         let stdout = stdout();
         let backend = CrosstermBackend::new(stdout);
@@ -30,7 +29,7 @@ impl UI {
         }
     }
 
-    pub(crate) fn start(&mut self) {
+    pub fn start(&mut self) {
         enable_raw_mode().unwrap();
         self.terminal.clear().unwrap();
         self.terminal.hide_cursor().unwrap();
@@ -38,7 +37,7 @@ impl UI {
         self.started = true;
     }
 
-    pub(crate) fn stop(&mut self) {
+    pub fn stop(&mut self) {
         disable_raw_mode().unwrap();
         crossterm::execute!(
             self.terminal.backend_mut(),
@@ -51,12 +50,12 @@ impl UI {
         self.started = false;
     }
 
-    pub(crate) fn is_started(&self) -> bool {
+    pub fn is_started(&self) -> bool {
         self.started
     }
 
     // Handle user input, redraw the ui, should be called manually after updating the ui app
-    pub(crate) fn update(&mut self) {
+    pub fn update(&mut self) {
         // Redraw the UI
         self.terminal
             .draw(|rect| {
