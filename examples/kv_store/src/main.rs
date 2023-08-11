@@ -1,3 +1,5 @@
+// To run the example with the UI:
+// cargo run --features "with_omnipaxos_ui"
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
     messages::Message,

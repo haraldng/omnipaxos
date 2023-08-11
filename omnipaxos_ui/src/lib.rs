@@ -56,12 +56,6 @@ impl UI {
 
     // Handle user input, redraw the ui, should be called manually after updating the ui app
     pub fn update(&mut self) {
-        // Redraw the UI
-        self.terminal
-            .draw(|rect| {
-                render::render(rect, &self.app);
-            })
-            .unwrap();
         // Handle user input
         if crossterm::event::poll(Duration::from_millis(0)).unwrap() {
             if let Event::Key(key) = crossterm::event::read().unwrap() {
@@ -70,5 +64,11 @@ impl UI {
                 }
             }
         }
+        // Redraw the UI
+        self.terminal
+            .draw(|rect| {
+                render::render(rect, &self.app);
+            })
+            .unwrap();
     }
 }
