@@ -28,9 +28,10 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
-
 use omnipaxos::OmniPaxosConfig;
 use sled::Config;
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::{lru_cache::LRUniCache, PreProcessedEntry};
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
@@ -847,7 +848,7 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
 pub struct Value(pub u64);
 
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
@@ -873,6 +874,27 @@ impl Snapshot<Value> for LatestValue {
 
 impl Entry for Value {
     type Snapshot = LatestValue;
+    #[cfg(feature = "unicache")]
+    type Encoded = u8;
+    #[cfg(feature = "unicache")]
+    type Encodable = Self;
+    #[cfg(feature = "unicache")]
+    type NotEncodable = ();
+    #[cfg(feature = "unicache")]
+    type UniCache = LRUniCache<Self>;
+
+    #[cfg(feature = "unicache")]
+    fn pre_process(&self) -> omnipaxos::unicache::PreProcessedEntry<Self> {
+        PreProcessedEntry {
+            encodable: vec![Value(self.0)],
+            not_encodable: vec![],
+        }
+    }
+
+    #[cfg(feature = "unicache")]
+    fn recreate(item: omnipaxos::unicache::PreProcessedEntry<Self>) -> Self {
+        *item.encodable.first().unwrap()
+    }
 }
 
 /// Create a temporary directory in /tmp/

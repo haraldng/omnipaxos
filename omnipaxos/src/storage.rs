@@ -1,4 +1,6 @@
 use super::ballot_leader_election::Ballot;
+#[cfg(feature = "unicache")]
+use crate::unicache::*;
 use crate::{
     util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
     ClusterConfig, CompactionErr,
@@ -22,6 +24,22 @@ pub trait Entry: Clone + Debug {
     #[cfg(feature = "serde")]
     /// The snapshot type for this entry type.
     type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
+
+    #[cfg(feature = "unicache")]
+    type Encoded: Encoded;
+    #[cfg(feature = "unicache")]
+    type Encodable: Encodable;
+    #[cfg(feature = "unicache")]
+    type NotEncodable: NotEncodable;
+
+    #[cfg(all(feature = "unicache", not(feature = "serde")))]
+    type UniCache: UniCache<Self>;
+    #[cfg(all(feature = "unicache", feature = "serde"))]
+    type UniCache: UniCache<Self> + Serialize + for<'a> Deserialize<'a>;
+    #[cfg(feature = "unicache")]
+    fn pre_process(&self) -> PreProcessedEntry<Self>;
+    #[cfg(feature = "unicache")]
+    fn recreate(item: PreProcessedEntry<Self>) -> Self;
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -74,7 +92,7 @@ where
 }
 
 /// The Result type returned by the storage API.
-pub type StorageResult<T> = std::result::Result<T, Box<dyn Error>>;
+pub type StorageResult<T> = Result<T, Box<dyn Error>>;
 
 /// Trait for implementing the storage backend of Sequence Paxos.
 pub trait Storage<T>
@@ -171,7 +189,6 @@ pub(crate) enum RollbackValue<T: Entry> {
 }
 
 /// A simple in-memory storage for simple state values of OmniPaxos.
-#[derive(Clone)]
 struct StateCache<T>
 where
     T: Entry,
@@ -192,6 +209,11 @@ where
     real_log_len: u64,
     /// Stopsign entry.
     stopsign: Option<StopSign>,
+    #[cfg(feature = "unicache")]
+    /// Batch of entries that are processed (i.e., maybe encoded). Only used by the leader.
+    batched_processed_by_leader: Vec<ProcessedEntry<T>>,
+    #[cfg(feature = "unicache")]
+    unicache: T::UniCache,
 }
 
 impl<T> StateCache<T>
@@ -208,6 +230,10 @@ where
             compacted_idx: 0,
             real_log_len: 0,
             stopsign: None,
+            #[cfg(feature = "unicache")]
+            batched_processed_by_leader: Vec::with_capacity(batch_size),
+            #[cfg(feature = "unicache")]
+            unicache: T::UniCache::new(1000), // TODO
         }
     }
 
@@ -229,6 +255,12 @@ where
     // Appends an entry to the end of the `batched_entries`. If the batch is full, the
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
+        #[cfg(feature = "unicache")]
+        {
+            let pre_processed = entry.pre_process();
+            let processed = self.unicache.try_encode(pre_processed);
+            self.batched_processed_by_leader.push(processed);
+        }
         self.batched_entries.push(entry);
         self.take_entries_if_batch_is_full()
     }
@@ -236,6 +268,14 @@ where
     // Appends entries to the end of the `batched_entries`. If the batch is full, the
     // batch is flushed and return flushed entries. Else, return None.
     fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
+        #[cfg(feature = "unicache")]
+        {
+            for entry in &entries {
+                let pre_processed = entry.pre_process();
+                let processed = self.unicache.try_encode(pre_processed);
+                self.batched_processed_by_leader.push(processed);
+            }
+        }
         self.batched_entries.extend(entries);
         self.take_entries_if_batch_is_full()
     }
@@ -253,6 +293,11 @@ where
     // return an empty vector.
     fn take_batched_entries(&mut self) -> Vec<T> {
         std::mem::take(&mut self.batched_entries)
+    }
+
+    #[cfg(feature = "unicache")]
+    fn take_batched_processed(&mut self) -> Vec<ProcessedEntry<T>> {
+        std::mem::take(&mut self.batched_processed_by_leader)
     }
 }
 
@@ -388,6 +433,9 @@ where
             Bound::Excluded(e) => *e,
             Bound::Unbounded => self.get_accepted_idx(),
         };
+        if to_idx == 0 {
+            return Ok(None);
+        }
         let compacted_idx = self.get_compacted_idx();
         let log_len = self.state_cache.real_log_len + self.state_cache.compacted_idx;
         let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, log_len)? {
@@ -540,15 +588,7 @@ where
         entry: T,
     ) -> StorageResult<Option<AcceptedMetaData<T>>> {
         let append_res = self.state_cache.append_entry(entry);
-        if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
-            Ok(Some(AcceptedMetaData {
-                accepted_idx,
-                flushed_entries,
-            }))
-        } else {
-            Ok(None)
-        }
+        self.flush_if_full_batch(append_res)
     }
 
     // Append entries in batch, if the batch size is reached, flush the batch and return the
@@ -558,11 +598,21 @@ where
         entries: Vec<T>,
     ) -> StorageResult<Option<AcceptedMetaData<T>>> {
         let append_res = self.state_cache.append_entries(entries);
+        self.flush_if_full_batch(append_res)
+    }
+
+    fn flush_if_full_batch(
+        &mut self,
+        append_res: Option<Vec<T>>,
+    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
         if let Some(flushed_entries) = append_res {
             let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
             Ok(Some(AcceptedMetaData {
                 accepted_idx,
+                #[cfg(not(feature = "unicache"))]
                 flushed_entries,
+                #[cfg(feature = "unicache")]
+                flushed_processed: self.state_cache.take_batched_processed(),
             }))
         } else {
             Ok(None)
@@ -584,7 +634,37 @@ where
         }
     }
 
+    #[cfg(feature = "unicache")]
+    pub(crate) fn get_unicache(&self) -> T::UniCache {
+        self.state_cache.unicache.clone()
+    }
+
+    #[cfg(feature = "unicache")]
+    pub(crate) fn set_unicache(&mut self, unicache: T::UniCache) {
+        self.state_cache.unicache = unicache;
+    }
+
+    #[cfg(feature = "unicache")]
+    pub(crate) fn append_encoded_entries_and_get_accepted_idx(
+        &mut self,
+        encoded_entries: Vec<ProcessedEntry<T>>,
+    ) -> StorageResult<Option<u64>> {
+        let entries = encoded_entries
+            .into_iter()
+            .map(|x| {
+                let decoded = self.state_cache.unicache.decode(x);
+                T::recreate(decoded)
+            })
+            .collect();
+        self.append_entries_and_get_accepted_idx(entries)
+    }
+
     pub(crate) fn flush_batch(&mut self) -> StorageResult<u64> {
+        #[cfg(feature = "unicache")]
+        {
+            // clear the processed batch
+            self.state_cache.batched_processed_by_leader.clear();
+        }
         let flushed_entries = self.state_cache.take_batched_entries();
         self.append_entries_without_batching(flushed_entries)
     }

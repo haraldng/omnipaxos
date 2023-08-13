@@ -3,6 +3,8 @@ use super::{
     messages::sequence_paxos::Promise,
     storage::{Entry, SnapshotType, StopSign},
 };
+#[cfg(feature = "unicache")]
+use crate::unicache::ProcessedEntry;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
@@ -10,7 +12,10 @@ use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 #[derive(Debug, Clone)]
 pub(crate) struct AcceptedMetaData<T: Entry> {
     pub accepted_idx: u64,
+    #[cfg(not(feature = "unicache"))]
     pub flushed_entries: Vec<T>,
+    #[cfg(feature = "unicache")]
+    pub flushed_processed: Vec<ProcessedEntry<T>>,
 }
 
 #[derive(Debug, Clone, Default)]

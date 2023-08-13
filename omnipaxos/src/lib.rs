@@ -27,6 +27,8 @@ pub(crate) mod sequence_paxos;
 // pub mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
+#[cfg(feature = "unicache")]
+pub mod unicache;
 /// A module containing helper functions and structs.
 pub mod util;
 pub(crate) mod utils;

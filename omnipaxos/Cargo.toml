@@ -20,6 +20,8 @@ slog-async = { version = "2.7.0", optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 toml = { version = "0.7.3", optional = true }
 omnipaxos_macros = { version = "0.1.2", optional = true }
+lru = { version = "0.11.0", optional = true }
+num-traits = { version = "0.2.16", optional = true }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
@@ -38,6 +40,7 @@ logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
 default = ["batch_accept"]
 macros = ["omnipaxos_macros"]
+unicache = ["lru", "num-traits"]
 
 [profile.release]
 lto = true

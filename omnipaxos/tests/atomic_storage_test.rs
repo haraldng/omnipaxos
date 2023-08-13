@@ -32,6 +32,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 use utils::{BrokenStorageConfig, LatestValue, TestConfig, Value};
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::UniCache;
+#[cfg(feature = "unicache")]
+use omnipaxos::storage::Entry;
 
 /// Creates a new OmniPaxos instance with `BrokenStorage` in its initial state.
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
@@ -177,6 +181,8 @@ fn setup_follower() -> (
             sync_idx: 0,
             decided_idx: 0,
             stopsign: None,
+            #[cfg(feature = "unicache")]
+            unicache: <Value as Entry>::UniCache::new(1000),
         }),
     });
     op.handle_incoming(setup_msg);
@@ -230,6 +236,8 @@ fn atomic_storage_acceptsync_test() {
                 sync_idx: 0,
                 decided_idx: 1,
                 stopsign: None,
+                #[cfg(feature = "unicache")]
+                unicache: <Value as Entry>::UniCache::new(1000),
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));

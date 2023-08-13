@@ -312,6 +312,10 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
+            #[cfg(feature = "unicache")]
+            PaxosMsg::EncodedAcceptDecide(e) => {
+                self.handle_encoded_acceptdecide(e);
+            }
         }
     }
 
@@ -426,6 +430,7 @@ where
     }
 
     fn propose_entry(&mut self, entry: T) {
+        // info!(self.logger, "Propose {:?}, state: {:?}, ballot: {:?}", entry, self.state, self.leader_state.n_leader);
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.accept_entry(entry),
@@ -443,7 +448,7 @@ enum Phase {
 }
 
 #[derive(PartialEq, Debug)]
-enum Role {
+pub(crate) enum Role {
     Follower,
     Leader,
 }

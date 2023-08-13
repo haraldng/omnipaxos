@@ -3,6 +3,8 @@ use super::super::{
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
 use crate::storage::{RollbackValue, Snapshot, SnapshotType};
+#[cfg(feature = "unicache")]
+use crate::unicache::ProcessedEntry;
 
 use super::*;
 
@@ -61,6 +63,7 @@ where
                     to: *pid,
                     msg: PaxosMsg::Prepare(prep),
                 });
+                // info!(self.logger, "PREPARE: {:?}, my log: {:?}, snapshot: {:?}", self.outgoing.last().unwrap(), self.internal_storage.read(0..), self.internal_storage.get_snapshot());
             }
         } else {
             self.state.0 = Role::Follower;
@@ -165,7 +168,7 @@ where
         });
     }
 
-    #[cfg(feature = "batch_accept")]
+    #[cfg(all(feature = "batch_accept", not(feature = "unicache")))]
     fn send_accept_and_cache(&mut self, to: NodeId, entries: Vec<T>) {
         let acc = AcceptDecide {
             n: self.leader_state.n_leader,
@@ -177,6 +180,23 @@ where
             from: self.pid,
             to,
             msg: PaxosMsg::AcceptDecide(acc),
+        });
+        self.leader_state
+            .set_batch_accept_meta(to, Some(self.outgoing.len() - 1));
+    }
+
+    #[cfg(all(feature = "batch_accept", feature = "unicache"))]
+    fn send_encoded_accept_and_cache(&mut self, to: NodeId, entries: Vec<ProcessedEntry<T>>) {
+        let acc = EncodedAcceptDecide {
+            n: self.leader_state.n_leader,
+            seq_num: self.leader_state.next_seq_num(to),
+            decided_idx: self.internal_storage.get_decided_idx(),
+            entries,
+        };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::EncodedAcceptDecide(acc),
         });
         self.leader_state
             .set_batch_accept_meta(to, Some(self.outgoing.len() - 1));
@@ -259,21 +279,21 @@ where
             sync_idx,
             decided_idx: my_decided_idx,
             stopsign: self.internal_storage.get_stopsign(),
+            #[cfg(feature = "unicache")]
+            unicache: self.internal_storage.get_unicache(),
         };
         let msg = PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::AcceptSync(acc_sync),
         };
+        // info!(self.logger, "ROUND: {:?} ACCSYNC MSG: {:?}", self.leader_state.n_leader, msg);
         self.outgoing.push(msg);
     }
 
     pub(crate) fn send_acceptdecide(&mut self, am: AcceptedMetaData<T>) {
-        let AcceptedMetaData {
-            accepted_idx,
-            flushed_entries,
-        } = am;
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        self.leader_state
+            .set_accepted_idx(self.pid, am.accepted_idx);
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
             if cfg!(feature = "batch_accept") {
@@ -282,27 +302,63 @@ where
                     Some((n, outgoing_idx)) if n == self.leader_state.n_leader => {
                         let PaxosMessage { msg, .. } = self.outgoing.get_mut(outgoing_idx).unwrap();
                         match msg {
+                            #[cfg(not(feature = "unicache"))]
                             PaxosMsg::AcceptDecide(a) => {
-                                a.entries.append(flushed_entries.clone().as_mut());
+                                a.entries.append(am.flushed_entries.clone().as_mut());
                                 a.decided_idx = decided_idx;
                             }
-                            _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
+                            #[cfg(feature = "unicache")]
+                            PaxosMsg::EncodedAcceptDecide(e) => {
+                                e.entries.append(am.flushed_processed.clone().as_mut());
+                                e.decided_idx = decided_idx;
+                            }
+                            _ => {
+                                #[cfg(not(feature = "unicache"))]
+                                self.send_accept_and_cache(pid, am.flushed_entries.clone());
+                                #[cfg(feature = "unicache")]
+                                self.send_encoded_accept_and_cache(
+                                    pid,
+                                    am.flushed_processed.clone(),
+                                );
+                            }
                         }
                     }
-                    _ => self.send_accept_and_cache(pid, flushed_entries.clone()),
+                    _ => {
+                        #[cfg(not(feature = "unicache"))]
+                        self.send_accept_and_cache(pid, am.flushed_entries.clone());
+                        #[cfg(feature = "unicache")]
+                        self.send_encoded_accept_and_cache(pid, am.flushed_processed.clone());
+                    }
                 }
             } else {
-                let acc = AcceptDecide {
-                    n: self.leader_state.n_leader,
-                    seq_num: self.leader_state.next_seq_num(pid),
-                    decided_idx,
-                    entries: flushed_entries.clone(),
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: pid,
-                    msg: PaxosMsg::AcceptDecide(acc),
-                });
+                #[cfg(not(feature = "unicache"))]
+                {
+                    let acc = AcceptDecide {
+                        n: self.leader_state.n_leader,
+                        seq_num: self.leader_state.next_seq_num(pid),
+                        decided_idx,
+                        entries: am.flushed_entries.clone(),
+                    };
+                    self.outgoing.push(PaxosMessage {
+                        from: self.pid,
+                        to: pid,
+                        msg: PaxosMsg::AcceptDecide(acc),
+                    });
+                }
+                #[cfg(feature = "unicache")]
+                {
+                    let acc = EncodedAcceptDecide {
+                        n: self.leader_state.n_leader,
+                        seq_num: self.leader_state.next_seq_num(pid),
+                        decided_idx,
+                        entries: am.flushed_processed.clone(),
+                    };
+                    self.outgoing.push(PaxosMessage {
+                        from: self.pid,
+                        to: pid,
+                        msg: PaxosMsg::EncodedAcceptDecide(acc),
+                    });
+                }
             }
         }
     }
@@ -501,12 +557,13 @@ where
 
     pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: NodeId) {
         #[cfg(feature = "logging")]
-        trace!(
+        info!(
             self.logger,
-            "Got Accepted from {}, idx: {}, chosen_idx: {}",
+            "Got Accepted from {}, idx: {}, chosen_idx: {}, accepted: {:?}",
             from,
             accepted.accepted_idx,
-            self.internal_storage.get_decided_idx()
+            self.internal_storage.get_decided_idx(),
+            self.leader_state.accepted_indexes
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             let old_decided_idx = self.internal_storage.get_decided_idx();
@@ -516,6 +573,7 @@ where
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
+                // info!(self.logger, "New decided index: {} in round: {:?}", decided_idx, self.leader_state.n_leader);
                 self.internal_storage
                     .set_decided_idx(decided_idx)
                     .expect("storage error while trying to write decided index");
@@ -531,6 +589,8 @@ where
                                     PaxosMsg::AcceptDecide(a) => {
                                         a.decided_idx = decided_idx;
                                     }
+                                    #[cfg(feature = "unicache")]
+                                    PaxosMsg::EncodedAcceptDecide(e) => e.decided_idx = decided_idx,
                                     _ => self.send_decide(pid, decided_idx, false),
                                 }
                             }

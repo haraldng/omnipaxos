@@ -76,6 +76,8 @@ fn increasing_accept_seq_num_test() {
                 PaxosMsg::AcceptSync(m) => Some(m.seq_num),
                 PaxosMsg::AcceptDecide(m) => Some(m.seq_num),
                 PaxosMsg::Decide(m) => Some(m.seq_num),
+                #[cfg(feature = "unicache")]
+                PaxosMsg::EncodedAcceptDecide(e) => Some(e.seq_num),
                 _ => None,
             });
         accept_seq_nums.extend(seq_nums);

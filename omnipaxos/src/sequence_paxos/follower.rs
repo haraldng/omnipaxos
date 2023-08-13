@@ -2,6 +2,8 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
+#[cfg(feature = "unicache")]
+use crate::unicache::ProcessedEntry;
 use crate::{
     storage::{RollbackValue, Snapshot, SnapshotType, StorageResult},
     util::MessageStatus,
@@ -79,6 +81,7 @@ where
                 accepted_idx,
                 stopsign,
             };
+            // info!(self.logger, "PROMISE: {:?}, my log: {:?}", promise, self.internal_storage.read(0..));
             self.cached_promise = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
@@ -94,6 +97,7 @@ where
         if self.internal_storage.get_promise() == accsync.n
             && self.state == (Role::Follower, Phase::Prepare)
         {
+            // info!(self.logger, "Got AcceptSync: {:?}, suffix len: {}, stopsign: {:?}", accsync.n, accsync.suffix.len(), accsync.stopsign);
             let old_decided_idx = self.internal_storage.get_decided_idx();
             let old_accepted_round = self.internal_storage.get_accepted_round();
             self.internal_storage
@@ -178,11 +182,15 @@ where
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
+            // info!(self.logger, "ACCEPTED0: accepted_idx: {:?}, compacted_idx: {}", self.internal_storage.get_accepted_idx(), self.internal_storage.get_compacted_idx());
+            // info!(self.logger, "ACCEPTED: {:?}, my log: {:?}", accepted, self.internal_storage.read(0..));
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Accepted(accepted),
             });
+            #[cfg(feature = "unicache")]
+            self.internal_storage.set_unicache(accsync.unicache);
         }
     }
 
@@ -208,6 +216,31 @@ where
             // handle accept
             let entries = acc.entries;
             let result = self.accept_entries_follower(acc.n, entries);
+            self.internal_storage.rollback_and_panic_if_err(
+                &result,
+                vec![RollbackValue::DecidedIdx(old_decided_idx)],
+                "storage error while trying to write log entries.",
+            );
+        }
+    }
+
+    #[cfg(feature = "unicache")]
+    pub(crate) fn handle_encoded_acceptdecide(&mut self, e: EncodedAcceptDecide<T>) {
+        if self.internal_storage.get_promise() == e.n
+            && self.state == (Role::Follower, Phase::Accept)
+            && self.handle_sequence_num(e.seq_num, e.n.pid) == MessageStatus::Expected
+        {
+            // handle decide
+            let old_decided_idx = self.get_decided_idx();
+            if e.decided_idx > old_decided_idx {
+                self.internal_storage
+                    .set_decided_idx(e.decided_idx)
+                    .expect("storage error while trying to write decided index");
+            }
+            // handle accept
+            let encoded_entries = e.entries;
+            // info!(self.logger, "ENCODED ACCEPT: {:?}, {:?}, ", e.n, encoded_entries);
+            let result = self.accept_encoded_entries_follower(e.n, encoded_entries);
             self.internal_storage.rollback_and_panic_if_err(
                 &result,
                 vec![RollbackValue::DecidedIdx(old_decided_idx)],
@@ -250,29 +283,50 @@ where
             .internal_storage
             .append_entries_and_get_accepted_idx(entries)?;
         if let Some(accepted_idx) = accepted_res {
-            match &self.latest_accepted_meta {
-                Some((round, outgoing_idx)) if round == &n => {
-                    let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
-                    match msg {
-                        PaxosMsg::Accepted(a) => {
-                            a.accepted_idx = accepted_idx;
-                        }
-                        _ => panic!("Cached idx is not an Accepted Message<T>!"),
-                    }
-                }
-                _ => {
-                    let accepted = Accepted { n, accepted_idx };
-                    let cached_idx = self.outgoing.len();
-                    self.latest_accepted_meta = Some((n, cached_idx));
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: self.leader.pid,
-                        msg: PaxosMsg::Accepted(accepted),
-                    });
-                }
-            };
+            self.handle_flushed_accepted(n, accepted_idx);
         }
         Ok(())
+    }
+
+    #[cfg(feature = "unicache")]
+    fn accept_encoded_entries_follower(
+        &mut self,
+        n: Ballot,
+        encoded_entries: Vec<ProcessedEntry<T>>,
+    ) -> StorageResult<()> {
+        let accepted_res = self
+            .internal_storage
+            .append_encoded_entries_and_get_accepted_idx(encoded_entries)?;
+        if let Some(accepted_idx) = accepted_res {
+            self.handle_flushed_accepted(n, accepted_idx);
+        }
+        Ok(())
+    }
+
+    fn handle_flushed_accepted(&mut self, n: Ballot, accepted_idx: u64) {
+        match &self.latest_accepted_meta {
+            Some((round, outgoing_idx)) if round == &n => {
+                let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
+                match msg {
+                    PaxosMsg::Accepted(a) => {
+                        a.accepted_idx = accepted_idx;
+                        // info!(self.logger, "ACCEPTED enc: {:?}, my log: {:?}", a, self.internal_storage.read(0..));
+                    }
+                    _ => panic!("Cached idx is not an Accepted Message<T>!"),
+                }
+            }
+            _ => {
+                let accepted = Accepted { n, accepted_idx };
+                // info!(self.logger, "ACCEPTED enc: {:?}, my log: {:?}", accepted, self.internal_storage.read(0..));
+                let cached_idx = self.outgoing.len();
+                self.latest_accepted_meta = Some((n, cached_idx));
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: self.leader.pid,
+                    msg: PaxosMsg::Accepted(accepted),
+                });
+            }
+        };
     }
 
     /// Also returns the MessageStatus of the sequence based on the incoming sequence number.

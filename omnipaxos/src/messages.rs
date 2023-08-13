@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 /// Internal component for log replication
 pub mod sequence_paxos {
+    #[cfg(feature = "unicache")]
+    use crate::unicache::ProcessedEntry;
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, SnapshotType, StopSign},
@@ -75,6 +77,8 @@ pub mod sequence_paxos {
         pub decided_idx: u64,
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
+        #[cfg(feature = "unicache")]
+        pub unicache: T::UniCache,
     }
 
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
@@ -92,6 +96,24 @@ pub mod sequence_paxos {
         pub decided_idx: u64,
         /// Entries to be replicated.
         pub entries: Vec<T>,
+    }
+
+    /// TODO
+    #[derive(Clone, Debug)]
+    #[cfg(feature = "unicache")]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct EncodedAcceptDecide<T>
+    where
+        T: Entry,
+    {
+        /// The current round.
+        pub n: Ballot,
+        /// The sequence number of this message in the leader-to-follower accept sequence
+        pub seq_num: SequenceNumber,
+        /// The decided index.
+        pub decided_idx: u64,
+        /// Entries to be replicated.
+        pub entries: Vec<ProcessedEntry<T>>,
     }
 
     /// Message sent by follower to leader when entries has been accepted.
@@ -159,6 +181,8 @@ pub mod sequence_paxos {
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         ForwardStopSign(StopSign),
+        #[cfg(feature = "unicache")]
+        EncodedAcceptDecide(EncodedAcceptDecide<T>),
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.
