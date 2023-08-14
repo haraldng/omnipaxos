@@ -22,8 +22,8 @@ use crate::{
 trait LRUEncodable: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
 impl<T> LRUEncodable for T where T: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
 
-trait LRUEncoded: Default + Copy + Clone + One + LRUEncodable {}
-impl<T> LRUEncoded for T where T: Default + Copy + Clone + One + LRUEncodable {}
+trait LRUEncoded: Default + Clone + One + LRUEncodable {}
+impl<T> LRUEncoded for T where T: Default + Clone + One + LRUEncodable {}
 
 struct LruWrapper<K, V>(LruCache<K, V>);
 
@@ -84,7 +84,6 @@ where
         while let Some((key, value)) = seq.next_element::<(K, V)>()? {
             lru.push(key, value);
         }
-
         // Wrap the LruCache in the LruWrapper
         Ok(LruWrapper(lru))
     }
@@ -170,8 +169,10 @@ where
                             self.lru_cache_encoder.0.push(e.clone(), popped_encoding);
                         } else {
                             let one = T::Encoded::one();
-                            let add = self.encoding.add(one);
-                            self.lru_cache_encoder.0.push(e.clone(), add);
+                            let enc = std::mem::take(&mut self.encoding);
+                            let added = enc.add(one);
+                            self.lru_cache_encoder.0.push(e.clone(), added.clone());
+                            self.encoding = added;
                         }
                         MaybeEncodedData::NotEncoded(e)
                     }
@@ -204,27 +205,3 @@ where
         }
     }
 }
-
-/*
-impl<T> Serialize for LRUniCache<T>
-    where
-        T: Entry,
-        T::Encoded: Add<Output = T::Encoded> + LRUEncoded,
-        T::Encodable: LRUEncodable,
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-
-        let mut seq = serializer.serialize_seq(Some(self.lru_cache_encoder.0.len()))?;
-        let _ = self.lru_cache_encoder.0.iter().rev().for_each(|item| {
-            seq.serialize_element(&item).unwrap();
-        });
-        seq.end()?;
-        let mut seq = serializer.serialize_seq(Some(self.lru_cache_decoder.0.len()))?;
-        let _ = self.lru_cache_decoder.0.iter().rev().for_each(|item| {
-            seq.serialize_element(&item).unwrap();
-        });
-        seq.end()?;
-        todo!()
-    }
-}
-*/
