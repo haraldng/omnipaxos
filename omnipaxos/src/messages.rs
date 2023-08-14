@@ -78,6 +78,7 @@ pub mod sequence_paxos {
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
         #[cfg(feature = "unicache")]
+        /// The UniCache of the leader
         pub unicache: T::UniCache,
     }
 

@@ -7,7 +7,7 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    storage::InternalStorage,
+    storage::{InternalStorage, InternalStorageConfig},
     util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
@@ -77,9 +77,13 @@ where
             }
             None => ((Role::Follower, Phase::None), Ballot::default(), None),
         };
-
+        let internal_storage_config = InternalStorageConfig {
+            batch_size: config.batch_size,
+            #[cfg(feature = "unicache")]
+            unicache_size: config.unicache_size,
+        };
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage, config.batch_size),
+            internal_storage: InternalStorage::with(storage, internal_storage_config),
             pid,
             peers,
             state,
@@ -466,8 +470,10 @@ pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<NodeId>,
     buffer_size: usize,
-    batch_size: usize,
+    pub(crate) batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
+    #[cfg(feature = "unicache")]
+    pub(crate) unicache_size: usize,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -487,6 +493,8 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             flexible_quorum: config.cluster_config.flexible_quorum,
             buffer_size: config.server_config.buffer_size,
             batch_size: config.server_config.batch_size,
+            #[cfg(feature = "unicache")]
+            unicache_size: config.cluster_config.unicache_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
         }

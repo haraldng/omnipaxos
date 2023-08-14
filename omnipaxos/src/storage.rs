@@ -26,15 +26,20 @@ pub trait Entry: Clone + Debug {
     type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
 
     #[cfg(feature = "unicache")]
+    /// The type for the encoded data. E.g., if `u8` then the cached `Entry` will be sent as `u8` instead.
     type Encoded: Encoded;
     #[cfg(feature = "unicache")]
+    /// The type representing the encodable parts of an `Entry`. It can be set to `Self` if the whole `Entry` is cachable. See docs of `pre_process()` for an example of deriving `Encodable` from an `Entry`.
     type Encodable: Encodable;
     #[cfg(feature = "unicache")]
+    /// The type representing the **NOT** encodable parts of an `Entry`. Any `NotEncodable` data will be transmitted in its original form, without encoding. It can be set to `()` if the whole `Entry` is cachable. See docs of `pre_process()` for an example.
     type NotEncodable: NotEncodable;
 
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
+    /// The unicache type for caching popular/re-occurring entries.
     type UniCache: UniCache<Self>;
     #[cfg(all(feature = "unicache", feature = "serde"))]
+    /// The unicache type for caching popular/re-occurring entries.
     type UniCache: UniCache<Self> + Serialize + for<'a> Deserialize<'a>;
     #[cfg(feature = "unicache")]
     fn pre_process(&self) -> PreProcessedEntry<Self>;
@@ -220,10 +225,10 @@ impl<T> StateCache<T>
 where
     T: Entry,
 {
-    pub fn new(batch_size: usize) -> Self {
+    pub fn new(config: InternalStorageConfig) -> Self {
         StateCache {
-            batch_size,
-            batched_entries: Vec::with_capacity(batch_size),
+            batch_size: config.batch_size,
+            batched_entries: Vec::with_capacity(config.batch_size),
             promise: Ballot::default(),
             accepted_round: Ballot::default(),
             decided_idx: 0,
@@ -231,9 +236,9 @@ where
             real_log_len: 0,
             stopsign: None,
             #[cfg(feature = "unicache")]
-            batched_processed_by_leader: Vec::with_capacity(batch_size),
+            batched_processed_by_leader: Vec::with_capacity(config.batch_size),
             #[cfg(feature = "unicache")]
-            unicache: T::UniCache::new(1000), // TODO
+            unicache: T::UniCache::new(config.unicache_size),
         }
     }
 
@@ -301,6 +306,12 @@ where
     }
 }
 
+pub(crate) struct InternalStorageConfig {
+    pub(crate) batch_size: usize,
+    #[cfg(feature = "unicache")]
+    pub(crate) unicache_size: usize,
+}
+
 /// Internal representation of storage. Hides all complexities with the compacted index
 /// such that Sequence Paxos accesses the log with the uncompacted index.
 pub(crate) struct InternalStorage<I, T>
@@ -318,10 +329,10 @@ where
     I: Storage<T>,
     T: Entry,
 {
-    pub(crate) fn with(storage: I, batch_size: usize) -> Self {
+    pub(crate) fn with(storage: I, config: InternalStorageConfig) -> Self {
         let mut internal_store = InternalStorage {
             storage,
-            state_cache: StateCache::new(batch_size),
+            state_cache: StateCache::new(config),
             _t: Default::default(),
         };
         internal_store.load_cache();
