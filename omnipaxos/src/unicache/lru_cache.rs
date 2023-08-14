@@ -1,3 +1,10 @@
+use crate::{
+    storage::Entry,
+    unicache::{MaybeEncodedData, PreProcessedEntry, ProcessedEntry, UniCache},
+};
+use lru::LruCache;
+use num_traits::identities::One;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::{Debug, Formatter},
@@ -7,87 +14,23 @@ use std::{
     ops::Add,
 };
 
-use lru::LruCache;
-use num_traits::identities::One;
-use serde::{
-    de::{SeqAccess, Visitor},
-    ser::SerializeSeq,
-};
+trait IncrementByOne: Default + Clone + One + Add<Output = Self> {}
+impl<T: Default + Clone + One + Add<Output = Self>> IncrementByOne for T {}
 
-use crate::{
-    storage::Entry,
-    unicache::{MaybeEncodedData, PreProcessedEntry, ProcessedEntry, UniCache},
-};
-
+#[cfg(not(feature = "serde"))]
+trait LRUEncodable: Hash + Eq + PartialEq {}
+#[cfg(not(feature = "serde"))]
+impl<T: Hash + Eq + PartialEq> LRUEncodable for T {}
+#[cfg(feature = "serde")]
 trait LRUEncodable: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
-impl<T> LRUEncodable for T where T: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
+#[cfg(feature = "serde")]
+impl<T: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> LRUEncodable for T {}
 
-trait LRUEncoded: Default + Clone + One + LRUEncodable {}
-impl<T> LRUEncoded for T where T: Default + Clone + One + LRUEncodable {}
+trait LRUEncoded: IncrementByOne + LRUEncodable {}
+impl<T: IncrementByOne + LRUEncodable> LRUEncoded for T {}
 
+/// Wrapper to implement serde for LruCache
 struct LruWrapper<K, V>(LruCache<K, V>);
-
-impl<K: LRUEncodable, V: LRUEncodable> Serialize for LruWrapper<K, V> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let len = self.0.len();
-        let mut seq = serializer.serialize_seq(Some(len))?;
-        let _ = self.0.iter().rev().for_each(|item| {
-            seq.serialize_element(&item).unwrap();
-        });
-        seq.end()
-    }
-}
-
-impl<'de, K: LRUEncodable, V: LRUEncodable> Deserialize<'de> for LruWrapper<K, V> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(LruWrapperVisitor::new())
-    }
-}
-
-struct LruWrapperVisitor<K, V> {
-    _k: PhantomData<K>,
-    _v: PhantomData<V>,
-}
-
-impl<K, V> LruWrapperVisitor<K, V> {
-    fn new() -> Self {
-        Self {
-            _k: PhantomData::default(),
-            _v: PhantomData::default(),
-        }
-    }
-}
-
-impl<'de, K, V> Visitor<'de> for LruWrapperVisitor<K, V>
-where
-    K: LRUEncodable,
-    V: LRUEncodable,
-{
-    type Value = LruWrapper<K, V>;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a sequence of key-value pairs")
-    }
-
-    fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
-    where
-        S: SeqAccess<'de>,
-    {
-        let size = seq.size_hint().unwrap();
-        let mut lru = LruCache::new(NonZeroUsize::new(size).unwrap());
-        while let Some((key, value)) = seq.next_element::<(K, V)>()? {
-            lru.push(key, value);
-        }
-        // Wrap the LruCache in the LruWrapper
-        Ok(LruWrapper(lru))
-    }
-}
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LRUniCache<T: Entry>
@@ -104,7 +47,7 @@ where
 impl<T> Clone for LRUniCache<T>
 where
     T: Entry,
-    T::Encoded: Add<Output = T::Encoded> + LRUEncoded,
+    T::Encoded: LRUEncoded,
     T::Encodable: LRUEncodable,
 {
     fn clone(&self) -> Self {
@@ -128,7 +71,7 @@ where
 impl<T> Debug for LRUniCache<T>
 where
     T: Entry,
-    T::Encoded: Add<Output = T::Encoded> + LRUEncoded,
+    T::Encoded: LRUEncoded,
     T::Encodable: LRUEncodable,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -139,7 +82,7 @@ where
 impl<T> UniCache<T> for LRUniCache<T>
 where
     T: Entry,
-    T::Encoded: Add<Output = T::Encoded> + LRUEncoded,
+    T::Encoded: LRUEncoded,
     T::Encodable: LRUEncodable,
 {
     fn new(size: usize) -> Self {
@@ -202,6 +145,77 @@ where
         PreProcessedEntry {
             encodable,
             not_encodable,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serialization {
+    use super::*;
+    use serde::{
+        de::{SeqAccess, Visitor},
+        ser::SerializeSeq,
+    };
+
+    impl<K: LRUEncodable, V: LRUEncodable> Serialize for LruWrapper<K, V> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let len = self.0.len();
+            let mut seq = serializer.serialize_seq(Some(len))?;
+            let _ = self.0.iter().rev().for_each(|item| {
+                seq.serialize_element(&item).unwrap();
+            });
+            seq.end()
+        }
+    }
+
+    impl<'de, K: LRUEncodable, V: LRUEncodable> Deserialize<'de> for LruWrapper<K, V> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_seq(LruWrapperVisitor::new())
+        }
+    }
+
+    struct LruWrapperVisitor<K, V> {
+        _k: PhantomData<K>,
+        _v: PhantomData<V>,
+    }
+
+    impl<K, V> LruWrapperVisitor<K, V> {
+        fn new() -> Self {
+            Self {
+                _k: PhantomData::default(),
+                _v: PhantomData::default(),
+            }
+        }
+    }
+
+    impl<'de, K, V> Visitor<'de> for LruWrapperVisitor<K, V>
+    where
+        K: LRUEncodable,
+        V: LRUEncodable,
+    {
+        type Value = LruWrapper<K, V>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a sequence of key-value pairs")
+        }
+
+        fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+        where
+            S: SeqAccess<'de>,
+        {
+            let size = seq.size_hint().unwrap();
+            let mut lru = LruCache::new(NonZeroUsize::new(size).unwrap());
+            while let Some((key, value)) = seq.next_element::<(K, V)>()? {
+                lru.push(key, value);
+            }
+            // Wrap the LruCache in the LruWrapper
+            Ok(LruWrapper(lru))
         }
     }
 }

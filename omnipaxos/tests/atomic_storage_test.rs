@@ -13,6 +13,10 @@
 pub mod utils;
 
 use crate::utils::StorageType;
+#[cfg(feature = "unicache")]
+use omnipaxos::storage::Entry;
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::UniCache;
 use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
@@ -32,10 +36,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 use utils::{BrokenStorageConfig, LatestValue, TestConfig, Value};
-#[cfg(feature = "unicache")]
-use omnipaxos::unicache::UniCache;
-#[cfg(feature = "unicache")]
-use omnipaxos::storage::Entry;
 
 /// Creates a new OmniPaxos instance with `BrokenStorage` in its initial state.
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and

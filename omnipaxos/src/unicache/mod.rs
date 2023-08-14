@@ -1,3 +1,4 @@
+#[cfg(feature = "unicache")]
 pub mod lru_cache;
 
 use std::fmt::{Debug, Formatter};
