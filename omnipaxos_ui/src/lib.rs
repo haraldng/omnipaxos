@@ -1,7 +1,7 @@
 use crate::app::{App, UIAppConfig};
-use crossterm::event::DisableMouseCapture;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::event::{Event, KeyCode};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::stdout;
 use std::time::Duration;
@@ -29,25 +29,30 @@ impl UI {
         }
     }
 
+    // Start the UI, do nothing if already started
     pub fn start(&mut self) {
-        enable_raw_mode().unwrap();
-        self.terminal.clear().unwrap();
-        self.terminal.hide_cursor().unwrap();
-        self.update();
-        self.started = true;
+        if !self.started {
+            let mut stdout = stdout();
+            crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
+            enable_raw_mode().unwrap();
+            self.terminal.hide_cursor().unwrap();
+            self.update();
+            self.started = true;
+        }
     }
 
+    // Stop the UI, do nothing if already stopped
     pub fn stop(&mut self) {
-        disable_raw_mode().unwrap();
-        crossterm::execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )
-        .unwrap();
-        self.terminal.clear().unwrap();
-        self.terminal.show_cursor().unwrap();
-        self.started = false;
+        if self.started {
+            disable_raw_mode().unwrap();
+            crossterm::execute!(
+                self.terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            ).unwrap();
+            self.terminal.show_cursor().unwrap();
+            self.started = false;
+        }
     }
 
     pub fn is_started(&self) -> bool {
