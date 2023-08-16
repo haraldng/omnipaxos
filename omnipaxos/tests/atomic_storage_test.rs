@@ -76,6 +76,7 @@ fn _setup_leader() -> (
             round: 1,
             ballot: n_old,
             connectivity: cfg.num_nodes as u8,
+            happy: true,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -87,6 +88,7 @@ fn _setup_leader() -> (
             round: 2,
             ballot: n_old,
             connectivity: 0,
+            happy: false,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -98,6 +100,7 @@ fn _setup_leader() -> (
             round: 3,
             ballot: n_old,
             connectivity: 0,
+            happy: false,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -434,6 +437,7 @@ fn atomic_storage_majority_promises_test() {
                 round: 1,
                 ballot: n_old,
                 connectivity: cfg.num_nodes as u8,
+                happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -445,6 +449,18 @@ fn atomic_storage_majority_promises_test() {
                 round: 2,
                 ballot: n_old,
                 connectivity: 0,
+                happy: false,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 3,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 2,
+                ballot: n_old,
+                connectivity: 0,
+                happy: false,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -456,6 +472,18 @@ fn atomic_storage_majority_promises_test() {
                 round: 3,
                 ballot: n_old,
                 connectivity: 0,
+                happy: false,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 3,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 2,
+                ballot: n_old,
+                connectivity: 0,
+                happy: false,
             }),
         });
         op.handle_incoming(setup_msg);

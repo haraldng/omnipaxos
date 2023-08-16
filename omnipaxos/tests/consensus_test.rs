@@ -6,7 +6,6 @@ use omnipaxos::{
     ClusterConfig, OmniPaxosConfig,
 };
 use serial_test::serial;
-use std::time::Duration;
 use utils::{
     create_temp_dir,
     verification::{verify_entries, verify_snapshot, verify_stopsign},
@@ -36,10 +35,7 @@ fn consensus_test() {
 
     sys.start_all_nodes();
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }

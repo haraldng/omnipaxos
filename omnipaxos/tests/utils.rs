@@ -6,13 +6,14 @@ use omnipaxos::{
     messages::Message,
     storage::{Entry, Snapshot, Storage, StorageResult},
     util::{FlexibleQuorum, NodeId},
-    ClusterConfig, ServerConfig,
+    ClusterConfig, OmniPaxosConfig, ServerConfig,
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use sled::Config;
 use std::{
     collections::HashMap,
     error::Error,
@@ -29,8 +30,14 @@ const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
 
-use omnipaxos::OmniPaxosConfig;
-use sled::Config;
+/// Serde deserialize function to deserialize toml milliseconds u64s to std::time::Duration
+fn deserialize_duration_millis<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let val = Deserialize::deserialize(deserializer)?;
+    Ok(Duration::from_millis(val))
+}
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
@@ -39,9 +46,15 @@ use sled::Config;
 pub struct TestConfig {
     pub num_threads: usize,
     pub num_nodes: usize,
-    pub wait_timeout_ms: u64,
-    pub election_timeout_ms: u64,
-    pub resend_message_timeout_ms: u64,
+    #[serde(rename(deserialize = "wait_timeout_ms"))]
+    #[serde(deserialize_with = "deserialize_duration_millis")]
+    pub wait_timeout: Duration,
+    #[serde(rename(deserialize = "election_timeout_ms"))]
+    #[serde(deserialize_with = "deserialize_duration_millis")]
+    pub election_timeout: Duration,
+    #[serde(rename(deserialize = "resend_timeout_ms"))]
+    #[serde(deserialize_with = "deserialize_duration_millis")]
+    pub resend_message_timeout: Duration,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
@@ -81,7 +94,8 @@ impl TestConfig {
             pid,
             election_tick_timeout: 1,
             // Make tick timeouts reletive to election timeout
-            resend_message_tick_timeout: self.resend_message_timeout_ms / self.election_timeout_ms,
+            resend_message_tick_timeout: self.resend_message_timeout.as_millis() as u64
+                / self.election_timeout.as_millis() as u64,
             batch_size: self.batch_size,
             ..Default::default()
         };
@@ -97,9 +111,9 @@ impl Default for TestConfig {
         Self {
             num_threads: 3,
             num_nodes: 3,
-            wait_timeout_ms: 3000,
-            election_timeout_ms: 50,
-            resend_message_timeout_ms: 500,
+            wait_timeout: Duration::from_millis(3000),
+            election_timeout: Duration::from_millis(50),
+            resend_message_timeout: Duration::from_millis(500),
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,
@@ -440,7 +454,7 @@ impl TestSystem {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.build(storage).unwrap(),
-                    test_config.election_timeout_ms,
+                    test_config.election_timeout,
                 )
             });
             omni_reg_f.wait_expect(REGISTRATION_TIMEOUT, "ReplicaComp failed to register!");
@@ -508,7 +522,7 @@ impl TestSystem {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.build(storage).unwrap(),
-                    test_config.election_timeout_ms,
+                    test_config.election_timeout,
                 )
             });
 
@@ -593,6 +607,29 @@ impl TestSystem {
         ballot.pid
     }
 
+    /// Forces the cluster to elect `next_leader` as leader of the cluster. Note: This modifies
+    /// node connections and results in a fully connected network.
+    pub fn force_leader_change(&self, next_leader: u64, wait_timeout: Duration) {
+        for node in self.nodes.keys() {
+            self.set_node_connections(*node, false);
+        }
+        self.set_node_connections(next_leader, true);
+        let current_leader = self.get_elected_leader(next_leader, wait_timeout);
+        let next_elected_leader = if current_leader != next_leader {
+            self.get_next_leader(next_leader, wait_timeout)
+        } else {
+            current_leader
+        };
+        assert_eq!(
+            next_leader, next_elected_leader,
+            "Failed to force leader change to {}: leader is instead {}",
+            next_leader, next_elected_leader
+        );
+        for node in self.nodes.keys() {
+            self.set_node_connections(*node, true);
+        }
+    }
+
     /// Use node `proposer` to propose `proposals` then waits for the proposals
     /// to be decided.
     pub fn make_proposals(&self, proposer: u64, proposals: Vec<Value>, timeout: Duration) {
@@ -675,7 +712,7 @@ pub mod omnireplica {
         pub peer_disconnections: HashSet<u64>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
-        tick_timeout_ms: u64,
+        tick_timeout: Duration,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
         pub decided_futures: Vec<Ask<(), Value>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
@@ -694,20 +731,19 @@ pub mod omnireplica {
                     Handled::Ok
                 },
             ));
-            self.tick_timer = Some(self.schedule_periodic(
-                Duration::from_millis(self.tick_timeout_ms),
-                Duration::from_millis(self.tick_timeout_ms),
-                move |c, _| {
-                    c.paxos.tick();
-                    if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
-                        if leader_ballot != c.current_leader_ballot {
-                            c.current_leader_ballot = leader_ballot;
-                            c.answer_election_future(leader_ballot);
+            self.tick_timer =
+                Some(
+                    self.schedule_periodic(self.tick_timeout, self.tick_timeout, move |c, _| {
+                        c.paxos.tick();
+                        if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
+                            if leader_ballot != c.current_leader_ballot {
+                                c.current_leader_ballot = leader_ballot;
+                                c.answer_election_future(leader_ballot);
+                            }
                         }
-                    }
-                    Handled::Ok
-                },
-            ));
+                        Handled::Ok
+                    }),
+                );
             Handled::Ok
         }
 
@@ -723,7 +759,7 @@ pub mod omnireplica {
         pub fn with(
             pid: NodeId,
             paxos: OmniPaxos<Value, StorageType<Value>>,
-            tick_timeout_ms: u64,
+            tick_timeout: Duration,
         ) -> Self {
             Self {
                 ctx: ComponentContext::uninitialised(),
@@ -732,7 +768,7 @@ pub mod omnireplica {
                 peer_disconnections: HashSet::new(),
                 paxos_timer: None,
                 tick_timer: None,
-                tick_timeout_ms,
+                tick_timeout,
                 decided_idx: paxos.get_decided_idx(),
                 paxos,
                 decided_futures: vec![],

@@ -75,12 +75,14 @@ pub(crate) struct BallotLeaderElection {
     /// The current round of the heartbeat cycle.
     hb_round: u32,
     /// Vector which holds all the received heartbeats
-    ballots: Vec<(Ballot, Connectivity)>,
+    ballots: Vec<(Ballot, Connectivity, bool)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
     /// The number of replicas inside the cluster that this instance is
     /// connected to (based on heartbeats received) including itself.
     connectivity: Connectivity,
+    happy: bool,
+    gossiped_leader: Ballot,
     /// Current elected leader.
     leader: Option<Ballot>,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain the leader.
@@ -109,6 +111,8 @@ impl BallotLeaderElection {
             ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             connectivity: num_nodes as Connectivity,
+            happy: true,
+            gossiped_leader: Ballot::default(),
             leader: initial_leader,
             quorum,
             outgoing: Vec::with_capacity(config.buffer_size),
@@ -156,7 +160,7 @@ impl BallotLeaderElection {
         let ballots = std::mem::take(&mut self.ballots);
         let top_accept_ballot = ballots
             .iter()
-            .filter_map(|&(ballot, connectivity)| {
+            .filter_map(|&(ballot, connectivity, _)| {
                 if self.quorum.is_accept_quorum(connectivity as usize) {
                     Some(ballot)
                 } else {
@@ -173,7 +177,7 @@ impl BallotLeaderElection {
             // leader is dead || changed priority || doesn't have an accept quorum
             let top_prepare_ballot = ballots
                 .iter()
-                .filter_map(|&(ballot, connectivity)| {
+                .filter_map(|&(ballot, connectivity, _)| {
                     if self.quorum.is_prepare_quorum(connectivity as usize) {
                         Some(ballot)
                     } else {
@@ -185,6 +189,10 @@ impl BallotLeaderElection {
             if top_prepare_ballot > leader_ballot {
                 // new leader with prepare quorum
                 let new_leader = top_prepare_ballot;
+                if new_leader > self.gossiped_leader {
+                    self.gossiped_leader = new_leader;
+                    self.happy = true;
+                }
                 self.leader = Some(new_leader);
                 #[cfg(feature = "logging")]
                 debug!(
@@ -194,8 +202,8 @@ impl BallotLeaderElection {
                 Some(new_leader)
             } else {
                 // nobody has taken over leadership, let's try to ourselves
-                self.current_ballot.n = leader_ballot.n + 1;
-                self.leader = None;
+                //self.current_ballot.n = leader_ballot.n + 1;
+                //self.leader = None;
                 None
             }
         }
@@ -214,6 +222,7 @@ impl BallotLeaderElection {
         for peer in &self.peers {
             let hb_request = HeartbeatRequest {
                 round: self.hb_round,
+                gossiped_leader: self.gossiped_leader,
             };
 
             self.outgoing.push(BLEMessage {
@@ -225,15 +234,32 @@ impl BallotLeaderElection {
     }
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
-        let my_connectivity = self.ballots.len() + 1;
+        // Update connectivity
+        self.ballots
+            .push((self.current_ballot, self.connectivity, self.happy));
+        let my_connectivity = self.ballots.len();
         self.connectivity = my_connectivity as Connectivity;
+
+        // Update happiness
+        let connected_to_qc_gossiped_leader = self
+            .ballots
+            .iter()
+            .filter(|(_, connectivity, _)| self.quorum.is_accept_quorum(*connectivity as usize))
+            .any(|(ballot, _, _)| ballot.pid == self.gossiped_leader.pid);
+        self.happy = connected_to_qc_gossiped_leader;
+
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
-            self.ballots.push((self.current_ballot, self.connectivity));
+            let unhappy_nodes = self.ballots.iter().filter(|&&(_, _, happy)| !happy).count();
+            if self.quorum.is_prepare_quorum(unhappy_nodes) {
+                self.current_ballot.n = self.gossiped_leader.n + 1;
+                self.gossiped_leader = self.current_ballot;
+                self.happy = true;
+            }
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -251,12 +277,15 @@ impl BallotLeaderElection {
     }
 
     fn handle_request(&mut self, from: NodeId, req: HeartbeatRequest) {
+        if self.gossiped_leader < req.gossiped_leader {
+            self.gossiped_leader = req.gossiped_leader;
+        }
         let hb_reply = HeartbeatReply {
             round: req.round,
             ballot: self.current_ballot,
             connectivity: self.connectivity,
+            happy: self.happy,
         };
-
         self.outgoing.push(BLEMessage {
             from: self.pid,
             to: from,
@@ -266,7 +295,7 @@ impl BallotLeaderElection {
 
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round && rep.ballot.config_id == self.configuration_id {
-            self.ballots.push((rep.ballot, rep.connectivity));
+            self.ballots.push((rep.ballot, rep.connectivity, rep.happy));
         } else {
             #[cfg(feature = "logging")]
             warn!(

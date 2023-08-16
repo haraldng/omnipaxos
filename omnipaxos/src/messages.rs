@@ -199,6 +199,8 @@ pub mod ballot_leader_election {
     pub struct HeartbeatRequest {
         /// Number of the current round.
         pub round: u32,
+        /// The requesting server's current gossiped leader
+        pub gossiped_leader: Ballot,
     }
 
     /// Replies
@@ -211,6 +213,8 @@ pub mod ballot_leader_election {
         pub ballot: Ballot,
         /// The number of replicas inside the cluster the sender is connected to (including itself)
         pub connectivity: u8,
+        /// Signals if the server sees a need for a new leader
+        pub happy: bool,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

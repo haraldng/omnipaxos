@@ -3,7 +3,6 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{storage::StopSign, ClusterConfig};
 use serial_test::serial;
-use std::time::Duration;
 use utils::{
     verification::{verify_log, verify_stopsign},
     TestConfig, TestSystem, Value,
@@ -160,7 +159,6 @@ fn sync_follower_snapshot_test() {
 fn sync_test(test: SyncTest) {
     // Start a Kompact system
     let cfg = TestConfig::load("sync_test").expect("Test config couldn't be loaded");
-    let wait_timeout = Duration::from_millis(cfg.wait_timeout_ms);
     let sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
@@ -183,9 +181,9 @@ fn sync_test(test: SyncTest) {
     };
 
     // Set up followers log
-    let follower_id = sys.get_elected_leader(1, wait_timeout);
+    let follower_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = sys.nodes.get(&follower_id).unwrap();
-    sys.make_proposals(follower_id, followers_decided.to_vec(), wait_timeout);
+    sys.make_proposals(follower_id, followers_decided.to_vec(), cfg.wait_timeout);
     sys.set_node_connections(follower_id, false);
     follower.on_definition(|comp| {
         if let Some(compact_idx) = test.followers_compacted_idx {
@@ -200,15 +198,15 @@ fn sync_test(test: SyncTest) {
 
     // Set up leaders log
     // Wait a bit so next leader is stabilized (otherwise we can lose proposals)
-    std::thread::sleep(Duration::from_millis(5 * cfg.election_timeout_ms));
-    let leader_id = sys.get_elected_leader(1, wait_timeout);
+    std::thread::sleep(5 * cfg.election_timeout);
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     assert_ne!(follower_id, leader_id, "New leader must be chosen!");
     let leader = sys.nodes.get(&leader_id).unwrap();
     // Propose leader's decided entries
-    sys.make_proposals(leader_id, leaders_new_decided, wait_timeout);
+    sys.make_proposals(leader_id, leaders_new_decided, cfg.wait_timeout);
     match test.leaders_ss.clone() {
         Some(ss) if leaders_ss_is_decided => {
-            sys.reconfigure(leader_id, ss.next_config, ss.metadata, wait_timeout)
+            sys.reconfigure(leader_id, ss.next_config, ss.metadata, cfg.wait_timeout)
         }
         _ => (),
     }
@@ -253,7 +251,7 @@ fn sync_test(test: SyncTest) {
         }
     });
     sys.set_node_connections(follower_id, true);
-    match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, wait_timeout) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }

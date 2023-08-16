@@ -21,12 +21,8 @@ fn leader_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(
-        1,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
+    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -72,12 +68,8 @@ fn leader_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(
-        1,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
+    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
 
     kill_and_recover_node(&mut sys, &cfg, leader);
     check_last_proposals(leader, leader, &sys, &cfg);
@@ -119,12 +111,8 @@ fn follower_fail_leader_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(
-        1,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
+    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -170,12 +158,8 @@ fn follower_fail_follower_propose_test() {
         .map(|v| Value(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
-    sys.make_proposals(
-        1,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
+    let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader)
@@ -236,10 +220,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         });
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
