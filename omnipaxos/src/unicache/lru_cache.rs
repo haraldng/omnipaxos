@@ -1,6 +1,6 @@
 use crate::{
     storage::Entry,
-    unicache::{MaybeEncodedData, PreProcessedEntry, ProcessedEntry, UniCache},
+    unicache::{MaybeEncodedData, UniCache},
 };
 use lru::LruCache;
 use num_traits::identities::One;
@@ -14,41 +14,65 @@ use std::{
     ops::Add,
 };
 
-trait IncrementByOne: Default + Clone + One + Add<Output = Self> {}
+use super::MaybeEncoded;
+
+pub trait IncrementByOne: Default + Clone + One + Add<Output = Self> {}
 impl<T: Default + Clone + One + Add<Output = Self>> IncrementByOne for T {}
 
 #[cfg(not(feature = "serde"))]
-trait LRUEncodable: Hash + Eq + PartialEq {}
+pub trait LRUEncodable: Clone + Hash + Eq + PartialEq {}
 #[cfg(not(feature = "serde"))]
-impl<T: Hash + Eq + PartialEq> LRUEncodable for T {}
+impl<T: Clone + Hash + Eq + PartialEq> LRUEncodable for T {}
 #[cfg(feature = "serde")]
-trait LRUEncodable: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
+pub trait LRUEncodable: Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
 #[cfg(feature = "serde")]
-impl<T: Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> LRUEncodable for T {}
+impl<T: Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> LRUEncodable for T {}
 
-trait LRUEncoded: IncrementByOne + LRUEncodable {}
-impl<T: IncrementByOne + LRUEncodable> LRUEncoded for T {}
+pub trait LRUEncoded: Clone + IncrementByOne + LRUEncodable {}
+impl<T: Clone + IncrementByOne + LRUEncodable> LRUEncoded for T {}
 
 /// Wrapper to implement serde for LruCache
-struct LruWrapper<K, V>(LruCache<K, V>);
+struct LruWrapper<Encodable, Encoded>(LruCache<Encodable, Encoded>);
+
+impl<Encodable, Encoded> std::ops::Deref for LruWrapper<Encodable, Encoded> {
+    type Target = LruCache<Encodable, Encoded>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<Encodable, Encoded> std::ops::DerefMut for LruWrapper<Encodable, Encoded> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub trait FieldCache<Encodable, Encoded> {
+    fn new(size: usize) -> Self;
+
+    fn try_encode(&mut self, field: &Encodable) -> MaybeEncoded<Encodable, Encoded>;
+
+    fn decode(&mut self, result: MaybeEncoded<Encodable, Encoded>) -> Encodable;
+}
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LRUniCache<T: Entry>
+#[serde(bound(deserialize = ""))]
+pub struct LRUniCache<Encodable, Encoded>
 where
-    T::Encodable: Hash + Eq,
-    T::Encoded: Hash + Eq,
+    Encodable: LRUEncodable,
+    Encoded: LRUEncoded,
 {
-    lru_cache_encoder: LruWrapper<T::Encodable, T::Encoded>,
-    lru_cache_decoder: LruWrapper<T::Encoded, T::Encodable>,
-    encoding: T::Encoded,
+    lru_cache_encoder: LruWrapper<Encodable, Encoded>,
+    lru_cache_decoder: LruWrapper<Encoded, Encodable>,
+    encoding: Encoded,
     size: usize,
 }
 
-impl<T> Clone for LRUniCache<T>
+impl<Encodable, Encoded> Clone for LRUniCache<Encodable, Encoded>
 where
-    T: Entry,
-    T::Encoded: LRUEncoded,
-    T::Encodable: LRUEncodable,
+    Encodable: LRUEncodable,
+    Encoded: LRUEncoded,
 {
     fn clone(&self) -> Self {
         let mut new = Self::new(self.size);
@@ -58,93 +82,65 @@ where
             .rev()
             .for_each(|(encodable, encoded)| {
                 new.lru_cache_encoder
-                    .0
                     .push(encodable.clone(), encoded.clone());
                 new.lru_cache_decoder
-                    .0
                     .push(encoded.clone(), encodable.clone());
             });
         new
     }
 }
 
-impl<T> Debug for LRUniCache<T>
+impl<Encodable, Encoded> Debug for LRUniCache<Encodable, Encoded>
 where
-    T: Entry,
-    T::Encoded: LRUEncoded,
-    T::Encodable: LRUEncodable,
+    Encodable: LRUEncodable,
+    Encoded: LRUEncoded,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("LRUnicache") // todo
     }
 }
 
-impl<T> UniCache<T> for LRUniCache<T>
+impl<Encodable, Encoded> FieldCache<Encodable, Encoded> for LRUniCache<Encodable, Encoded>
 where
-    T: Entry,
-    T::Encoded: LRUEncoded,
-    T::Encodable: LRUEncodable,
+    Encodable: LRUEncodable,
+    Encoded: LRUEncoded,
 {
     fn new(size: usize) -> Self {
         let s: NonZeroUsize = NonZeroUsize::new(size).unwrap();
         Self {
             lru_cache_encoder: LruWrapper(LruCache::new(s)),
             lru_cache_decoder: LruWrapper(LruCache::new(s)),
-            encoding: T::Encoded::default(),
+            encoding: Encoded::default(),
             size,
         }
     }
 
-    fn try_encode(&mut self, pre_processed: PreProcessedEntry<T>) -> ProcessedEntry<T> {
-        let PreProcessedEntry {
-            encodable,
-            not_encodable,
-        } = pre_processed;
-        let maybe_encoded = encodable
-            .into_iter()
-            .map(|e| {
-                match self.lru_cache_encoder.0.get(&e) {
-                    Some(encoding) => MaybeEncodedData::Encoded(encoding.clone()),
-                    None => {
-                        if self.lru_cache_encoder.0.len() == self.size {
-                            // cache is full, replace LRU with new item
-                            let (_, popped_encoding) = self.lru_cache_encoder.0.pop_lru().unwrap();
-                            self.lru_cache_encoder.0.push(e.clone(), popped_encoding);
-                        } else {
-                            let one = T::Encoded::one();
-                            let enc = std::mem::take(&mut self.encoding);
-                            let added = enc.add(one);
-                            self.lru_cache_encoder.0.push(e.clone(), added.clone());
-                            self.encoding = added;
-                        }
-                        MaybeEncodedData::NotEncoded(e)
-                    }
+    fn try_encode(&mut self, field: &Encodable) -> MaybeEncoded<Encodable, Encoded> {
+        match self.lru_cache_encoder.get(&field) {
+            Some(encoding) => MaybeEncoded::<Encodable, Encoded>::Encoded(encoding.clone()),
+            None => {
+                if self.lru_cache_encoder.len() == self.size {
+                    // cache is full, replace LRU with new item
+                    let (_, popped_encoding) = self.lru_cache_encoder.pop_lru().unwrap();
+                    self.lru_cache_encoder.push(field.clone(), popped_encoding);
+                } else {
+                    let one = Encoded::one();
+                    let enc = std::mem::take(&mut self.encoding);
+                    let added = enc.add(one);
+                    self.lru_cache_encoder.push(field.clone(), added.clone());
+                    self.encoding = added;
                 }
-            })
-            .collect();
-        ProcessedEntry {
-            maybe_encoded,
-            not_encodable,
+                MaybeEncoded::NotEncoded(field.clone())
+            }
         }
     }
 
-    fn decode(&mut self, processed: ProcessedEntry<T>) -> PreProcessedEntry<T> {
-        let ProcessedEntry {
-            maybe_encoded,
-            not_encodable,
-        } = processed;
-        let encodable = maybe_encoded
-            .into_iter()
-            .map(|e| match e {
-                MaybeEncodedData::Encoded(encoding) => {
-                    self.lru_cache_decoder.0.get(&encoding).unwrap().clone()
-                }
-                MaybeEncodedData::NotEncoded(not_encodable) => not_encodable,
-            })
-            .collect();
-        PreProcessedEntry {
-            encodable,
-            not_encodable,
+    fn decode(&mut self, result: MaybeEncoded<Encodable, Encoded>) -> Encodable {
+        match result {
+            MaybeEncoded::Encoded(encoding) => {
+                self.lru_cache_decoder.get(&encoding).unwrap().clone()
+            }
+            MaybeEncoded::NotEncoded(not_encodable) => not_encodable,
         }
     }
 }
@@ -157,7 +153,7 @@ mod serialization {
         ser::SerializeSeq,
     };
 
-    impl<K: LRUEncodable, V: LRUEncodable> Serialize for LruWrapper<K, V> {
+    impl<Encodable: LRUEncodable, Encoded: LRUEncodable> Serialize for LruWrapper<Encodable, Encoded> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -171,7 +167,9 @@ mod serialization {
         }
     }
 
-    impl<'de, K: LRUEncodable, V: LRUEncodable> Deserialize<'de> for LruWrapper<K, V> {
+    impl<'de, Encodable: LRUEncodable, Encoded: LRUEncodable> Deserialize<'de>
+        for LruWrapper<Encodable, Encoded>
+    {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
@@ -180,12 +178,12 @@ mod serialization {
         }
     }
 
-    struct LruWrapperVisitor<K, V> {
-        _k: PhantomData<K>,
-        _v: PhantomData<V>,
+    struct LruWrapperVisitor<Encodable, Encoded> {
+        _k: PhantomData<Encodable>,
+        _v: PhantomData<Encoded>,
     }
 
-    impl<K, V> LruWrapperVisitor<K, V> {
+    impl<Encodable, Encoded> LruWrapperVisitor<Encodable, Encoded> {
         fn new() -> Self {
             Self {
                 _k: PhantomData::default(),
@@ -194,12 +192,12 @@ mod serialization {
         }
     }
 
-    impl<'de, K, V> Visitor<'de> for LruWrapperVisitor<K, V>
+    impl<'de, Encodable, Encoded> Visitor<'de> for LruWrapperVisitor<Encodable, Encoded>
     where
-        K: LRUEncodable,
-        V: LRUEncodable,
+        Encodable: LRUEncodable,
+        Encoded: LRUEncodable,
     {
-        type Value = LruWrapper<K, V>;
+        type Value = LruWrapper<Encodable, Encoded>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a sequence of key-value pairs")
@@ -211,7 +209,7 @@ mod serialization {
         {
             let size = seq.size_hint().unwrap();
             let mut lru = LruCache::new(NonZeroUsize::new(size).unwrap());
-            while let Some((key, value)) = seq.next_element::<(K, V)>()? {
+            while let Some((key, value)) = seq.next_element::<(Encodable, Encoded)>()? {
                 lru.push(key, value);
             }
             // Wrap the LruCache in the LruWrapper

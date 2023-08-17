@@ -28,8 +28,6 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
-#[cfg(feature = "unicache")]
-use omnipaxos::unicache::{lru_cache::LRUniCache, PreProcessedEntry};
 use omnipaxos::OmniPaxosConfig;
 use sled::Config;
 
@@ -885,16 +883,16 @@ impl Entry for Value {
     type NotEncodable = ();
     type UniCache = LRUniCache<Self>;
 
-    fn pre_process(&self) -> omnipaxos::unicache::PreProcessedEntry<Self> {
-        PreProcessedEntry {
-            encodable: vec![Value(self.0)],
-            not_encodable: vec![],
-        }
-    }
+    // fn pre_process(&self) -> omnipaxos::unicache::PreProcessedEntry<Self> {
+    //     PreProcessedEntry {
+    //         encodable: vec![Value(self.0)],
+    //         not_encodable: vec![],
+    //     }
+    // }
 
-    fn recreate(item: omnipaxos::unicache::PreProcessedEntry<Self>) -> Self {
-        *item.encodable.first().unwrap()
-    }
+    // fn recreate(item: omnipaxos::unicache::PreProcessedEntry<Self>) -> Self {
+    //     *item.encodable.first().unwrap()
+    // }
 }
 
 /// Create a temporary directory in /tmp/

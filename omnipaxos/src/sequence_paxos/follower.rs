@@ -2,8 +2,6 @@ use super::super::ballot_leader_election::Ballot;
 
 use super::*;
 
-#[cfg(feature = "unicache")]
-use crate::unicache::ProcessedEntry;
 use crate::{
     storage::{RollbackValue, Snapshot, SnapshotType, StorageResult},
     util::MessageStatus,
@@ -292,7 +290,7 @@ where
     fn accept_encoded_entries_follower(
         &mut self,
         n: Ballot,
-        encoded_entries: Vec<ProcessedEntry<T>>,
+        encoded_entries: Vec<T::EncodeResult>,
     ) -> StorageResult<()> {
         let accepted_res = self
             .internal_storage

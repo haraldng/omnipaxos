@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 /// Internal component for log replication
 pub mod sequence_paxos {
-    #[cfg(feature = "unicache")]
-    use crate::unicache::ProcessedEntry;
     use crate::{
         ballot_leader_election::Ballot,
         storage::{Entry, SnapshotType, StopSign},
@@ -114,7 +112,7 @@ pub mod sequence_paxos {
         /// The decided index.
         pub decided_idx: u64,
         /// Entries to be replicated.
-        pub entries: Vec<ProcessedEntry<T>>,
+        pub entries: Vec<T::EncodeResult>,
     }
 
     /// Message sent by follower to leader when entries has been accepted.

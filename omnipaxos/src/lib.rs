@@ -10,8 +10,9 @@
 //! * `toml_config` - Create an OmniPaxos instance from a TOML configuration file
 //! * `serde` - Serialization and deserialization of messages and internal structs with serde. Disable this if you want to implement your own custom ser/deserialization or want to store data that is not serde-supported.
 
+#![allow(unused)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod ballot_leader_election;
 /// OmniPaxos error definitions

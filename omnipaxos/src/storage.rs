@@ -36,15 +36,17 @@ pub trait Entry: Clone + Debug {
     type NotEncodable: NotEncodable;
 
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
+    type EncodeResult: Clone + Debug;
+
+    #[cfg(feature = "unicache")]
+    type EncodeResult: Clone + Debug + Serialize + for<'a> Deserialize<'a>;
+
+    #[cfg(all(feature = "unicache", not(feature = "serde")))]
     /// The unicache type for caching popular/re-occurring entries.
-    type UniCache: UniCache<Self>;
+    type UniCache: UniCache<T = Self>;
     #[cfg(all(feature = "unicache", feature = "serde"))]
-    /// The unicache type for caching popular/re-occurring entries.
-    type UniCache: UniCache<Self> + Serialize + for<'a> Deserialize<'a>;
-    #[cfg(feature = "unicache")]
-    fn pre_process(&self) -> PreProcessedEntry<Self>;
-    #[cfg(feature = "unicache")]
-    fn recreate(item: PreProcessedEntry<Self>) -> Self;
+    // /// The unicache type for caching popular/re-occurring entries.
+    type UniCache: UniCache<T = Self> + Serialize + for<'a> Deserialize<'a>;
 }
 
 /// A StopSign entry that marks the end of a configuration. Used for reconfiguration.
@@ -216,7 +218,7 @@ where
     stopsign: Option<StopSign>,
     #[cfg(feature = "unicache")]
     /// Batch of entries that are processed (i.e., maybe encoded). Only used by the leader.
-    batched_processed_by_leader: Vec<ProcessedEntry<T>>,
+    batched_processed_by_leader: Vec<T::EncodeResult>,
     #[cfg(feature = "unicache")]
     unicache: T::UniCache,
 }
@@ -262,8 +264,7 @@ where
     fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
         #[cfg(feature = "unicache")]
         {
-            let pre_processed = entry.pre_process();
-            let processed = self.unicache.try_encode(pre_processed);
+            let processed = self.unicache.try_encode(&entry);
             self.batched_processed_by_leader.push(processed);
         }
         self.batched_entries.push(entry);
@@ -276,8 +277,7 @@ where
         #[cfg(feature = "unicache")]
         {
             for entry in &entries {
-                let pre_processed = entry.pre_process();
-                let processed = self.unicache.try_encode(pre_processed);
+                let processed = self.unicache.try_encode(entry);
                 self.batched_processed_by_leader.push(processed);
             }
         }
@@ -301,7 +301,7 @@ where
     }
 
     #[cfg(feature = "unicache")]
-    fn take_batched_processed(&mut self) -> Vec<ProcessedEntry<T>> {
+    fn take_batched_processed(&mut self) -> Vec<T::EncodeResult> {
         std::mem::take(&mut self.batched_processed_by_leader)
     }
 }
@@ -658,14 +658,11 @@ where
     #[cfg(feature = "unicache")]
     pub(crate) fn append_encoded_entries_and_get_accepted_idx(
         &mut self,
-        encoded_entries: Vec<ProcessedEntry<T>>,
+        encoded_entries: Vec<<T as Entry>::EncodeResult>,
     ) -> StorageResult<Option<u64>> {
         let entries = encoded_entries
             .into_iter()
-            .map(|x| {
-                let decoded = self.state_cache.unicache.decode(x);
-                T::recreate(decoded)
-            })
+            .map(|x| self.state_cache.unicache.decode(x))
             .collect();
         self.append_entries_and_get_accepted_idx(entries)
     }

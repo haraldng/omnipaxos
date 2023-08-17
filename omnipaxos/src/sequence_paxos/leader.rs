@@ -3,8 +3,6 @@ use super::super::{
     util::{LeaderState, PromiseData, PromiseMetaData},
 };
 use crate::storage::{RollbackValue, Snapshot, SnapshotType};
-#[cfg(feature = "unicache")]
-use crate::unicache::ProcessedEntry;
 
 use super::*;
 
@@ -186,7 +184,7 @@ where
     }
 
     #[cfg(all(feature = "batch_accept", feature = "unicache"))]
-    fn send_encoded_accept_and_cache(&mut self, to: NodeId, entries: Vec<ProcessedEntry<T>>) {
+    fn send_encoded_accept_and_cache(&mut self, to: NodeId, entries: Vec<T::EncodeResult>) {
         let acc = EncodedAcceptDecide {
             n: self.leader_state.n_leader,
             seq_num: self.leader_state.next_seq_num(to),

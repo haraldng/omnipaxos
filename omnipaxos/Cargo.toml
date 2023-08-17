@@ -19,7 +19,7 @@ slog-term = { version = "2.9.0", optional = true }
 slog-async = { version = "2.7.0", optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 toml = { version = "0.7.3", optional = true }
-omnipaxos_macros = { version = "0.1.2", optional = true }
+omnipaxos_macros = { path = "../omnipaxos_macros", optional = true }
 lru = { version = "0.11.0", optional = true }
 num-traits = { version = "0.2.16", optional = true }
 
