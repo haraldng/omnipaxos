@@ -118,6 +118,10 @@ where
         paxos
     }
 
+    pub(crate) fn get_state(&self) -> &(Role, Phase) {
+        &self.state
+    }
+
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_idx` - Deletes all entries up to [`trim_idx`], if the [`trim_idx`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_idx`].
@@ -435,7 +439,7 @@ where
 }
 
 #[derive(PartialEq, Debug)]
-enum Phase {
+pub(crate) enum Phase {
     Prepare,
     Accept,
     Recover,
@@ -443,7 +447,7 @@ enum Phase {
 }
 
 #[derive(PartialEq, Debug)]
-enum Role {
+pub(crate) enum Role {
     Follower,
     Leader,
 }

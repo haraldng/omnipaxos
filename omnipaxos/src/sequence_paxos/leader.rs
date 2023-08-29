@@ -63,7 +63,7 @@ where
                 });
             }
         } else {
-            self.state.0 = Role::Follower;
+            //self.state.0 = Role::Follower;
         }
     }
 
