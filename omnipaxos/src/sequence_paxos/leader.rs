@@ -62,8 +62,6 @@ where
                     msg: PaxosMsg::Prepare(prep),
                 });
             }
-        } else {
-            //self.state.0 = Role::Follower;
         }
     }
 

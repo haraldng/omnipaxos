@@ -198,7 +198,7 @@ fn sync_test(test: SyncTest) {
 
     // Set up leaders log
     // Wait a bit so next leader is stabilized (otherwise we can lose proposals)
-    std::thread::sleep(15 * cfg.election_timeout);
+    std::thread::sleep(6 * cfg.election_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     assert_ne!(follower_id, leader_id, "New leader must be chosen!");
     let leader = sys.nodes.get(&leader_id).unwrap();
