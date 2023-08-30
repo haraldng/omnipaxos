@@ -30,6 +30,8 @@ const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
 use omnipaxos::OmniPaxosConfig;
 use sled::Config;
+use omnipaxos::unicache::lru_cache::{FieldCache, LRUniCache};
+use omnipaxos::unicache::{MaybeEncoded, UniCache};
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
@@ -74,6 +76,7 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids.clone(),
             flexible_quorum,
+            unicache_size: 100,
             ..Default::default()
         };
         let server_config = ServerConfig {
@@ -876,23 +879,42 @@ impl Entry for Value {
 }
 
 #[cfg(feature = "unicache")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueCache {
+    f0: LRUniCache<u64, u8>,
+}
+
+#[cfg(feature = "unicache")]
+impl UniCache for ValueCache {
+    type T = Value;
+    fn new(size: usize) -> Self {
+        Self {
+            f0: LRUniCache::new(size),
+        }
+    }
+
+    fn try_encode(&mut self, entry: &Self::T) -> <Self::T as Entry>::EncodeResult {
+        let f0_result = self.f0.try_encode(&entry.0);
+        (f0_result, )
+    }
+
+    fn decode(
+        &mut self,
+        (f0_result, ): <Self::T as Entry>::EncodeResult,
+    ) -> Self::T {
+        let f0 = self.f0.decode(f0_result);
+        Value(f0)
+    }
+}
+
+#[cfg(feature = "unicache")]
 impl Entry for Value {
     type Snapshot = LatestValue;
-    type Encoded = u16;
-    type Encodable = Self;
+    type Encoded = (u8, );
+    type Encodable = (u64, );
     type NotEncodable = ();
-    type UniCache = LRUniCache<Self>;
-
-    // fn pre_process(&self) -> omnipaxos::unicache::PreProcessedEntry<Self> {
-    //     PreProcessedEntry {
-    //         encodable: vec![Value(self.0)],
-    //         not_encodable: vec![],
-    //     }
-    // }
-
-    // fn recreate(item: omnipaxos::unicache::PreProcessedEntry<Self>) -> Self {
-    //     *item.encodable.first().unwrap()
-    // }
+    type EncodeResult = (MaybeEncoded<u64, u8>, );
+    type UniCache = ValueCache;
 }
 
 /// Create a temporary directory in /tmp/

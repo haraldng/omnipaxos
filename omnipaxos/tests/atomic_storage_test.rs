@@ -57,6 +57,7 @@ fn basic_setup() -> (
     op_config.cluster_config.nodes = (1..=cfg.num_nodes as NodeId).collect();
     op_config.cluster_config.configuration_id = 1;
     op_config.server_config.election_tick_timeout = 1; // set tick timeout to 1 as we need to trigger leader change when we call tick() in the tests.
+    op_config.cluster_config.unicache_size = 100;
     let op = op_config.build(storage).unwrap();
     (mem_storage, storage_conf, op)
 }

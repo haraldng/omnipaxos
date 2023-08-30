@@ -93,6 +93,7 @@ fn read_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
+    op_config.cluster_config.unicache_size = 100;
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
 
     // read decided entries
@@ -180,6 +181,7 @@ fn read_entries_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
+    op_config.cluster_config.unicache_size = 100;
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
     omni_paxos
         .snapshot(Some(snapshotted_idx), true)
