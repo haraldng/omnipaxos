@@ -1,6 +1,6 @@
-use crate::errors::{valid_config, ConfigError};
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
+    errors::{valid_config, ConfigError},
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
@@ -424,20 +424,31 @@ where
         self.ui.stop();
     }
 
+    /// Returns whether the ui is started.
+    #[cfg(feature = "ui")]
+    pub fn is_ui_started(&self) -> bool {
+        self.ui.is_started()
+    }
+
     #[cfg(feature = "ui")]
     fn update_ui_if_started(&mut self) {
-        if self.ui.is_started() {
+        if self.is_ui_started() {
             let ballot = self.ble.get_current_ballot();
             self.ui.app.current_node.ballot_number = ballot.n;
             self.ui.app.current_node.configuration_id = ballot.config_id;
             self.ui.app.current_leader = self.get_current_leader();
-            self.ui.app.decided_idx = self.get_decided_idx();
+            self.ui.app.set_decided_idx(self.get_decided_idx());
             self.ui.app.active_peers.clear();
             self.ble
                 .get_ballots()
                 .iter()
                 .filter(|(b, _)| b.pid != self.ui.app.current_node.pid)
-                .for_each(|(b, _)| self.ui.app.active_peers.push((*b).into()));
+                .for_each(|(b, c)| {
+                    self.ui.app.active_peers.push((*b).into());
+                    self.ui.app.active_peers.last_mut().unwrap().connectivity = *c;
+                });
+            self.ui.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
+            self.ui.app.current_node.connectivity = self.ui.app.active_peers.len() as u8 + 1;
             self.ui.update();
         }
     }

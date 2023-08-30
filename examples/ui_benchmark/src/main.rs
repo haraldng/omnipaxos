@@ -1,12 +1,9 @@
 // To run the benchmark for ui:
 // cargo run --bin ui_benchmark
 
-use omnipaxos::macros::Entry;
-use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
+use omnipaxos::{macros::Entry, ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
-use std::thread;
-use std::time::Duration;
-
+use std::{thread, time::Duration};
 
 #[derive(Entry, Clone, Debug)]
 struct Entry {}
@@ -36,7 +33,8 @@ fn op_buildup() -> OmniPaxos<Entry, MemoryStorage<Entry>> {
         server_config,
         cluster_config,
     };
-    let omni_paxos: OmniPaxos<Entry, MemoryStorage<Entry>> = op_config.build(MemoryStorage::default()).unwrap();
+    let omni_paxos: OmniPaxos<Entry, MemoryStorage<Entry>> =
+        op_config.build(MemoryStorage::default()).unwrap();
     omni_paxos
 }
 
@@ -75,10 +73,22 @@ fn bench_tick_with_ui() {
     let tick_1ms_timeout = now.elapsed().as_millis();
 
     // Output results
-    println!("Time elapsed of {:?} ticks with UI started: {:.2?} nanoseconds", NUMBER_OF_TICKS, tick_ui_timeout);
-    println!("Time elapsed of {:?} ticks without UI: {:.2?} nanoseconds", NUMBER_OF_TICKS, tick_timeout);
-    println!("Time elapsed of {:?} ticks with UI started and {:?}ms/tick: {:.2?} ms", NUMBER_OF_TICKS, TICK_RATE, tick_1ms_ui_timeout);
-    println!("Time elapsed of {:?} ticks without UI and {:?}ms/tick: {:.2?} ms", NUMBER_OF_TICKS, TICK_RATE, tick_1ms_timeout);
+    println!(
+        "Time elapsed of {:?} ticks with UI started: {:.2?} nanoseconds",
+        NUMBER_OF_TICKS, tick_ui_timeout
+    );
+    println!(
+        "Time elapsed of {:?} ticks without UI: {:.2?} nanoseconds",
+        NUMBER_OF_TICKS, tick_timeout
+    );
+    println!(
+        "Time elapsed of {:?} ticks with UI started and {:?}ms/tick: {:.2?} ms",
+        NUMBER_OF_TICKS, TICK_RATE, tick_1ms_ui_timeout
+    );
+    println!(
+        "Time elapsed of {:?} ticks without UI and {:?}ms/tick: {:.2?} ms",
+        NUMBER_OF_TICKS, TICK_RATE, tick_1ms_timeout
+    );
 }
 
 fn main() {

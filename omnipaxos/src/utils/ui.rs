@@ -1,5 +1,4 @@
-use crate::ballot_leader_election::Ballot;
-use crate::OmniPaxosConfig;
+use crate::{ballot_leader_election::Ballot, OmniPaxosConfig};
 use omnipaxos_ui::app::{Node, UIAppConfig};
 
 impl From<Ballot> for Node {

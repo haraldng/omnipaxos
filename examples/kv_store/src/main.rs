@@ -1,5 +1,7 @@
 // To run the example with the UI:
 // cargo run --features "with_omnipaxos_ui"
+// To run the example with Logging feature:
+// cargo run --features "with_omnipaxos_log"
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
     messages::Message,

@@ -15,3 +15,5 @@ serde = { version = "1.0", features = ["derive"] }
 derive_entry = []
 # To run the program with the UI, use `cargo run --features with_omnipaxos_ui`
 with_omnipaxos_ui = ["omnipaxos/ui"]
+with_omnipaxos_log = ["omnipaxos/logging"]
+

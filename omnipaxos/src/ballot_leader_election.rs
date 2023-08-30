@@ -16,6 +16,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
+#[cfg(feature = "ui")]
+use omnipaxos_ui::UI;
 
 /// Used to define a Sequence Paxos epoch
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
@@ -120,10 +122,20 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-                let s = config
-                    .logger_file_path
-                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                create_logger(s.as_str())
+
+                #[cfg(not(feature = "ui"))]
+                {
+                    let s = config
+                        .logger_file_path
+                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                }
+                #[cfg(feature = "ui")]
+                {
+                    let logger = UI::logger();
+                    info!(logger, "UI_logger created with slog");
+                    logger
+                }
             },
         };
         #[cfg(feature = "logging")]

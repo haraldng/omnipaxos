@@ -1,10 +1,13 @@
 use crate::app::{App, UIAppConfig};
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::event::{Event, KeyCode};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::stdout;
-use std::time::Duration;
+use std::{io::stdout, time::Duration};
+use tui_logger::*;
+use log::LevelFilter;
+use slog::{self, o, Drain, info, debug};
 
 pub mod app;
 mod render;
@@ -29,15 +32,24 @@ impl UI {
         }
     }
 
+    // Get the logger for logging into UI, need to be used with slog configration.
+    pub fn logger() -> slog::Logger {
+        let drain = slog_drain().fuse();
+        slog::Logger::root(drain, o!())
+    }
+
     // Start the UI, do nothing if already started
     pub fn start(&mut self) {
         if !self.started {
+            init_logger(LevelFilter::Trace).unwrap();
+            set_default_level(LevelFilter::Debug);
             let mut stdout = stdout();
             crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
             enable_raw_mode().unwrap();
             self.terminal.hide_cursor().unwrap();
             self.update();
             self.started = true;
+            debug!(Self::logger(), "UI started with slog");
         }
     }
 
@@ -49,7 +61,8 @@ impl UI {
                 self.terminal.backend_mut(),
                 LeaveAlternateScreen,
                 DisableMouseCapture
-            ).unwrap();
+            )
+                .unwrap();
             self.terminal.show_cursor().unwrap();
             self.started = false;
         }
@@ -64,16 +77,22 @@ impl UI {
         // Handle user input
         if crossterm::event::poll(Duration::from_millis(0)).unwrap() {
             if let Event::Key(key) = crossterm::event::read().unwrap() {
+                if let KeyCode::Esc = key.code {
+                    self.stop();
+                };
                 if let KeyCode::Char('q') = key.code {
                     self.stop();
-                }
+                };
+
             }
         }
         // Redraw the UI
-        self.terminal
-            .draw(|rect| {
-                render::render(rect, &self.app);
-            })
-            .unwrap();
+        if self.started {
+            self.terminal
+                .draw(|rect| {
+                    render::render(rect, &self.app);
+                })
+                .unwrap();
+        }
     }
 }
