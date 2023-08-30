@@ -62,6 +62,8 @@ where
                     msg: PaxosMsg::Prepare(prep),
                 });
             }
+        } else {
+            self.state = (Role::Follower, Phase::None);
         }
     }
 

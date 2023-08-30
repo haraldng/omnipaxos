@@ -14,6 +14,7 @@ pub mod utils;
 
 use crate::utils::StorageType;
 use omnipaxos::{
+    ballot_leader_election::Leader,
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
@@ -67,15 +68,15 @@ fn _setup_leader() -> (
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
-    let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
     let n_old = n;
+    let leader_old = Leader::with(n);
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
-            leader: n_old,
+            leader: leader_old,
             happy: true,
         }),
     });
@@ -87,7 +88,7 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 2,
             ballot: n_old,
-            leader: n_old,
+            leader: leader_old,
             happy: false,
         }),
     });
@@ -99,7 +100,7 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 3,
             ballot: n_old,
-            leader: n_old,
+            leader: leader_old,
             happy: false,
         }),
     });
@@ -424,33 +425,32 @@ fn atomic_storage_accept_decide_test() {
 
 #[test]
 #[serial]
-// TODO: don't ignore, fix this
-#[ignore]
 fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
-        let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
+        // Send messages to 1 such that it tries to take over leadership
         let n_old = n;
+        let leader_old = Leader::with(n);
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
                 ballot: n_old,
-                leader: n_old,
+                leader: leader_old,
                 happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        op.tick();
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                leader: n_old,
+                leader: leader_old,
                 happy: false,
             }),
         });
@@ -461,20 +461,25 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                leader: n_old,
+                leader: leader_old,
                 happy: false,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        op.tick();
+        // Send messages to 1 so it sees it has gained leadership and notifies paxos
+        let mut n_new = n_old;
+        n_new.n += 1;
+        n_new.pid = 1;
+        let leader_new = Leader::with(n_new);
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
-                ballot: n_old,
-                leader: n_old,
-                happy: false,
+                ballot: n_new,
+                leader: leader_new,
+                happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -482,14 +487,14 @@ fn atomic_storage_majority_promises_test() {
             from: 3,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
-                round: 2,
-                ballot: n_old,
-                leader: n_old,
-                happy: false,
+                round: 3,
+                ballot: n_new,
+                leader: leader_new,
+                happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        op.tick(); // 1 gains leadership here
         let msgs = op.outgoing_messages();
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {
