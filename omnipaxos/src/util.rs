@@ -1,5 +1,5 @@
 use super::{
-    ballot_leader_election::Ballot,
+    ballot_leader_election::{Ballot, Connectivity},
     messages::sequence_paxos::Promise,
     storage::{Entry, SnapshotType, StopSign},
 };
@@ -287,8 +287,6 @@ pub(crate) mod defaults {
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
     pub(crate) const ELECTION_TIMEOUT: u64 = 10;
     pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 100;
-    #[cfg(feature = "ui")]
-    pub(crate) const UI_UPDATE_TIMEOUT: u64 = 50;
 }
 
 #[allow(missing_docs)]
@@ -402,4 +400,17 @@ impl Quorum {
             Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.write_quorum_size,
         }
     }
+}
+
+/// The states of an OmniPaxos instance.
+pub struct OmniPaxosStates{
+    /// The current ballot number
+    pub current_ballot: Ballot,
+    /// The current leader
+    pub current_leader: Option<NodeId>,
+    /// The current decided index
+    pub decided_idx: u64,
+    /// All the received heartbeats from the previous heartbeat round, including the current node.
+    /// Represents nodes that are currently alive from the view of the current node.
+    pub ballots: Vec<(Ballot, Connectivity)>,
 }

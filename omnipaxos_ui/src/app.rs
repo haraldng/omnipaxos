@@ -1,5 +1,6 @@
-use crate::util::*;
+use crate::util::defaults::*;
 use std::time::Instant;
+use omnipaxos::util::{ConfigurationId, NodeId};
 
 #[derive(Debug, Clone, Default)]
 pub struct Node {

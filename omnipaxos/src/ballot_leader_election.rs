@@ -16,8 +16,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
-#[cfg(feature = "ui")]
-use omnipaxos_ui::UI;
 
 /// Used to define a Sequence Paxos epoch
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
@@ -80,7 +78,6 @@ pub(crate) struct BallotLeaderElection {
     ballots: Vec<(Ballot, Connectivity)>,
     /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
-    #[cfg(feature = "ui")]
     prev_round_ballots: Vec<(Ballot, Connectivity)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
@@ -113,7 +110,6 @@ impl BallotLeaderElection {
             peers,
             hb_round: 0,
             ballots: Vec::with_capacity(num_nodes),
-            #[cfg(feature = "ui")]
             prev_round_ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             connectivity: num_nodes as Connectivity,
@@ -122,20 +118,10 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-
-                #[cfg(not(feature = "ui"))]
-                {
-                    let s = config
-                        .logger_file_path
-                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(s.as_str())
-                }
-                #[cfg(feature = "ui")]
-                {
-                    let logger = UI::logger();
-                    info!(logger, "UI_logger created with slog");
-                    logger
-                }
+                let s = config
+                    .logger_file_path
+                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                create_logger(s.as_str())
             },
         };
         #[cfg(feature = "logging")]
@@ -245,10 +231,7 @@ impl BallotLeaderElection {
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         // Add our own ballot to the list of received ballots of current hb round
         self.ballots.push((self.current_ballot, self.connectivity));
-        #[cfg(feature = "ui")]
-        {
-            self.prev_round_ballots = self.ballots.clone();
-        }
+        self.prev_round_ballots = self.ballots.clone();
         let my_connectivity = self.ballots.len();
         self.connectivity = my_connectivity as Connectivity;
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
@@ -299,14 +282,12 @@ impl BallotLeaderElection {
         }
     }
 
-    #[cfg(feature = "ui")]
     pub(crate) fn get_current_ballot(&self) -> Ballot {
         self.current_ballot
     }
 
-    #[cfg(feature = "ui")]
-    pub(crate) fn get_ballots(&self) -> &Vec<(Ballot, Connectivity)> {
-        &self.prev_round_ballots
+    pub(crate) fn get_ballots(&self) -> Vec<(Ballot, Connectivity)> {
+        self.prev_round_ballots.clone()
     }
 }
 

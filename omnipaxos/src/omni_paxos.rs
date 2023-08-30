@@ -22,11 +22,8 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
+use crate::util::OmniPaxosStates;
 // use crate::valid_config;
-#[cfg(feature = "ui")]
-use crate::util::defaults::UI_UPDATE_TIMEOUT;
-#[cfg(feature = "ui")]
-use omnipaxos_ui::UI;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -78,10 +75,6 @@ impl OmniPaxosConfig {
             resend_message_clock: LogicalClock::with(
                 self.server_config.resend_message_tick_timeout,
             ),
-            #[cfg(feature = "ui")]
-            ui: UI::with(self.clone().into()),
-            #[cfg(feature = "ui")]
-            ui_update_clock: LogicalClock::with(self.server_config.ui_update_tick_timeout),
             seq_paxos: SequencePaxos::with(self.into(), storage),
         })
     }
@@ -175,9 +168,6 @@ pub struct ServerConfig {
     pub election_tick_timeout: u64,
     /// The number of calls to `tick()` before a message is considered dropped and thus resent. Must not be 0.
     pub resend_message_tick_timeout: u64,
-    /// The number of calls to `tick()` before the UI is updated. Must not be 0.
-    #[cfg(feature = "ui")]
-    pub ui_update_tick_timeout: u64,
     /// The buffer size for outgoing messages.
     pub buffer_size: usize,
     /// The size of the buffer for log batching. The default is 1, which means no batching.
@@ -213,8 +203,6 @@ impl Default for ServerConfig {
             pid: 0,
             election_tick_timeout: ELECTION_TIMEOUT,
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
-            #[cfg(feature = "ui")]
-            ui_update_tick_timeout: UI_UPDATE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
             batch_size: 1,
             #[cfg(feature = "logging")]
@@ -235,10 +223,6 @@ where
     ble: BallotLeaderElection,
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
-    #[cfg(feature = "ui")]
-    ui: UI,
-    #[cfg(feature = "ui")]
-    ui_update_clock: LogicalClock,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -389,11 +373,6 @@ where
         if self.resend_message_clock.tick_and_check_timeout() {
             self.seq_paxos.resend_message_timeout();
         }
-        #[cfg(feature = "ui")]
-        if self.ui_update_clock.tick_and_check_timeout() {
-            // Update the UI if it has been started
-            self.update_ui_if_started();
-        }
     }
 
     /*** BLE calls ***/
@@ -412,44 +391,13 @@ where
         }
     }
 
-    /// Clear the terminal and render the ui.
-    #[cfg(feature = "ui")]
-    pub fn start_ui(&mut self) {
-        self.ui.start();
-    }
-
-    /// Stop the ui.
-    #[cfg(feature = "ui")]
-    pub fn stop_ui(&mut self) {
-        self.ui.stop();
-    }
-
-    /// Returns whether the ui is started.
-    #[cfg(feature = "ui")]
-    pub fn is_ui_started(&self) -> bool {
-        self.ui.is_started()
-    }
-
-    #[cfg(feature = "ui")]
-    fn update_ui_if_started(&mut self) {
-        if self.is_ui_started() {
-            let ballot = self.ble.get_current_ballot();
-            self.ui.app.current_node.ballot_number = ballot.n;
-            self.ui.app.current_node.configuration_id = ballot.config_id;
-            self.ui.app.current_leader = self.get_current_leader();
-            self.ui.app.set_decided_idx(self.get_decided_idx());
-            self.ui.app.active_peers.clear();
-            self.ble
-                .get_ballots()
-                .iter()
-                .filter(|(b, _)| b.pid != self.ui.app.current_node.pid)
-                .for_each(|(b, c)| {
-                    self.ui.app.active_peers.push((*b).into());
-                    self.ui.app.active_peers.last_mut().unwrap().connectivity = *c;
-                });
-            self.ui.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
-            self.ui.app.current_node.connectivity = self.ui.app.active_peers.len() as u8 + 1;
-            self.ui.update();
+    /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
+    pub fn get_states(&self) -> OmniPaxosStates {
+        OmniPaxosStates{
+            current_ballot: self.ble.get_current_ballot(),
+            current_leader: self.get_current_leader(),
+            decided_idx: self.get_decided_idx(),
+            ballots: self.ble.get_ballots(),
         }
     }
 }

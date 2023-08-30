@@ -11,3 +11,4 @@ slog = { version = "2.7.0"}
 crossterm = { version = "0.26.1" }
 ratatui = { version = "0.22.0" }
 tui-logger  = { version = "0.9.4", default-features = false,features = ["slog-support", "ratatui-support"] }
+omnipaxos = { path = "../omnipaxos"}

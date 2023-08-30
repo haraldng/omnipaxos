@@ -1,4 +1,3 @@
-use crate::{app::App, util::*};
 use ratatui::{
     widgets::{
         canvas::{Canvas, Line, Rectangle},
@@ -6,11 +5,10 @@ use ratatui::{
     },
     prelude::*,
 };
-use std::{collections::HashMap, f64::consts::PI};
-use std::os::linux::raw::stat;
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerSmartWidget, TuiLoggerWidget, TuiWidgetState};
-// temp use
-use log::*;
+use omnipaxos::util::NodeId;
+use std::{collections::HashMap, f64::consts::PI};
+use crate::{app::App, util::defaults::*};
 
 // render ui components
 pub(crate) fn render<B>(rect: &mut Frame<B>, app: &App)

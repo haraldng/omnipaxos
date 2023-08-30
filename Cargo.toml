@@ -5,7 +5,6 @@ members = [
     "omnipaxos_macros",
     "omnipaxos_ui",
     "examples/kv_store",
-    "examples/ui_benchmark",
 ]
 
 [profile.release]

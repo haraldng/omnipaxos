@@ -10,10 +10,11 @@ omnipaxos = { path = "../../omnipaxos", features = ["macros"] }
 omnipaxos_storage = { path = "../../omnipaxos_storage"}
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
+omnipaxos_ui = { path = "../../omnipaxos_ui", optional = true }
 
 [features]
 derive_entry = []
 # To run the program with the UI, use `cargo run --features with_omnipaxos_ui`
-with_omnipaxos_ui = ["omnipaxos/ui"]
+with_omnipaxos_ui = ["omnipaxos_ui"]
 with_omnipaxos_log = ["omnipaxos/logging"]
 

@@ -14,8 +14,6 @@ use crate::{
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
-#[cfg(feature = "ui")]
-use omnipaxos_ui::UI;
 
 pub mod follower;
 pub mod leader;
@@ -96,19 +94,10 @@ where
             buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
-                #[cfg(not(feature = "ui"))]
-                {
-                    let log_file_path = config
-                        .logger_file_path
-                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                    create_logger(log_file_path.as_str())
-                }
-                #[cfg(feature = "ui")]
-                {
-                    let logger = UI::logger();
-                    info!(logger, "UI_logger created with slog");
-                    logger
-                }
+                let log_file_path = config
+                    .logger_file_path
+                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                create_logger(log_file_path.as_str())
             },
         };
         paxos

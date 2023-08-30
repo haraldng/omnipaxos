@@ -2,18 +2,20 @@
 // cargo run --features "with_omnipaxos_ui"
 // To run the example with Logging feature:
 // cargo run --features "with_omnipaxos_log"
-use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
+use tokio::{runtime::Builder, sync::mpsc};
 use omnipaxos::{
     messages::Message,
     util::{LogEntry, NodeId},
     *,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
+#[cfg(feature = "with_omnipaxos_ui")]
+use omnipaxos_ui::OmniPaxosUI;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use tokio::{runtime::Builder, sync::mpsc};
+use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 
 mod kv;
 mod server;
@@ -54,8 +56,6 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
-            #[cfg(feature = "with_omnipaxos_ui")]
-            ui_update_tick_timeout: UI_UPDATE_TICK_TIMEOUT,
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
@@ -67,10 +67,18 @@ fn main() {
             server_config,
             cluster_config,
         };
+        #[cfg(feature = "with_omnipaxos_ui")]
+        let mut  omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
+        #[cfg(feature = "with_omnipaxos_ui")]
+        if pid == 1 {
+            omni_paxos_ui.start();
+        }
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
             op_config.build(MemoryStorage::default()).unwrap(),
         ));
         let mut op_server = OmniPaxosServer {
+            #[cfg(feature = "with_omnipaxos_ui")]
+            omni_paxos_ui,
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),
             outgoing: sender_channels.clone(),
@@ -86,9 +94,6 @@ fn main() {
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     let (first_server, _) = op_server_handles.get(&1).unwrap();
-    // start the UI if feature is enabled
-    #[cfg(feature = "with_omnipaxos_ui")]
-    first_server.lock().unwrap().start_ui();
     // check which server is the current leader
     let leader = first_server
         .lock()
@@ -188,7 +193,5 @@ fn main() {
 
     // clean up ui
     #[cfg(feature = "with_omnipaxos_ui")]
-    std::thread::sleep(WAIT_UI_QUIT_TIMEOUT);
-    #[cfg(feature = "with_omnipaxos_ui")]
-    first_server.lock().unwrap().stop_ui();
+    std::thread::sleep(EXIST_TIMEOUT);
 }
