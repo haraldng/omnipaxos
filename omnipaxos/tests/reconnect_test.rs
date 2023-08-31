@@ -490,7 +490,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     );
 
     // Disconnect follower from leader, kill others, and then propose StopSign
-    for other_follower in followers {
+    for other_follower in followers.clone() {
         sys.kill_node(other_follower);
     }
     let next_config = ClusterConfig {

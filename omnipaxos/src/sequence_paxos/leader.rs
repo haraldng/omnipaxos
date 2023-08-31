@@ -14,11 +14,11 @@ where
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
     pub(crate) fn handle_leader(&mut self, n: Ballot) {
-        #[cfg(feature = "logging")]
-        debug!(self.logger, "Newly elected leader: {:?}", n);
         if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
+        #[cfg(feature = "logging")]
+        debug!(self.logger, "Newly elected leader: {:?}", n);
         if self.pending_reconfiguration() {
             self.pending_proposals.clear();
         }
@@ -63,8 +63,12 @@ where
                 });
             }
         } else {
-            self.state = (Role::Follower, Phase::None);
+            self.state.0 = Role::Follower;
         }
+    }
+
+    pub(crate) fn handle_stale_leader(&mut self) {
+        self.state.0 = Role::Follower;
     }
 
     pub(crate) fn handle_preparereq(&mut self, from: NodeId) {

@@ -180,10 +180,7 @@ pub mod sequence_paxos {
 /// The different messages BLE uses to communicate with other servers.
 pub mod ballot_leader_election {
 
-    use crate::{
-        ballot_leader_election::{Ballot, Leader},
-        util::NodeId,
-    };
+    use crate::{ballot_leader_election::Ballot, util::NodeId};
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
 
@@ -202,10 +199,8 @@ pub mod ballot_leader_election {
     pub struct HeartbeatRequest {
         /// Number of the current round.
         pub round: u32,
-        /// Ballot of requesting server.
+        /// Ballot of the requesting server
         pub ballot: Ballot,
-        /// Requesting server sees a need for a new leader
-        pub happy: bool,
     }
 
     /// Replies
@@ -216,9 +211,9 @@ pub mod ballot_leader_election {
         pub round: u32,
         /// Ballot of replying server.
         pub ballot: Ballot,
-        /// The leader this server is following
-        pub leader: Leader,
-        /// Replying server sees a need for a new leader
+        /// Leader this server is following
+        pub leader: Ballot,
+        /// Whether the replying server sees a need for a new leader
         pub happy: bool,
     }
 

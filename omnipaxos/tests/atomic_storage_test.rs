@@ -14,7 +14,6 @@ pub mod utils;
 
 use crate::utils::StorageType;
 use omnipaxos::{
-    ballot_leader_election::Leader,
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
@@ -69,14 +68,13 @@ fn _setup_leader() -> (
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
     let n_old = n;
-    let leader_old = Leader::with(n);
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
         to: 1,
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
-            leader: leader_old,
+            leader: n_old,
             happy: true,
         }),
     });
@@ -88,7 +86,7 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 2,
             ballot: n_old,
-            leader: leader_old,
+            leader: n_old,
             happy: false,
         }),
     });
@@ -100,7 +98,7 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 3,
             ballot: n_old,
-            leader: leader_old,
+            leader: n_old,
             happy: false,
         }),
     });
@@ -431,14 +429,13 @@ fn atomic_storage_majority_promises_test() {
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
         // Send messages to 1 such that it tries to take over leadership
         let n_old = n;
-        let leader_old = Leader::with(n);
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
                 ballot: n_old,
-                leader: leader_old,
+                leader: n_old,
                 happy: true,
             }),
         });
@@ -450,7 +447,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                leader: leader_old,
+                leader: n_old,
                 happy: false,
             }),
         });
@@ -461,7 +458,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                leader: leader_old,
+                leader: n_old,
                 happy: false,
             }),
         });
@@ -471,14 +468,13 @@ fn atomic_storage_majority_promises_test() {
         let mut n_new = n_old;
         n_new.n += 1;
         n_new.pid = 1;
-        let leader_new = Leader::with(n_new);
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
                 ballot: n_new,
-                leader: leader_new,
+                leader: n_new,
                 happy: true,
             }),
         });
@@ -489,7 +485,7 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
                 ballot: n_new,
-                leader: leader_new,
+                leader: n_new,
                 happy: true,
             }),
         });

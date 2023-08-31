@@ -20,26 +20,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
 use slog::{info, trace, warn, Logger};
 
-/// The leader of a Ballot Leader Election component
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Leader {
-    /// The leader's ballot
-    pub ballot: Ballot,
-    /// Whether the leader has seen a majority of nodes in the cluster following it
-    pub adopted_by_majority: bool,
-}
-
-impl Leader {
-    /// Creates a new, not-yet-adopted leader
-    pub fn with(ballot: Ballot) -> Self {
-        Self {
-            ballot,
-            adopted_by_majority: false,
-        }
-    }
-}
-
 /// Used to define a Sequence Paxos epoch
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -70,6 +50,19 @@ impl Ballot {
     }
 }
 
+/// The state a BallotLeaderElection is in
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum BleState {
+    /// Leader with a quorum of followers
+    Leader(Ballot),
+    /// Leader without a quorum of followers
+    PendingLeader,
+    /// A pending leader that sees another leader outcompleting it
+    StaleLeader,
+    /// Accepts another node as the leader
+    Follower,
+}
+
 impl Ord for Ballot {
     fn cmp(&self, other: &Self) -> Ordering {
         (self.n, self.priority, self.pid).cmp(&(other.n, other.priority, other.pid))
@@ -98,11 +91,12 @@ pub(crate) struct BallotLeaderElection {
     heartbeat_replies: Vec<HeartbeatReply>,
     /// The current ballot of this instance.
     current_ballot: Ballot,
-    /// We are connected to the highest seen ballot and the owner of this ballot can make progress
-    /// as the leader of the cluster
-    happy: bool,
     /// The current leader of this instance
-    leader: Leader,
+    leader: Ballot,
+    /// If this instance sees a need for a new leader
+    happy: bool,
+    // The state of this instance
+    state: BleState,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain the leader.
     quorum: Quorum,
     /// Vector which holds all the outgoing messages of the BLE instance.
@@ -126,6 +120,11 @@ impl BallotLeaderElection {
             Some(b) => b,
             None => initial_ballot,
         };
+        let initial_state = if initial_leader == initial_ballot {
+            BleState::PendingLeader
+        } else {
+            BleState::Follower
+        };
         let mut ble = BallotLeaderElection {
             configuration_id: config_id,
             pid,
@@ -133,8 +132,9 @@ impl BallotLeaderElection {
             hb_round: 0,
             heartbeat_replies: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
+            leader: initial_leader,
             happy: true,
-            leader: Leader::with(initial_leader),
+            state: initial_state,
             quorum,
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
@@ -190,7 +190,6 @@ impl BallotLeaderElection {
             let hb_request = HeartbeatRequest {
                 round: self.hb_round,
                 ballot: self.current_ballot,
-                happy: self.happy,
             };
             self.outgoing.push(BLEMessage {
                 from: self.pid,
@@ -200,77 +199,58 @@ impl BallotLeaderElection {
         }
     }
 
-    pub(crate) fn hb_timeout(&mut self, seq_paxos_state: &(Role, Phase)) -> Option<Ballot> {
+    pub(crate) fn hb_timeout(&mut self, seq_paxos_state: &(Role, Phase)) -> BleState {
         self.check_leader();
-        let leadership_change = self.update_happiness(seq_paxos_state);
+        self.update_happiness(seq_paxos_state);
         self.update_ballot();
         self.heartbeat_replies.clear();
         self.new_hb_round();
-        leadership_change
+        self.state
     }
 
     /// Checks the heartbeat replies of the round and sets the new leader if appropriate
     fn check_leader(&mut self) {
-        let max_reply = self
+        self.leader = self
             .heartbeat_replies
             .iter()
-            .max_by(|r1, r2| r1.ballot.cmp(&r2.ballot));
-        if let Some(reply) = max_reply {
-            if reply.ballot > self.leader.ballot {
-                self.leader = Leader::with(reply.ballot);
-                self.happy = reply.happy;
-            }
+            .fold(self.leader, |a, b| a.max(b.ballot));
+        if self.leader != self.current_ballot {
+            self.state = BleState::Follower;
         }
     }
 
-    fn update_happiness(&mut self, seq_paxos_state: &(Role, Phase)) -> Option<Ballot> {
-        let mut leadership_change = None;
-        if self.current_ballot == self.leader.ballot {
-            let followers = self
-                .heartbeat_replies
-                .iter()
-                .filter(|hb_reply| hb_reply.leader.ballot == self.current_ballot)
-                .count()
-                + 1;
-            self.happy = match seq_paxos_state {
-                (Role::Leader, Phase::Accept) => self.quorum.is_accept_quorum(followers),
-                _ => self.quorum.is_prepare_quorum(followers),
-            };
-            if !self.leader.adopted_by_majority && self.happy {
-                // A majority of nodes just started following me
-                self.leader.adopted_by_majority = true;
-                leadership_change = Some(self.leader.ballot);
-            } else if self.leader.adopted_by_majority && !self.happy {
-                // I lost my majority of followers to someone greater than me
-                let greater_leader = self
+    fn update_happiness(&mut self, seq_paxos_state: &(Role, Phase)) {
+        self.happy = match self.state {
+            BleState::Follower => {
+                let leaders_reply = self
                     .heartbeat_replies
                     .iter()
-                    .filter_map(|r| {
-                        if r.leader.adopted_by_majority {
-                            Some(r.leader.ballot)
-                        } else {
-                            None
-                        }
-                    })
-                    .max();
-                if let Some(ballot) = greater_leader {
-                    self.leader.adopted_by_majority = false;
-                    leadership_change = Some(ballot);
+                    .find(|r| r.ballot.pid == self.leader.pid);
+                match leaders_reply {
+                    Some(reply) if reply.ballot >= self.leader => reply.happy,
+                    // Must have learned of leader ballot from HeartbeatRequest and HeartbeatReply is stale
+                    Some(_) => true,
+                    None => false,
                 }
             }
-        } else {
-            let leaders_reply = self
-                .heartbeat_replies
-                .iter()
-                .find(|reply| reply.ballot.pid == self.leader.ballot.pid);
-            self.happy = match leaders_reply {
-                Some(reply) if reply.ballot >= self.leader.ballot => reply.happy,
-                // Must have learned of leader ballot from HeartbeatRequest so HeartbeatReply is stale
-                Some(_) => self.happy,
-                None => false,
-            };
+            _ => {
+                let followers = self
+                    .heartbeat_replies
+                    .iter()
+                    .filter(|hb_reply| hb_reply.leader.pid == self.pid)
+                    .count();
+                let happy = match seq_paxos_state {
+                    (Role::Leader, Phase::Accept) => self.quorum.is_accept_quorum(followers + 1),
+                    _ => self.quorum.is_prepare_quorum(followers + 1),
+                };
+                if happy {
+                    self.state = BleState::Leader(self.leader);
+                } else if followers < self.heartbeat_replies.len() {
+                    self.state = BleState::StaleLeader;
+                }
+                happy
+            }
         };
-        leadership_change
     }
 
     fn update_ballot(&mut self) {
@@ -282,17 +262,18 @@ impl BallotLeaderElection {
             if all_neighbors_unhappy && im_quorum_connected {
                 // We increment past our leader instead of max of unhappy ballots because we
                 // assume we have already checked leader for this round so they should be equal
-                self.current_ballot.n = self.leader.ballot.n + 1;
-                self.leader = Leader::with(self.current_ballot);
+                self.current_ballot.n = self.leader.n + 1;
+                self.leader = self.current_ballot;
+                self.state = BleState::PendingLeader;
                 self.happy = true;
             }
         }
     }
 
     fn handle_request(&mut self, from: NodeId, req: HeartbeatRequest) {
-        if req.ballot > self.leader.ballot {
-            self.leader = Leader::with(req.ballot);
-            self.happy = req.happy;
+        if req.ballot > self.leader {
+            self.leader = req.ballot;
+            self.state = BleState::Follower;
         }
         let hb_reply = HeartbeatReply {
             round: req.round,
