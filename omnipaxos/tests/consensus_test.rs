@@ -8,9 +8,7 @@ use omnipaxos::{
 use serial_test::serial;
 use std::time::Duration;
 use utils::{
-    create_temp_dir,
-    verification::{verify_entries, verify_snapshot, verify_stopsign},
-    LatestValue, StorageType, TestConfig, TestSystem, Value,
+    create_temp_dir, verification::*, LatestValue, StorageType, TestConfig, TestSystem, Value,
 };
 
 /// Verifies the 3 properties that the Paxos algorithm offers
@@ -294,62 +292,4 @@ fn read_entries_test() {
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
     verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
     verify_stopsign(stopsign, &ss);
-}
-
-/// Verifies that there is a majority when an entry is proposed.
-fn check_quorum(
-    log_responses: Vec<(u64, Vec<Value>)>,
-    quorum_size: usize,
-    num_proposals: Vec<Value>,
-) {
-    for i in num_proposals {
-        let num_nodes: usize = log_responses
-            .iter()
-            .filter(|(_, sr)| sr.contains(&i))
-            .map(|sr| sr.0)
-            .count();
-        let timed_out_proposal = num_nodes == 0;
-        if !timed_out_proposal {
-            assert!(
-                num_nodes >= quorum_size,
-                "Decided value did NOT have majority quorum! contained: {:?}",
-                num_nodes
-            );
-        }
-    }
-
-    println!("Pass check_quorum");
-}
-
-/// Verifies that only proposed values are decided.
-fn check_validity(log_responses: Vec<(u64, Vec<Value>)>, num_proposals: Vec<Value>) {
-    let invalid_nodes: Vec<_> = log_responses
-        .iter()
-        .filter(|(_, sr)| {
-            sr.iter()
-                .filter(|ent| !num_proposals.contains(*ent))
-                .count()
-                != 0
-        })
-        .collect();
-    assert!(
-        invalid_nodes.len() < 1,
-        "Nodes decided unproposed values. invalid_nodes: {:?}",
-        invalid_nodes
-    );
-
-    println!("Pass check_validity");
-}
-
-/// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(log_responses: Vec<(u64, Vec<Value>)>) {
-    let (_, longest_log) = log_responses
-        .iter()
-        .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
-        .expect("Empty SequenceResp from nodes!");
-    for (_, sr) in &log_responses {
-        assert!(longest_log.starts_with(sr.as_slice()));
-    }
-
-    println!("Pass check_uniform_agreement");
 }

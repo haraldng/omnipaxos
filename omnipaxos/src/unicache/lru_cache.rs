@@ -24,7 +24,10 @@ pub trait LRUEncodable: Clone + Hash + Eq + PartialEq {}
 #[cfg(not(feature = "serde"))]
 impl<T: Clone + Hash + Eq + PartialEq> LRUEncodable for T {}
 #[cfg(feature = "serde")]
-pub trait LRUEncodable: Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a> {}
+pub trait LRUEncodable:
+    Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>
+{
+}
 #[cfg(feature = "serde")]
 impl<T: Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> LRUEncodable for T {}
 

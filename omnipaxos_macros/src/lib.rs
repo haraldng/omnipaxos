@@ -14,6 +14,7 @@ use syn::{parse_macro_input, DeriveInput, Ident};
 ///     pub value: u64,
 /// }
 /// ```
+// TODO add snapshot attribute
 #[proc_macro_derive(Entry)]
 pub fn entry_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
@@ -33,6 +34,7 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
+// TODO add snapshot attribute
 #[proc_macro_derive(UniCacheEntry, attributes(unicache))]
 pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
@@ -137,7 +139,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
 
             quote! {
                 impl #impl_generics Entry for #name #ty_generics #where_clause {
-                    type Snapshot = NoSnapshot;
+                    type Snapshot = ::omnipaxos::storage::NoSnapshot;
                     type Encoded = (#(#encodable_field_attr_types,)*);
                     type Encodable = (#(#encodable_field_types,)*);
                     type NotEncodable = (#(#non_encodable_field_types,)*);

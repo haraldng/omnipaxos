@@ -76,7 +76,7 @@ fn sync_decided_ss_test() {
     let mut cluster_config = ClusterConfig::default();
     #[cfg(feature = "unicache")]
     {
-        op_config.cluster_config.unicache_size = 100;
+        cluster_config.unicache_size = 100;
     }
     let mut leaders_ss = StopSign::with(cluster_config, None);
     leaders_ss.next_config.configuration_id = 2;
@@ -109,7 +109,7 @@ fn sync_only_stopsign_test() {
     let mut cluster_config = ClusterConfig::default();
     #[cfg(feature = "unicache")]
     {
-        op_config.cluster_config.unicache_size = 100;
+        cluster_config.unicache_size = 100;
     }
     let mut leaders_ss = StopSign::with(cluster_config, None);
     leaders_ss.next_config.configuration_id = 2;

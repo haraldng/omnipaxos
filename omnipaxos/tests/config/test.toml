@@ -12,6 +12,14 @@ num_nodes = 5
 num_proposals = 10000
 storage_type = { type = "Memory" }
 
+[unicache_test]
+wait_timeout_ms = 3000
+num_threads = 8
+num_nodes = 5
+num_proposals = 1000
+num_iterations = 2
+storage_type = { type = "Memory" }
+
 [flexible_quorum_test]
 wait_timeout_ms = 5000
 num_threads = 8

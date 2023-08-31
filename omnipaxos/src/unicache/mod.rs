@@ -4,7 +4,6 @@ pub mod lru_cache;
 use std::fmt::{Debug, Formatter};
 // use crate::sequence_paxos::Role;
 use crate::storage::Entry;
-// TODO use num_traits::PrimInt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -86,7 +85,7 @@ pub enum MaybeEncoded<Encodable, Encoded> {
     NotEncoded(Encodable),
     Encoded(Encoded),
 }
-
+/*
 // #[cfg(test)]
 mod unicache_macro_test {
     use omnipaxos_macros::UniCacheEntry;
@@ -159,3 +158,4 @@ mod unicache_macro_test {
         }
     }
 }
+*/

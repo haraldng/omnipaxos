@@ -167,7 +167,7 @@ where
 }
 
 /// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NoSnapshot;
 
