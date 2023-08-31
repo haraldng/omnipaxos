@@ -172,11 +172,14 @@ pub struct ServerConfig {
     pub buffer_size: usize,
     /// The size of the buffer for log batching. The default is 1, which means no batching.
     pub batch_size: usize,
+    /// Custom priority for this node to be elected as the leader.
+    pub leader_priority: u32,
     /// The path where the default logger logs events.
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
-    /// Custom priority for this node to be elected as the leader.
-    pub leader_priority: u32,
+    /// Custom logger, if provided, will be used instead of the default logger.
+    #[cfg(feature = "logging")]
+    pub custom_logger: Option<slog::Logger>,
 }
 
 impl ServerConfig {
@@ -205,9 +208,11 @@ impl Default for ServerConfig {
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
             batch_size: 1,
+            leader_priority: 0,
             #[cfg(feature = "logging")]
             logger_file_path: None,
-            leader_priority: 0,
+            #[cfg(feature = "logging")]
+            custom_logger: None,
         }
     }
 }

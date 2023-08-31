@@ -56,6 +56,7 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
+            custom_logger: Some(OmniPaxosUI::logger()),
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
