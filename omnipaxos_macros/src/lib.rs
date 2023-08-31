@@ -14,7 +14,17 @@ use syn::{parse_macro_input, DeriveInput, Ident};
 ///     pub value: u64,
 /// }
 /// ```
-// TODO add snapshot attribute
+
+/// TODO add optional snapshot type as attribute:
+/// ```rust
+/// use omnipaxos::macros::Entry;
+/// #[derive(Clone, Debug, Entry)]
+/// #[snapshot(KVSnapshot)] // KVSnapshot is a type that implements the Snapshot trait
+/// pub struct KeyValue {
+///     pub key: String,
+///     pub value: u64,
+/// }
+/// ```
 #[proc_macro_derive(Entry)]
 pub fn entry_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
@@ -34,7 +44,7 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
-// TODO add snapshot attribute
+// TODO add snapshot attribute (see above)
 #[proc_macro_derive(UniCacheEntry, attributes(unicache))]
 pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
