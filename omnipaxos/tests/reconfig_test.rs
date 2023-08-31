@@ -20,9 +20,10 @@ fn reconfig_test() {
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+        let value = Value::with_id(i);
+        vec_proposals.push(value.clone());
         first_node.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(value).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -32,7 +33,7 @@ fn reconfig_test() {
 
     let vec_proposals = (1..=cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     sys.make_proposals(1, vec_proposals, Duration::from_millis(cfg.wait_timeout_ms));
 
@@ -42,6 +43,7 @@ fn reconfig_test() {
         configuration_id: new_config_id,
         nodes: new_nodes.clone(),
         flexible_quorum: None,
+        #[cfg(feature = "unicache")]
         unicache_size: 100,
     };
     let metadata = Some(vec![SS_METADATA]);
@@ -59,7 +61,7 @@ fn reconfig_test() {
     let decided_ss_config = reconfig_f
         .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
         .expect("Failed to collect reconfiguration future");
-    assert_eq!(decided_ss_config, Value(new_config_id as u64));
+    assert_eq!(decided_ss_config, Value::with_id(new_config_id as u64));
 
     let decided_nodes = sys.nodes.iter().fold(vec![], |mut x, (pid, paxos)| {
         let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());
@@ -77,7 +79,7 @@ fn reconfig_test() {
     let node = sys.nodes.get(pid).unwrap();
     node.on_definition(|x| {
         x.paxos
-            .append(Value(0))
+            .append(Value::with_id(0))
             .expect_err("Should not be able to propose after decided StopSign!")
     });
 

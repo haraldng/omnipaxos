@@ -30,12 +30,15 @@ fn sync_full_test() {
     // Define leader's log
     let leaders_log = [1, 2, 3, 4, 5, 10, 11, 12]
         .into_iter()
-        .map(|x| Value(x))
+        .map(|x| Value::with_id(x))
         .collect();
     let leaders_dec_idx = 5;
     let leaders_compacted_idx = 2;
     let mut cluster_config = ClusterConfig::default();
-    cluster_config.unicache_size = 100;
+    #[cfg(feature = "unicache")]
+    {
+        cluster_config.unicache_size = 100;
+    }
     let mut leaders_ss = StopSign::with(cluster_config, None);
     leaders_ss.next_config.configuration_id = 2;
     leaders_ss.next_config.nodes = vec![1, 2, 3];
@@ -43,7 +46,7 @@ fn sync_full_test() {
     // Define follower's log
     let followers_log = [1, 2, 3, 6, 7, 8, 9]
         .into_iter()
-        .map(|x| Value(x))
+        .map(|x| Value::with_id(x))
         .collect();
     let followers_dec_idx = 3;
 
@@ -65,16 +68,25 @@ fn sync_full_test() {
 #[serial]
 fn sync_decided_ss_test() {
     // Define leader's log
-    let leaders_log = [1, 2, 3, 4, 5].into_iter().map(|x| Value(x)).collect();
+    let leaders_log = [1, 2, 3, 4, 5]
+        .into_iter()
+        .map(|x| Value::with_id(x))
+        .collect();
     let leaders_dec_idx = 6;
     let mut cluster_config = ClusterConfig::default();
-    cluster_config.unicache_size = 100;
+    #[cfg(feature = "unicache")]
+    {
+        op_config.cluster_config.unicache_size = 100;
+    }
     let mut leaders_ss = StopSign::with(cluster_config, None);
     leaders_ss.next_config.configuration_id = 2;
     leaders_ss.next_config.nodes = vec![1, 2, 3];
 
     // Define follower's log
-    let followers_log = [1, 2, 3, 6, 7].into_iter().map(|x| Value(x)).collect();
+    let followers_log = [1, 2, 3, 6, 7]
+        .into_iter()
+        .map(|x| Value::with_id(x))
+        .collect();
     let followers_dec_idx = 3;
 
     let test = SyncTest {
@@ -95,7 +107,10 @@ fn sync_only_stopsign_test() {
     // Define leader's log
     let leaders_dec_idx = 1;
     let mut cluster_config = ClusterConfig::default();
-    cluster_config.unicache_size = 100;
+    #[cfg(feature = "unicache")]
+    {
+        op_config.cluster_config.unicache_size = 100;
+    }
     let mut leaders_ss = StopSign::with(cluster_config, None);
     leaders_ss.next_config.configuration_id = 2;
     leaders_ss.next_config.nodes = vec![1, 2, 3];
@@ -118,7 +133,7 @@ fn sync_only_stopsign_test() {
 #[serial]
 fn sync_only_snapshot_test() {
     // Define leader's log
-    let leaders_log: Vec<Value> = [1, 2, 3].into_iter().map(|x| Value(x)).collect();
+    let leaders_log: Vec<Value> = [1, 2, 3].into_iter().map(|x| Value::with_id(x)).collect();
     let leaders_dec_idx = 3;
     let leaders_compacted_idx = 3;
 
@@ -141,11 +156,17 @@ fn sync_only_snapshot_test() {
 #[serial]
 fn sync_follower_snapshot_test() {
     // Define leader's log
-    let leaders_log = [1, 2, 3, 4, 5].into_iter().map(|x| Value(x)).collect();
+    let leaders_log = [1, 2, 3, 4, 5]
+        .into_iter()
+        .map(|x| Value::with_id(x))
+        .collect();
     let leaders_dec_idx = 5;
 
     // Define follower's log
-    let followers_log = [1, 2, 3, 4].into_iter().map(|x| Value(x)).collect();
+    let followers_log = [1, 2, 3, 4]
+        .into_iter()
+        .map(|x| Value::with_id(x))
+        .collect();
     let followers_dec_idx = 4;
     let followers_compacted_idx = 3;
 

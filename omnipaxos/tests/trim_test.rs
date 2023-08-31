@@ -31,9 +31,9 @@ fn trim_test() {
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(Value::with_id(i)).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
@@ -96,9 +96,9 @@ fn double_trim_test() {
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(Value::with_id(i)).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);

@@ -37,11 +37,11 @@ fn forward_proposal_test() {
 
     let px = sys.nodes.get(&proposal_node).unwrap();
 
-    let v = Value(1);
+    let v = Value::with_id(1);
     let (kprom_px, kfuture_px) = promise::<Value>();
     px.on_definition(|x| {
         x.decided_futures.push(Ask::new(kprom_px, ()));
-        x.paxos.append(v).expect("Failed to call Append");
+        x.paxos.append(v.clone()).expect("Failed to call Append");
     });
 
     let decided = kfuture_px

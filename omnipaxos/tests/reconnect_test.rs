@@ -30,11 +30,11 @@ fn increasing_accept_seq_num_test() {
 
     let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let leaders_proposals: Vec<Value> = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + SECOND_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
     let expected_seq_nums: Vec<SequenceNumber> = (4..4 + SECOND_PROPOSALS)
@@ -106,20 +106,20 @@ fn reconnect_after_dropped_accepts_test() {
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some values so that a leader is elected
@@ -189,15 +189,15 @@ fn reconnect_after_dropped_prepare_test() {
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some values so that a leader is elected
@@ -272,15 +272,15 @@ fn reconnect_after_dropped_promise_test() {
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some values so that a leader is elected
@@ -361,20 +361,20 @@ fn reconnect_after_dropped_preparereq_test() {
 
     let initial_proposals = (0..INITIAL_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some values so that a leader is elected
@@ -461,6 +461,7 @@ fn resync_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        #[cfg(feature = "unicache")]
         unicache_size: 100,
     };
     leader.on_definition(|comp| {
@@ -534,6 +535,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        #[cfg(feature = "unicache")]
         unicache_size: 100,
     };
     let leader = sys.nodes.get(&leader_id).unwrap();
@@ -597,6 +599,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        #[cfg(feature = "unicache")]
         unicache_size: 100,
     };
     for other_follower in followers.clone() {

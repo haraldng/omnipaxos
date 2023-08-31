@@ -21,9 +21,9 @@ fn batching_test() {
     let mut last_decided_idx = 0;
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+        vec_proposals.push(Value::with_id(i));
         first_node.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(Value::with_id(i)).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);

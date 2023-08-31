@@ -26,9 +26,9 @@ fn consensus_test() {
     let mut futures = vec![];
     for i in 1..=cfg.num_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+        vec_proposals.push(Value::with_id(i));
         first_node.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(Value::with_id(i)).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -72,7 +72,7 @@ fn read_test() {
 
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
-        .map(|v| Value(*v as u64))
+        .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
@@ -93,7 +93,10 @@ fn read_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
-    op_config.cluster_config.unicache_size = 100;
+    #[cfg(feature = "unicache")]
+    {
+        op_config.cluster_config.unicache_size = 100;
+    }
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
 
     // read decided entries
@@ -162,7 +165,7 @@ fn read_entries_test() {
 
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
-        .map(|v| Value(*v as u64))
+        .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
@@ -181,7 +184,10 @@ fn read_entries_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
-    op_config.cluster_config.unicache_size = 100;
+    #[cfg(feature = "unicache")]
+    {
+        op_config.cluster_config.unicache_size = 100;
+    }
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
     omni_paxos
         .snapshot(Some(snapshotted_idx), true)

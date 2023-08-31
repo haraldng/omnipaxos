@@ -17,15 +17,15 @@ fn flexible_quorum_prepare_phase_test() {
 
     let initial_proposals = (0..cfg.num_proposals / 2)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let last_proposals: Vec<Value> = ((cfg.num_proposals / 2)..cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log: Vec<Value> = (0..cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some initial values
@@ -80,15 +80,15 @@ fn flexible_quorum_accept_phase_test() {
 
     let initial_proposals = (0..cfg.num_proposals / 2)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let last_proposals: Vec<Value> = ((cfg.num_proposals / 2)..cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let expected_log: Vec<Value> = (0..cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
 
     // Propose some values

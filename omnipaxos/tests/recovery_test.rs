@@ -18,7 +18,7 @@ fn leader_fail_follower_propose_test() {
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
@@ -69,7 +69,7 @@ fn leader_fail_leader_propose_test() {
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
@@ -116,7 +116,7 @@ fn follower_fail_leader_propose_test() {
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
@@ -167,7 +167,7 @@ fn follower_fail_follower_propose_test() {
 
     let proposals: Vec<Value> = (1..=cfg.num_proposals)
         .into_iter()
-        .map(|v| Value(v))
+        .map(|v| Value::with_id(v))
         .collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
@@ -232,7 +232,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
 
     for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
         proposer_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(Value::with_id(i)).expect("Failed to append");
         });
     }
 

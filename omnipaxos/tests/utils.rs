@@ -28,10 +28,15 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::{
+    lru_cache::{FieldCache, LRUniCache},
+    {MaybeEncoded, UniCache},
+};
 use omnipaxos::OmniPaxosConfig;
+#[cfg(feature = "unicache")]
+use omnipaxos_macros::UniCacheEntry;
 use sled::Config;
-use omnipaxos::unicache::lru_cache::{FieldCache, LRUniCache};
-use omnipaxos::unicache::{MaybeEncoded, UniCache};
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
@@ -76,6 +81,7 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids.clone(),
             flexible_quorum,
+            #[cfg(feature = "unicache")]
             unicache_size: 100,
             ..Default::default()
         };
@@ -666,7 +672,12 @@ pub mod omnireplica {
     };
     use std::collections::{HashMap, HashSet};
 
-    const SNAPSHOTTED_DECIDE: Value = Value(0);
+    const SNAPSHOTTED_DECIDE: Value = Value {
+        id: 0,
+        first_name: String::new(),
+        last_name: String::new(),
+        job: String::new(),
+    };
 
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosComponent {
@@ -753,7 +764,7 @@ pub mod omnireplica {
                 };
                 ents.iter()
                     .map(|x| match x {
-                        LogEntry::Decided(i) => *i,
+                        LogEntry::Decided(i) => i.clone(),
                         err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                     })
                     .collect()
@@ -817,14 +828,17 @@ pub mod omnireplica {
                                 self.decided_futures
                                     .pop()
                                     .unwrap()
-                                    .reply(s.snapshot.value)
+                                    .reply(s.snapshot.0)
                                     .expect("Failed to reply promise!");
                             }
                             LogEntry::StopSign(ss, _is_decided) => self
                                 .decided_futures
                                 .pop()
                                 .unwrap()
-                                .reply(Value(ss.next_config.configuration_id as u64))
+                                .reply(Value {
+                                    id: ss.next_config.configuration_id as u64,
+                                    ..Default::default()
+                                })
                                 .expect("Failed to reply stopsign promise"),
                             err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                         }
@@ -849,28 +863,13 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
-pub struct Value(pub u64);
-
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
-pub struct LatestValue {
-    value: Value,
-}
-
-impl Snapshot<Value> for LatestValue {
-    fn create(entries: &[Value]) -> Self {
-        Self {
-            value: *entries.last().unwrap_or(&Value(0)),
-        }
-    }
-
-    fn merge(&mut self, delta: Self) {
-        self.value = delta.value;
-    }
-
-    fn use_snapshots() -> bool {
-        true
-    }
+#[cfg(not(feature = "unicache"))]
+#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+pub struct Value {
+    id: u64,
+    first_name: String,
+    last_name: String,
+    job: String,
 }
 
 #[cfg(not(feature = "unicache"))]
@@ -878,6 +877,52 @@ impl Entry for Value {
     type Snapshot = LatestValue;
 }
 
+#[cfg(feature = "unicache")]
+#[cfg_attr(feature = "unicache", derive(UniCacheEntry))]
+#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+pub struct Value {
+    pub id: u64,
+    #[unicache(encoding(u8), size(100))]
+    first_name: String,
+    #[unicache(encoding(u64))]
+    last_name: String,
+    #[unicache(size(20), cache(LRUniCache), encoding(u64))]
+    job: String,
+}
+
+impl Value {
+    pub fn with_id(id: u64) -> Self {
+        Self {
+            id,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
+pub struct LatestValue(Value);
+
+impl Snapshot<Value> for LatestValue {
+    fn create(entries: &[Value]) -> Self {
+        match entries.last() {
+            Some(l) => Self(l.clone()),
+            None => Self(Value {
+                id: 0,
+                ..Default::default()
+            }),
+        }
+    }
+
+    fn merge(&mut self, delta: Self) {
+        self.0 = delta.0;
+    }
+
+    fn use_snapshots() -> bool {
+        true
+    }
+}
+
+/*
 #[cfg(feature = "unicache")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueCache {
@@ -915,7 +960,7 @@ impl Entry for Value {
     type NotEncodable = ();
     type EncodeResult = (MaybeEncoded<u64, u8>, );
     type UniCache = ValueCache;
-}
+}*/
 
 /// Create a temporary directory in /tmp/
 pub fn create_temp_dir() -> String {
