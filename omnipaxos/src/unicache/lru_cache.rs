@@ -143,7 +143,15 @@ where
             MaybeEncoded::Encoded(encoding) => {
                 self.lru_cache_decoder.get(&encoding).unwrap().clone()
             }
-            MaybeEncoded::NotEncoded(not_encodable) => not_encodable,
+            MaybeEncoded::NotEncoded(not_encodable) => {
+                let one = Encoded::one();
+                let enc = std::mem::take(&mut self.encoding);
+                let added = enc.add(one);
+                self.lru_cache_decoder
+                    .push(added.clone(), not_encodable.clone());
+                self.encoding = added;
+                not_encodable
+            }
         }
     }
 }

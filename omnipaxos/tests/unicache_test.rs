@@ -2,9 +2,7 @@ pub mod utils;
 
 // #[cfg(feature = "unicache")]
 mod unicache_test {
-    use super::utils::{
-        create_temp_dir, verification::*, LatestValue, StorageType, TestConfig, TestSystem, Value,
-    };
+    use super::utils::{verification::*, TestConfig, TestSystem, Value};
     use kompact::prelude::{promise, Ask, FutureCollection};
     use serial_test::serial;
     use std::time::Duration;
