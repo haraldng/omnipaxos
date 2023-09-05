@@ -31,14 +31,12 @@ fn snapshot_test() {
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
-
-    let mut vec_proposals = vec![];
+    let vec_proposals = utils::create_proposals(cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    for v in &vec_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v.clone()).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
@@ -68,7 +66,7 @@ fn snapshot_test() {
         }));
     }
 
-    check_snapshot(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
+    check_snapshot(&vec_proposals, &seqs_after, cfg.gc_idx, elected_pid);
 
     println!("Pass trim");
 
@@ -98,14 +96,12 @@ fn double_snapshot_test() {
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
-
-    let mut vec_proposals = vec![];
+    let vec_proposals = utils::create_proposals(cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    for v in &vec_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v.clone()).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
@@ -144,8 +140,8 @@ fn double_snapshot_test() {
     }
 
     check_snapshot(
-        vec_proposals,
-        seq_after_double,
+        &vec_proposals,
+        &seq_after_double,
         cfg.gc_idx + TRIM_INDEX_INCREMENT,
         elected_pid,
     );
@@ -161,14 +157,14 @@ fn double_snapshot_test() {
 }
 
 fn check_snapshot(
-    vec_proposals: Vec<Value>,
-    seq_after: Vec<(u64, Vec<LogEntry<Value>>)>,
+    vec_proposals: &Vec<Value>,
+    seq_after: &Vec<(u64, Vec<LogEntry<Value>>)>,
     gc_idx: u64,
     leader: NodeId,
 ) {
     let exp_snapshot = LatestValue::create(&vec_proposals[0..gc_idx as usize]);
     for (pid, after) in seq_after {
-        if pid == leader {
+        if *pid == leader {
             let snapshot = after.first().unwrap();
             match snapshot {
                 LogEntry::Snapshotted(s) => {

@@ -38,6 +38,25 @@ use omnipaxos::OmniPaxosConfig;
 use omnipaxos_macros::UniCacheEntry;
 use sled::Config;
 
+/// Must be greater than one to test UniCache hits.
+const UNICACHE_ITERATIONS: u64 = 2;
+
+pub fn create_proposals(num_proposals: u64) -> Vec<Value> {
+    #[cfg(feature = "unicache")]
+    {
+        let (start, end) = (1, num_proposals / UNICACHE_ITERATIONS);
+        (start..=end)
+            .cycle()
+            .take((end - start) as usize * UNICACHE_ITERATIONS as usize)
+            .map(|v| Value::with_id(v))
+            .collect()
+    }
+    #[cfg(not(feature = "unicache"))]
+    {
+        (1..=num_proposals).map(|v| Value::with_id(v)).collect()
+    }
+}
+
 /// Configuration for `TestSystem`. TestConfig loads the values from
 /// the configuration file `/tests/config/test.toml` using toml
 #[derive(Deserialize, Clone, Copy)]
@@ -1085,9 +1104,9 @@ pub mod verification {
 
     /// Verifies that there is a majority when an entry is proposed.
     pub fn check_quorum(
-        log_responses: Vec<(u64, Vec<Value>)>,
+        log_responses: &Vec<(u64, Vec<Value>)>,
         quorum_size: usize,
-        num_proposals: Vec<Value>,
+        num_proposals: &Vec<Value>,
     ) {
         for i in num_proposals {
             let num_nodes: usize = log_responses
@@ -1104,12 +1123,10 @@ pub mod verification {
                 );
             }
         }
-
-        println!("Pass check_quorum");
     }
 
     /// Verifies that only proposed values are decided.
-    pub fn check_validity(log_responses: Vec<(u64, Vec<Value>)>, num_proposals: Vec<Value>) {
+    pub fn check_validity(log_responses: &Vec<(u64, Vec<Value>)>, num_proposals: &Vec<Value>) {
         let invalid_nodes: Vec<_> = log_responses
             .iter()
             .filter(|(_, sr)| {
@@ -1124,20 +1141,16 @@ pub mod verification {
             "Nodes decided unproposed values. invalid_nodes: {:?}",
             invalid_nodes
         );
-
-        println!("Pass check_validity");
     }
 
     /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-    pub fn check_uniform_agreement(log_responses: Vec<(u64, Vec<Value>)>) {
+    pub fn check_uniform_agreement(log_responses: &Vec<(u64, Vec<Value>)>) {
         let (_, longest_log) = log_responses
             .iter()
             .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
             .expect("Empty SequenceResp from nodes!");
-        for (_, sr) in &log_responses {
+        for (_, sr) in log_responses {
             assert!(longest_log.starts_with(sr.as_slice()));
         }
-
-        println!("Pass check_uniform_agreement");
     }
 }

@@ -27,13 +27,12 @@ fn trim_test() {
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let mut vec_proposals = vec![];
+    let vec_proposals = utils::create_proposals(cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    for v in &vec_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v.clone()).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
@@ -61,9 +60,7 @@ fn trim_test() {
         }));
     }
 
-    check_trim(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
-
-    println!("Pass trim");
+    check_trim(&vec_proposals, &seqs_after, cfg.gc_idx, elected_pid);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -92,13 +89,12 @@ fn double_trim_test() {
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let mut vec_proposals = vec![];
+    let vec_proposals = utils::create_proposals(cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    for v in &vec_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value::with_id(i));
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v.clone()).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
@@ -135,13 +131,11 @@ fn double_trim_test() {
     }
 
     check_trim(
-        vec_proposals,
-        seq_after_double,
+        &vec_proposals,
+        &seq_after_double,
         cfg.gc_idx + TRIM_INDEX_INCREMENT,
         elected_pid,
     );
-
-    println!("Pass double trim");
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -152,13 +146,13 @@ fn double_trim_test() {
 }
 
 fn check_trim(
-    vec_proposals: Vec<Value>,
-    seq_after: Vec<(u64, Vec<Value>)>,
+    vec_proposals: &Vec<Value>,
+    seq_after: &Vec<(u64, Vec<Value>)>,
     gc_idx: u64,
     leader: NodeId,
 ) {
     for (pid, after) in seq_after {
-        if pid == leader {
+        if *pid == leader {
             // leader must have successfully trimmed
             assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
             assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));

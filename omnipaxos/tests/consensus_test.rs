@@ -20,13 +20,12 @@ fn consensus_test() {
     let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
-    let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    for v in &vec_proposals {
         let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value::with_id(i));
         first_node.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v.clone()).expect("Failed to append");
             x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
@@ -51,9 +50,9 @@ fn consensus_test() {
     }
 
     let quorum_size = cfg.num_nodes as usize / 2 + 1;
-    check_quorum(log.clone(), quorum_size, vec_proposals.clone());
-    check_validity(log.clone(), vec_proposals);
-    check_uniform_agreement(log);
+    check_quorum(&log, quorum_size, &vec_proposals);
+    check_validity(&log, &vec_proposals);
+    check_uniform_agreement(&log);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");

@@ -18,9 +18,9 @@ fn reconfig_test() {
     let first_node = sys.nodes.get(&1).unwrap();
     let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
+    for v in utils::create_proposals(cfg.num_proposals) {
         let (kprom, kfuture) = promise::<Value>();
-        let value = Value::with_id(i);
+        let value = v;
         vec_proposals.push(value.clone());
         first_node.on_definition(|x| {
             x.paxos.append(value).expect("Failed to append");
