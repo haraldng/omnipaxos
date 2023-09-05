@@ -461,8 +461,6 @@ fn resync_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
-        #[cfg(feature = "unicache")]
-        unicache_size: 100,
     };
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
@@ -535,8 +533,6 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
-        #[cfg(feature = "unicache")]
-        unicache_size: 100,
     };
     let leader = sys.nodes.get(&leader_id).unwrap();
     leader.on_definition(|comp| {
@@ -599,8 +595,6 @@ fn reconnect_after_dropped_decidestopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
-        #[cfg(feature = "unicache")]
-        unicache_size: 100,
     };
     for other_follower in followers.clone() {
         sys.nodes

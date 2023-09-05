@@ -79,8 +79,6 @@ where
         };
         let internal_storage_config = InternalStorageConfig {
             batch_size: config.batch_size,
-            #[cfg(feature = "unicache")]
-            unicache_size: config.unicache_size,
         };
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(storage, internal_storage_config),
@@ -472,8 +470,6 @@ pub(crate) struct SequencePaxosConfig {
     buffer_size: usize,
     pub(crate) batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
-    #[cfg(feature = "unicache")]
-    pub(crate) unicache_size: usize,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
 }
@@ -493,8 +489,6 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             flexible_quorum: config.cluster_config.flexible_quorum,
             buffer_size: config.server_config.buffer_size,
             batch_size: config.server_config.batch_size,
-            #[cfg(feature = "unicache")]
-            unicache_size: config.cluster_config.unicache_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
         }

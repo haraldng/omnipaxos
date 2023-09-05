@@ -73,7 +73,7 @@ pub enum MaybeEncodedData<T: Entry> {
 pub trait UniCache: Clone + Debug {
     type T: Entry;
 
-    fn new(size: usize) -> Self;
+    fn new() -> Self;
 
     fn try_encode(&mut self, entry: &Self::T) -> <Self::T as Entry>::EncodeResult;
 

@@ -40,9 +40,9 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
 /// For instance, a popular `String` that appears repeatedly can be sent over the network as an `u8`.
 ///
 /// # Attributes
-/// * `encoding(T)`: The type for what the annotated field should be encoded as.
+/// * `encoding(T)`: (Optional) The type for what the annotated field should be encoded as. The default is `u8`.
 /// * `size(usize)`: (Optional) The size of the cache for this field. Should not be larger than the max size of the encoding type, e.g., if `encoding(u8)` is used, the max size should be 255.
-/// The default value is TODO.
+/// The default value is `u8::MAX`.
 /// * `cache(C)`: (Optional) The cache implementation which is a type `C: UniCache`. To use one of the provided implementations, simply use `cache(lru)` or `cache(lfu)`.
 /// The default uses `lru` (least-recently-used) eviction policy.
 ///
@@ -138,7 +138,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                     }).expect(format!("Expected a valid attribute {}", quote::quote!(#attr)).as_str());
                     // Defaults
                     encoding_type = encoding_type.take().or_else(|| Some(quote!(u8)));
-                    cache_size = cache_size.take().or_else(|| Some(quote::quote!(size)));
+                    cache_size = cache_size.take().or_else(|| Some(quote::quote!(u8::MAX as usize)));
                     cache_type = cache_type.take().or_else(|| Some(quote::quote!(LRUniCache)));
 
                     encodable_field_names.push(name);
@@ -174,7 +174,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                 impl #impl_generics UniCache for #cache_name #ty_generics #where_clause {
                     type T = #name #ty_generics;
 
-                    fn new(size: usize) -> Self {
+                    fn new() -> Self {
                         Self {
                             #(#encodable_field_names: #cache_type::new(#cache_sizes),)*
                         }

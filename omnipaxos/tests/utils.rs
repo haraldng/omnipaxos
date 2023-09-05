@@ -83,8 +83,6 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids.clone(),
             flexible_quorum,
-            #[cfg(feature = "unicache")]
-            unicache_size: 100,
             ..Default::default()
         };
         let server_config = ServerConfig {

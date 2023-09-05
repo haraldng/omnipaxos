@@ -96,9 +96,6 @@ pub struct ClusterConfig {
     pub nodes: Vec<NodeId>,
     /// Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
     pub flexible_quorum: Option<FlexibleQuorum>,
-    #[cfg(feature = "unicache")]
-    /// The size of UniCache
-    pub unicache_size: usize,
 }
 
 impl ClusterConfig {
@@ -129,8 +126,6 @@ impl ClusterConfig {
                 "Read quorum size must be >= the write quorum size."
             );
         }
-        #[cfg(feature = "unicache")]
-        valid_config!(self.unicache_size != 0, "UniCache size cannot be 0");
         Ok(())
     }
 

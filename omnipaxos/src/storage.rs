@@ -240,7 +240,7 @@ where
             #[cfg(feature = "unicache")]
             batched_processed_by_leader: Vec::with_capacity(config.batch_size),
             #[cfg(feature = "unicache")]
-            unicache: T::UniCache::new(config.unicache_size),
+            unicache: T::UniCache::new(),
         }
     }
 
@@ -308,8 +308,6 @@ where
 
 pub(crate) struct InternalStorageConfig {
     pub(crate) batch_size: usize,
-    #[cfg(feature = "unicache")]
-    pub(crate) unicache_size: usize,
 }
 
 /// Internal representation of storage. Hides all complexities with the compacted index
