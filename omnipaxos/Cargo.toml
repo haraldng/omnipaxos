@@ -38,7 +38,7 @@ rand = "0.8.4"
 batch_accept = []
 logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
-default = ["batch_accept"]
+default = ["batch_accept", "macros"]
 macros = ["omnipaxos_macros"]
 unicache = ["lru", "num-traits"]
 

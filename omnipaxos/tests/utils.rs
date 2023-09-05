@@ -37,13 +37,15 @@ use omnipaxos::OmniPaxosConfig;
 #[cfg(feature = "unicache")]
 use omnipaxos_macros::UniCacheEntry;
 use sled::Config;
+use omnipaxos_macros::Entry;
 
-/// Must be greater than one to test UniCache hits.
+#[cfg(feature = "unicache")]
 const UNICACHE_ITERATIONS: u64 = 2;
 
 pub fn create_proposals(num_proposals: u64) -> Vec<Value> {
     #[cfg(feature = "unicache")]
     {
+        assert!(UNICACHE_ITERATIONS > 1, "Must be greater than 1 to test UniCache hits");
         let (start, end) = (1, num_proposals / UNICACHE_ITERATIONS);
         (start..=end)
             .cycle()
@@ -885,17 +887,13 @@ pub mod omnireplica {
 }
 
 #[cfg(not(feature = "unicache"))]
-#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(Entry, Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[snapshot(LatestValue)]
 pub struct Value {
     id: u64,
     first_name: String,
     last_name: String,
     job: String,
-}
-
-#[cfg(not(feature = "unicache"))]
-impl Entry for Value {
-    type Snapshot = LatestValue;
 }
 
 #[cfg(feature = "unicache")]
@@ -943,46 +941,6 @@ impl Snapshot<Value> for LatestValue {
         true
     }
 }
-
-/*
-#[cfg(feature = "unicache")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValueCache {
-    f0: LRUniCache<u64, u8>,
-}
-
-#[cfg(feature = "unicache")]
-impl UniCache for ValueCache {
-    type T = Value;
-    fn new(size: usize) -> Self {
-        Self {
-            f0: LRUniCache::new(size),
-        }
-    }
-
-    fn try_encode(&mut self, entry: &Self::T) -> <Self::T as Entry>::EncodeResult {
-        let f0_result = self.f0.try_encode(&entry.0);
-        (f0_result, )
-    }
-
-    fn decode(
-        &mut self,
-        (f0_result, ): <Self::T as Entry>::EncodeResult,
-    ) -> Self::T {
-        let f0 = self.f0.decode(f0_result);
-        Value(f0)
-    }
-}
-
-#[cfg(feature = "unicache")]
-impl Entry for Value {
-    type Snapshot = LatestValue;
-    type Encoded = (u8, );
-    type Encodable = (u64, );
-    type NotEncodable = ();
-    type EncodeResult = (MaybeEncoded<u64, u8>, );
-    type UniCache = ValueCache;
-}*/
 
 /// Create a temporary directory in /tmp/
 pub fn create_temp_dir() -> String {
