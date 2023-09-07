@@ -22,7 +22,7 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
-use crate::util::OmniPaxosStates;
+use crate::util::UIState;
 // use crate::valid_config;
 
 /// Configuration for `OmniPaxos`.
@@ -397,8 +397,8 @@ where
     }
 
     /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
-    pub fn get_states(&self) -> OmniPaxosStates {
-        OmniPaxosStates{
+    pub fn get_states(&self) -> UIState {
+        UIState {
             current_ballot: self.ble.get_current_ballot(),
             current_leader: self.get_current_leader(),
             decided_idx: self.get_decided_idx(),

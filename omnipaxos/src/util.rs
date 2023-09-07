@@ -402,8 +402,8 @@ impl Quorum {
     }
 }
 
-/// The states of an OmniPaxos instance.
-pub struct OmniPaxosStates{
+/// The states to show in the UI.
+pub struct UIState {
     /// The current ballot number
     pub current_ballot: Ballot,
     /// The current leader

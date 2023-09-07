@@ -102,7 +102,7 @@ fn bench_tick_with_ui() {
 #[test]
 #[serial]
 fn ui_test() {
-    let cfg = TestConfig::load("ui_test").expect("Test config loaded");
+    let cfg = TestConfig::default();
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 

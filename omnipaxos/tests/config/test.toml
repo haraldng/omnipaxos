@@ -65,8 +65,3 @@ storage_type = { type = "Broken" }
 wait_timeout_ms = 5000
 num_nodes = 3
 
-[ui_test]
-wait_timeout_ms = 5000
-num_nodes = 3
-num_threads = 8
-election_timeout_m = 100

@@ -3,11 +3,11 @@ use std::time::Instant;
 use omnipaxos::util::{ConfigurationId, NodeId};
 
 #[derive(Debug, Clone, Default)]
-pub struct Node {
-    pub pid: NodeId,
-    pub configuration_id: ConfigurationId,
-    pub ballot_number: u32,
-    pub connectivity: u8,
+pub(crate) struct Node {
+    pub(crate) pid: NodeId,
+    pub(crate) configuration_id: ConfigurationId,
+    pub(crate) ballot_number: u32,
+    pub(crate) connectivity: u8,
 }
 
 impl PartialEq for Node {
@@ -19,17 +19,17 @@ impl PartialEq for Node {
 }
 
 /// Ui application, containing the ui states
-pub struct App {
+pub(crate) struct App {
     /// The current node.
-    pub current_node: Node,
+    pub(crate) current_node: Node,
     /// Leader of the current node.
-    pub current_leader: Option<NodeId>,
+    pub(crate) current_leader: Option<NodeId>,
     /// Max index of the decided log entry.
-    pub decided_idx: u64,
+    pub(crate) decided_idx: u64,
     /// Ids of all the nodes in the cluster specified in the configuration, does not include the current node.
-    pub peers: Vec<NodeId>,
+    pub(crate) peers: Vec<NodeId>,
     /// All the active nodes in the cluster that current node is connected to.
-    pub active_peers: Vec<Node>,
+    pub(crate) active_peers: Vec<Node>,
     /// The last time the ui states were updated.
     last_update_time: Instant,
     /// The throughput data of the current node, (sub, throughput).
@@ -57,7 +57,7 @@ impl App {
         }
     }
 
-    pub fn set_decided_idx(&mut self, decided_idx: u64) {
+    pub(crate) fn set_decided_idx(&mut self, decided_idx: u64) {
         let period = self.last_update_time.elapsed().as_secs_f64();
         let throughput = decided_idx - self.decided_idx;
         self.throughput_data
@@ -70,7 +70,7 @@ impl App {
 }
 
 pub struct UIAppConfig {
-    pub pid: u64,
-    pub peers: Vec<u64>,
-    pub configuration_id: ConfigurationId,
+    pub(crate) pid: u64,
+    pub(crate) peers: Vec<u64>,
+    pub(crate) configuration_id: ConfigurationId,
 }

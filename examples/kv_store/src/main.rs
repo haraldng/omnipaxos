@@ -56,6 +56,7 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
+            #[cfg(feature = "with_omnipaxos_ui")]
             custom_logger: Some(OmniPaxosUI::logger()),
             ..Default::default()
         };
@@ -192,7 +193,23 @@ fn main() {
     #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("KV store: {:?}", simple_kv_store);
 
-    // clean up ui
+    // loop to append new values
     #[cfg(feature = "with_omnipaxos_ui")]
-    std::thread::sleep(EXIST_TIMEOUT);
+    {
+        let mut i = 0;
+        loop {
+            i = i + 1;
+            let kv4 = KeyValue {
+                key: "b".to_string(),
+                value: i,
+            };
+            leader_server
+                .lock()
+                .unwrap()
+                .append(kv4)
+                .expect("append failed");
+            std::thread::sleep(WAIT_DECIDED_TIMEOUT);
+        }
+    }
 }
+

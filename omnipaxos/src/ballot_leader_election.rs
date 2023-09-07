@@ -233,11 +233,11 @@ impl BallotLeaderElection {
     }
 
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
+        let my_connectivity = self.ballots.len() + 1;
+        self.connectivity = my_connectivity as Connectivity;
         // Add our own ballot to the list of received ballots of current hb round
         self.ballots.push((self.current_ballot, self.connectivity));
         self.prev_round_ballots = self.ballots.clone();
-        let my_connectivity = self.ballots.len();
-        self.connectivity = my_connectivity as Connectivity;
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
             debug!(

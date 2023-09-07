@@ -14,6 +14,10 @@ pub(crate) mod defaults{
     pub(crate) const THROUGHPUT_DATA_SIZE: usize = 200;
     pub(crate) const UI_BARCHART_WIDTH: u16 = 3;
     pub(crate) const UI_BARCHART_GAP: u16 = 1;
+    pub(crate) const UI_TABLE_TITLE_HEIGHT: u16 = 1;
+    pub(crate) const UI_TABLE_CONTENT_HEIGHT: u16 = 1;
+    pub(crate) const UI_TABLE_ROW_MARGIN: u16 = 1;
+
 }
 
 impl From<Ballot> for Node {

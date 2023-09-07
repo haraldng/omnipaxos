@@ -6,7 +6,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use tui_logger::*;
 use log::LevelFilter;
 use slog::{self, o, Drain, info, debug};
-use omnipaxos::util::OmniPaxosStates;
+use omnipaxos::util::UIState;
 use std::{io::stdout, time::Duration};
 use crate::app::{App, UIAppConfig};
 
@@ -15,7 +15,7 @@ mod render;
 mod util;
 
 pub struct OmniPaxosUI {
-    pub app: App,
+    app: App,
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     started: bool,
 }
@@ -74,7 +74,7 @@ impl OmniPaxosUI {
     }
 
     /// Handle user input, redraw the ui, should be called manually after updating the ui app
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         // Handle user input
         if crossterm::event::poll(Duration::from_millis(0)).unwrap() {
             if let Event::Key(key) = crossterm::event::read().unwrap() {
@@ -98,7 +98,7 @@ impl OmniPaxosUI {
     }
 
     /// Update the UI with the latest states from the OmniPaxos instance
-    pub fn tick(&mut self, op_states: OmniPaxosStates) {
+    pub fn tick(&mut self, op_states: UIState) {
         let ballot = op_states.current_ballot;
         self.app.current_node.ballot_number = ballot.n;
         self.app.current_node.configuration_id = ballot.config_id;

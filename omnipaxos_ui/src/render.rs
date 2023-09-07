@@ -11,11 +11,11 @@ use std::{collections::HashMap, f64::consts::PI};
 use crate::{app::App, util::defaults::*};
 
 // render ui components
-pub(crate) fn render<B>(rect: &mut Frame<B>, app: &App)
+pub(crate) fn render<B>(f: &mut Frame<B>, app: &App)
 where
     B: Backend,
 {
-    let size = rect.size();
+    let size = f.size();
     let window_width: usize = size.width.into();
 
     // Vertical layout
@@ -38,11 +38,11 @@ where
 
     // Title
     let title = draw_title();
-    rect.render_widget(title, chunks[0]);
+    f.render_widget(title, chunks[0]);
 
     // Bar Chart
     let chart = draw_chart(app, window_width);
-    rect.render_widget(chart, chunks[1]);
+    f.render_widget(chart, chunks[1]);
 
     // Table and Logger
     let body_chunks = Layout::default()
@@ -51,6 +51,7 @@ where
         .split(chunks[2]);
 
     // Logger
+    /// Smart logging window
     // let tui_sm = TuiLoggerSmartWidget::default()
     //     .style_error(Style::default().fg(Color::Red))
     //     .style_debug(Style::default().fg(Color::Green))
@@ -66,13 +67,16 @@ where
     //     .state(&TuiWidgetState::new().set_default_display_level(log::LevelFilter::Debug));
     // rect.render_widget(tui_sm, body_chunks[0]);
 
+    /// Simple logging window
     let filter_state = TuiWidgetState::new()
-        .set_default_display_level(log::LevelFilter::Trace);
+        .set_default_display_level(log::LevelFilter::Off)
+        .set_level_for_target("omnipaxos::sequence_paxos", log::LevelFilter::Debug)
+        .set_level_for_target("omnipaxos::ballot_leader_election", log::LevelFilter::Debug);
     let tui_w: TuiLoggerWidget = TuiLoggerWidget::default()
         .block(
             Block::default()
                 .title("Independent Tui Logger View")
-                .border_style(Style::default().fg(Color::White).bg(Color::Black))
+                .border_style(Style::default().fg(Color::White))
                 .borders(Borders::ALL),
         )
         .style_error(Style::default().fg(Color::Red))
@@ -80,57 +84,29 @@ where
         .style_warn(Style::default().fg(Color::Yellow))
         .style_trace(Style::default().fg(Color::Magenta))
         .style_info(Style::default().fg(Color::Cyan))
-        .output_separator(':')
-        .output_timestamp(Some("%F %H:%M:%S%.3f".to_string()))
+        .output_separator('|')
+        .output_timestamp(Some("%F %H:%M:%S".to_string()))
         .output_level(Some(TuiLoggerLevelOutput::Long))
-        .output_target(true)
+        .output_target(false)
         .output_file(false)
         .output_line(true)
-        .style(Style::default().fg(Color::White).bg(Color::Black))
+        .style(Style::default())
         .state(&filter_state);
-    rect.render_widget(tui_w,  body_chunks[0]);
+    f.render_widget(tui_w, body_chunks[0]);
 
-    // Canvas
-    let canvas_node = Canvas::default()
-        .block(Block::default().title("Canvas").borders(Borders::ALL))
-        .marker(Marker::Braille)
-        .x_bounds([-90.0, 90.0])
-        .y_bounds([-60.0, 60.0])
-        .paint(|ctx| {
-            let canvas_components = make_canvas(app);
-            for node in canvas_components.nodes.values() {
-                ctx.draw(node);
-            }
-
-            for label in canvas_components.labels.values() {
-                ctx.print(label.x, label.y, label.span.clone());
-            }
-        });
-    let canvas_line_lable = Canvas::default()
-        .block(Block::default().title("Canvas").borders(Borders::ALL))
-        .marker(Marker::Braille)
-        .x_bounds([-90.0, 90.0])
-        .y_bounds([-60.0, 60.0])
-        .paint(|ctx| {
-            let canvas_components = make_canvas(app);
-
-            for line in canvas_components.connections.values() {
-                ctx.draw(line);
-            }
-            for label in canvas_components.labels.values() {
-                ctx.print(label.x, label.y, label.span.clone());
-            }
-        });
-    // rect.render_widget(canvas_line_lable, body_chunks[0]);
-    // rect.render_widget(canvas_node, body_chunks[0]);
-
+    let table_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(20), Constraint::Length(20)].as_ref())
+        .split(body_chunks[1]);
     // Table
     let table = draw_table(app);
-    rect.render_widget(table, body_chunks[1]);
+    f.render_widget(table, table_chunks[0]);
+    // Progress bar
+    draw_progress(f, app, table_chunks[1]);
 
     // Temp
     let temp = draw_temp(app);
-    rect.render_widget(temp, chunks[3]);
+    f.render_widget(temp, chunks[3]);
 }
 
 fn draw_title<'a>() -> Paragraph<'a> {
@@ -168,7 +144,7 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .bar_width(UI_BARCHART_WIDTH)
         .bar_gap(UI_BARCHART_GAP)
         .value_style(Style::default().fg(Color::Black).bg(Color::LightGreen))
-        .style(Style::default().fg(Color::LightGreen))
+        .bar_style(Style::default().fg(Color::LightGreen))
 }
 
 fn draw_temp<'a>(app: &App) -> Paragraph<'a> {
@@ -290,8 +266,8 @@ fn draw_table<'a>(app: &App) -> Table<'a> {
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
     let header = Row::new(header_cells)
-        .height(1)
-        .bottom_margin(1)
+        .height(UI_TABLE_TITLE_HEIGHT)
+        .bottom_margin(UI_TABLE_ROW_MARGIN)
         .style(Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD));
     let rows = app.active_peers.iter().map(|peer| {
         let mut  cells = Vec::with_capacity(number_of_columns);
@@ -299,19 +275,75 @@ fn draw_table<'a>(app: &App) -> Table<'a> {
         cells.push(Cell::from(peer.ballot_number.to_string()));
         cells.push(Cell::from(peer.configuration_id.to_string()));
         cells.push(Cell::from(peer.connectivity.to_string()));
-        Row::new(cells).height(1).bottom_margin(1)
+        Row::new(cells).height(UI_TABLE_CONTENT_HEIGHT).bottom_margin(UI_TABLE_ROW_MARGIN)
     });
     Table::new(rows)
         .header(header)
-        .block(Block::default().borders(Borders::ALL).title(UI_TABLE_TITLE))
+        .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::BOTTOM).title(UI_TABLE_TITLE))
         .widths({
             let widths = &[
+                Constraint::Percentage(10),
                 Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
+                Constraint::Percentage(32),
                 Constraint::Percentage(25),
             ];
             assert_eq!(widths.len(), number_of_columns);
             widths
         })
+        .style(Style::default().fg(Color::White))
+}
+
+fn draw_progress<B>(f: &mut Frame<B>, app: &App, area: Rect)
+    where
+        B: Backend,
+{
+    let chunks = Layout::default()
+        .constraints(
+            [
+                Constraint::Length(UI_TABLE_TITLE_HEIGHT + UI_TABLE_ROW_MARGIN),
+                Constraint::Length(UI_TABLE_CONTENT_HEIGHT + UI_TABLE_ROW_MARGIN),
+                Constraint::Length(UI_TABLE_CONTENT_HEIGHT + UI_TABLE_ROW_MARGIN),
+                Constraint::Length(UI_TABLE_CONTENT_HEIGHT + UI_TABLE_ROW_MARGIN),
+            ]
+                .as_ref(),
+        )
+        .split(area);
+
+    // draw border and title
+    let block = Block::default().borders(Borders::RIGHT | Borders::BOTTOM | Borders::TOP).title("Progress");
+    f.render_widget(block.clone(), area);
+
+    draw_progress_bar(f, chunks[1], 1.0);
+    draw_progress_bar(f, chunks[2], 0.5);
+}
+
+// Draw a progress bar for one node in the cell
+fn draw_progress_bar<B>(f: &mut Frame<B>, cell: Rect, ratio: f64)
+    where
+        B: Backend,
+{
+    let chunks = Layout::default()
+        .constraints(
+            [
+                Constraint::Length(UI_TABLE_CONTENT_HEIGHT),
+                Constraint::Length(UI_TABLE_CONTENT_HEIGHT),
+            ]
+                .as_ref(),
+        )
+        .split(cell);
+
+    let gauge_color = if ratio == 1.0 {
+        Color::Green
+    } else {
+        Color::LightYellow
+    };
+    let gauge = Gauge::default()
+        .block(Block::default().borders(Borders::RIGHT))
+        .gauge_style(
+            Style::default()
+                .fg(gauge_color)
+                .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+        )
+        .ratio(ratio);
+    f.render_widget(gauge, chunks[1]);
 }
