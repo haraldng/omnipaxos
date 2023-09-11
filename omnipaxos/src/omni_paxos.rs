@@ -6,7 +6,7 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
-        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
+        ui, ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
 };
 #[cfg(any(feature = "toml_config", feature = "serde"))]
@@ -22,7 +22,6 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
-use crate::util::UIState;
 // use crate::valid_config;
 
 /// Configuration for `OmniPaxos`.
@@ -397,12 +396,13 @@ where
     }
 
     /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
-    pub fn get_states(&self) -> UIState {
-        UIState {
+    pub fn get_ui_states(&self) -> ui::OmniPaxosStates {
+        ui::OmniPaxosStates {
             current_ballot: self.ble.get_current_ballot(),
             current_leader: self.get_current_leader(),
             decided_idx: self.get_decided_idx(),
             ballots: self.ble.get_ballots(),
+            followers_state: self.seq_paxos.get_leader_state().into(),
         }
     }
 }

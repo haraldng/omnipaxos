@@ -436,6 +436,10 @@ where
             _ => self.forward_proposals(vec![entry]),
         }
     }
+
+    pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {
+        &self.leader_state
+    }
 }
 
 #[derive(PartialEq, Debug)]

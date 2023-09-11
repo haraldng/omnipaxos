@@ -1,13 +1,20 @@
 use crate::util::defaults::*;
+use omnipaxos::util::{ui::FollowersState, ConfigurationId, NodeId};
 use std::time::Instant;
-use omnipaxos::util::{ConfigurationId, NodeId};
 
+/// Basic information of a node.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Node {
     pub(crate) pid: NodeId,
     pub(crate) configuration_id: ConfigurationId,
     pub(crate) ballot_number: u32,
     pub(crate) connectivity: u8,
+}
+
+#[derive(PartialEq, Debug)]
+pub(crate) enum Role {
+    Follower,
+    Leader,
 }
 
 impl PartialEq for Node {
@@ -24,6 +31,7 @@ pub(crate) struct App {
     pub(crate) current_node: Node,
     /// Leader of the current node.
     pub(crate) current_leader: Option<NodeId>,
+    pub(crate) current_role: Role,
     /// Max index of the decided log entry.
     pub(crate) decided_idx: u64,
     /// Ids of all the nodes in the cluster specified in the configuration, does not include the current node.
@@ -36,10 +44,17 @@ pub(crate) struct App {
     pub(crate) throughput_data: Vec<(String, u64)>,
     /// Number of decided log entries per second, calculated from throughput_data.
     pub(crate) dps: f64,
+    /// The states of all the followers.
+    pub(crate) followers_state: FollowersState,
+    /// The progress of all the followers, calculated by accepted_idx / leader’s accepted index.
+    /// Calculated only when the current node is the leader. Idx is the pid of the node.
+    pub(crate) followers_progress: Vec<f64>,
 }
 
 impl App {
     pub(crate) fn with(config: UIAppConfig) -> Self {
+        let max_peer_pid = config.peers.iter().max().unwrap();
+        let max_pid = *std::cmp::max(max_peer_pid, &config.pid) as usize;
         Self {
             current_node: Node {
                 pid: config.pid,
@@ -48,12 +63,15 @@ impl App {
                 connectivity: 0,
             },
             current_leader: None,
+            current_role: Role::Follower,
             decided_idx: 0,
             active_peers: Vec::with_capacity(config.peers.len()),
             peers: config.peers,
             last_update_time: Instant::now(),
             throughput_data: Vec::with_capacity(THROUGHPUT_DATA_SIZE),
             dps: 0.0,
+            followers_state: FollowersState::default(),
+            followers_progress: vec![0.0; max_pid + 1],
         }
     }
 

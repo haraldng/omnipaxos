@@ -2,7 +2,7 @@
 // cargo run --features "with_omnipaxos_ui"
 // To run the example with Logging feature:
 // cargo run --features "with_omnipaxos_log"
-use tokio::{runtime::Builder, sync::mpsc};
+use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
     messages::Message,
     util::{LogEntry, NodeId},
@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
+use tokio::{runtime::Builder, sync::mpsc};
 
 mod kv;
 mod server;
@@ -70,9 +70,9 @@ fn main() {
             cluster_config,
         };
         #[cfg(feature = "with_omnipaxos_ui")]
-        let mut  omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
+        let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
         #[cfg(feature = "with_omnipaxos_ui")]
-        if pid == 1 {
+        if pid == 2 {
             omni_paxos_ui.start();
         }
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
@@ -212,4 +212,3 @@ fn main() {
         }
     }
 }
-

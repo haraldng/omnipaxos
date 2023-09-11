@@ -1,4 +1,8 @@
-use tokio::{sync::mpsc, time};
+use crate::{
+    kv::KeyValue,
+    util::{OMNI_PAXOS_TICK_PERIOD, OMNI_PAXOS_UI_TICK_PERIOD, OUTGOING_MESSAGE_PERIOD},
+    OmniPaxosKV,
+};
 use omnipaxos::{messages::Message, util::NodeId};
 #[cfg(feature = "with_omnipaxos_ui")]
 use omnipaxos_ui::OmniPaxosUI;
@@ -6,11 +10,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use crate::{
-    util::{OUTGOING_MESSAGE_PERIOD, OMNI_PAXOS_TICK_PERIOD, OMNI_PAXOS_UI_TICK_PERIOD},
-    OmniPaxosKV,
-};
-use crate::kv::KeyValue;
+use tokio::{sync::mpsc, time};
 
 pub struct OmniPaxosServer {
     #[cfg(feature = "with_omnipaxos_ui")]
@@ -45,7 +45,7 @@ impl OmniPaxosServer {
                 _ = outgoing_interval.tick() => { self.send_outgoing_msgs().await; },
                 _ = op_ui_tick_interval.tick() => {
                     #[cfg(feature = "with_omnipaxos_ui")]
-                    self.omni_paxos_ui.tick(self.omni_paxos.lock().unwrap().get_states());
+                    self.omni_paxos_ui.tick(self.omni_paxos.lock().unwrap().get_ui_states());
                 },
                 Some(in_msg) = self.incoming.recv() => { self.omni_paxos.lock().unwrap().handle_incoming(in_msg); },
                 else => { }

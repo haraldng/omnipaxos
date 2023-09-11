@@ -1,5 +1,5 @@
 use super::{
-    ballot_leader_election::{Ballot, Connectivity},
+    ballot_leader_election::Ballot,
     messages::sequence_paxos::Promise,
     storage::{Entry, SnapshotType, StopSign},
 };
@@ -402,15 +402,44 @@ impl Quorum {
     }
 }
 
-/// The states to show in the UI.
-pub struct UIState {
-    /// The current ballot number
-    pub current_ballot: Ballot,
-    /// The current leader
-    pub current_leader: Option<NodeId>,
-    /// The current decided index
-    pub decided_idx: u64,
-    /// All the received heartbeats from the previous heartbeat round, including the current node.
-    /// Represents nodes that are currently alive from the view of the current node.
-    pub ballots: Vec<(Ballot, Connectivity)>,
+/// Structs for the UI
+pub mod ui {
+    use crate::{
+        ballot_leader_election::{Ballot, Connectivity},
+        storage::Entry,
+        util::{LeaderState, NodeId},
+    };
+
+    /// The states of all the nodes in the cluster.
+    #[derive(Debug, Clone, Default)]
+    pub struct FollowersState {
+        /// The accepted indexes of all the nodes in the cluster. The index of the vector is the node id.
+        pub accepted_indexes: Vec<u64>,
+    }
+
+    impl<T> From<&LeaderState<T>> for FollowersState
+    where
+        T: Entry,
+    {
+        fn from(leader_state: &LeaderState<T>) -> Self {
+            let mut accepted_indexes = leader_state.accepted_indexes.clone();
+            accepted_indexes.insert(0, 0);
+            Self { accepted_indexes }
+        }
+    }
+
+    /// The states that are for UI to show.
+    pub struct OmniPaxosStates {
+        /// The current ballot
+        pub current_ballot: Ballot,
+        /// The current leader
+        pub current_leader: Option<NodeId>,
+        /// The current decided index
+        pub decided_idx: u64,
+        /// All the received heartbeats from the previous heartbeat round, including the current node.
+        /// Represents nodes that are currently alive from the view of the current node.
+        pub ballots: Vec<(Ballot, Connectivity)>,
+        /// The states of all the nodes in the cluster.
+        pub followers_state: FollowersState,
+    }
 }
