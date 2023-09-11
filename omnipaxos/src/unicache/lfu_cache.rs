@@ -2,7 +2,7 @@ use crate::unicache::*;
 use lfu::LFUCache;
 use std::fmt::format;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LFUniCache<Encodable, Encoded>
 where
@@ -13,6 +13,28 @@ where
     lfu_cache_decoder: LFUCache<Encoded, Encodable>,
     encoding: Encoded,
     size: usize,
+}
+
+impl<Encodable, Encoded> Clone for LFUniCache<Encodable, Encoded>
+    where
+        Encodable: DefaultEncodable,
+        Encoded: DefaultEncoded,
+{
+    fn clone(&self) -> Self {
+        let mut lfu_cache_decoder = LFUCache::with_capacity(self.size);
+        self.lfu_cache_encoder
+            .iter()
+            .for_each(|(encodable, encoded)| {
+                lfu_cache_decoder
+                    .set(encoded.clone(), encodable.clone());
+            });
+        Self {
+            lfu_cache_encoder: LFUCache::with_capacity(1),
+            lfu_cache_decoder,
+            encoding: self.encoding.clone(),
+            size: self.size,
+        }
+    }
 }
 
 impl<Encodable, Encoded> FieldCache<Encodable, Encoded> for LFUniCache<Encodable, Encoded>
@@ -52,7 +74,6 @@ where
     fn decode(&mut self, result: MaybeEncoded<Encodable, Encoded>) -> Encodable {
         match result {
             MaybeEncoded::Encoded(encoding) => {
-                // let x = format!("{:?}", self.lfu_cache_decoder);
                 self.lfu_cache_decoder.get(&encoding).unwrap().clone()
             }
             MaybeEncoded::NotEncoded(not_encodable) => {
