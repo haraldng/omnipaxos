@@ -88,6 +88,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
 
             let mut cache_fields = Vec::new();
             let mut cache_sizes = Vec::new();
+            let mut cache_types = Vec::new();
 
             for field in &data.fields {
                 let name = field.ident.as_ref().unwrap();
@@ -122,7 +123,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                             cache_type = if ty == "lru" {
                                 Some(quote!(::omnipaxos::unicache::lru_cache::LRUniCache))
                             } else if ty == "lfu" {
-                                Some(quote!(LFUniCache))
+                                Some(quote!(::omnipaxos::unicache::lfu_cache::LFUniCache))
                             } else {
                                 panic!("Invalid cache type")
                             };
@@ -147,6 +148,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                     encode_result.push(quote!(MaybeEncoded<#ty, #encoding_type>));
                     cache_fields.push(quote!(#name: #cache_type<#ty, #encoding_type>));
                     cache_sizes.push(cache_size);
+                    cache_types.push(cache_type.clone());
                 } else {
                     non_encodable_field_names.push(name);
                     non_encodable_field_types.push(ty);
@@ -178,7 +180,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
 
                     fn new() -> Self {
                         Self {
-                            #(#encodable_field_names: #cache_type::new(#cache_sizes),)*
+                            #(#encodable_field_names: #cache_types::new(#cache_sizes),)*
                         }
                     }
 

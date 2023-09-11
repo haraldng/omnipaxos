@@ -903,9 +903,9 @@ pub struct Value {
     pub id: u64,
     #[unicache(encoding(u8), size(100))]
     first_name: String,
-    #[unicache(encoding(u64))]
+    #[unicache(encoding(u32))]
     last_name: String,
-    #[unicache(size(20), cache(lru), encoding(u64))]
+    #[unicache(size(20), cache(lfu), encoding(u64))]
     job: String,
 }
 

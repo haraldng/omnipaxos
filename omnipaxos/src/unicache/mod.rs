@@ -1,8 +1,7 @@
 #[cfg(feature = "unicache")]
+pub mod lfu_cache;
+#[cfg(feature = "unicache")]
 pub mod lru_cache;
-// mod lfu;
-// #[cfg(feature = "unicache")]
-// pub mod lfu_cache;
 
 use crate::storage::Entry;
 use num_traits::One;

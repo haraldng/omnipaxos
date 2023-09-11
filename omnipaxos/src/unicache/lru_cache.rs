@@ -106,12 +106,19 @@ where
                 self.lru_cache_decoder.get(&encoding).unwrap().clone()
             }
             MaybeEncoded::NotEncoded(not_encodable) => {
-                let one = Encoded::one();
-                let enc = std::mem::take(&mut self.encoding);
-                let added = enc.add(one);
-                self.lru_cache_decoder
-                    .push(added.clone(), not_encodable.clone());
-                self.encoding = added;
+                if self.lru_cache_decoder.len() == self.size {
+                    // cache is full, replace LRU with new item
+                    let (popped_encoded, _) = self.lru_cache_decoder.pop_lru().unwrap();
+                    self.lru_cache_decoder
+                        .push(popped_encoded, not_encodable.clone());
+                } else {
+                    let one = Encoded::one();
+                    let enc = std::mem::take(&mut self.encoding);
+                    let added = enc.add(one);
+                    self.lru_cache_decoder
+                        .push(added.clone(), not_encodable.clone());
+                    self.encoding = added;
+                }
                 not_encodable
             }
         }
