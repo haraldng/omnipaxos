@@ -16,17 +16,17 @@ where
 }
 
 impl<Encodable, Encoded> Clone for LFUniCache<Encodable, Encoded>
-    where
-        Encodable: DefaultEncodable,
-        Encoded: DefaultEncoded,
+where
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
 {
+    /// A cloned version of the cache but *ONLY* with the decoder. The clone is used to send the cache to followers, who will only use the decoder.
     fn clone(&self) -> Self {
         let mut lfu_cache_decoder = LFUCache::with_capacity(self.size);
         self.lfu_cache_encoder
             .iter()
             .for_each(|(encodable, encoded)| {
-                lfu_cache_decoder
-                    .set(encoded.clone(), encodable.clone());
+                lfu_cache_decoder.set(encoded.clone(), encodable.clone());
             });
         Self {
             lfu_cache_encoder: LFUCache::with_capacity(1),

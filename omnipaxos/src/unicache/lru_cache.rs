@@ -39,19 +39,22 @@ where
     Encodable: DefaultEncodable,
     Encoded: DefaultEncoded,
 {
+    /// A cloned version of the cache but *ONLY* with the decoder. The clone is used to send the cache to followers, who will only use the decoder.
     fn clone(&self) -> Self {
-        let mut new = Self::new(self.size);
+        let mut cloned_decoder = LruCache::new(NonZeroUsize::new(self.size).unwrap());
         self.lru_cache_encoder
             .0
             .iter()
             .rev()
             .for_each(|(encodable, encoded)| {
-                // new.lru_cache_encoder
-                //     .push(encodable.clone(), encoded.clone());
-                new.lru_cache_decoder
-                    .push(encoded.clone(), encodable.clone());
+                cloned_decoder.push(encoded.clone(), encodable.clone());
             });
-        new
+        Self {
+            lru_cache_encoder: LruWrapper(LruCache::new(NonZeroUsize::new(1).unwrap())),
+            lru_cache_decoder: LruWrapper(cloned_decoder),
+            encoding: self.encoding.clone(),
+            size: self.size,
+        }
     }
 }
 
@@ -61,7 +64,7 @@ where
     Encoded: DefaultEncoded,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str("LRUnicache") // todo
+        f.write_str("LRUnicache")
     }
 }
 
@@ -189,7 +192,7 @@ mod serialization {
         where
             S: SeqAccess<'de>,
         {
-            let size = seq.size_hint().unwrap();
+            let size = seq.size_hint().unwrap_or(u8::MAX as usize);
             let mut lru = LruCache::new(NonZeroUsize::new(size).unwrap());
             while let Some((key, value)) = seq.next_element::<(Encodable, Encoded)>()? {
                 lru.push(key, value);
