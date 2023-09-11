@@ -38,7 +38,7 @@ pub trait Entry: Clone + Debug {
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
     type EncodeResult: Clone + Debug;
 
-    #[cfg(feature = "unicache")]
+    #[cfg(all(feature = "unicache", feature = "serde"))]
     type EncodeResult: Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
