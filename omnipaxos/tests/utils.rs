@@ -29,15 +29,11 @@ const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
 #[cfg(feature = "unicache")]
-use omnipaxos::unicache::{
-    lru_cache::{FieldCache, LRUniCache},
-    {MaybeEncoded, UniCache},
-};
+use omnipaxos::unicache::{MaybeEncoded, UniCache};
 use omnipaxos::OmniPaxosConfig;
 #[cfg(feature = "unicache")]
 use omnipaxos_macros::UniCacheEntry;
 use sled::Config;
-use omnipaxos_macros::Entry;
 
 #[cfg(feature = "unicache")]
 const UNICACHE_ITERATIONS: u64 = 2;
@@ -45,7 +41,10 @@ const UNICACHE_ITERATIONS: u64 = 2;
 pub fn create_proposals(num_proposals: u64) -> Vec<Value> {
     #[cfg(feature = "unicache")]
     {
-        assert!(UNICACHE_ITERATIONS > 1, "Must be greater than 1 to test UniCache hits");
+        assert!(
+            UNICACHE_ITERATIONS > 1,
+            "Must be greater than 1 to test UniCache hits"
+        );
         let (start, end) = (1, num_proposals / UNICACHE_ITERATIONS);
         (start..=end)
             .cycle()

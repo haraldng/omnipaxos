@@ -1,38 +1,8 @@
-use crate::{
-    storage::Entry,
-    unicache::{MaybeEncodedData, UniCache},
-};
+use crate::{storage::Entry, unicache::*};
 use lru::LruCache;
 use num_traits::identities::One;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::{
-    fmt::{Debug, Formatter},
-    hash::Hash,
-    marker::PhantomData,
-    num::NonZeroUsize,
-    ops::Add,
-};
-
-use super::MaybeEncoded;
-
-pub trait IncrementByOne: Default + Clone + One + Add<Output = Self> {}
-impl<T: Default + Clone + One + Add<Output = Self>> IncrementByOne for T {}
-
-#[cfg(not(feature = "serde"))]
-pub trait LRUEncodable: Clone + Hash + Eq + PartialEq {}
-#[cfg(not(feature = "serde"))]
-impl<T: Clone + Hash + Eq + PartialEq> LRUEncodable for T {}
-#[cfg(feature = "serde")]
-pub trait LRUEncodable:
-    Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>
-{
-}
-#[cfg(feature = "serde")]
-impl<T: Clone + Hash + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> LRUEncodable for T {}
-
-pub trait LRUEncoded: Clone + IncrementByOne + LRUEncodable {}
-impl<T: Clone + IncrementByOne + LRUEncodable> LRUEncoded for T {}
 
 /// Wrapper to implement serde for LruCache
 struct LruWrapper<Encodable, Encoded>(LruCache<Encodable, Encoded>);
@@ -51,20 +21,12 @@ impl<Encodable, Encoded> std::ops::DerefMut for LruWrapper<Encodable, Encoded> {
     }
 }
 
-pub trait FieldCache<Encodable, Encoded> {
-    fn new(size: usize) -> Self;
-
-    fn try_encode(&mut self, field: &Encodable) -> MaybeEncoded<Encodable, Encoded>;
-
-    fn decode(&mut self, result: MaybeEncoded<Encodable, Encoded>) -> Encodable;
-}
-
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[serde(bound(deserialize = ""))]
 pub struct LRUniCache<Encodable, Encoded>
 where
-    Encodable: LRUEncodable,
-    Encoded: LRUEncoded,
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
 {
     lru_cache_encoder: LruWrapper<Encodable, Encoded>,
     lru_cache_decoder: LruWrapper<Encoded, Encodable>,
@@ -74,8 +36,8 @@ where
 
 impl<Encodable, Encoded> Clone for LRUniCache<Encodable, Encoded>
 where
-    Encodable: LRUEncodable,
-    Encoded: LRUEncoded,
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
 {
     fn clone(&self) -> Self {
         let mut new = Self::new(self.size);
@@ -84,8 +46,8 @@ where
             .iter()
             .rev()
             .for_each(|(encodable, encoded)| {
-                new.lru_cache_encoder
-                    .push(encodable.clone(), encoded.clone());
+                // new.lru_cache_encoder
+                //     .push(encodable.clone(), encoded.clone());
                 new.lru_cache_decoder
                     .push(encoded.clone(), encodable.clone());
             });
@@ -95,8 +57,8 @@ where
 
 impl<Encodable, Encoded> Debug for LRUniCache<Encodable, Encoded>
 where
-    Encodable: LRUEncodable,
-    Encoded: LRUEncoded,
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("LRUnicache") // todo
@@ -105,8 +67,8 @@ where
 
 impl<Encodable, Encoded> FieldCache<Encodable, Encoded> for LRUniCache<Encodable, Encoded>
 where
-    Encodable: LRUEncodable,
-    Encoded: LRUEncoded,
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
 {
     fn new(size: usize) -> Self {
         let s: NonZeroUsize = NonZeroUsize::new(size).unwrap();
@@ -164,7 +126,9 @@ mod serialization {
         ser::SerializeSeq,
     };
 
-    impl<Encodable: LRUEncodable, Encoded: LRUEncodable> Serialize for LruWrapper<Encodable, Encoded> {
+    impl<Encodable: DefaultEncodable, Encoded: DefaultEncodable> Serialize
+        for LruWrapper<Encodable, Encoded>
+    {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -178,7 +142,7 @@ mod serialization {
         }
     }
 
-    impl<'de, Encodable: LRUEncodable, Encoded: LRUEncodable> Deserialize<'de>
+    impl<'de, Encodable: DefaultEncodable, Encoded: DefaultEncodable> Deserialize<'de>
         for LruWrapper<Encodable, Encoded>
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -205,8 +169,8 @@ mod serialization {
 
     impl<'de, Encodable, Encoded> Visitor<'de> for LruWrapperVisitor<Encodable, Encoded>
     where
-        Encodable: LRUEncodable,
-        Encoded: LRUEncodable,
+        Encodable: DefaultEncodable,
+        Encoded: DefaultEncodable,
     {
         type Value = LruWrapper<Encodable, Encoded>;
 

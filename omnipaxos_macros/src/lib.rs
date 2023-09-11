@@ -120,7 +120,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                             //     .parse_args::<syn::Ident>()
                             //     .expect("Expected identifier");
                             cache_type = if ty == "lru" {
-                                Some(quote!(LRUniCache))
+                                Some(quote!(::omnipaxos::unicache::lru_cache::LRUniCache))
                             } else if ty == "lfu" {
                                 Some(quote!(LFUniCache))
                             } else {
@@ -139,7 +139,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                     // Defaults
                     encoding_type = encoding_type.take().or_else(|| Some(quote!(u8)));
                     cache_size = cache_size.take().or_else(|| Some(quote::quote!(u8::MAX as usize)));
-                    cache_type = cache_type.take().or_else(|| Some(quote::quote!(LRUniCache)));
+                    cache_type = cache_type.take().or_else(|| Some(quote::quote!(::omnipaxos::unicache::lru_cache::LRUniCache)));
 
                     encodable_field_names.push(name);
                     encodable_field_attr_types.push(encoding_type.clone());
@@ -157,6 +157,8 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
             let cache_name = suffix(name, "Cache");
 
             quote! {
+                use ::omnipaxos::unicache::FieldCache;      // TODO remove this and use fully qualified path in the method calls instead?
+
                 impl #impl_generics Entry for #name #ty_generics #where_clause {
                     type Snapshot = #snapshot_type;
                     type Encoded = (#(#encodable_field_attr_types,)*);
