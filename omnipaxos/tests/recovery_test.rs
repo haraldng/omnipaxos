@@ -16,10 +16,7 @@ fn leader_fail_follower_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
         1,
@@ -28,7 +25,6 @@ fn leader_fail_follower_propose_test() {
     );
     let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -67,10 +63,7 @@ fn leader_fail_leader_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
         1,
@@ -114,10 +107,7 @@ fn follower_fail_leader_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
         1,
@@ -126,7 +116,6 @@ fn follower_fail_leader_propose_test() {
     );
     let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -165,10 +154,7 @@ fn follower_fail_follower_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(
         1,
@@ -177,7 +163,6 @@ fn follower_fail_follower_propose_test() {
     );
     let leader = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 

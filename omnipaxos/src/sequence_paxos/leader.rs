@@ -555,7 +555,7 @@ where
 
     pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: NodeId) {
         #[cfg(feature = "logging")]
-        info!(
+        trace!(
             self.logger,
             "Got Accepted from {}, idx: {}, chosen_idx: {}, accepted: {:?}",
             from,

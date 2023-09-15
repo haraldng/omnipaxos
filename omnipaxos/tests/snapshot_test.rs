@@ -179,28 +179,26 @@ fn check_snapshot(
             // leader must have successfully trimmed
             // -1 as snapshot is one entry
             assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize));
-        } else {
-            if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
-                let snapshot = after.first().unwrap();
-                match snapshot {
-                    LogEntry::Snapshotted(s) => {
-                        assert_eq!(s.trimmed_idx, gc_idx);
-                        assert_eq!(&s.snapshot, &exp_snapshot);
-                    }
-                    _ => panic!("First entry is not a snapshot"),
+        } else if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
+            let snapshot = after.first().unwrap();
+            match snapshot {
+                LogEntry::Snapshotted(s) => {
+                    assert_eq!(s.trimmed_idx, gc_idx);
+                    assert_eq!(&s.snapshot, &exp_snapshot);
                 }
-            } else {
-                // must be prefix
-                for (entry_idx, entry) in after.iter().enumerate() {
-                    match entry {
-                        LogEntry::Decided(d) => {
-                            assert_eq!(d, &vec_proposals[entry_idx]);
-                        }
-                        l => panic!(
-                            "Unexpected entry for node {}, idx: {}: {:?}",
-                            pid, entry_idx, l
-                        ),
+                _ => panic!("First entry is not a snapshot"),
+            }
+        } else {
+            // must be prefix
+            for (entry_idx, entry) in after.iter().enumerate() {
+                match entry {
+                    LogEntry::Decided(d) => {
+                        assert_eq!(d, &vec_proposals[entry_idx]);
                     }
+                    l => panic!(
+                        "Unexpected entry for node {}, idx: {}: {:?}",
+                        pid, entry_idx, l
+                    ),
                 }
             }
         }

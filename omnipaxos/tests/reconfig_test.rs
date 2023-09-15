@@ -31,17 +31,14 @@ fn reconfig_test() {
 
     sys.start_all_nodes();
 
-    let vec_proposals = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let vec_proposals = (1..=cfg.num_proposals).map(Value::with_id).collect();
     sys.make_proposals(1, vec_proposals, Duration::from_millis(cfg.wait_timeout_ms));
 
     let new_config_id = 2;
     let new_nodes: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
     let new_config = ClusterConfig {
         configuration_id: new_config_id,
-        nodes: new_nodes.clone(),
+        nodes: new_nodes,
         flexible_quorum: None,
     };
     let metadata = Some(vec![SS_METADATA]);
@@ -70,7 +67,7 @@ fn reconfig_test() {
         }
         x
     });
-    let quorum_size = cfg.num_nodes as usize / 2 + 1;
+    let quorum_size = cfg.num_nodes / 2 + 1;
     assert!(decided_nodes.len() >= quorum_size);
 
     let pid = *decided_nodes.last().unwrap();

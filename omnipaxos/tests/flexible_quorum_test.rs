@@ -15,18 +15,11 @@ fn flexible_quorum_prepare_phase_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..cfg.num_proposals / 2)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..cfg.num_proposals / 2).map(Value::with_id).collect();
     let last_proposals: Vec<Value> = ((cfg.num_proposals / 2)..cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
-    let expected_log: Vec<Value> = (0..cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some initial values
     sys.make_proposals(
@@ -39,7 +32,6 @@ fn flexible_quorum_prepare_phase_test() {
     // Kill maximum number of nodes (including leader) such that cluster can still function
     let maximum_tolerable_follower_failures = cfg.flexible_quorum.unwrap().1 - 1;
     let faulty_followers = (1..=cfg.num_nodes as NodeId)
-        .into_iter()
         .filter(|id| *id != leader_id)
         .take(maximum_tolerable_follower_failures - 1);
     for node_id in faulty_followers {
@@ -78,18 +70,11 @@ fn flexible_quorum_accept_phase_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..cfg.num_proposals / 2)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..cfg.num_proposals / 2).map(Value::with_id).collect();
     let last_proposals: Vec<Value> = ((cfg.num_proposals / 2)..cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
-    let expected_log: Vec<Value> = (0..cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some values
     sys.make_proposals(
@@ -101,7 +86,6 @@ fn flexible_quorum_accept_phase_test() {
 
     // Kill maximum number of followers such that leader can still function
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
-        .into_iter()
         .filter(|id| *id != leader_id)
         .take(cfg.num_nodes - cfg.flexible_quorum.unwrap().1);
     for node_id in maximum_tolerable_follower_failures {

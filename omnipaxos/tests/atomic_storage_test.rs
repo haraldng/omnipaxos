@@ -37,12 +37,15 @@ use std::{
 };
 use utils::{BrokenStorageConfig, LatestValue, TestConfig, Value};
 
+type MemoryStore = Arc<Mutex<MemoryStorage<Value>>>;
+type BrokenStore = Arc<Mutex<BrokenStorageConfig>>;
+
 /// Creates a new OmniPaxos instance with `BrokenStorage` in its initial state.
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
 /// `BrokenStorageConfig` to enable injecting storage errors.
 fn basic_setup() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
@@ -65,8 +68,8 @@ fn basic_setup() -> (
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
 /// `BrokenStorageConfig` to enable injecting storage errors.
 fn _setup_leader() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
@@ -140,8 +143,8 @@ fn _setup_leader() -> (
 /// `BrokenStorageConfig` to enable injecting storage errors.
 /// The next expected sequence number is `SequenceNumber{session: 1, counter: 2}`.
 fn setup_follower() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = basic_setup();

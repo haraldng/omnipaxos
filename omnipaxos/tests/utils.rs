@@ -8,6 +8,7 @@ use omnipaxos::{
     util::{FlexibleQuorum, NodeId},
     ClusterConfig, ServerConfig,
 };
+use omnipaxos_macros::*;
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
@@ -21,7 +22,6 @@ use std::{
     time::Duration,
 };
 use tempfile::TempDir;
-use toml;
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -54,7 +54,7 @@ pub fn create_proposals(num_proposals: u64) -> Vec<Value> {
     }
     #[cfg(not(feature = "unicache"))]
     {
-        (1..=num_proposals).map(|v| Value::with_id(v)).collect()
+        (1..=num_proposals).map(Value::with_id).collect()
     }
 }
 
@@ -85,25 +85,22 @@ impl TestConfig {
         let mut configs: HashMap<String, TestConfig> = toml::from_str(&config_file)?;
         let config = configs
             .remove(name)
-            .expect(&format!("Couldnt find config for {}", name));
+            .unwrap_or_else(|| panic!("Couldnt find config for {}", name));
         Ok(config)
     }
 
     pub fn into_omnipaxos_config(&self, pid: NodeId) -> OmniPaxosConfig {
         let all_pids: Vec<u64> = (1..=self.num_nodes as u64).collect();
-        let flexible_quorum =
-            self.flexible_quorum
-                .and_then(|(read_quorum_size, write_quorum_size)| {
-                    Some(FlexibleQuorum {
-                        read_quorum_size,
-                        write_quorum_size,
-                    })
-                });
+        let flexible_quorum = self
+            .flexible_quorum
+            .map(|(read_quorum_size, write_quorum_size)| FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            });
         let cluster_config = ClusterConfig {
             configuration_id: 1,
-            nodes: all_pids.clone(),
+            nodes: all_pids,
             flexible_quorum,
-            ..Default::default()
         };
         let server_config = ServerConfig {
             pid,
@@ -161,7 +158,7 @@ impl BrokenStorageConfig {
     /// Should be called before every operation on the broken storage.
     /// Returns Ok(_) if the operation should be performed without error.
     /// Returns Err(_) if the operation should fail.
-    pub fn next(&mut self) -> StorageResult<()> {
+    pub fn tick(&mut self) -> StorageResult<()> {
         let err = Err("test error from mocked broken storage".into());
         self.op_counter += 1;
         if self.fail_in > 0 {
@@ -233,7 +230,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_entry(entry)
             }
         }
@@ -244,7 +241,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_entries(entries)
             }
         }
@@ -255,7 +252,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_on_prefix(from_idx, entries)
             }
         }
@@ -266,7 +263,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
             StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_promise(n_prom)
             }
         }
@@ -277,7 +274,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_decided_idx(ld)
             }
         }
@@ -288,7 +285,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_decided_idx()
             }
         }
@@ -299,7 +296,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
             StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_accepted_round(na)
             }
         }
@@ -310,7 +307,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_accepted_round()
             }
         }
@@ -321,7 +318,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_entries(from, to)
             }
         }
@@ -332,7 +329,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_log_len()
             }
         }
@@ -343,7 +340,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_suffix(from)
             }
         }
@@ -354,7 +351,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_promise()
             }
         }
@@ -365,7 +362,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_stopsign(s)
             }
         }
@@ -376,7 +373,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_stopsign()
             }
         }
@@ -387,7 +384,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().trim(idx)
             }
         }
@@ -398,7 +395,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_compacted_idx(idx)
             }
         }
@@ -409,7 +406,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_compacted_idx()
             }
         }
@@ -420,7 +417,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_snapshot(snapshot)
             }
         }
@@ -431,7 +428,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_snapshot()
             }
         }
@@ -563,7 +560,7 @@ impl TestSystem {
         let node = self
             .nodes
             .get(&pid)
-            .expect(&format!("Cannot find node {pid}"));
+            .unwrap_or_else(|| panic!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
@@ -576,7 +573,7 @@ impl TestSystem {
         let node = self
             .nodes
             .get(&pid)
-            .expect(&format!("Cannot find node {pid}"));
+            .unwrap_or_else(|| panic!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
@@ -595,7 +592,7 @@ impl TestSystem {
         });
         // Remove incoming connections
         for node_id in self.nodes.keys() {
-            let node = self.nodes.get(&node_id).expect("Cannot find {pid}");
+            let node = self.nodes.get(node_id).expect("Cannot find {pid}");
             node.on_definition(|comp| {
                 comp.set_connection(pid, connection_status);
             });
@@ -673,13 +670,13 @@ impl TestSystem {
             .expect("Failed to collect reconfiguration future");
     }
 
-    fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
+    fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) {
         if threads <= 32 {
-            conf.executor(|t| crossbeam_workstealing_pool::small_pool(t))
+            conf.executor(crossbeam_workstealing_pool::small_pool)
         } else if threads <= 64 {
-            conf.executor(|t| crossbeam_workstealing_pool::large_pool(t))
+            conf.executor(crossbeam_workstealing_pool::large_pool)
         } else {
-            conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
+            conf.executor(crossbeam_workstealing_pool::dyn_pool)
         };
     }
 }
@@ -977,7 +974,7 @@ pub mod verification {
                 verify_entries(decided_entries, last_proposals, 0, num_proposals);
             }
             [] => assert!(
-                proposals.len() == 0,
+                proposals.is_empty(),
                 "Log is empty but should be {:?}",
                 proposals
             ),
@@ -1061,15 +1058,14 @@ pub mod verification {
 
     /// Verifies that there is a majority when an entry is proposed.
     pub fn check_quorum(
-        log_responses: &Vec<(u64, Vec<Value>)>,
+        log_responses: &[(u64, Vec<Value>)],
         quorum_size: usize,
-        num_proposals: &Vec<Value>,
+        num_proposals: &[Value],
     ) {
         for i in num_proposals {
             let num_nodes: usize = log_responses
                 .iter()
-                .filter(|(_, sr)| sr.contains(&i))
-                .map(|sr| sr.0)
+                .filter(|(_, sr)| sr.contains(i))
                 .count();
             let timed_out_proposal = num_nodes == 0;
             if !timed_out_proposal {
@@ -1083,7 +1079,7 @@ pub mod verification {
     }
 
     /// Verifies that only proposed values are decided.
-    pub fn check_validity(log_responses: &Vec<(u64, Vec<Value>)>, num_proposals: &Vec<Value>) {
+    pub fn check_validity(log_responses: &[(u64, Vec<Value>)], num_proposals: &[Value]) {
         let invalid_nodes: Vec<_> = log_responses
             .iter()
             .filter(|(_, sr)| {
@@ -1094,7 +1090,7 @@ pub mod verification {
             })
             .collect();
         assert!(
-            invalid_nodes.len() < 1,
+            invalid_nodes.is_empty(),
             "Nodes decided unproposed values. invalid_nodes: {:?}",
             invalid_nodes
         );

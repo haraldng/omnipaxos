@@ -156,15 +156,13 @@ fn check_trim(
             // leader must have successfully trimmed
             assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
             assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
+        } else if after.len() + gc_idx as usize == vec_proposals.len() {
+            // successful trim
+            assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
         } else {
-            if after.len() + gc_idx as usize == vec_proposals.len() {
-                // successful trim
-                assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
-            } else {
-                // must be prefix
-                for (entry_idx, entry) in after.iter().enumerate() {
-                    assert_eq!(Some(entry), vec_proposals.get(entry_idx));
-                }
+            // must be prefix
+            for (entry_idx, entry) in after.iter().enumerate() {
+                assert_eq!(Some(entry), vec_proposals.get(entry_idx));
             }
         }
     }

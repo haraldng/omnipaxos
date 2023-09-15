@@ -6,8 +6,7 @@ use syn::{parse_macro_input, DeriveInput, Ident};
 ///
 /// ## Usage
 ///
-/// ```rust
-/// use omnipaxos::macros::Entry;
+/// ```ignore
 /// #[derive(Clone, Debug, Entry)]
 /// #[snapshot(KVSnapshot)] // KVSnapshot is a type that implements the Snapshot trait. Remove this if snapshot is not used.
 /// pub struct KeyValue {
@@ -48,10 +47,9 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
 ///
 /// ## Usage
 ///
-/// ```rust
-/// #[cfg(feature = "unicache")]
-/// #[cfg_attr(feature = "unicache", derive(UniCacheEntry))]
-/// #[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+/// ```ignore
+/// use omnipaxos_macros::UniCacheEntry;
+/// #[derive(UniCacheEntry, Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
 /// pub struct Person {
 ///     pub id: u64,
 ///     #[unicache(encoding(u8))]   // First names can be cached e.g., if "John" repeatedly occurs in the log, it will be sent as a u8 instead.
@@ -93,12 +91,8 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
             for field in &data.fields {
                 let name = field.ident.as_ref().unwrap();
                 let ty = &field.ty;
-                let attr = field.attrs.iter().find_map(|attr| {
-                    if attr.path().is_ident("unicache") {
-                        Some(attr)
-                    } else {
-                        None
-                    }
+                let attr = field.attrs.iter().find(|attr| {
+                   attr.path().is_ident("unicache")
                 });
                 field_names.push(name);
                 if let Some(attr) = attr {
@@ -136,7 +130,7 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                             panic!("Found unexpected attribute `{}`", quote::quote!(#path))
                         }
                         Ok(())
-                    }).expect(format!("Expected a valid attribute {}", quote::quote!(#attr)).as_str());
+                    }).unwrap_or_else(|_| panic!("Expected a valid attribute {}", quote::quote!(#attr)));
                     // Defaults
                     encoding_type = encoding_type.take().or_else(|| Some(quote!(u8)));
                     cache_size = cache_size.take().or_else(|| Some(quote::quote!(u8::MAX as usize)));

@@ -49,7 +49,7 @@ fn consensus_test() {
         }));
     }
 
-    let quorum_size = cfg.num_nodes as usize / 2 + 1;
+    let quorum_size = cfg.num_nodes / 2 + 1;
     check_quorum(&log, quorum_size, &vec_proposals);
     check_validity(&log, &vec_proposals);
     check_uniform_agreement(&log);

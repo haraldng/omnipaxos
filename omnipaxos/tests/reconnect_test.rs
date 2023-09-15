@@ -28,13 +28,9 @@ fn increasing_accept_seq_num_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let leaders_proposals: Vec<Value> = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
     let expected_seq_nums: Vec<SequenceNumber> = (4..4 + SECOND_PROPOSALS)
@@ -53,7 +49,6 @@ fn increasing_accept_seq_num_test() {
     let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
 
@@ -104,22 +99,16 @@ fn reconnect_after_dropped_accepts_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -131,7 +120,6 @@ fn reconnect_after_dropped_accepts_test() {
     let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -187,17 +175,12 @@ fn reconnect_after_dropped_prepare_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -208,7 +191,6 @@ fn reconnect_after_dropped_prepare_test() {
     );
     let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -270,17 +252,12 @@ fn reconnect_after_dropped_promise_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -291,7 +268,6 @@ fn reconnect_after_dropped_promise_test() {
     );
     let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -359,22 +335,16 @@ fn reconnect_after_dropped_preparereq_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value::with_id(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -386,7 +356,6 @@ fn reconnect_after_dropped_preparereq_test() {
     let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -451,7 +420,6 @@ fn resync_after_dropped_acceptstopsign_test() {
     let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -511,9 +479,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
-    let mut followers = (1..=cfg.num_nodes as u64)
-        .into_iter()
-        .filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
 
     let write_quorum_size = match cfg.flexible_quorum {
@@ -584,9 +550,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
-    let mut followers = (1..=cfg.num_nodes as u64)
-        .into_iter()
-        .filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
     let leader = sys.nodes.get(&leader_id).unwrap();
 
