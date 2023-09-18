@@ -1,6 +1,6 @@
+use crate::util::defaults::*;
 use omnipaxos::util::{ConfigurationId, NodeId};
 use std::time::Instant;
-use crate::util::defaults::*;
 
 /// Basic information of a node.
 #[derive(Debug, Clone, Default)]

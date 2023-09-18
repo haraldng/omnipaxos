@@ -1,9 +1,9 @@
-use ratatui::{prelude::*, widgets::*};
-use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 use crate::{
     app::{App, Role},
     util::defaults::*,
 };
+use ratatui::{prelude::*, widgets::*};
+use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 
 /// Render ui components
 pub(crate) fn render<B>(f: &mut Frame<B>, app: &App)
@@ -181,7 +181,10 @@ where
         None => "\nNo leader yet".to_string(),
     };
     cluster_info.push_str(&format!("\nPeers: {:?}", app.peers));
-    cluster_info.push_str(&format!("\nConfiguration ID: {:?}", app.current_node.configuration_id));
+    cluster_info.push_str(&format!(
+        "\nConfiguration ID: {:?}",
+        app.current_node.configuration_id
+    ));
     let cluster_info_text = Paragraph::new(cluster_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -198,7 +201,10 @@ where
     let mut node_info = "".to_string();
     node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
     node_info.push_str(&format!("\nRole: {:?}", app.current_role));
-    node_info.push_str(&format!("\nAccepted idx: {:?}", app.followers_accepted_idx[app.current_node.pid as usize]));
+    node_info.push_str(&format!(
+        "\nAccepted idx: {:?}",
+        app.followers_accepted_idx[app.current_node.pid as usize]
+    ));
     node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
@@ -262,7 +268,9 @@ fn draw_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         let mut cells = Vec::with_capacity(number_of_columns);
         cells.push(Cell::from(peer.pid.to_string()));
         cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(app.followers_accepted_idx[peer.pid as usize].to_string()));
+        cells.push(Cell::from(
+            app.followers_accepted_idx[peer.pid as usize].to_string(),
+        ));
         cells.push(Cell::from(peer.connectivity.to_string()));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
@@ -307,13 +315,16 @@ where
         .title("Progress");
     f.render_widget(block.clone(), area);
 
-    app.active_peers.iter().enumerate().for_each(|(idx, node_id)| {
-        draw_progress_bar(
-            f,
-            chunks[idx + 1],
-            app.followers_progress[node_id.pid as usize],
-        )
-    });
+    app.active_peers
+        .iter()
+        .enumerate()
+        .for_each(|(idx, node_id)| {
+            draw_progress_bar(
+                f,
+                chunks[idx + 1],
+                app.followers_progress[node_id.pid as usize],
+            )
+        });
 }
 
 // Draw a progress bar for one node in the cell

@@ -1,14 +1,14 @@
+use crate::app::{App, Role, UIAppConfig};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use tui_logger::*;
-use slog::{self, debug, o, Drain};
 use log::LevelFilter;
 use omnipaxos::util::ui::OmniPaxosStates;
+use ratatui::{backend::CrosstermBackend, Terminal};
+use slog::{self, debug, o, Drain};
 use std::{io::stdout, time::Duration};
-use crate::app::{App, Role, UIAppConfig};
+use tui_logger::*;
 
 pub mod app;
 mod render;
@@ -96,47 +96,50 @@ impl OmniPaxosUI {
         }
     }
 
-    /// Update the UI with the latest states from the OmniPaxos instance
+    /// Update the UI if started, with the latest states from the OmniPaxos instance.
     pub fn tick(&mut self, op_states: OmniPaxosStates) {
-        let ballot = op_states.current_ballot;
-        self.app.current_node.ballot_number = ballot.n;
-        self.app.current_node.configuration_id = ballot.config_id;
-        self.app.current_leader = op_states.current_leader;
-        if let Some(leader_id) = self.app.current_leader {
-            if leader_id == self.app.current_node.pid {
-                // Current node is the leader
-                self.app.current_role = Role::Leader;
-                // Update the progress of all the followers
-                let leader_acc_idx = op_states.cluster_state.accepted_indexes[leader_id as usize];
-                for (idx, &accepted_idx) in
-                    op_states.cluster_state.accepted_indexes.iter().enumerate()
-                {
-                    self.app.followers_progress[idx] = if leader_acc_idx == 0 {
-                        0.0 // To avoid division by zero
-                    } else {
-                        accepted_idx as f64 / leader_acc_idx as f64
-                    };
-                    self.app.followers_accepted_idx[idx] = accepted_idx;
+        if self.started {
+            let ballot = op_states.current_ballot;
+            self.app.current_node.ballot_number = ballot.n;
+            self.app.current_node.configuration_id = ballot.config_id;
+            self.app.current_leader = op_states.current_leader;
+            if let Some(leader_id) = self.app.current_leader {
+                if leader_id == self.app.current_node.pid {
+                    // Current node is the leader
+                    self.app.current_role = Role::Leader;
+                    // Update the progress of all the followers
+                    let leader_acc_idx =
+                        op_states.cluster_state.accepted_indexes[leader_id as usize];
+                    for (idx, &accepted_idx) in
+                        op_states.cluster_state.accepted_indexes.iter().enumerate()
+                    {
+                        self.app.followers_progress[idx] = if leader_acc_idx == 0 {
+                            0.0 // To avoid division by zero
+                        } else {
+                            accepted_idx as f64 / leader_acc_idx as f64
+                        };
+                        self.app.followers_accepted_idx[idx] = accepted_idx;
+                    }
+                } else {
+                    // Current node is a follower
+                    self.app.current_role = Role::Follower;
                 }
-            } else {
-                // Current node is a follower
-                self.app.current_role = Role::Follower;
             }
+            self.app.set_decided_idx(op_states.decided_idx);
+            self.app.active_peers.clear();
+            op_states
+                .cluster_state
+                .ballots
+                .iter()
+                .filter(|(b, _)| b.pid != self.app.current_node.pid)
+                .for_each(|(b, c)| {
+                    self.app.active_peers.push((*b).into());
+                    self.app.active_peers.last_mut().unwrap().connectivity = *c;
+                });
+            // Sort the active peers by pid
+            self.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
+            self.app.current_node.connectivity = self.app.active_peers.len() as u8 + 1;
+            self.update();
         }
-        self.app.set_decided_idx(op_states.decided_idx);
-        self.app.active_peers.clear();
-        op_states
-            .cluster_state
-            .ballots
-            .iter()
-            .filter(|(b, _)| b.pid != self.app.current_node.pid)
-            .for_each(|(b, c)| {
-                self.app.active_peers.push((*b).into());
-                self.app.active_peers.last_mut().unwrap().connectivity = *c;
-            });
-        // Sort the active peers by pid
-        self.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
-        self.app.current_node.connectivity = self.app.active_peers.len() as u8 + 1;
-        self.update();
     }
 }
