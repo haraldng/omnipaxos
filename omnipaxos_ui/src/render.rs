@@ -52,7 +52,7 @@ where
     f.render_widget(chart, chunks[1]);
 
     // Info
-    draw_info(f, app, chunks[2]);
+    draw_follower_info(f, app, chunks[2]);
 
     // Table and Logger
     let body_chunks = Layout::default()
@@ -65,7 +65,7 @@ where
     f.render_widget(logger_w, body_chunks[0]);
 
     // Table
-    let table = draw_table(app, Borders::ALL);
+    let table = draw_follower_table(app, Borders::ALL);
     f.render_widget(table, body_chunks[1]);
 }
 
@@ -114,7 +114,7 @@ where
     f.render_widget(logger_w, body_chunks[0]);
 
     // Info
-    draw_info(f, app, chunks[2]);
+    draw_leader_info(f, app, chunks[2]);
 
     // Table and Progress bar
     let table_chunks = Layout::default()
@@ -122,7 +122,7 @@ where
         .constraints([Constraint::Min(20), Constraint::Length(20)].as_ref())
         .split(body_chunks[1]);
     // Table
-    let table = draw_table(app, Borders::TOP | Borders::LEFT | Borders::BOTTOM);
+    let table = draw_leader_table(app, Borders::TOP | Borders::LEFT | Borders::BOTTOM);
     f.render_widget(table, table_chunks[0]);
     // Progress bar
     draw_progress(f, app, table_chunks[1]);
@@ -166,7 +166,56 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .bar_style(Style::default().fg(Color::LightGreen))
 }
 
-fn draw_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
+fn draw_follower_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
+where
+    B: Backend,
+{
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+        .split(area);
+
+    // cluster info
+    let mut cluster_info = match app.current_leader {
+        Some(ref id) => format!("\nCurrent Leader: {:?}", id),
+        None => "\nNo leader yet".to_string(),
+    };
+    cluster_info.push_str(&format!("\nPeers: {:?}", app.peers));
+    cluster_info.push_str(&format!(
+        "\nConfiguration ID: {:?}",
+        app.current_node.configuration_id
+    ));
+    let cluster_info_text = Paragraph::new(cluster_info)
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(UI_CLUSTER_INFO_TITLE)
+                .style(Style::default().fg(Color::White))
+                .border_type(BorderType::Plain),
+        );
+    f.render_widget(cluster_info_text, chunks[0]);
+
+    // node info
+    let mut node_info = "".to_string();
+    node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
+    node_info.push_str(&format!("\nRole: {:?}", app.current_role));
+    node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
+    let node_info_text = Paragraph::new(node_info)
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(UI_NODE_INFO_TITLE)
+                .style(Style::default().fg(Color::White))
+                .border_type(BorderType::Plain),
+        );
+    f.render_widget(node_info_text, chunks[1]);
+}
+
+fn draw_leader_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
 where
     B: Backend,
 {
@@ -226,7 +275,7 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
     // Simple logging window
     let filter_state = TuiWidgetState::new()
         .set_default_display_level(log::LevelFilter::Off)
-        .set_level_for_target("omnipaxos::sequence_paxos", log::LevelFilter::Trace)
+        .set_level_for_target("omnipaxos::sequence_paxos", log::LevelFilter::Info)
         .set_level_for_target("omnipaxos::ballot_leader_election", log::LevelFilter::Trace);
     let logger_w: TuiLoggerWidget = TuiLoggerWidget::default()
         .block(
@@ -251,7 +300,44 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
     logger_w
 }
 
-fn draw_table<'a>(app: &App, borders: Borders) -> Table<'a> {
+fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
+    let header_cells = ["PID", "Ballot number", "Connectivity"]
+        .iter()
+        .map(|h| Cell::from(*h));
+    let number_of_columns = header_cells.len();
+    let header = Row::new(header_cells)
+        .height(UI_TABLE_CONTENT_HEIGHT)
+        .bottom_margin(UI_TABLE_ROW_MARGIN)
+        .style(
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    let rows = app.active_peers.iter().map(|peer| {
+        let mut cells = Vec::with_capacity(number_of_columns);
+        cells.push(Cell::from(peer.pid.to_string()));
+        cells.push(Cell::from(peer.ballot_number.to_string()));
+        cells.push(Cell::from(peer.connectivity.to_string()));
+        Row::new(cells)
+            .height(UI_TABLE_CONTENT_HEIGHT)
+            .bottom_margin(UI_TABLE_ROW_MARGIN)
+    });
+    Table::new(rows)
+        .header(header)
+        .block(Block::default().borders(borders).title(UI_TABLE_TITLE))
+        .widths({
+            let widths = &[
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(40),
+            ];
+            assert_eq!(widths.len(), number_of_columns);
+            widths
+        })
+        .style(Style::default().fg(Color::White))
+}
+
+fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
     let header_cells = ["PID", "Ballot number", "Accepted index", "Connectivity"]
         .iter()
         .map(|h| Cell::from(*h));
