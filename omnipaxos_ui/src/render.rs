@@ -1,9 +1,9 @@
+use ratatui::{prelude::*, widgets::*};
+use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 use crate::{
     app::{App, Role},
     util::defaults::*,
 };
-use ratatui::{prelude::*, widgets::*};
-use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 
 /// Render ui components
 pub(crate) fn render<B>(f: &mut Frame<B>, app: &App)
@@ -162,7 +162,7 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .data(data)
         .bar_width(UI_BARCHART_WIDTH)
         .bar_gap(UI_BARCHART_GAP)
-        .value_style(Style::default().fg(Color::Black).bg(Color::LightGreen))
+        .value_style(Style::default().fg(Color::LightGreen).bg(Color::LightGreen))
         .bar_style(Style::default().fg(Color::LightGreen))
 }
 
@@ -181,6 +181,7 @@ where
         None => "\nNo leader yet".to_string(),
     };
     cluster_info.push_str(&format!("\nPeers: {:?}", app.peers));
+    cluster_info.push_str(&format!("\nConfiguration ID: {:?}", app.current_node.configuration_id));
     let cluster_info_text = Paragraph::new(cluster_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -244,7 +245,7 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
 }
 
 fn draw_table<'a>(app: &App, borders: Borders) -> Table<'a> {
-    let header_cells = ["PID", "Ballot number", "Configuration ID", "Connectivity"]
+    let header_cells = ["PID", "Ballot number", "Accepted index", "Connectivity"]
         .iter()
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
@@ -260,7 +261,7 @@ fn draw_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         let mut cells = Vec::with_capacity(number_of_columns);
         cells.push(Cell::from(peer.pid.to_string()));
         cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(peer.configuration_id.to_string()));
+        cells.push(Cell::from(app.followers_accepted_idx[peer.pid as usize].to_string()));
         cells.push(Cell::from(peer.connectivity.to_string()));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)

@@ -412,19 +412,25 @@ pub mod ui {
 
     /// The states of all the nodes in the cluster.
     #[derive(Debug, Clone, Default)]
-    pub struct FollowersState {
+    pub struct ClusterState {
         /// The accepted indexes of all the nodes in the cluster. The index of the vector is the node id.
         pub accepted_indexes: Vec<u64>,
+        /// All the received heartbeats from the previous heartbeat round, including the current node.
+        /// Represents nodes that are currently alive from the view of the current node.
+        pub ballots: Vec<(Ballot, Connectivity)>,
     }
 
-    impl<T> From<&LeaderState<T>> for FollowersState
+    impl<T> From<&LeaderState<T>> for ClusterState
     where
         T: Entry,
     {
         fn from(leader_state: &LeaderState<T>) -> Self {
             let mut accepted_indexes = leader_state.accepted_indexes.clone();
             accepted_indexes.insert(0, 0);
-            Self { accepted_indexes }
+            Self {
+                accepted_indexes,
+                ballots: vec![],
+            }
         }
     }
 
@@ -440,6 +446,6 @@ pub mod ui {
         /// Represents nodes that are currently alive from the view of the current node.
         pub ballots: Vec<(Ballot, Connectivity)>,
         /// The states of all the nodes in the cluster.
-        pub followers_state: FollowersState,
+        pub cluster_state: ClusterState,
     }
 }

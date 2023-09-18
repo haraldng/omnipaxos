@@ -1,6 +1,6 @@
-use crate::util::defaults::*;
-use omnipaxos::util::{ui::FollowersState, ConfigurationId, NodeId};
+use omnipaxos::util::{ConfigurationId, NodeId};
 use std::time::Instant;
+use crate::util::defaults::*;
 
 /// Basic information of a node.
 #[derive(Debug, Clone, Default)]
@@ -31,6 +31,7 @@ pub(crate) struct App {
     pub(crate) current_node: Node,
     /// Leader of the current node.
     pub(crate) current_leader: Option<NodeId>,
+    /// Role of the current node.
     pub(crate) current_role: Role,
     /// Max index of the decided log entry.
     pub(crate) decided_idx: u64,
@@ -40,15 +41,15 @@ pub(crate) struct App {
     pub(crate) active_peers: Vec<Node>,
     /// The last time the ui states were updated.
     last_update_time: Instant,
-    /// The throughput data of the current node, (sub, throughput).
+    /// The throughput data of the current node, (current ballot, throughput).
     pub(crate) throughput_data: Vec<(String, u64)>,
     /// Number of decided log entries per second, calculated from throughput_data.
     pub(crate) dps: f64,
-    /// The states of all the followers.
-    pub(crate) followers_state: FollowersState,
     /// The progress of all the followers, calculated by accepted_idx / leader’s accepted index.
     /// Calculated only when the current node is the leader. Idx is the pid of the node.
     pub(crate) followers_progress: Vec<f64>,
+    /// The accepted_idx of all the followers. Idx is the pid of the node.
+    pub(crate) followers_accepted_idx: Vec<u64>,
 }
 
 impl App {
@@ -70,8 +71,8 @@ impl App {
             last_update_time: Instant::now(),
             throughput_data: Vec::with_capacity(THROUGHPUT_DATA_SIZE),
             dps: 0.0,
-            followers_state: FollowersState::default(),
             followers_progress: vec![0.0; max_pid + 1],
+            followers_accepted_idx: vec![0; max_pid + 1],
         }
     }
 

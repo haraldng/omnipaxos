@@ -22,6 +22,7 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
+use crate::util::ui::ClusterState;
 // use crate::valid_config;
 
 /// Configuration for `OmniPaxos`.
@@ -178,6 +179,7 @@ pub struct ServerConfig {
     pub logger_file_path: Option<String>,
     /// Custom logger, if provided, will be used instead of the default logger.
     #[cfg(feature = "logging")]
+    #[cfg_attr(feature = "toml_config", serde(skip_deserializing))]
     pub custom_logger: Option<slog::Logger>,
 }
 
@@ -397,12 +399,15 @@ where
 
     /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
     pub fn get_ui_states(&self) -> ui::OmniPaxosStates {
+        let mut  cluster_state = ClusterState::from(self.seq_paxos.get_leader_state());
+        cluster_state.ballots = self.ble.get_ballots();
+
         ui::OmniPaxosStates {
             current_ballot: self.ble.get_current_ballot(),
             current_leader: self.get_current_leader(),
             decided_idx: self.get_decided_idx(),
             ballots: self.ble.get_ballots(),
-            followers_state: self.seq_paxos.get_leader_state().into(),
+            cluster_state,
         }
     }
 }

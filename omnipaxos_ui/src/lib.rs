@@ -1,14 +1,14 @@
-use crate::app::{App, Role, UIAppConfig};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use ratatui::{backend::CrosstermBackend, Terminal};
+use tui_logger::*;
+use slog::{self, debug, o, Drain};
 use log::LevelFilter;
 use omnipaxos::util::ui::OmniPaxosStates;
-use ratatui::{backend::CrosstermBackend, Terminal};
-use slog::{self, debug, o, Drain};
 use std::{io::stdout, time::Duration};
-use tui_logger::*;
+use crate::app::{App, Role, UIAppConfig};
 
 pub mod app;
 mod render;
@@ -102,21 +102,21 @@ impl OmniPaxosUI {
         self.app.current_node.ballot_number = ballot.n;
         self.app.current_node.configuration_id = ballot.config_id;
         self.app.current_leader = op_states.current_leader;
-        self.app.followers_state = op_states.followers_state;
         if let Some(leader_id) = self.app.current_leader {
             if leader_id == self.app.current_node.pid {
                 // Current node is the leader
                 self.app.current_role = Role::Leader;
                 // Update the progress of all the followers
-                let leader_acc_idx = self.app.followers_state.accepted_indexes[leader_id as usize];
+                let leader_acc_idx = op_states.cluster_state.accepted_indexes[leader_id as usize];
                 for (idx, &accepted_idx) in
-                    self.app.followers_state.accepted_indexes.iter().enumerate()
+                    op_states.cluster_state.accepted_indexes.iter().enumerate()
                 {
                     self.app.followers_progress[idx] = if leader_acc_idx == 0 {
                         0.0 // To avoid division by zero
                     } else {
                         accepted_idx as f64 / leader_acc_idx as f64
                     };
+                    self.app.followers_accepted_idx[idx] = accepted_idx;
                 }
             } else {
                 // Current node is a follower
@@ -126,6 +126,7 @@ impl OmniPaxosUI {
         self.app.set_decided_idx(op_states.decided_idx);
         self.app.active_peers.clear();
         op_states
+            .cluster_state
             .ballots
             .iter()
             .filter(|(b, _)| b.pid != self.app.current_node.pid)
