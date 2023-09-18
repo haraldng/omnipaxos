@@ -10,5 +10,3 @@ pub const WAIT_LEADER_TIMEOUT: Duration = Duration::from_millis(500);
 pub const WAIT_DECIDED_TIMEOUT: Duration = Duration::from_millis(50);
 #[cfg(feature = "with_omnipaxos_ui")]
 pub const WAIT_UI_UPDATE_TIMEOUT: Duration = Duration::from_secs(1);
-#[cfg(feature = "with_omnipaxos_ui")]
-pub const EXIST_TIMEOUT: Duration = Duration::from_secs(100);

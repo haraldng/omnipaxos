@@ -198,6 +198,7 @@ where
     let mut node_info = "".to_string();
     node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
     node_info.push_str(&format!("\nRole: {:?}", app.current_role));
+    node_info.push_str(&format!("\nAccepted idx: {:?}", app.followers_accepted_idx[app.current_node.pid as usize]));
     node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
@@ -306,10 +307,10 @@ where
         .title("Progress");
     f.render_widget(block.clone(), area);
 
-    app.active_peers.iter().for_each(|node_id| {
+    app.active_peers.iter().enumerate().for_each(|(idx, node_id)| {
         draw_progress_bar(
             f,
-            chunks[node_id.pid as usize],
+            chunks[idx + 1],
             app.followers_progress[node_id.pid as usize],
         )
     });
