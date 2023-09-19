@@ -3,7 +3,7 @@ use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
 
 pub(crate) mod defaults {
     pub(crate) const UI_TITLE: &str = "OmniPaxos";
-    pub(crate) const UI_THROUGHPUT_TITLE: &str = "Throughput: ";
+    pub(crate) const UI_THROUGHPUT_TITLE: &str = "Throughput";
     pub(crate) const UI_TABLE_TITLE: &str = "Active peers";
     pub(crate) const UI_NODE_INFO_TITLE: &str = "Current node information";
     pub(crate) const UI_CLUSTER_INFO_TITLE: &str = "Cluster information";

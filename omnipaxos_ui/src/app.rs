@@ -80,7 +80,7 @@ impl App {
         let period = self.last_update_time.elapsed().as_secs_f64();
         let throughput = decided_idx - self.decided_idx;
         self.throughput_data
-            .insert(0, (self.current_node.ballot_number.to_string(), throughput));
+            .insert(0, (throughput.to_string(), throughput));
         // temp: only calculate dps from the last tick.
         self.dps = (throughput as f64) / period;
         self.last_update_time = Instant::now();

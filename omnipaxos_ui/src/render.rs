@@ -2,7 +2,10 @@ use crate::{
     app::{App, Role},
     util::defaults::*,
 };
-use ratatui::{prelude::*, widgets::*};
+use ratatui::{
+    prelude::*,
+    widgets::{block::Title, *},
+};
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 
 /// Render ui components
@@ -153,16 +156,32 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
             }
         })
         .collect::<Vec<(&str, u64)>>();
+    let title = Title::from(Line::from(vec![
+        Span::styled(
+            format!("{}: {} req/s", UI_THROUGHPUT_TITLE, app.dps as u64),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " (# reqs/tick)",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
     BarChart::default()
         .block(
             Block::default()
-                .title(format!("{}{:.2} req/s", UI_THROUGHPUT_TITLE, app.dps))
+                // .title(format!("{}{:.2} req/s", UI_THROUGHPUT_TITLE, app.dps).cyan().bold())
+                .title(title)
                 .borders(Borders::ALL),
         )
         .data(data)
         .bar_width(UI_BARCHART_WIDTH)
         .bar_gap(UI_BARCHART_GAP)
         .value_style(Style::default().fg(Color::LightGreen).bg(Color::LightGreen))
+        .label_style(Style::default().fg(Color::Yellow))
         .bar_style(Style::default().fg(Color::LightGreen))
 }
 
