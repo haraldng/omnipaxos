@@ -180,9 +180,13 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .data(data)
         .bar_width(UI_BARCHART_WIDTH)
         .bar_gap(UI_BARCHART_GAP)
-        .value_style(Style::default().fg(Color::LightGreen).bg(Color::LightGreen))
+        .value_style(
+            Style::default()
+                .fg(*app.color_generator.current_color())
+                .bg(*app.color_generator.current_color()),
+        )
         .label_style(Style::default().fg(Color::Yellow))
-        .bar_style(Style::default().fg(Color::LightGreen))
+        .bar_style(Style::default().fg(*app.color_generator.current_color()))
 }
 
 fn draw_follower_info<B>(f: &mut Frame<B>, app: &App, area: Rect)

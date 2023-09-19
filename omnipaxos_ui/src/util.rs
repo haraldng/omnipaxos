@@ -1,7 +1,10 @@
 use crate::app::{Node, UIAppConfig};
 use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
+use ratatui::prelude::Color;
 
 pub(crate) mod defaults {
+    use ratatui::prelude::Color;
+
     pub(crate) const UI_TITLE: &str = "OmniPaxos";
     pub(crate) const UI_THROUGHPUT_TITLE: &str = "Throughput";
     pub(crate) const UI_TABLE_TITLE: &str = "Active peers";
@@ -13,6 +16,7 @@ pub(crate) mod defaults {
     pub(crate) const UI_BARCHART_GAP: u16 = 1;
     pub(crate) const UI_TABLE_CONTENT_HEIGHT: u16 = 1;
     pub(crate) const UI_TABLE_ROW_MARGIN: u16 = 1;
+    pub(crate) const COLORS: [Color; 4] = [Color::Green, Color::Blue, Color::Magenta, Color::Cyan];
 }
 
 impl From<Ballot> for Node {
@@ -41,5 +45,33 @@ impl From<OmniPaxosConfig> for UIAppConfig {
             pid,
             peers,
         }
+    }
+}
+
+pub(crate) struct ColorGenerator {
+    colors: Vec<Color>,
+    index: usize,
+}
+
+impl ColorGenerator {
+    pub fn new(colors: Vec<Color>) -> Self {
+        ColorGenerator { colors, index: 0 }
+    }
+
+    pub fn next_color(&mut self) -> &Color {
+        if self.colors.is_empty() {
+            panic!("No colors provided!");
+        }
+        let color = &self.colors[self.index];
+        self.index = (self.index + 1) % self.colors.len();
+        color
+    }
+
+    pub fn current_color(&self) -> &Color {
+        if self.colors.is_empty() {
+            panic!("No colors provided!");
+        }
+
+        &self.colors[self.index]
     }
 }

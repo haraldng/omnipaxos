@@ -1,4 +1,4 @@
-use crate::util::defaults::*;
+use crate::util::{defaults::*, ColorGenerator};
 use omnipaxos::util::{ConfigurationId, NodeId};
 use std::time::Instant;
 
@@ -50,6 +50,7 @@ pub(crate) struct App {
     pub(crate) followers_progress: Vec<f64>,
     /// The accepted_idx of all the followers. Idx is the pid of the node.
     pub(crate) followers_accepted_idx: Vec<u64>,
+    pub(crate) color_generator: ColorGenerator,
 }
 
 impl App {
@@ -73,6 +74,7 @@ impl App {
             dps: 0.0,
             followers_progress: vec![0.0; max_pid + 1],
             followers_accepted_idx: vec![0; max_pid + 1],
+            color_generator: ColorGenerator::new(COLORS.to_vec()),
         }
     }
 
