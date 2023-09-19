@@ -59,7 +59,8 @@ pub trait UniCache: Clone + Debug {
     fn decode(&mut self, processed: <Self::T as Entry>::EncodeResult) -> Self::T;
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MaybeEncoded<Encodable, Encoded> {
     NotEncoded(Encodable),
     Encoded(Encoded),

@@ -22,7 +22,20 @@ impl<Encodable, Encoded> std::ops::DerefMut for LruWrapper<Encodable, Encoded> {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg(feature = "serde")]
 #[serde(bound(deserialize = ""))]
+pub struct LRUniCache<Encodable, Encoded>
+where
+    Encodable: DefaultEncodable,
+    Encoded: DefaultEncoded,
+{
+    lru_cache_encoder: LruWrapper<Encodable, Encoded>,
+    lru_cache_decoder: LruWrapper<Encoded, Encodable>,
+    encoding: Encoded,
+    size: usize,
+}
+
+#[cfg(not(feature = "serde"))]
 pub struct LRUniCache<Encodable, Encoded>
 where
     Encodable: DefaultEncodable,

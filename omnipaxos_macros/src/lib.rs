@@ -164,7 +164,8 @@ pub fn unicache_entry_derive(input: TokenStream) -> TokenStream {
                     type UniCache = #cache_name #ty_generics;
                 }
 
-                #[derive(Clone, Debug, Serialize, Deserialize)]
+                #[derive(Clone, Debug)]
+                #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
                 pub struct #impl_generics #cache_name #ty_generics #where_clause {
                     #(#cache_fields,)*
                 }
