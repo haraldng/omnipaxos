@@ -199,8 +199,6 @@ pub mod ballot_leader_election {
     pub struct HeartbeatRequest {
         /// Number of the current round.
         pub round: u32,
-        /// Ballot of the requesting server
-        pub ballot: Ballot,
     }
 
     /// Replies
