@@ -1,5 +1,5 @@
 use crate::{
-    ballot_leader_election::BleState,
+    ballot_leader_election::ElectionStatus,
     errors::{valid_config, ConfigError},
 };
 // use crate::valid_config;
@@ -389,8 +389,8 @@ where
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
     fn election_timeout(&mut self) {
         match self.ble.hb_timeout(self.seq_paxos.get_state()) {
-            BleState::Leader(n) => self.seq_paxos.handle_leader(n),
-            BleState::StaleLeader => self.seq_paxos.handle_stale_leader(),
+            (n, ElectionStatus::Leader) => self.seq_paxos.handle_leader(n),
+            (_, ElectionStatus::DisconnectedLeader) => self.seq_paxos.become_follower(),
             _ => (),
         }
     }

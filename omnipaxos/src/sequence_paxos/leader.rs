@@ -63,11 +63,11 @@ where
                 });
             }
         } else {
-            self.state.0 = Role::Follower;
+            self.become_follower();
         }
     }
 
-    pub(crate) fn handle_stale_leader(&mut self) {
+    pub(crate) fn become_follower(&mut self) {
         self.state.0 = Role::Follower;
     }
 
