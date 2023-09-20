@@ -47,7 +47,7 @@ where
         .split(size);
 
     // Title
-    let title = draw_title();
+    let title = draw_title(app);
     f.render_widget(title, chunks[0]);
 
     // Bar Chart
@@ -99,7 +99,7 @@ where
         .split(size);
 
     // Title
-    let title = draw_title();
+    let title = draw_title(app);
     f.render_widget(title, chunks[0]);
 
     // Bar Chart
@@ -131,16 +131,19 @@ where
     draw_progress(f, app, table_chunks[1]);
 }
 
-fn draw_title<'a>() -> Paragraph<'a> {
-    Paragraph::new(UI_TITLE)
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::White))
-                .border_type(BorderType::Plain),
-        )
+fn draw_title<'a>(app: &App) -> Paragraph<'a> {
+    Paragraph::new(format!(
+        "{} Node <{:?}> (press 'q' or 'esc' to exit)",
+        UI_TITLE, app.current_node.pid
+    ))
+    .style(Style::default().fg(Color::LightCyan))
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::White))
+            .border_type(BorderType::Plain),
+    )
 }
 
 fn draw_chart(app: &App, window_width: usize) -> BarChart {
@@ -189,26 +192,33 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .bar_style(Style::default().fg(*app.color_generator.current_color()))
 }
 
-fn draw_follower_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
+fn draw_cluster_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
 where
     B: Backend,
 {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-        .split(area);
-
-    // cluster info
-    let mut cluster_info = match app.current_leader {
-        Some(ref id) => format!("\nCurrent Leader: {:?}", id),
-        None => "\nNo leader yet".to_string(),
+    let mut lines = vec![Line::from("")];
+    let leader = match app.current_leader {
+        Some(ref id) => Line::from(vec![
+            Span::raw("Current Leader: "),
+            Span::styled(
+                format!("  {:?}  ", id),
+                Style::default()
+                    .fg(Color::White)
+                    .bg(*app.color_generator.current_color()),
+            ),
+        ]),
+        None => Line::from("No leader yet"),
     };
-    cluster_info.push_str(&format!("\nPeers: {:?}", app.peers));
-    cluster_info.push_str(&format!(
-        "\nConfiguration ID: {:?}",
-        app.current_node.configuration_id
-    ));
-    let cluster_info_text = Paragraph::new(cluster_info)
+    lines.push(leader);
+    lines.push(format!("\nPeers: {:?}", app.peers).into());
+    lines.push(
+        format!(
+            "\nConfiguration ID: {:?}",
+            app.current_node.configuration_id
+        )
+        .into(),
+    );
+    let cluster_info_text = Paragraph::new(lines)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
         .block(
@@ -218,8 +228,19 @@ where
                 .style(Style::default().fg(Color::White))
                 .border_type(BorderType::Plain),
         );
-    f.render_widget(cluster_info_text, chunks[0]);
+    f.render_widget(cluster_info_text, area);
+}
 
+fn draw_follower_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
+where
+    B: Backend,
+{
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+        .split(area);
+    // cluster info
+    draw_cluster_info(f, app, chunks[0]);
     // node info
     let mut node_info = "".to_string();
     node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
@@ -248,26 +269,7 @@ where
         .split(area);
 
     // cluster info
-    let mut cluster_info = match app.current_leader {
-        Some(ref id) => format!("\nCurrent Leader: {:?}", id),
-        None => "\nNo leader yet".to_string(),
-    };
-    cluster_info.push_str(&format!("\nPeers: {:?}", app.peers));
-    cluster_info.push_str(&format!(
-        "\nConfiguration ID: {:?}",
-        app.current_node.configuration_id
-    ));
-    let cluster_info_text = Paragraph::new(cluster_info)
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(UI_CLUSTER_INFO_TITLE)
-                .style(Style::default().fg(Color::White))
-                .border_type(BorderType::Plain),
-        );
-    f.render_widget(cluster_info_text, chunks[0]);
+    draw_cluster_info(f, app, chunks[0]);
 
     // node info
     let mut node_info = "".to_string();

@@ -14,6 +14,6 @@ omnipaxos_ui = { path = "../../omnipaxos_ui", optional = true }
 [features]
 derive_entry = []
 # To run the program with the UI, use `cargo run --features with_omnipaxos_ui`
-with_omnipaxos_ui = ["omnipaxos_ui", "omnipaxos/logging"]
+with_omnipaxos_ui = ["omnipaxos_ui"]
 with_omnipaxos_log = ["omnipaxos/logging"]
 

@@ -6,10 +6,9 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
-        ui,
-        ui::ClusterState,
         ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
+    utils::{ui, ui::ClusterState},
 };
 #[cfg(any(feature = "toml_config", feature = "serde"))]
 use serde::Deserialize;
@@ -24,7 +23,6 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
-// use crate::valid_config;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields

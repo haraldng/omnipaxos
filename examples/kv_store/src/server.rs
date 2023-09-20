@@ -1,6 +1,6 @@
 use crate::{
     kv::KeyValue,
-    util::{OMNI_PAXOS_TICK_PERIOD, OMNI_PAXOS_UI_TICK_PERIOD, OUTGOING_MESSAGE_PERIOD},
+    util::{OUTGOING_MESSAGE_PERIOD, TICK_PERIOD, UI_TICK_PERIOD},
     OmniPaxosKV,
 };
 use omnipaxos::{messages::Message, util::NodeId};
@@ -35,8 +35,8 @@ impl OmniPaxosServer {
 
     pub(crate) async fn run(&mut self) {
         let mut outgoing_interval = time::interval(OUTGOING_MESSAGE_PERIOD);
-        let mut op_tick_interval = time::interval(OMNI_PAXOS_TICK_PERIOD);
-        let mut op_ui_tick_interval = time::interval(OMNI_PAXOS_UI_TICK_PERIOD);
+        let mut op_tick_interval = time::interval(TICK_PERIOD);
+        let mut op_ui_tick_interval = time::interval(UI_TICK_PERIOD);
         loop {
             tokio::select! {
                 biased;

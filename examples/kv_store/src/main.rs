@@ -153,7 +153,7 @@ fn main() {
     println!("Killing leader: {}...", leader);
     // wait for the UI to update...
     #[cfg(feature = "with_omnipaxos_ui")]
-    std::thread::sleep(WAIT_UI_UPDATE_TIMEOUT);
+    std::thread::sleep(UI_UPDATE_TIMEOUT);
 
     leader_join_handle.abort();
     // wait for new leader to be elected...
