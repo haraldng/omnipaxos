@@ -72,6 +72,9 @@ pub(crate) enum ElectionStatus {
     Follower,
 }
 
+const INITIAL_ROUND: u32 = 1;
+const RECOVERY_ROUND: u32 = 0;
+
 /// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.
@@ -110,15 +113,19 @@ impl BallotLeaderElection {
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
         let initial_ballot = match recovered_leader {
-            Some(b) if b == Ballot::default() => Ballot::with(config_id, 1, config.priority, pid),
+            Some(b) if b == Ballot::default() => {
+                Ballot::with(config_id, INITIAL_ROUND, config.priority, pid)
+            }
             // Prevents a recovered server from retain BLE leadership with the same ballot.
-            Some(_) => Ballot::with(config_id, 0, config.priority, pid),
-            None => Ballot::with(config_id, 1, config.priority, pid),
+            Some(_) => Ballot::with(config_id, RECOVERY_ROUND, config.priority, pid),
+            None => Ballot::with(config_id, INITIAL_ROUND, config.priority, pid),
         };
         let initial_leader = match recovered_leader {
-            Some(b) if b == Ballot::default() => Ballot::with(config_id, 1, config.priority, pid),
+            Some(b) if b == Ballot::default() => {
+                Ballot::with(config_id, INITIAL_ROUND, config.priority, pid)
+            }
             Some(b) => b,
-            None => Ballot::with(config_id, 1, config.priority, pid),
+            None => Ballot::with(config_id, INITIAL_ROUND, config.priority, pid),
         };
         let mut ble = BallotLeaderElection {
             configuration_id: config_id,
@@ -231,11 +238,15 @@ impl BallotLeaderElection {
                 }
                 _ => self.quorum.is_prepare_quorum(potential_followers + 1),
             };
-            let see_larger_happy_leader = self
-                .heartbeat_replies
-                .iter()
-                .any(|r| r.leader > self.current_ballot && r.happy);
-            can_form_quorum || see_larger_happy_leader
+            if can_form_quorum {
+                true
+            } else {
+                let see_larger_happy_leader = self
+                    .heartbeat_replies
+                    .iter()
+                    .any(|r| r.leader > self.current_ballot && r.happy);
+                see_larger_happy_leader
+            }
         } else {
             self.heartbeat_replies
                 .iter()
