@@ -50,19 +50,6 @@ impl Ballot {
     }
 }
 
-/// The state a BallotLeaderElection is in
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ElectionStatus {
-    /// I'm the leader
-    Leader,
-    /// I'm trying to become the leader but still need confirmation from a quorum of followers.
-    PendingLeader,
-    /// Accepts another node as the leader even though I'm not connected to it.
-    DisconnectedLeader,
-    /// Follows another node as the leader.
-    Follower,
-}
-
 impl Ord for Ballot {
     fn cmp(&self, other: &Self) -> Ordering {
         (self.n, self.priority, self.pid).cmp(&(other.n, other.priority, other.pid))
@@ -73,6 +60,16 @@ impl PartialOrd for Ballot {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// The election state of a BLE
+pub(crate) enum ElectionStatus {
+    /// I'm the leader.
+    Leader,
+    /// I think I'm the leader, but I see there is a greater leader that I'm not following.
+    StaleLeader,
+    /// Follows another node as the leader.
+    Follower,
 }
 
 /// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
@@ -87,15 +84,13 @@ pub(crate) struct BallotLeaderElection {
     peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
-    /// The heartbeat replies this instance received during the current round
+    /// The heartbeat replies this instance received during the current round.
     heartbeat_replies: Vec<HeartbeatReply>,
     /// The current ballot of this instance.
     current_ballot: Ballot,
-    /// The current leader of this instance
+    /// The current leader of this instance.
     leader: Ballot,
-    /// How this instance relates to its leader
-    election_status: ElectionStatus,
-    /// If this instance sees a need for a new leader
+    /// If this instance sees a need for a new leader.
     happy: bool,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain the leader.
     quorum: Quorum,
@@ -114,21 +109,16 @@ impl BallotLeaderElection {
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let mut initial_ballot = Ballot::with(config_id, 1, config.priority, pid);
-        let initial_leader = match recovered_leader {
-            Some(b) if b == Ballot::default() => initial_ballot,
-            Some(b) => b,
-            None => initial_ballot,
+        let initial_ballot = match recovered_leader {
+            Some(b) if b == Ballot::default() => Ballot::with(config_id, 1, config.priority, pid),
+            // Prevents a recovered server from retain BLE leadership with the same ballot.
+            Some(_) => Ballot::with(config_id, 0, config.priority, pid),
+            None => Ballot::with(config_id, 1, config.priority, pid),
         };
-        if recovered_leader.is_some() {
-            // SequencePaxos doesn't support leader recovery. This ensures that a recovered leader
-            // doesn't recover and retain BLE leadership with the same ballot.
-            initial_ballot.n = 0;
-        }
-        let initial_state = if initial_leader == initial_ballot {
-            ElectionStatus::PendingLeader
-        } else {
-            ElectionStatus::Follower
+        let initial_leader = match recovered_leader {
+            Some(b) if b == Ballot::default() => Ballot::with(config_id, 1, config.priority, pid),
+            Some(b) => b,
+            None => Ballot::with(config_id, 1, config.priority, pid),
         };
         let mut ble = BallotLeaderElection {
             configuration_id: config_id,
@@ -139,7 +129,6 @@ impl BallotLeaderElection {
             current_ballot: initial_ballot,
             leader: initial_leader,
             happy: true,
-            election_status: initial_state,
             quorum,
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
@@ -208,13 +197,18 @@ impl BallotLeaderElection {
     pub(crate) fn hb_timeout(
         &mut self,
         seq_paxos_state: &(Role, Phase),
-    ) -> (Ballot, ElectionStatus) {
+        seq_paxos_promise: Ballot,
+    ) -> (ElectionStatus, Ballot) {
+        if seq_paxos_promise > self.leader {
+            // Sync leader with Paxos promise in case ballot didn't make it to BLE followers
+            self.leader = seq_paxos_promise;
+        }
         self.update_leader();
         self.update_happiness(seq_paxos_state);
-        self.update_leader_state(seq_paxos_state);
         self.update_ballot();
+        let election_status = self.get_election_status(seq_paxos_state);
         self.new_hb_round();
-        (self.leader, self.election_status)
+        (election_status, self.leader)
     }
 
     fn update_leader(&mut self) {
@@ -222,66 +216,55 @@ impl BallotLeaderElection {
             .heartbeat_replies
             .iter()
             .fold(self.leader, |a, b| a.max(b.ballot));
-        if self.leader != self.current_ballot {
-            self.election_status = ElectionStatus::Follower;
-        }
     }
 
     fn update_happiness(&mut self, seq_paxos_state: &(Role, Phase)) {
-        self.happy = match self.election_status {
-            ElectionStatus::Follower => self
+        self.happy = if self.leader == self.current_ballot {
+            let potential_followers = self
                 .heartbeat_replies
                 .iter()
-                .any(|r| r.ballot == self.leader && r.happy),
-            _ => {
-                let potential_followers = self
-                    .heartbeat_replies
-                    .iter()
-                    .filter(|hb_reply| hb_reply.leader <= self.current_ballot)
-                    .count();
-                let can_form_quorum = match seq_paxos_state {
-                    (Role::Leader, Phase::Accept) => {
-                        self.quorum.is_accept_quorum(potential_followers + 1)
-                    }
-                    _ => self.quorum.is_prepare_quorum(potential_followers + 1),
-                };
-                let see_larger_happy_leader = self
-                    .heartbeat_replies
-                    .iter()
-                    .any(|r| r.leader > self.current_ballot && r.happy);
-                can_form_quorum || see_larger_happy_leader
-            }
+                .filter(|hb_reply| hb_reply.leader <= self.current_ballot)
+                .count();
+            let can_form_quorum = match seq_paxos_state {
+                (Role::Leader, Phase::Accept) => {
+                    self.quorum.is_accept_quorum(potential_followers + 1)
+                }
+                _ => self.quorum.is_prepare_quorum(potential_followers + 1),
+            };
+            let see_larger_happy_leader = self
+                .heartbeat_replies
+                .iter()
+                .any(|r| r.leader > self.current_ballot && r.happy);
+            can_form_quorum || see_larger_happy_leader
+        } else {
+            self.heartbeat_replies
+                .iter()
+                .any(|r| r.ballot == self.leader && r.happy)
         };
     }
 
-    /// Update election status if we are a leader.
-    fn update_leader_state(&mut self, seq_paxos_state: &(Role, Phase)) {
-        match self.election_status {
-            ElectionStatus::Follower => (),
-            _ => {
-                let followers = self
-                    .heartbeat_replies
-                    .iter()
-                    .filter(|hb_reply| hb_reply.leader == self.current_ballot)
-                    .count();
-                let have_quorum_of_followers = match seq_paxos_state {
-                    (Role::Leader, Phase::Accept) => self.quorum.is_accept_quorum(followers + 1),
-                    _ => self.quorum.is_prepare_quorum(followers + 1),
-                };
-                if have_quorum_of_followers {
-                    // Signalling leadership only once we have a majority of followers ensures that the
-                    // BLE leader of any node will be >= its Paxos promised ballot.
-                    self.election_status = ElectionStatus::Leader;
-                } else if let ElectionStatus::Leader = self.election_status {
-                    let see_larger_ballot = self
-                        .heartbeat_replies
-                        .iter()
-                        .any(|r| r.leader > self.current_ballot);
-                    if see_larger_ballot {
-                        self.election_status = ElectionStatus::DisconnectedLeader;
-                    }
-                }
+    fn get_election_status(&self, seq_paxos_state: &(Role, Phase)) -> ElectionStatus {
+        if self.leader == self.current_ballot {
+            let followers = self
+                .heartbeat_replies
+                .iter()
+                .filter(|hb_reply| hb_reply.leader == self.current_ballot)
+                .count();
+            let have_quorum_of_followers = match seq_paxos_state {
+                (Role::Leader, Phase::Accept) => self.quorum.is_accept_quorum(followers + 1),
+                _ => self.quorum.is_prepare_quorum(followers + 1),
+            };
+            let see_larger_ballot = self
+                .heartbeat_replies
+                .iter()
+                .any(|r| r.leader > self.current_ballot);
+            if !have_quorum_of_followers && see_larger_ballot {
+                ElectionStatus::StaleLeader
+            } else {
+                ElectionStatus::Leader
             }
+        } else {
+            ElectionStatus::Follower
         }
     }
 
@@ -296,7 +279,6 @@ impl BallotLeaderElection {
                 // assume we have already checked leader for this round so they should be equal
                 self.current_ballot.n = self.leader.n + 1;
                 self.leader = self.current_ballot;
-                self.election_status = ElectionStatus::PendingLeader;
                 self.happy = true;
             }
         }

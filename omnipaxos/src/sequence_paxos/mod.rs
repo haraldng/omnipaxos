@@ -122,6 +122,10 @@ where
         &self.state
     }
 
+    pub(crate) fn get_promise(&self) -> Ballot {
+        self.internal_storage.get_promise()
+    }
+
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_idx` - Deletes all entries up to [`trim_idx`], if the [`trim_idx`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_idx`].
