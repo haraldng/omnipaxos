@@ -108,18 +108,23 @@ pub(crate) struct BallotLeaderElection {
 
 impl BallotLeaderElection {
     /// Construct a new BallotLeaderElection node
-    pub(crate) fn with(config: BLEConfig, initial_leader: Option<Ballot>) -> Self {
+    pub(crate) fn with(config: BLEConfig, recovered_leader: Option<Ballot>) -> Self {
         let config_id = config.configuration_id;
         let pid = config.pid;
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let initial_ballot = Ballot::with(config_id, 0, config.priority, pid);
-        let initial_leader = match initial_leader {
+        let mut initial_ballot = Ballot::with(config_id, 1, config.priority, pid);
+        let initial_leader = match recovered_leader {
             Some(b) if b == Ballot::default() => initial_ballot,
             Some(b) => b,
             None => initial_ballot,
         };
+        if recovered_leader.is_some() {
+            // SequencePaxos doesn't support leader recovery. This ensures that a recovered leader
+            // doesn't recover and retain BLE leadership with the same ballot.
+            initial_ballot.n = 0;
+        }
         let initial_state = if initial_leader == initial_ballot {
             ElectionStatus::PendingLeader
         } else {
@@ -264,6 +269,8 @@ impl BallotLeaderElection {
                     _ => self.quorum.is_prepare_quorum(followers + 1),
                 };
                 if have_quorum_of_followers {
+                    // Signalling leadership only once we have a majority of followers ensures that the
+                    // BLE leader of any node will be >= its Paxos promised ballot.
                     self.election_status = ElectionStatus::Leader;
                 } else if let ElectionStatus::Leader = self.election_status {
                     let see_larger_ballot = self
