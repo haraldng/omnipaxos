@@ -183,13 +183,9 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .data(data)
         .bar_width(UI_BARCHART_WIDTH)
         .bar_gap(UI_BARCHART_GAP)
-        .value_style(
-            Style::default()
-                .fg(*app.color_generator.current_color())
-                .bg(*app.color_generator.current_color()),
-        )
+        .value_style(Style::default().fg(app.leader_color).bg(app.leader_color))
         .label_style(Style::default().fg(Color::Yellow))
-        .bar_style(Style::default().fg(*app.color_generator.current_color()))
+        .bar_style(Style::default().fg(app.leader_color))
 }
 
 fn draw_cluster_info<B>(f: &mut Frame<B>, app: &App, area: Rect)
@@ -201,16 +197,22 @@ where
         Some(ref id) => Line::from(vec![
             Span::raw("Current Leader: "),
             Span::styled(
-                format!("  {:?}  ", id),
-                Style::default()
-                    .fg(Color::White)
-                    .bg(*app.color_generator.current_color()),
+                format!(" {:?} ", id),
+                Style::default().fg(Color::White).bg(app.leader_color),
             ),
         ]),
         None => Line::from("No leader yet"),
     };
     lines.push(leader);
-    lines.push(format!("\nPeers: {:?}", app.peers).into());
+    let mut node_spans = vec![Span::raw("Nodes:")];
+    app.nodes.iter().for_each(|n| {
+        node_spans.push(Span::raw(" "));
+        node_spans.push(Span::styled(
+            format!(" {:?} ", n.pid),
+            Style::default().fg(Color::White).bg(n.color),
+        ));
+    });
+    let nodes = Line::from(node_spans);
     lines.push(
         format!(
             "\nConfiguration ID: {:?}",
@@ -218,6 +220,7 @@ where
         )
         .into(),
     );
+    lines.push(nodes);
     let cluster_info_text = Paragraph::new(lines)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -301,7 +304,7 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
     let filter_state = TuiWidgetState::new()
         .set_default_display_level(log::LevelFilter::Off)
         .set_level_for_target("omnipaxos::sequence_paxos", log::LevelFilter::Info)
-        .set_level_for_target("omnipaxos::ballot_leader_election", log::LevelFilter::Trace);
+        .set_level_for_target("omnipaxos::ballot_leader_election", log::LevelFilter::Info);
     let logger_w: TuiLoggerWidget = TuiLoggerWidget::default()
         .block(
             Block::default()

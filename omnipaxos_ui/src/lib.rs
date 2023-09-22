@@ -1,4 +1,4 @@
-use crate::app::{App, Role, UIAppConfig};
+use crate::app::{App, Node, Role, UIAppConfig};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -128,28 +128,40 @@ impl OmniPaxosUI {
             .iter()
             .filter(|(b, _)| b.pid != self.app.current_node.pid)
             .for_each(|(b, c)| {
-                self.app.active_peers.push((*b).into());
-                self.app.active_peers.last_mut().unwrap().connectivity = *c;
+                let mut node = Node::from(*b);
+                node.connectivity = *c;
+                self.app.active_peers.push(node);
             });
         // Sort the active peers by pid
         self.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
         self.app.current_node.connectivity = self.app.active_peers.len() as u8 + 1;
     }
 
+    fn update_leader(&mut self, op_states: &OmniPaxosStates) {
+        self.app.current_leader = op_states.current_leader;
+        self.app.leader_color = match self.app.current_leader {
+            None => Default::default(),
+            Some(leader_id) => {
+                if leader_id == self.app.current_node.pid {
+                    self.app.current_node.color
+                } else {
+                    let leader = self.app.nodes.iter().find(|x| x.pid == leader_id).unwrap();
+                    leader.color
+                }
+            }
+        };
+    }
+
     /// Update the UI if started, with the latest states from the OmniPaxos instance.
     pub fn tick(&mut self, op_states: OmniPaxosStates) {
         if self.started {
             let ballot = op_states.current_ballot;
-            // If ballot number change, change color
-            if self.app.current_node.ballot_number != ballot.n {
-                self.app.color_generator.next_color();
-            }
             self.app.current_node.ballot_number = ballot.n;
             self.app.current_node.configuration_id = ballot.config_id;
-            self.app.current_leader = op_states.current_leader;
             self.app.set_decided_idx(op_states.decided_idx);
             self.update_progress(&op_states);
             self.update_active_peers(&op_states);
+            self.update_leader(&op_states);
             self.update_ui();
         }
     }

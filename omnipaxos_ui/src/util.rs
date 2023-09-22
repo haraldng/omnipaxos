@@ -16,7 +16,7 @@ pub(crate) mod defaults {
     pub(crate) const UI_BARCHART_GAP: u16 = 1;
     pub(crate) const UI_TABLE_CONTENT_HEIGHT: u16 = 1;
     pub(crate) const UI_TABLE_ROW_MARGIN: u16 = 1;
-    pub(crate) const COLORS: [Color; 4] = [Color::Green, Color::Blue, Color::Magenta, Color::Cyan];
+    pub(crate) const COLORS: [Color; 4] = [Color::Green, Color::Blue, Color::Cyan, Color::Magenta];
 }
 
 impl From<Ballot> for Node {
@@ -58,6 +58,7 @@ impl ColorGenerator {
         ColorGenerator { colors, index: 0 }
     }
 
+    /// Get the next color in the list, and increase the index.
     pub fn next_color(&mut self) -> &Color {
         if self.colors.is_empty() {
             panic!("No colors provided!");
@@ -65,13 +66,5 @@ impl ColorGenerator {
         let color = &self.colors[self.index];
         self.index = (self.index + 1) % self.colors.len();
         color
-    }
-
-    pub fn current_color(&self) -> &Color {
-        if self.colors.is_empty() {
-            panic!("No colors provided!");
-        }
-
-        &self.colors[self.index]
     }
 }
