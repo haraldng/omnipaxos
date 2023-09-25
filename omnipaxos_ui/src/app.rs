@@ -54,8 +54,6 @@ pub(crate) struct App {
     pub(crate) followers_progress: Vec<f64>,
     /// The accepted_idx of all the followers. Idx is the pid of the node.
     pub(crate) followers_accepted_idx: Vec<u64>,
-    // Color generator for the current node, the first color is for the current node.
-    // pub(crate) color_generator: ColorGenerator,
 }
 
 impl App {
@@ -63,25 +61,30 @@ impl App {
         let max_peer_pid = config.peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &config.pid) as usize;
         let mut color_generator = ColorGenerator::new(COLORS.to_vec());
-        let current_node = Node {
+        let mut current_node = Node {
             pid: config.pid,
             configuration_id: config.configuration_id,
             ballot_number: 0,
             connectivity: 0,
-            color: *color_generator.next_color(),
+            ..Default::default()
         };
-        let mut nodes: Vec<Node> = config
-            .peers
-            .clone()
+        let mut peers = config.peers.clone();
+        peers.push(config.pid);
+        peers.sort();
+        let nodes: Vec<Node> = peers
             .into_iter()
-            .map(|pid| Node {
-                pid,
-                color: *color_generator.next_color(),
-                ..Default::default()
+            .map(|pid| {
+                let node = Node {
+                    pid,
+                    color: *color_generator.next_color(),
+                    ..Default::default()
+                };
+                if pid == config.pid {
+                    current_node.color = node.color;
+                }
+                node
             })
             .collect();
-        nodes.push(current_node.clone());
-        nodes.sort_by(|a, b| a.pid.cmp(&b.pid));
         Self {
             current_node,
             current_leader: None,

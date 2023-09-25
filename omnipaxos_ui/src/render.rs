@@ -133,7 +133,7 @@ where
 
 fn draw_title<'a>(app: &App) -> Paragraph<'a> {
     Paragraph::new(format!(
-        "{} Node <{:?}> (press 'q' or 'esc' to exit)",
+        "{} node {:?} (press 'q' or 'esc' to exit the dashboard)",
         UI_TITLE, app.current_node.pid
     ))
     .style(Style::default().fg(Color::LightCyan))
@@ -455,11 +455,12 @@ where
             .as_ref(),
         )
         .split(cell);
-
-    let gauge_color = if ratio == 1.0 {
-        Color::Green
-    } else {
-        Color::LightYellow
+    let gauge_color = match ratio {
+        x if 0.9 < x && x <= 1.0 => Color::Green,
+        x if 0.75 < x && x <= 0.9 => Color::LightYellow,
+        x if 0.5 < x && x <= 0.75 => Color::Indexed(208),
+        x if 0.0 <= x && x <= 0.5 => Color::LightRed,
+        _ => Color::White,
     };
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::RIGHT))
