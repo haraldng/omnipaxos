@@ -16,7 +16,17 @@ pub(crate) mod defaults {
     pub(crate) const UI_BARCHART_GAP: u16 = 1;
     pub(crate) const UI_TABLE_CONTENT_HEIGHT: u16 = 1;
     pub(crate) const UI_TABLE_ROW_MARGIN: u16 = 1;
-    pub(crate) const COLORS: [Color; 4] = [Color::Green, Color::Blue, Color::Cyan, Color::Magenta];
+    pub(crate) const COLORS: [Color; 9] = [
+        Color::Green,
+        Color::Blue,
+        Color::Indexed(27), // Blue
+        Color::Cyan,
+        Color::Yellow,
+        Color::Indexed(211), // Pink
+        Color::Indexed(208), // Orange
+        Color::Magenta,
+        Color::Red,
+    ];
 }
 
 impl From<Ballot> for Node {

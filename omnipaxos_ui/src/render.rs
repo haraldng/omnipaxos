@@ -472,3 +472,23 @@ where
         .ratio(ratio);
     f.render_widget(gauge, chunks[1]);
 }
+
+// Draw all the colors we have to test the color theme
+fn draw_colors<B>(f: &mut Frame<B>, area: Rect)
+    where
+        B: Backend,
+{
+    let spans = COLORS.iter().map(|c| Span::styled("    ", Style::default().bg(*c))).collect::<Vec<Span>>();
+    let line = Line::from(spans);
+    let colors_text = Paragraph::new(line)
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(UI_NODE_INFO_TITLE)
+                .style(Style::default().fg(Color::White))
+                .border_type(BorderType::Plain),
+        );
+    f.render_widget(colors_text, area);
+}
