@@ -62,16 +62,6 @@ impl PartialOrd for Ballot {
     }
 }
 
-/// The election state of a BLE
-pub(crate) enum ElectionStatus {
-    /// I'm the leader.
-    Leader,
-    /// I think I'm the leader, but I see there is a greater leader that I'm not following.
-    StaleLeader,
-    /// Follows another node as the leader.
-    Follower,
-}
-
 const INITIAL_ROUND: u32 = 1;
 const RECOVERY_ROUND: u32 = 0;
 
@@ -93,7 +83,8 @@ pub(crate) struct BallotLeaderElection {
     current_ballot: Ballot,
     /// The current leader of this instance.
     leader: Ballot,
-    /// If this instance sees a need for a new leader.
+    /// A happy node either sees that it is, is connected to, or sees evidence of a potential leader
+    /// for the cluster. If a node is unhappy then it is seeking a new leader.
     happy: bool,
     /// The number of replicas inside the cluster whose heartbeats are needed to become and remain the leader.
     quorum: Quorum,
@@ -112,20 +103,14 @@ impl BallotLeaderElection {
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let initial_ballot = match recovered_leader {
-            Some(b) if b == Ballot::default() => {
-                Ballot::with(config_id, INITIAL_ROUND, config.priority, pid)
-            }
-            // Prevents a recovered server from retain BLE leadership with the same ballot.
-            Some(_) => Ballot::with(config_id, RECOVERY_ROUND, config.priority, pid),
-            None => Ballot::with(config_id, INITIAL_ROUND, config.priority, pid),
-        };
+        let mut initial_ballot = Ballot::with(config_id, INITIAL_ROUND, config.priority, pid);
         let initial_leader = match recovered_leader {
-            Some(b) if b == Ballot::default() => {
-                Ballot::with(config_id, INITIAL_ROUND, config.priority, pid)
+            Some(b) if b != Ballot::default() => {
+                // Prevents a recovered server from retaining BLE leadership with the same ballot.
+                initial_ballot.n = RECOVERY_ROUND;
+                b
             }
-            Some(b) => b,
-            None => Ballot::with(config_id, INITIAL_ROUND, config.priority, pid),
+            _ => initial_ballot,
         };
         let mut ble = BallotLeaderElection {
             configuration_id: config_id,
@@ -205,24 +190,30 @@ impl BallotLeaderElection {
         &mut self,
         seq_paxos_state: &(Role, Phase),
         seq_paxos_promise: Ballot,
-    ) -> (ElectionStatus, Ballot) {
+    ) -> Option<Ballot> {
+        self.update_leader();
+        self.update_happiness(seq_paxos_state);
+        self.check_takeover();
+        self.new_hb_round();
         if seq_paxos_promise > self.leader {
             // Sync leader with Paxos promise in case ballot didn't make it to BLE followers
             self.leader = seq_paxos_promise;
+            self.happy = true;
         }
-        self.update_leader();
-        self.update_happiness(seq_paxos_state);
-        self.update_ballot();
-        let election_status = self.get_election_status(seq_paxos_state);
-        self.new_hb_round();
-        (election_status, self.leader)
+        if self.leader == self.current_ballot {
+            Some(self.current_ballot)
+        } else {
+            None
+        }
     }
 
     fn update_leader(&mut self) {
-        self.leader = self
-            .heartbeat_replies
-            .iter()
-            .fold(self.leader, |a, b| a.max(b.ballot));
+        let max_reply_ballot = self.heartbeat_replies.iter().map(|r| r.ballot).max();
+        if let Some(max) = max_reply_ballot {
+            if max > self.leader {
+                self.leader = max;
+            }
+        }
     }
 
     fn update_happiness(&mut self, seq_paxos_state: &(Role, Phase)) {
@@ -254,32 +245,7 @@ impl BallotLeaderElection {
         };
     }
 
-    fn get_election_status(&self, seq_paxos_state: &(Role, Phase)) -> ElectionStatus {
-        if self.leader == self.current_ballot {
-            let followers = self
-                .heartbeat_replies
-                .iter()
-                .filter(|hb_reply| hb_reply.leader == self.current_ballot)
-                .count();
-            let have_quorum_of_followers = match seq_paxos_state {
-                (Role::Leader, Phase::Accept) => self.quorum.is_accept_quorum(followers + 1),
-                _ => self.quorum.is_prepare_quorum(followers + 1),
-            };
-            let see_larger_ballot = self
-                .heartbeat_replies
-                .iter()
-                .any(|r| r.leader > self.current_ballot);
-            if !have_quorum_of_followers && see_larger_ballot {
-                ElectionStatus::StaleLeader
-            } else {
-                ElectionStatus::Leader
-            }
-        } else {
-            ElectionStatus::Follower
-        }
-    }
-
-    fn update_ballot(&mut self) {
+    fn check_takeover(&mut self) {
         if !self.happy {
             let all_neighbors_unhappy = self.heartbeat_replies.iter().all(|r| !r.happy);
             let im_quorum_connected = self
