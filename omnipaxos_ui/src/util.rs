@@ -1,6 +1,5 @@
 use crate::app::{Node, UIAppConfig};
 use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
-use ratatui::prelude::Color;
 
 pub(crate) mod defaults {
     use ratatui::prelude::Color;
@@ -55,26 +54,5 @@ impl From<OmniPaxosConfig> for UIAppConfig {
             pid,
             peers,
         }
-    }
-}
-
-pub(crate) struct ColorGenerator {
-    colors: Vec<Color>,
-    index: usize,
-}
-
-impl ColorGenerator {
-    pub fn new(colors: Vec<Color>) -> Self {
-        ColorGenerator { colors, index: 0 }
-    }
-
-    /// Get the next color in the list, and increase the index.
-    pub fn next_color(&mut self) -> &Color {
-        if self.colors.is_empty() {
-            panic!("No colors provided!");
-        }
-        let color = &self.colors[self.index];
-        self.index = (self.index + 1) % self.colors.len();
-        color
     }
 }

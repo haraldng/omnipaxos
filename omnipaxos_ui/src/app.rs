@@ -1,4 +1,4 @@
-use crate::util::{defaults::*, ColorGenerator};
+use crate::util::defaults::*;
 use omnipaxos::util::{ConfigurationId, NodeId};
 use ratatui::style::Color;
 use std::time::Instant;
@@ -60,7 +60,6 @@ impl App {
     pub(crate) fn with(config: UIAppConfig) -> Self {
         let max_peer_pid = config.peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &config.pid) as usize;
-        let mut color_generator = ColorGenerator::new(COLORS.to_vec());
         let mut current_node = Node {
             pid: config.pid,
             configuration_id: config.configuration_id,
@@ -73,10 +72,11 @@ impl App {
         peers.sort();
         let nodes: Vec<Node> = peers
             .into_iter()
-            .map(|pid| {
+            .enumerate()
+            .map(|(idx, pid)| {
                 let node = Node {
                     pid,
-                    color: *color_generator.next_color(),
+                    color: COLORS[idx % COLORS.len()],
                     ..Default::default()
                 };
                 if pid == config.pid {

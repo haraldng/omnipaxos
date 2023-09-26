@@ -459,7 +459,7 @@ where
         x if 0.9 < x && x <= 1.0 => Color::Green,
         x if 0.75 < x && x <= 0.9 => Color::LightYellow,
         x if 0.5 < x && x <= 0.75 => Color::Indexed(208),
-        x if 0.0 <= x && x <= 0.5 => Color::LightRed,
+        x if (0.0..=0.5).contains(&x) => Color::LightRed,
         _ => Color::White,
     };
     let gauge = Gauge::default()
@@ -471,24 +471,4 @@ where
         )
         .ratio(ratio);
     f.render_widget(gauge, chunks[1]);
-}
-
-// Draw all the colors we have to test the color theme
-fn draw_colors<B>(f: &mut Frame<B>, area: Rect)
-    where
-        B: Backend,
-{
-    let spans = COLORS.iter().map(|c| Span::styled("    ", Style::default().bg(*c))).collect::<Vec<Span>>();
-    let line = Line::from(spans);
-    let colors_text = Paragraph::new(line)
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(UI_NODE_INFO_TITLE)
-                .style(Style::default().fg(Color::White))
-                .border_type(BorderType::Plain),
-        );
-    f.render_widget(colors_text, area);
 }
