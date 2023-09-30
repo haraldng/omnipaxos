@@ -10,4 +10,3 @@ pub const WAIT_DECIDED_TIMEOUT: Duration = Duration::from_millis(50);
 #[cfg(feature = "with_omnipaxos_ui")]
 pub const UI_UPDATE_TIMEOUT: Duration = Duration::from_secs(1);
 pub const UI_TICK_PERIOD: Duration = Duration::from_millis(200);
-
