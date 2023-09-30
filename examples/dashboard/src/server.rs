@@ -1,17 +1,18 @@
-use crate::kv::KeyValue;
+use crate::{
+    kv::KeyValue,
+    util::{OUTGOING_MESSAGE_PERIOD, TICK_PERIOD, UI_TICK_PERIOD},
+    OmniPaxosKV,
+};
 use omnipaxos::{messages::Message, util::NodeId};
+use omnipaxos_ui::OmniPaxosUI;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-
-use crate::{
-    util::{OUTGOING_MESSAGE_PERIOD, TICK_PERIOD},
-    OmniPaxosKV,
-};
 use tokio::{sync::mpsc, time};
 
 pub struct OmniPaxosServer {
+    pub omni_paxos_ui: OmniPaxosUI,
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
     pub incoming: mpsc::Receiver<Message<KeyValue>>,
     pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
@@ -32,13 +33,17 @@ impl OmniPaxosServer {
 
     pub(crate) async fn run(&mut self) {
         let mut outgoing_interval = time::interval(OUTGOING_MESSAGE_PERIOD);
-        let mut tick_interval = time::interval(TICK_PERIOD);
+        let mut op_tick_interval = time::interval(TICK_PERIOD);
+        let mut op_ui_tick_interval = time::interval(UI_TICK_PERIOD);
         loop {
             tokio::select! {
                 biased;
 
-                _ = tick_interval.tick() => { self.omni_paxos.lock().unwrap().tick(); },
+                _ = op_tick_interval.tick() => { self.omni_paxos.lock().unwrap().tick(); },
                 _ = outgoing_interval.tick() => { self.send_outgoing_msgs().await; },
+                _ = op_ui_tick_interval.tick() => {
+                    self.omni_paxos_ui.tick(self.omni_paxos.lock().unwrap().get_ui_states());
+                },
                 Some(in_msg) = self.incoming.recv() => { self.omni_paxos.lock().unwrap().handle_incoming(in_msg); },
                 else => { }
             }

@@ -1,7 +1,3 @@
-// To run the example with the UI:
-// cargo run --features "with_omnipaxos_ui"
-// To run the example with Logging feature:
-// cargo run --features "with_omnipaxos_log"
 use crate::{kv::KeyValue, server::OmniPaxosServer, util::*};
 use omnipaxos::{
     messages::Message,
@@ -9,8 +5,6 @@ use omnipaxos::{
     *,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
-#[cfg(feature = "with_omnipaxos_ui")]
-use omnipaxos_ui::OmniPaxosUI;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -56,8 +50,6 @@ fn main() {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
-            #[cfg(feature = "with_omnipaxos_ui")]
-            custom_logger: Some(OmniPaxosUI::logger()),
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
@@ -69,18 +61,10 @@ fn main() {
             server_config,
             cluster_config,
         };
-        #[cfg(feature = "with_omnipaxos_ui")]
-        let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
-        #[cfg(feature = "with_omnipaxos_ui")]
-        if pid == 2 {
-            omni_paxos_ui.start();
-        }
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
             op_config.build(MemoryStorage::default()).unwrap(),
         ));
         let mut op_server = OmniPaxosServer {
-            #[cfg(feature = "with_omnipaxos_ui")]
-            omni_paxos_ui,
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(&pid).unwrap(),
             outgoing: sender_channels.clone(),
@@ -102,7 +86,6 @@ fn main() {
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Elected leader: {}", leader);
 
     let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
@@ -112,7 +95,6 @@ fn main() {
         key: "a".to_string(),
         value: 1,
     };
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv1, follower);
     follower_server
         .lock()
@@ -124,7 +106,6 @@ fn main() {
         key: "b".to_string(),
         value: 2,
     };
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv2, leader);
     let (leader_server, leader_join_handle) = op_server_handles.get(&leader).unwrap();
     leader_server
@@ -147,14 +128,8 @@ fn main() {
         }
         // ignore uncommitted entries
     }
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("KV store: {:?}", simple_kv_store);
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Killing leader: {}...", leader);
-    // wait for the UI to update...
-    #[cfg(feature = "with_omnipaxos_ui")]
-    std::thread::sleep(UI_UPDATE_TIMEOUT);
-
     leader_join_handle.abort();
     // wait for new leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
@@ -163,13 +138,11 @@ fn main() {
         .unwrap()
         .get_current_leader()
         .expect("Failed to get leader");
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Elected new leader: {}", leader);
     let kv3 = KeyValue {
         key: "b".to_string(),
         value: 3,
     };
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("Adding value: {:?} via server {}", kv3, leader);
     let (leader_server, _) = op_server_handles.get(&leader).unwrap();
     leader_server
@@ -190,25 +163,5 @@ fn main() {
         }
         // ignore uncommitted entries
     }
-    #[cfg(not(feature = "with_omnipaxos_ui"))]
     println!("KV store: {:?}", simple_kv_store);
-
-    // loop to append new values
-    #[cfg(feature = "with_omnipaxos_ui")]
-    {
-        let mut i = 0;
-        loop {
-            i = i + 1;
-            let kv4 = KeyValue {
-                key: "b".to_string(),
-                value: i,
-            };
-            leader_server
-                .lock()
-                .unwrap()
-                .append(kv4)
-                .expect("append failed");
-            std::thread::sleep(WAIT_DECIDED_TIMEOUT);
-        }
-    }
 }
