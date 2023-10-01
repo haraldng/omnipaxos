@@ -128,6 +128,15 @@ pub mod sequence_paxos {
         pub ss: StopSign,
     }
 
+    /// Message sent by follower to leader when accepting an entry is rejected.
+    /// This happens when the follower is promised to a greater leader.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct NotAccepted {
+        /// The rejected ballot
+        pub n: Ballot,
+    }
+
     /// Compaction Request
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
@@ -153,6 +162,7 @@ pub mod sequence_paxos {
         AcceptSync(AcceptSync<T>),
         AcceptDecide(AcceptDecide<T>),
         Accepted(Accepted),
+        NotAccepted(NotAccepted),
         Decide(Decide),
         /// Forward client proposals to the leader.
         ProposalForward(Vec<T>),

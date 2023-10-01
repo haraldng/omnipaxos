@@ -91,9 +91,9 @@ where
     // Correctness: This function performs multiple storage operations that cannot be rolled
     // back, so instead it relies on writing in a "safe" order for correctness.
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
-        if self.internal_storage.get_promise() == accsync.n
-            && self.state == (Role::Follower, Phase::Prepare)
-        {
+        if self.internal_storage.get_promise() != accsync.n {
+            self.send_notaccepted(accsync.n, from);
+        } else if self.state == (Role::Follower, Phase::Prepare) {
             let old_decided_idx = self.internal_storage.get_decided_idx();
             let old_accepted_round = self.internal_storage.get_accepted_round();
             self.internal_storage
@@ -194,8 +194,9 @@ where
     }
 
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
-        if self.internal_storage.get_promise() == acc.n
-            && self.state == (Role::Follower, Phase::Accept)
+        if self.internal_storage.get_promise() != acc.n {
+            self.send_notaccepted(acc.n, acc.n.pid);
+        } else if self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc.seq_num, acc.n.pid) == MessageStatus::Expected
         {
             // handle decide
@@ -217,8 +218,9 @@ where
     }
 
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
-        if self.internal_storage.get_promise() == acc_ss.n
-            && self.state == (Role::Follower, Phase::Accept)
+        if self.internal_storage.get_promise() != acc_ss.n {
+            self.send_notaccepted(acc_ss.n, acc_ss.n.pid);
+        } else if self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
             self.accept_stopsign(acc_ss.ss);
@@ -243,6 +245,15 @@ where
                 .set_decided_idx(dec.decided_idx)
                 .expect("storage error while trying to write decided index");
         }
+    }
+
+    fn send_notaccepted(&mut self, n: Ballot, to: NodeId) {
+        let not_acc = NotAccepted { n };
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to,
+            msg: PaxosMsg::NotAccepted(not_acc),
+        });
     }
 
     fn accept_entries_follower(&mut self, n: Ballot, entries: Vec<T>) -> StorageResult<()> {

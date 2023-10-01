@@ -547,4 +547,10 @@ where
             }
         }
     }
+
+    pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {
+        if self.state.0 == Role::Leader && self.leader_state.n_leader == not_acc.n {
+            self.leader_state.remove_promise(from);
+        }
+    }
 }

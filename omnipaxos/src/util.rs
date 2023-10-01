@@ -146,6 +146,11 @@ where
         self.quorum.is_prepare_quorum(num_promised)
     }
 
+    pub fn remove_promise(&mut self, pid: NodeId) {
+        self.decided_indexes[Self::pid_to_idx(pid)] = None;
+        self.promises_meta[Self::pid_to_idx(pid)] = None;
+    }
+
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
         std::mem::take(&mut self.max_promise)
     }
