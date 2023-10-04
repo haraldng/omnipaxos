@@ -1,5 +1,5 @@
 use crate::{
-    kv::KeyValue,
+    kv::LogEntry,
     util::{OUTGOING_MESSAGE_PERIOD, TICK_PERIOD, UI_TICK_PERIOD},
     OmniPaxosKV,
 };
@@ -14,8 +14,8 @@ use tokio::{sync::mpsc, time};
 pub struct OmniPaxosServer {
     pub omni_paxos_ui: OmniPaxosUI,
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
-    pub incoming: mpsc::Receiver<Message<KeyValue>>,
-    pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
+    pub incoming: mpsc::Receiver<Message<LogEntry>>,
+    pub outgoing: HashMap<NodeId, mpsc::Sender<Message<LogEntry>>>,
 }
 
 impl OmniPaxosServer {
