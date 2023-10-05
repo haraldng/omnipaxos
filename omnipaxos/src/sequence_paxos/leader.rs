@@ -24,7 +24,7 @@ where
         }
         if self.pid == n.pid {
             self.leader_state =
-                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
+                LeaderState::with(n, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
             self.internal_storage
                 .flush_batch()
@@ -71,10 +71,10 @@ where
         self.state.0 = Role::Follower;
     }
 
-    pub(crate) fn handle_preparereq(&mut self, from: NodeId) {
+    pub(crate) fn handle_preparereq(&mut self, prepreq: PrepareReq, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
-        if self.state.0 == Role::Leader {
+        if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
             self.leader_state.set_decided_idx(from, None);
             #[cfg(feature = "batch_accept")]
             {
@@ -550,7 +550,7 @@ where
 
     pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {
         if self.state.0 == Role::Leader && self.leader_state.n_leader == not_acc.n {
-            self.leader_state.remove_promise(from);
+            self.leader_state.update_promise(not_acc.n, from);
         }
     }
 }

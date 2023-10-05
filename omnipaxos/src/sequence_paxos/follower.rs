@@ -79,7 +79,7 @@ where
                 accepted_idx,
                 stopsign,
             };
-            self.cached_promise = Some(promise.clone());
+            self.cached_promise_message = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,

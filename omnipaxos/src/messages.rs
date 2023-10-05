@@ -17,6 +17,14 @@ pub mod sequence_paxos {
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
 
+    /// Message sent by a follower on crash-recovery or dropped messages to request its leader to re-prepare them.
+    #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct PrepareReq {
+        /// The current round.
+        pub n: Ballot,
+    }
+
     /// Prepare message sent by a newly-elected leader to initiate the Prepare phase.
     #[derive(Copy, Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -155,7 +163,7 @@ pub mod sequence_paxos {
         T: Entry,
     {
         /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
-        PrepareReq,
+        PrepareReq(PrepareReq),
         #[allow(missing_docs)]
         Prepare(Prepare),
         Promise(Promise<T>),

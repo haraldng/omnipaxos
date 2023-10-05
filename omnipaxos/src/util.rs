@@ -16,6 +16,7 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
+    pub n: Ballot,
     pub n_accepted: Ballot,
     pub accepted_idx: u64,
     pub pid: NodeId,
@@ -80,18 +81,13 @@ impl<T> LeaderState<T>
 where
     T: Entry,
 {
-    pub fn with(
-        n_leader: Ballot,
-        decided_indexes: Option<Vec<Option<u64>>>,
-        max_pid: usize,
-        quorum: Quorum,
-    ) -> Self {
+    pub fn with(n_leader: Ballot, max_pid: usize, quorum: Quorum) -> Self {
         Self {
             n_leader,
             promises_meta: vec![None; max_pid],
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
-            decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
+            decided_indexes: vec![None; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise: None,
             #[cfg(feature = "batch_accept")]
@@ -128,6 +124,7 @@ where
 
     pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
+            n: prom.n,
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
             pid: from,
@@ -142,13 +139,19 @@ where
         }
         self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
-        let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
+        let num_promised = self
+            .promises_meta
+            .iter()
+            .flatten()
+            .filter(|prom| prom.n == self.n_leader)
+            .count();
         self.quorum.is_prepare_quorum(num_promised)
     }
 
-    pub fn remove_promise(&mut self, pid: NodeId) {
-        self.decided_indexes[Self::pid_to_idx(pid)] = None;
-        self.promises_meta[Self::pid_to_idx(pid)] = None;
+    pub fn update_promise(&mut self, new_ballot: Ballot, pid: NodeId) {
+        if let Some(prom) = self.promises_meta[Self::pid_to_idx(pid)].as_mut() {
+            prom.n = new_ballot;
+        }
     }
 
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
@@ -178,20 +181,27 @@ where
     }
 
     pub fn get_promised_followers(&self) -> Vec<NodeId> {
-        self.decided_indexes
+        self.promises_meta
             .iter()
             .enumerate()
-            .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as NodeId)
+            .filter_map(|(idx, x)| match x {
+                Some(prom) if prom.n == self.n_leader => Some((idx + 1) as NodeId),
+                _ => None,
+            })
+            .filter(|pid| *pid != self.n_leader.pid)
             .collect()
     }
 
-    pub fn get_unpromised_peers(&self) -> Vec<NodeId> {
-        self.decided_indexes
+    /// The pids of peers which don't, but if prepared would, follow my leader ballot
+    pub fn get_preparable_peers(&self) -> Vec<NodeId> {
+        self.promises_meta
             .iter()
             .enumerate()
-            .filter(|(pid, x)| x.is_none() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as NodeId)
+            .filter_map(|(idx, x)| match x {
+                Some(prom) if prom.n >= self.n_leader => None,
+                _ => Some((idx + 1) as NodeId),
+            })
+            .filter(|pid| *pid != self.n_leader.pid)
             .collect()
     }
 
