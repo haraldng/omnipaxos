@@ -42,7 +42,6 @@ where
                 suffix: vec![],
                 stopsign: self.internal_storage.get_stopsign(),
             };
-            self.leader_state.reset_promises();
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);

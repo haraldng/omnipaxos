@@ -132,10 +132,6 @@ where
         self.decided_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
-    pub fn reset_promises(&mut self) {
-        self.promises_meta = vec![PromiseState::NotPromised; self.promises_meta.len()];
-    }
-
     pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
