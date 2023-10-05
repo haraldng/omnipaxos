@@ -42,6 +42,7 @@ where
                 suffix: vec![],
                 stopsign: self.internal_storage.get_stopsign(),
             };
+            self.leader_state.reset_promises();
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
@@ -550,7 +551,7 @@ where
 
     pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {
         if self.state.0 == Role::Leader && self.leader_state.n_leader == not_acc.n {
-            self.leader_state.update_promise(not_acc.n, from);
+            self.leader_state.lost_promise(from);
         }
     }
 }
