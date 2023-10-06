@@ -75,7 +75,7 @@ where
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
-            self.leader_state.set_decided_idx(from, None);
+            self.leader_state.reset_promise(from);
             #[cfg(feature = "batch_accept")]
             {
                 self.leader_state.set_batch_accept_meta(from, None);
@@ -355,13 +355,7 @@ where
         let max_stopsign = self.leader_state.take_max_promise_stopsign();
         let max_promise = self.leader_state.take_max_promise();
         let max_promise_meta = self.leader_state.get_max_promise_meta();
-        let decided_idx = self
-            .leader_state
-            .decided_indexes
-            .iter()
-            .max()
-            .unwrap()
-            .unwrap();
+        let decided_idx = self.leader_state.get_max_decided_idx().unwrap();
         let old_decided_idx = self.internal_storage.get_decided_idx();
         let old_accepted_round = self.internal_storage.get_accepted_round();
         self.internal_storage
@@ -549,7 +543,7 @@ where
     }
 
     pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {
-        if self.state.0 == Role::Leader && self.leader_state.n_leader == not_acc.n {
+        if self.state.0 == Role::Leader && self.leader_state.n_leader < not_acc.n {
             self.leader_state.lost_promise(from);
         }
     }

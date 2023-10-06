@@ -141,7 +141,7 @@ pub mod sequence_paxos {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct NotAccepted {
-        /// The rejected ballot
+        /// The follower's current ballot
         pub n: Ballot,
     }
 

@@ -18,6 +18,7 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
 pub(crate) struct PromiseMetaData {
     pub n_accepted: Ballot,
     pub accepted_idx: u64,
+    pub decided_idx: u64,
     pub pid: NodeId,
     pub stopsign: Option<StopSign>,
 }
@@ -76,7 +77,6 @@ where
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
     accepted_indexes: Vec<u64>,
-    pub decided_indexes: Vec<Option<u64>>,
     max_promise_meta: PromiseMetaData,
     max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
@@ -97,7 +97,6 @@ where
             promises_meta: vec![PromiseState::NotPromised; max_pid],
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
-            decided_indexes: vec![None; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise: None,
             #[cfg(feature = "batch_accept")]
@@ -128,14 +127,11 @@ where
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
-    pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
-        self.decided_indexes[Self::pid_to_idx(pid)] = idx;
-    }
-
     pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
+            decided_idx: prom.decided_idx,
             pid: from,
             stopsign: prom.stopsign,
         };
@@ -146,7 +142,6 @@ where
                 suffix: prom.suffix,
             })
         }
-        self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
         self.promises_meta[Self::pid_to_idx(from)] = PromiseState::Promised(promise_meta);
         let num_promised = self
             .promises_meta
@@ -154,6 +149,10 @@ where
             .filter(|p| matches!(p, PromiseState::Promised(_)))
             .count();
         self.quorum.is_prepare_quorum(num_promised)
+    }
+
+    pub fn reset_promise(&mut self, pid: NodeId) {
+        self.promises_meta[Self::pid_to_idx(pid)] = PromiseState::NotPromised;
     }
 
     /// Node `pid` seen with ballot greater than my ballot
@@ -167,6 +166,16 @@ where
 
     pub fn get_max_promise_meta(&self) -> &PromiseMetaData {
         &self.max_promise_meta
+    }
+
+    pub fn get_max_decided_idx(&self) -> Option<u64> {
+        self.promises_meta
+            .iter()
+            .filter_map(|p| match p {
+                PromiseState::Promised(m) => Some(m.decided_idx),
+                _ => None,
+            })
+            .max()
     }
 
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
@@ -232,8 +241,11 @@ where
             .copied()
     }
 
-    pub fn get_decided_idx(&self, pid: NodeId) -> &Option<u64> {
-        self.decided_indexes.get(Self::pid_to_idx(pid)).unwrap()
+    pub fn get_decided_idx(&self, pid: NodeId) -> Option<u64> {
+        match self.promises_meta.get(Self::pid_to_idx(pid)).unwrap() {
+            PromiseState::Promised(metadata) => Some(metadata.decided_idx),
+            _ => None,
+        }
     }
 
     pub fn get_accepted_idx(&self, pid: NodeId) -> u64 {
