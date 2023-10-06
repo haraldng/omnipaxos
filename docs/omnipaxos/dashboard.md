@@ -1,4 +1,4 @@
-OmniPaxos supplies an in-terminal dashboard that works out-of-the-box which displays the information of peers that the OmniPaxos node currently connects to. The dashboard can be used for monitoring the workings status of the OmniPaxos peers or for network debugging. The dashboard can be used by importing the `omnipaxos_ui` dependency:
+OmniPaxos provides an in-terminal dashboard that can be connected to one of the OmniPaxos nodes. The dashboard displays the performance, the connectivity, and who is the current leader in the cluster. The dashboard can be used by importing the `omnipaxos_ui` dependency:
 
 ```rust
 [dependencies]
@@ -7,8 +7,7 @@ omnipaxos_ui = "LATEST_VERSION"
 ```
 
 ## How To Use
-
-We need to setup the dashboard using the same configuration that used to setup OmniPaxos then call the public function `start()` to start showing the UI.
+We need to setup the dashboard using the same configuration that was used to setup OmniPaxos and then call the public function `start()` to start showing the UI.
 
 ```rust
 // op_config: OmniPaxosConfig
@@ -16,7 +15,7 @@ let mut omni_paxos_ui = OmniPaxosUI::with(op_config.into());
 omni_paxos_ui.start();
 ```
 
-To get user inputs and flush the UI, a `tick()` function need to be called periodically with the states retrieved from OmniPaxos instance. Then the UI will update based on the newest information of the server. The time period between `tick()`s can be customized depends on how often dose the user want the UI to be flushed. For example, if it is called every `200ms`, the OmniPaxos status will be retrieved and the UI will be updated `5` times per seconds. 
+The dashboard gets updated via the `tick()` function that needs to be called periodically with the states retrieved from the OmniPaxos node. The time period between `tick()`s can be customized depending on how often we want the UI to be flushed. The more frequent, the more updated the dashboard will be, but that might also incur more overhead. From our experience, calling `tick()` every 200ms is a good starting point.
 
 ```rust
 // Call this periodically
@@ -24,6 +23,6 @@ To get user inputs and flush the UI, a `tick()` function need to be called perio
 omni_paxos_ui.tick(omni_paxos.get_ui_states());
 ```
 
-The dashboard has two different views for leader server and follower servers. The leader's dashboard has more information then follower's, such as followers progress to catch up, as shown bellow:
+The dashboard has different views depending on if it is connected to the leader or follower server. The leader's dashboard has more information than the follower's, such as the follower's lag in the replication log, as shown below:
 
 ![omnipaxos](../images/dashboard.jpg)
