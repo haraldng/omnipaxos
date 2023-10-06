@@ -411,7 +411,7 @@ where
     B: Backend,
 {
     let num_of_active_peers = app.active_peers.len();
-    let constraints = if num_of_active_peers > 0 {
+    let constraints: Vec<Constraint> = if num_of_active_peers > 0 {
         vec![
             Constraint::Length(UI_TABLE_CONTENT_HEIGHT + UI_TABLE_ROW_MARGIN);
             num_of_active_peers + 2
@@ -420,7 +420,7 @@ where
         vec![]
     };
     let chunks = Layout::default()
-        .constraints(constraints.as_ref())
+        .constraints(constraints.as_slice())
         .split(area);
 
     // draw border and title
