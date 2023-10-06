@@ -91,7 +91,7 @@ where
     // Correctness: This function performs multiple storage operations that cannot be rolled
     // back, so instead it relies on writing in a "safe" order for correctness.
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
-        if self.handle_message_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
+        if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
             let old_decided_idx = self.internal_storage.get_decided_idx();
             let old_accepted_round = self.internal_storage.get_accepted_round();
             self.internal_storage
@@ -192,7 +192,7 @@ where
     }
 
     pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
-        if self.handle_message_ballot(acc.n)
+        if self.check_valid_ballot(acc.n)
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc.seq_num, acc.n.pid) == MessageStatus::Expected
         {
@@ -215,7 +215,7 @@ where
     }
 
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
-        if self.handle_message_ballot(acc_ss.n)
+        if self.check_valid_ballot(acc_ss.n)
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
@@ -233,7 +233,7 @@ where
     }
 
     pub(crate) fn handle_decide(&mut self, dec: Decide) {
-        if self.handle_message_ballot(dec.n)
+        if self.check_valid_ballot(dec.n)
             && self.state.1 == Phase::Accept
             && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
@@ -274,7 +274,7 @@ where
     }
 
     /// Also returns whether the message's ballot was promised
-    fn handle_message_ballot(&mut self, message_ballot: Ballot) -> bool {
+    fn check_valid_ballot(&mut self, message_ballot: Ballot) -> bool {
         let my_promise = self.internal_storage.get_promise();
         match my_promise.cmp(&message_ballot) {
             std::cmp::Ordering::Equal => true,
@@ -289,6 +289,11 @@ where
             }
             std::cmp::Ordering::Greater => {
                 // Should never happen, but to be safe send PrepareReq
+                #[cfg(feature = "logging")]
+                warn!(
+                    self.logger,
+                    "Received non-prepare message from a leader I've never promised."
+                );
                 self.reconnected(message_ballot.pid);
                 false
             }
