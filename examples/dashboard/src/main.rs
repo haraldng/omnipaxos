@@ -1,6 +1,6 @@
 // To run the example with the UI:
 // cargo run --bin dashboard
-use crate::{kv::LogEntry, server::OmniPaxosServer, util::*};
+use crate::{entry::LogEntry, server::OmniPaxosServer, util::*};
 use omnipaxos::{messages::Message, util::NodeId, *};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use omnipaxos_ui::OmniPaxosUI;
@@ -10,11 +10,11 @@ use std::{
 };
 use tokio::{runtime::Builder, sync::mpsc};
 
-mod kv;
+mod entry;
 mod server;
 mod util;
 
-type OmniPaxosKV = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
+type OmniPaxosLog = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
 
 const SERVERS: [u64; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
@@ -73,7 +73,7 @@ fn main() {
             // start UI for the the node with id equals to majority, which will be the leader later
             omni_paxos_ui.start();
         }
-        let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
+        let omni_paxos: Arc<Mutex<OmniPaxosLog>> = Arc::new(Mutex::new(
             op_config.build(MemoryStorage::default()).unwrap(),
         ));
         let mut op_server = OmniPaxosServer {
@@ -99,7 +99,7 @@ fn main() {
         let (server, handler) = op_server_handles.get(&(idx as u64)).unwrap();
         // batch append log entries
         for i in 0..BATCH_SIZE {
-            let kv = LogEntry(i as u64);
+            let kv = LogEntry(i);
             server.lock().unwrap().append(kv).expect("append failed");
             std::thread::sleep(BATCH_PERIOD);
         }

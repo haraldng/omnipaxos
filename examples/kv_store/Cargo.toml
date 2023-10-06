@@ -2,8 +2,6 @@
 name = "kv_store"
 version = "0.1.0"
 edition = "2021"
-# Make the kv_store binary the default to run when `cargo run` is called.
-default-run = "kv_store"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
