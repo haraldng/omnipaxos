@@ -79,7 +79,10 @@ pub(crate) struct BallotLeaderElection {
     hb_round: u32,
     /// The heartbeat replies this instance received during the current round.
     heartbeat_replies: Vec<HeartbeatReply>,
-    /// The current ballot of this instance.
+    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node.
+    /// Represents nodes that are currently alive from the view of the current node.
+    prev_replies: Vec<HeartbeatReply>,
+    /// Holds the current ballot of this instance.
     current_ballot: Ballot,
     /// The current leader of this instance.
     leader: Ballot,
@@ -118,6 +121,7 @@ impl BallotLeaderElection {
             peers,
             hb_round: 0,
             heartbeat_replies: Vec::with_capacity(num_nodes),
+            prev_replies: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             leader: initial_leader,
             happy: true,
@@ -125,10 +129,14 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-                let s = config
-                    .logger_file_path
-                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                create_logger(s.as_str())
+                if let Some(logger) = config.custom_logger {
+                    logger
+                } else {
+                    let s = config
+                        .logger_file_path
+                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                }
             },
         };
         #[cfg(feature = "logging")]
@@ -165,7 +173,7 @@ impl BallotLeaderElection {
 
     /// Initiates a new heartbeat round.
     pub(crate) fn new_hb_round(&mut self) {
-        self.heartbeat_replies.clear();
+        self.prev_replies = std::mem::take(&mut self.heartbeat_replies);
         self.hb_round += 1;
         #[cfg(feature = "logging")]
         trace!(
@@ -286,6 +294,14 @@ impl BallotLeaderElection {
             );
         }
     }
+
+    pub(crate) fn get_current_ballot(&self) -> Ballot {
+        self.current_ballot
+    }
+
+    pub(crate) fn get_ballots(&self) -> Vec<HeartbeatReply> {
+        self.prev_replies.clone()
+    }
 }
 
 /// Configuration for `BallotLeaderElection`.
@@ -307,6 +323,8 @@ pub(crate) struct BLEConfig {
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
+    #[cfg(feature = "logging")]
+    custom_logger: Option<Logger>,
 }
 
 impl From<OmniPaxosConfig> for BLEConfig {
@@ -328,6 +346,8 @@ impl From<OmniPaxosConfig> for BLEConfig {
             buffer_size: BLE_BUFFER_SIZE,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
+            #[cfg(feature = "logging")]
+            custom_logger: config.server_config.custom_logger,
         }
     }
 }

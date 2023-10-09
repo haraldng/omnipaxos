@@ -76,7 +76,7 @@ where
     promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
-    accepted_indexes: Vec<u64>,
+    pub accepted_indexes: Vec<u64>,
     max_promise_meta: PromiseMetaData,
     max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
