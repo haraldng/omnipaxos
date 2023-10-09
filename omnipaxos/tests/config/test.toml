@@ -1,15 +1,15 @@
 [ble_test]
 wait_timeout_ms = 3000
 num_threads = 8
-num_nodes = 5
-election_timeout_ms = 50
+num_nodes = 10
+election_timeout_ms = 100
 storage_type = { type = "Memory" }
 
 [consensus_test]
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 5
-num_proposals = 10000
+num_proposals = 2000
 storage_type = { type = "Memory" }
 
 [flexible_quorum_test]
@@ -42,7 +42,7 @@ storage_type = { type = "Persistent" }
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 3
-num_proposals = 10000
+num_proposals = 2000
 gc_idx = 1000
 storage_type = { type = "Memory" }
 

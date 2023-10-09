@@ -1,5 +1,6 @@
 use crate::{
-    ballot_leader_election::{Ballot, Connectivity},
+    ballot_leader_election::Ballot,
+    messages::ballot_leader_election::HeartbeatReply,
     storage::Entry,
     util::{LeaderState, NodeId},
 };
@@ -11,7 +12,7 @@ pub struct ClusterState {
     pub accepted_indexes: Vec<u64>,
     /// All the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
-    pub ballots: Vec<(Ballot, Connectivity)>,
+    pub heartbeats: Vec<HeartbeatReply>,
 }
 
 impl<T> From<&LeaderState<T>> for ClusterState
@@ -24,7 +25,7 @@ where
         accepted_indexes.insert(0, 0);
         Self {
             accepted_indexes,
-            ballots: vec![],
+            heartbeats: vec![],
         }
     }
 }
@@ -39,7 +40,7 @@ pub struct OmniPaxosStates {
     pub decided_idx: u64,
     /// All the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
-    pub ballots: Vec<(Ballot, Connectivity)>,
+    pub heartbeats: Vec<HeartbeatReply>,
     /// The states of all the nodes in the cluster.
     pub cluster_state: ClusterState,
 }

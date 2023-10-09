@@ -1,5 +1,6 @@
 pub mod utils;
 
+use kompact::prelude::{promise, Ask};
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::StopSign,
@@ -45,12 +46,8 @@ fn increasing_accept_seq_num_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(
-        1,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -121,12 +118,8 @@ fn reconnect_after_dropped_accepts_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -138,21 +131,13 @@ fn reconnect_after_dropped_accepts_test() {
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
     });
-    sys.make_proposals(
-        leader_id,
-        unseen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, true);
     });
-    sys.make_proposals(
-        leader_id,
-        seen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
     // Wait for Re-sync with leader to finish
     thread::sleep(SLEEP_TIMEOUT);
@@ -199,12 +184,8 @@ fn reconnect_after_dropped_prepare_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader_id)
@@ -220,7 +201,7 @@ fn reconnect_after_dropped_prepare_test() {
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_prepare_test failed to elect a different leader"
@@ -230,7 +211,7 @@ fn reconnect_after_dropped_prepare_test() {
     sys.make_proposals(
         new_leader_id,
         unseen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
+        cfg.wait_timeout,
     );
 
     // Reconnect everyone to follower
@@ -282,12 +263,8 @@ fn reconnect_after_dropped_promise_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
         .find(|x| *x != leader_id)
@@ -306,7 +283,7 @@ fn reconnect_after_dropped_promise_test() {
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_promise_test failed to elect a different leader"
@@ -316,7 +293,7 @@ fn reconnect_after_dropped_promise_test() {
     sys.make_proposals(
         new_leader_id,
         unseen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
+        cfg.wait_timeout,
     );
 
     // Reconnect follower and wait for re-sync with leader
@@ -376,12 +353,8 @@ fn reconnect_after_dropped_preparereq_test() {
         .collect();
 
     // Propose some values so that a leader is elected
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -393,11 +366,7 @@ fn reconnect_after_dropped_preparereq_test() {
     leader.on_definition(|comp| {
         comp.set_connection(follower_id, false);
     });
-    sys.make_proposals(
-        leader_id,
-        unseen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break but drop PrepareReq
     leader.on_definition(|comp| {
@@ -406,11 +375,7 @@ fn reconnect_after_dropped_preparereq_test() {
     follower.on_definition(|comp| {
         comp.set_connection(leader_id, false);
     });
-    sys.make_proposals(
-        leader_id,
-        seen_by_follower_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
     // Reconnect follower to leader
     follower.on_definition(|comp| {
@@ -446,7 +411,7 @@ fn resync_after_dropped_acceptstopsign_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let leader_id = sys.get_elected_leader(2, Duration::from_millis(cfg.wait_timeout_ms));
+    let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
         .into_iter()
@@ -469,14 +434,15 @@ fn resync_after_dropped_acceptstopsign_test() {
     // Wait for AcceptStopSign to be sent and dropped
     thread::sleep(SLEEP_TIMEOUT);
 
-    // Reconnect leader to follower
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    // Force follower to become leader and wait for follower to decide the stopsign
+    let (kprom, kfuture) = promise::<Value>();
+    follower.on_definition(|comp| {
+        comp.decided_futures.push(Ask::new(kprom, ()));
     });
-
-    // Check that follower has become the new leader
-    let new_leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
-    assert!(new_leader_id == follower_id);
+    sys.force_leader_change(follower_id, cfg.wait_timeout);
+    kfuture
+        .wait_timeout(cfg.wait_timeout)
+        .expect("Timeout for collecting future of decided proposal expired");
 
     // Verify log
     let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
@@ -508,7 +474,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let mut followers = (1..=cfg.num_nodes as u64)
         .into_iter()
         .filter(|x| *x != leader_id);
@@ -524,7 +490,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     );
 
     // Disconnect follower from leader, kill others, and then propose StopSign
-    for other_follower in followers {
+    for other_follower in followers.clone() {
         sys.kill_node(other_follower);
     }
     let next_config = ClusterConfig {
@@ -581,7 +547,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let mut followers = (1..=cfg.num_nodes as u64)
         .into_iter()
         .filter(|x| *x != leader_id);

@@ -329,7 +329,7 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
 }
 
 fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
-    let header_cells = ["PID", "Ballot number", "Connectivity"]
+    let header_cells = ["PID", "Ballot number", "Leader"]
         .iter()
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
@@ -345,7 +345,7 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         let mut cells = Vec::with_capacity(number_of_columns);
         cells.push(Cell::from(peer.pid.to_string()));
         cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(peer.connectivity.to_string()));
+        cells.push(Cell::from(peer.leader.to_string()));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
             .bottom_margin(UI_TABLE_ROW_MARGIN)
@@ -366,7 +366,7 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
 }
 
 fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
-    let header_cells = ["PID", "Ballot number", "Accepted index", "Connectivity"]
+    let header_cells = ["PID", "Ballot number", "Accepted index", "Leader"]
         .iter()
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
@@ -385,7 +385,7 @@ fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         cells.push(Cell::from(
             app.followers_accepted_idx[peer.pid as usize].to_string(),
         ));
-        cells.push(Cell::from(peer.connectivity.to_string()));
+        cells.push(Cell::from(peer.leader.to_string()));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
             .bottom_margin(UI_TABLE_ROW_MARGIN)

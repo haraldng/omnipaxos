@@ -124,17 +124,16 @@ impl OmniPaxosUI {
         self.app.active_peers.clear();
         op_states
             .cluster_state
-            .ballots
+            .heartbeats
             .iter()
-            .filter(|(b, _)| b.pid != self.app.current_node.pid)
-            .for_each(|(b, c)| {
-                let mut node = Node::from(*b);
-                node.connectivity = *c;
+            .filter(|reply| reply.ballot.pid != self.app.current_node.pid)
+            .for_each(|reply| {
+                let mut node = Node::from(reply.ballot);
+                node.leader = reply.leader.pid;
                 self.app.active_peers.push(node);
             });
         // Sort the active peers by pid
         self.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
-        self.app.current_node.connectivity = self.app.active_peers.len() as u8 + 1;
     }
 
     fn update_leader(&mut self, op_states: &OmniPaxosStates) {

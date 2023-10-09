@@ -67,7 +67,6 @@ fn _setup_leader() -> (
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
-    let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
     let n_old = n;
     let setup_msg = Message::<Value>::BLE(BLEMessage {
         from: 2,
@@ -75,7 +74,8 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 1,
             ballot: n_old,
-            connectivity: cfg.num_nodes as u8,
+            leader: n_old,
+            happy: true,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -86,7 +86,8 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 2,
             ballot: n_old,
-            connectivity: 0,
+            leader: n_old,
+            happy: false,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -97,7 +98,8 @@ fn _setup_leader() -> (
         msg: HeartbeatMsg::Reply(HeartbeatReply {
             round: 3,
             ballot: n_old,
-            connectivity: 0,
+            leader: n_old,
+            happy: false,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -425,7 +427,7 @@ fn atomic_storage_majority_promises_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
         let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
-        let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
+        // Send messages to 1 such that it tries to take over leadership
         let n_old = n;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
@@ -433,33 +435,62 @@ fn atomic_storage_majority_promises_test() {
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 1,
                 ballot: n_old,
-                connectivity: cfg.num_nodes as u8,
+                leader: n_old,
+                happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        op.tick();
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 2,
                 ballot: n_old,
-                connectivity: 0,
+                leader: n_old,
+                happy: false,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 3,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 2,
+                ballot: n_old,
+                leader: n_old,
+                happy: false,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        op.tick();
+        // Send messages to 1 so it sees it has gained leadership and notifies paxos
+        let mut n_new = n_old;
+        n_new.n += 1;
+        n_new.pid = 1;
         let setup_msg = Message::<Value>::BLE(BLEMessage {
             from: 2,
             to: 1,
             msg: HeartbeatMsg::Reply(HeartbeatReply {
                 round: 3,
-                ballot: n_old,
-                connectivity: 0,
+                ballot: n_new,
+                leader: n_new,
+                happy: true,
             }),
         });
         op.handle_incoming(setup_msg);
-        op.tick(); // trigger leader change
+        let setup_msg = Message::<Value>::BLE(BLEMessage {
+            from: 3,
+            to: 1,
+            msg: HeartbeatMsg::Reply(HeartbeatReply {
+                round: 3,
+                ballot: n_new,
+                leader: n_new,
+                happy: true,
+            }),
+        });
+        op.handle_incoming(setup_msg);
+        op.tick(); // 1 gains leadership here
         let msgs = op.outgoing_messages();
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {

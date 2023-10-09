@@ -9,7 +9,7 @@ pub(crate) struct Node {
     pub(crate) pid: NodeId,
     pub(crate) configuration_id: ConfigurationId,
     pub(crate) ballot_number: u32,
-    pub(crate) connectivity: u8,
+    pub(crate) leader: NodeId,
     pub(crate) color: Color,
 }
 
@@ -64,7 +64,7 @@ impl App {
             pid: config.pid,
             configuration_id: config.configuration_id,
             ballot_number: 0,
-            connectivity: 0,
+            leader: 0,
             ..Default::default()
         };
         let mut peers = config.peers.clone();

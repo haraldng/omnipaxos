@@ -391,21 +391,24 @@ where
     /// It is also used for the election process, where the server checks if it can become the leader.
     /// For instance if `election_timeout()` is called every 100ms, then if the leader fails, the servers will detect it after 100ms and elect a new server after another 100ms if possible.
     fn election_timeout(&mut self) {
-        if let Some(b) = self.ble.hb_timeout() {
-            self.seq_paxos.handle_leader(b);
+        if let Some(new_leader) = self
+            .ble
+            .hb_timeout(self.seq_paxos.get_state(), self.seq_paxos.get_promise())
+        {
+            self.seq_paxos.handle_leader(new_leader);
         }
     }
 
     /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
     pub fn get_ui_states(&self) -> ui::OmniPaxosStates {
         let mut cluster_state = ClusterState::from(self.seq_paxos.get_leader_state());
-        cluster_state.ballots = self.ble.get_ballots();
+        cluster_state.heartbeats = self.ble.get_ballots();
 
         ui::OmniPaxosStates {
             current_ballot: self.ble.get_current_ballot(),
             current_leader: self.get_current_leader(),
             decided_idx: self.get_decided_idx(),
-            ballots: self.ble.get_ballots(),
+            heartbeats: self.ble.get_ballots(),
             cluster_state,
         }
     }

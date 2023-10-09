@@ -17,6 +17,14 @@ pub mod sequence_paxos {
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
 
+    /// Message sent by a follower on crash-recovery or dropped messages to request its leader to re-prepare them.
+    #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct PrepareReq {
+        /// The current round.
+        pub n: Ballot,
+    }
+
     /// Prepare message sent by a newly-elected leader to initiate the Prepare phase.
     #[derive(Copy, Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -128,6 +136,15 @@ pub mod sequence_paxos {
         pub ss: StopSign,
     }
 
+    /// Message sent by follower to leader when accepting an entry is rejected.
+    /// This happens when the follower is promised to a greater leader.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct NotAccepted {
+        /// The follower's current ballot
+        pub n: Ballot,
+    }
+
     /// Compaction Request
     #[allow(missing_docs)]
     #[derive(Clone, Debug)]
@@ -146,13 +163,14 @@ pub mod sequence_paxos {
         T: Entry,
     {
         /// Request a [`Prepare`] to be sent from the leader. Used for fail-recovery.
-        PrepareReq,
+        PrepareReq(PrepareReq),
         #[allow(missing_docs)]
         Prepare(Prepare),
         Promise(Promise<T>),
         AcceptSync(AcceptSync<T>),
         AcceptDecide(AcceptDecide<T>),
         Accepted(Accepted),
+        NotAccepted(NotAccepted),
         Decide(Decide),
         /// Forward client proposals to the leader.
         ProposalForward(Vec<T>),
@@ -207,10 +225,12 @@ pub mod ballot_leader_election {
     pub struct HeartbeatReply {
         /// Number of the current heartbeat round.
         pub round: u32,
-        /// Ballot of a server.
+        /// Ballot of replying server.
         pub ballot: Ballot,
-        /// The number of replicas inside the cluster the sender is connected to (including itself)
-        pub connectivity: u8,
+        /// Leader this server is following
+        pub leader: Ballot,
+        /// Whether the replying server sees a need for a new leader
+        pub happy: bool,
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

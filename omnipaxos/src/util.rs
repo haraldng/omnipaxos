@@ -18,6 +18,7 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
 pub(crate) struct PromiseMetaData {
     pub n_accepted: Ballot,
     pub accepted_idx: u64,
+    pub decided_idx: u64,
     pub pid: NodeId,
     pub stopsign: Option<StopSign>,
 }
@@ -56,20 +57,30 @@ pub(crate) struct PromiseData<T: Entry> {
 }
 
 #[derive(Debug, Clone)]
+/// The promise state of a node.
+enum PromiseState {
+    /// Not promised to any leader
+    NotPromised,
+    /// Promised to my ballot
+    Promised(PromiseMetaData),
+    /// Promised to a leader who's ballot is greater than mine
+    PromisedHigher,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct LeaderState<T>
 where
     T: Entry,
 {
     pub n_leader: Ballot,
-    pub promises_meta: Vec<Option<PromiseMetaData>>,
+    promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
-    pub follower_seq_nums: Vec<SequenceNumber>,
+    follower_seq_nums: Vec<SequenceNumber>,
     pub accepted_indexes: Vec<u64>,
-    pub decided_indexes: Vec<Option<u64>>,
-    pub max_promise_meta: PromiseMetaData,
-    pub max_promise: Option<PromiseData<T>>,
+    max_promise_meta: PromiseMetaData,
+    max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
-    pub batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
+    batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
@@ -80,18 +91,12 @@ impl<T> LeaderState<T>
 where
     T: Entry,
 {
-    pub fn with(
-        n_leader: Ballot,
-        decided_indexes: Option<Vec<Option<u64>>>,
-        max_pid: usize,
-        quorum: Quorum,
-    ) -> Self {
+    pub fn with(n_leader: Ballot, max_pid: usize, quorum: Quorum) -> Self {
         Self {
             n_leader,
-            promises_meta: vec![None; max_pid],
+            promises_meta: vec![PromiseState::NotPromised; max_pid],
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
-            decided_indexes: decided_indexes.unwrap_or_else(|| vec![None; max_pid]),
             max_promise_meta: PromiseMetaData::default(),
             max_promise: None,
             #[cfg(feature = "batch_accept")]
@@ -122,14 +127,11 @@ where
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
-    pub fn set_decided_idx(&mut self, pid: NodeId, idx: Option<u64>) {
-        self.decided_indexes[Self::pid_to_idx(pid)] = idx;
-    }
-
     pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
+            decided_idx: prom.decided_idx,
             pid: from,
             stopsign: prom.stopsign,
         };
@@ -140,10 +142,22 @@ where
                 suffix: prom.suffix,
             })
         }
-        self.decided_indexes[Self::pid_to_idx(from)] = Some(prom.decided_idx);
-        self.promises_meta[Self::pid_to_idx(from)] = Some(promise_meta);
-        let num_promised = self.promises_meta.iter().filter(|x| x.is_some()).count();
+        self.promises_meta[Self::pid_to_idx(from)] = PromiseState::Promised(promise_meta);
+        let num_promised = self
+            .promises_meta
+            .iter()
+            .filter(|p| matches!(p, PromiseState::Promised(_)))
+            .count();
         self.quorum.is_prepare_quorum(num_promised)
+    }
+
+    pub fn reset_promise(&mut self, pid: NodeId) {
+        self.promises_meta[Self::pid_to_idx(pid)] = PromiseState::NotPromised;
+    }
+
+    /// Node `pid` seen with ballot greater than my ballot
+    pub fn lost_promise(&mut self, pid: NodeId) {
+        self.promises_meta[Self::pid_to_idx(pid)] = PromiseState::PromisedHigher;
     }
 
     pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
@@ -154,10 +168,21 @@ where
         &self.max_promise_meta
     }
 
+    pub fn get_max_decided_idx(&self) -> Option<u64> {
+        self.promises_meta
+            .iter()
+            .filter_map(|p| match p {
+                PromiseState::Promised(m) => Some(m.decided_idx),
+                _ => None,
+            })
+            .max()
+    }
+
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
-        self.promises_meta[Self::pid_to_idx(pid)]
-            .as_ref()
-            .expect("No Metadata found for promised follower")
+        match &self.promises_meta[Self::pid_to_idx(pid)] {
+            PromiseState::Promised(metadata) => metadata,
+            _ => panic!("No Metadata found for promised follower"),
+        }
     }
 
     pub fn get_min_all_accepted_idx(&self) -> &u64 {
@@ -173,20 +198,27 @@ where
     }
 
     pub fn get_promised_followers(&self) -> Vec<NodeId> {
-        self.decided_indexes
+        self.promises_meta
             .iter()
             .enumerate()
-            .filter(|(pid, x)| x.is_some() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as NodeId)
+            .filter_map(|(idx, x)| match x {
+                PromiseState::Promised(_) if idx != Self::pid_to_idx(self.n_leader.pid) => {
+                    Some((idx + 1) as NodeId)
+                }
+                _ => None,
+            })
             .collect()
     }
 
-    pub fn get_unpromised_peers(&self) -> Vec<NodeId> {
-        self.decided_indexes
+    /// The pids of peers which have not promised a higher ballot than mine.
+    pub fn get_preparable_peers(&self) -> Vec<NodeId> {
+        self.promises_meta
             .iter()
             .enumerate()
-            .filter(|(pid, x)| x.is_none() && *pid != Self::pid_to_idx(self.n_leader.pid))
-            .map(|(idx, _)| (idx + 1) as NodeId)
+            .filter_map(|(idx, x)| match x {
+                PromiseState::NotPromised => Some((idx + 1) as NodeId),
+                _ => None,
+            })
             .collect()
     }
 
@@ -209,8 +241,11 @@ where
             .copied()
     }
 
-    pub fn get_decided_idx(&self, pid: NodeId) -> &Option<u64> {
-        self.decided_indexes.get(Self::pid_to_idx(pid)).unwrap()
+    pub fn get_decided_idx(&self, pid: NodeId) -> Option<u64> {
+        match self.promises_meta.get(Self::pid_to_idx(pid)).unwrap() {
+            PromiseState::Promised(metadata) => Some(metadata.decided_idx),
+            _ => None,
+        }
     }
 
     pub fn get_accepted_idx(&self, pid: NodeId) -> u64 {
