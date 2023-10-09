@@ -27,9 +27,10 @@ pub(crate) mod sequence_paxos;
 // pub mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
-/// A module containing helper functions and structs.
+/// A module containing helper functions and structs for consensus logic.
 pub mod util;
-pub(crate) mod utils;
+/// A module containing helper functions and structs.
+pub mod utils;
 
 #[cfg(feature = "macros")]
 #[allow(unused_imports)]

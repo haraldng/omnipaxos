@@ -28,6 +28,8 @@ OmniPaxos:
     path: "omnipaxos/features.md"
   Logging:
     path: "omnipaxos/logging.md"
+  Dashboard:
+    path: "omnipaxos/dashboard.md"
 
 Contributing:
   Contributing to OmniPaxos:

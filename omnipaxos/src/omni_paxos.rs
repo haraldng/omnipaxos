@@ -1,7 +1,6 @@
-use crate::errors::{valid_config, ConfigError};
-// use crate::valid_config;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
+    errors::{valid_config, ConfigError},
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
@@ -9,6 +8,7 @@ use crate::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
         ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
+    utils::{ui, ui::ClusterState},
 };
 #[cfg(any(feature = "toml_config", feature = "serde"))]
 use serde::Deserialize;
@@ -171,11 +171,15 @@ pub struct ServerConfig {
     pub buffer_size: usize,
     /// The size of the buffer for log batching. The default is 1, which means no batching.
     pub batch_size: usize,
+    /// Custom priority for this node to be elected as the leader.
+    pub leader_priority: u32,
     /// The path where the default logger logs events.
     #[cfg(feature = "logging")]
     pub logger_file_path: Option<String>,
-    /// Custom priority for this node to be elected as the leader.
-    pub leader_priority: u32,
+    /// Custom logger, if provided, will be used instead of the default logger.
+    #[cfg(feature = "logging")]
+    #[cfg_attr(feature = "toml_config", serde(skip_deserializing))]
+    pub custom_logger: Option<slog::Logger>,
 }
 
 impl ServerConfig {
@@ -204,9 +208,11 @@ impl Default for ServerConfig {
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
             batch_size: 1,
+            leader_priority: 0,
             #[cfg(feature = "logging")]
             logger_file_path: None,
-            leader_priority: 0,
+            #[cfg(feature = "logging")]
+            custom_logger: None,
         }
     }
 }
@@ -320,7 +326,7 @@ where
             .expect("storage error while trying to read decided log suffix")
     }
 
-    /// Handle an incoming message.
+    /// Handle an incoming message
     pub fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
@@ -387,6 +393,20 @@ where
     fn election_timeout(&mut self) {
         if let Some(b) = self.ble.hb_timeout() {
             self.seq_paxos.handle_leader(b);
+        }
+    }
+
+    /// Returns the current states of the OmniPaxos instance for OmniPaxos UI to display.
+    pub fn get_ui_states(&self) -> ui::OmniPaxosStates {
+        let mut cluster_state = ClusterState::from(self.seq_paxos.get_leader_state());
+        cluster_state.ballots = self.ble.get_ballots();
+
+        ui::OmniPaxosStates {
+            current_ballot: self.ble.get_current_ballot(),
+            current_leader: self.get_current_leader(),
+            decided_idx: self.get_decided_idx(),
+            ballots: self.ble.get_ballots(),
+            cluster_state,
         }
     }
 }

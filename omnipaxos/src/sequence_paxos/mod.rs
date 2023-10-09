@@ -94,10 +94,14 @@ where
             buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
-                let s = config
-                    .logger_file_path
-                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                create_logger(s.as_str())
+                if let Some(logger) = config.custom_logger {
+                    logger
+                } else {
+                    let s = config
+                        .logger_file_path
+                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                }
             },
         };
         paxos
@@ -432,6 +436,10 @@ where
             _ => self.forward_proposals(vec![entry]),
         }
     }
+
+    pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {
+        &self.leader_state
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -465,6 +473,8 @@ pub(crate) struct SequencePaxosConfig {
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
+    #[cfg(feature = "logging")]
+    custom_logger: Option<Logger>,
 }
 
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
@@ -484,6 +494,8 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             batch_size: config.server_config.batch_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
+            #[cfg(feature = "logging")]
+            custom_logger: config.server_config.custom_logger,
         }
     }
 }

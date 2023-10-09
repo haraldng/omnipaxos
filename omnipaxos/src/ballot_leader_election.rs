@@ -60,7 +60,7 @@ impl PartialOrd for Ballot {
 }
 
 /// The connectivity of an OmniPaxos node
-type Connectivity = u8;
+pub(crate) type Connectivity = u8;
 
 /// A Ballot Leader Election component. Used in conjunction with OmniPaxos to handle the election of a leader for a cluster of OmniPaxos servers,
 /// incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
@@ -74,8 +74,11 @@ pub(crate) struct BallotLeaderElection {
     peers: Vec<NodeId>,
     /// The current round of the heartbeat cycle.
     hb_round: u32,
-    /// Vector which holds all the received heartbeats
+    /// Vector which temporarily holds all the received heartbeats from one heartbeat round, including the current node.
     ballots: Vec<(Ballot, Connectivity)>,
+    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node.
+    /// Represents nodes that are currently alive from the view of the current node.
+    prev_round_ballots: Vec<(Ballot, Connectivity)>,
     /// Holds the current ballot of this instance.
     current_ballot: Ballot,
     /// The number of replicas inside the cluster that this instance is
@@ -107,6 +110,7 @@ impl BallotLeaderElection {
             peers,
             hb_round: 0,
             ballots: Vec::with_capacity(num_nodes),
+            prev_round_ballots: Vec::with_capacity(num_nodes),
             current_ballot: initial_ballot,
             connectivity: num_nodes as Connectivity,
             leader: initial_leader,
@@ -114,10 +118,14 @@ impl BallotLeaderElection {
             outgoing: Vec::with_capacity(config.buffer_size),
             #[cfg(feature = "logging")]
             logger: {
-                let s = config
-                    .logger_file_path
-                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                create_logger(s.as_str())
+                if let Some(logger) = config.custom_logger {
+                    logger
+                } else {
+                    let s = config
+                        .logger_file_path
+                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                }
             },
         };
         #[cfg(feature = "logging")]
@@ -227,13 +235,15 @@ impl BallotLeaderElection {
     pub(crate) fn hb_timeout(&mut self) -> Option<Ballot> {
         let my_connectivity = self.ballots.len() + 1;
         self.connectivity = my_connectivity as Connectivity;
+        // Add our own ballot to the list of received ballots of current hb round
+        self.ballots.push((self.current_ballot, self.connectivity));
+        self.prev_round_ballots = self.ballots.clone();
         let result: Option<Ballot> = if self.quorum.is_prepare_quorum(my_connectivity) {
             #[cfg(feature = "logging")]
             debug!(
                 self.logger,
                 "Received a majority of heartbeats, round: {}, {:?}", self.hb_round, self.ballots
             );
-            self.ballots.push((self.current_ballot, self.connectivity));
             self.check_leader()
         } else {
             #[cfg(feature = "logging")]
@@ -275,6 +285,14 @@ impl BallotLeaderElection {
             );
         }
     }
+
+    pub(crate) fn get_current_ballot(&self) -> Ballot {
+        self.current_ballot
+    }
+
+    pub(crate) fn get_ballots(&self) -> Vec<(Ballot, Connectivity)> {
+        self.prev_round_ballots.clone()
+    }
 }
 
 /// Configuration for `BallotLeaderElection`.
@@ -296,6 +314,8 @@ pub(crate) struct BLEConfig {
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
+    #[cfg(feature = "logging")]
+    custom_logger: Option<Logger>,
 }
 
 impl From<OmniPaxosConfig> for BLEConfig {
@@ -317,6 +337,8 @@ impl From<OmniPaxosConfig> for BLEConfig {
             buffer_size: BLE_BUFFER_SIZE,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
+            #[cfg(feature = "logging")]
+            custom_logger: config.server_config.custom_logger,
         }
     }
 }
