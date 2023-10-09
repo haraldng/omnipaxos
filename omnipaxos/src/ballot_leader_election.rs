@@ -79,7 +79,7 @@ pub(crate) struct BallotLeaderElection {
     hb_round: u32,
     /// The heartbeat replies this instance received during the current round.
     heartbeat_replies: Vec<HeartbeatReply>,
-    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node.
+    /// Vector that holds all the received heartbeats from the previous heartbeat round, including the current node. Only used to display the connectivity of this node in the UI.
     /// Represents nodes that are currently alive from the view of the current node.
     prev_replies: Vec<HeartbeatReply>,
     /// Holds the current ballot of this instance.
