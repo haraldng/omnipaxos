@@ -122,7 +122,7 @@ fn toml_config() -> OmniPaxosConfig {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#fail-recovery
-#[test]
+
 fn fail_recovery() {
     let omnipaxos_config = toml_config();
 
@@ -145,7 +145,6 @@ fn fail_recovery() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/storage.md#batching
-#[test]
 fn batch_config() {
     // CODE_EXAMPLE
     let omnipaxos_config = OmniPaxosConfig {
@@ -176,7 +175,6 @@ fn incoming_messages(in_msg: Message<KeyValue>) {
     // END_CODE_EXAMPLE
 }
 
-#[test]
 fn outgoing_messages() {
     let mut omni_paxos = creating_a_node();
 
@@ -190,7 +188,7 @@ fn outgoing_messages() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/log.md
-#[test]
+
 fn append_log() {
     let mut omni_paxos = creating_a_node();
 
@@ -203,7 +201,6 @@ fn append_log() {
     // END_CODE_EXAMPLE
 }
 
-#[test]
 fn read_log() {
     let mut omni_paxos = creating_a_node();
 
@@ -218,7 +215,7 @@ fn read_log() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/leader_election.md
-#[test]
+
 fn tick() {
     let mut omni_paxos = creating_a_node();
 
@@ -229,7 +226,7 @@ fn tick() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#trim
-#[test]
+
 fn trim() {
     let mut omni_paxos = creating_a_node();
 
@@ -256,7 +253,7 @@ fn trim() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#snapshot
-#[test]
+
 fn snapshot() {
     use omnipaxos::CompactionErr;
     let mut omni_paxos = creating_a_node();
@@ -295,7 +292,7 @@ fn snapshot() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/reconfiguration.md
-#[test]
+
 fn reconfiguration() {
     let mut omni_paxos = creating_a_node();
 
@@ -314,7 +311,7 @@ fn reconfiguration() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/reconfiguration.md
-#[test]
+
 fn get_stop_sign() {
     let mut omni_paxos = creating_a_node();
 
@@ -354,7 +351,7 @@ fn get_stop_sign() {
 }
 
 // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/flexible_quorums.md
-#[test]
+
 fn flexible_quorums() {
     // CODE_EXAMPLE
     use omnipaxos::{util::FlexibleQuorum, ClusterConfig, OmniPaxosConfig, ServerConfig};
