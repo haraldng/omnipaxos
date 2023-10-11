@@ -2,7 +2,7 @@ pub mod utils;
 
 use omnipaxos::util::NodeId;
 use serial_test::serial;
-use std::{thread, time::Duration};
+use std::thread;
 use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 
 /// Verifies that an OmniPaxos cluster with a write quorum size of Q can still make
@@ -22,12 +22,8 @@ fn flexible_quorum_prepare_phase_test() {
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some initial values
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
 
     // Kill maximum number of nodes (including leader) such that cluster can still function
     let maximum_tolerable_follower_failures = cfg.flexible_quorum.unwrap().1 - 1;
@@ -45,11 +41,7 @@ fn flexible_quorum_prepare_phase_test() {
     // Make some propsals
     let still_alive_node_id = sys.nodes.keys().next().unwrap();
     let still_alive_node = sys.nodes.get(still_alive_node_id).unwrap();
-    sys.make_proposals(
-        *still_alive_node_id,
-        last_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(*still_alive_node_id, last_proposals, cfg.wait_timeout);
 
     // Verify log
     let nodes_log = still_alive_node.on_definition(|comp| {
@@ -77,12 +69,8 @@ fn flexible_quorum_accept_phase_test() {
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some values
-    sys.make_proposals(
-        2,
-        initial_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
 
     // Kill maximum number of followers such that leader can still function
     let maximum_tolerable_follower_failures = (1..=cfg.num_nodes as NodeId)
@@ -93,11 +81,7 @@ fn flexible_quorum_accept_phase_test() {
     }
 
     // Make some more propsals
-    sys.make_proposals(
-        leader_id,
-        last_proposals,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    );
+    sys.make_proposals(leader_id, last_proposals, cfg.wait_timeout);
 
     // Verify log
     let leader = sys.nodes.get(&leader_id).unwrap();

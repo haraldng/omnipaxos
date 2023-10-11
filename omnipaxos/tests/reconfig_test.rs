@@ -31,7 +31,7 @@ fn reconfig_test() {
     sys.start_all_nodes();
 
     let vec_proposals = (1..=cfg.num_proposals).map(Value::with_id).collect();
-    sys.make_proposals(1, vec_proposals, Duration::from_millis(cfg.wait_timeout_ms));
+    sys.make_proposals(1, vec_proposals, cfg.wait_timeout);
 
     let new_config_id = 2;
     let new_nodes: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();

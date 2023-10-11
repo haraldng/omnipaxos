@@ -444,7 +444,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
 
@@ -515,7 +515,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let leader_id = sys.get_elected_leader(1, Duration::from_millis(cfg.wait_timeout_ms));
+    let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
     let leader = sys.nodes.get(&leader_id).unwrap();
