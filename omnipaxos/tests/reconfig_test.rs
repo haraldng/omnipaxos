@@ -3,7 +3,6 @@ pub mod utils;
 use kompact::prelude::{promise, Ask};
 use omnipaxos::ClusterConfig;
 use serial_test::serial;
-use std::time::Duration;
 use utils::{TestConfig, TestSystem, Value};
 
 const SS_METADATA: u8 = 255;
@@ -54,7 +53,7 @@ fn reconfig_test() {
     });
 
     let decided_ss_config = reconfig_f
-        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
+        .wait_timeout(cfg.wait_timeout)
         .expect("Failed to collect reconfiguration future");
     assert_eq!(decided_ss_config, Value::with_id(new_config_id as u64));
 

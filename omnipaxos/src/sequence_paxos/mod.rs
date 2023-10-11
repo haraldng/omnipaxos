@@ -38,7 +38,7 @@ where
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
-    cached_promise: Option<Promise<T>>,
+    cached_promise_message: Option<Promise<T>>,
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
@@ -59,7 +59,7 @@ where
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(config.buffer_size);
-        let (state, leader, lds) = match storage
+        let (state, leader) = match storage
             .get_promise()
             .expect("storage error while trying to read promise")
         {
@@ -67,15 +67,16 @@ where
             Some(b) => {
                 let state = (Role::Follower, Phase::Recover);
                 for peer_pid in &peers {
+                    let prepreq = PrepareReq { n: b };
                     outgoing.push(PaxosMessage {
                         from: pid,
                         to: *peer_pid,
-                        msg: PaxosMsg::PrepareReq,
+                        msg: PaxosMsg::PrepareReq(prepreq),
                     });
                 }
-                (state, b, None)
+                (state, b)
             }
-            None => ((Role::Follower, Phase::None), Ballot::default(), None),
+            None => ((Role::Follower, Phase::None), Ballot::default()),
         };
         let internal_storage_config = InternalStorageConfig {
             batch_size: config.batch_size,
@@ -89,17 +90,21 @@ where
             pending_stopsign: None,
             leader,
             outgoing,
-            leader_state: LeaderState::<T>::with(leader, lds, max_pid, quorum),
+            leader_state: LeaderState::<T>::with(leader, max_pid, quorum),
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
-            cached_promise: None,
+            cached_promise_message: None,
             buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
-                let s = config
-                    .logger_file_path
-                    .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
-                create_logger(s.as_str())
+                if let Some(logger) = config.custom_logger {
+                    logger
+                } else {
+                    let s = config
+                        .logger_file_path
+                        .unwrap_or_else(|| format!("logs/paxos_{}.log", pid));
+                    create_logger(s.as_str())
+                }
             },
         };
         paxos
@@ -118,6 +123,14 @@ where
             }
         }
         paxos
+    }
+
+    pub(crate) fn get_state(&self) -> &(Role, Phase) {
+        &self.state
+    }
+
+    pub(crate) fn get_promise(&self) -> Ballot {
+        self.internal_storage.get_promise()
     }
 
     /// Initiates the trim process.
@@ -218,8 +231,8 @@ where
         match &self.state {
             (Role::Leader, Phase::Prepare) => {
                 // Resend Prepare
-                let unpromised_peers = self.leader_state.get_unpromised_peers();
-                for peer in unpromised_peers {
+                let preparable_peers = self.leader_state.get_preparable_peers();
+                for peer in preparable_peers {
                     self.send_prepare(peer);
                 }
             }
@@ -238,14 +251,14 @@ where
                     }
                 }
                 // Resend Prepare
-                let unpromised_peers = self.leader_state.get_unpromised_peers();
-                for peer in unpromised_peers {
+                let preparable_peers = self.leader_state.get_preparable_peers();
+                for peer in preparable_peers {
                     self.send_prepare(peer);
                 }
             }
             (Role::Follower, Phase::Prepare) => {
                 // Resend Promise
-                match &self.cached_promise {
+                match &self.cached_promise_message {
                     Some(promise) => {
                         self.outgoing.push(PaxosMessage {
                             from: self.pid,
@@ -259,20 +272,26 @@ where
                         #[cfg(feature = "logging")]
                         warn!(self.logger, "In Prepare phase without a cached promise!");
                         self.state = (Role::Follower, Phase::Recover);
+                        let prepreq = PrepareReq {
+                            n: self.get_promise(),
+                        };
                         self.outgoing.push(PaxosMessage {
                             from: self.pid,
                             to: self.leader.pid,
-                            msg: PaxosMsg::PrepareReq,
+                            msg: PaxosMsg::PrepareReq(prepreq),
                         });
                     }
                 }
             }
             (Role::Follower, Phase::Recover) => {
                 // Resend PrepareReq
+                let prepreq = PrepareReq {
+                    n: self.get_promise(),
+                };
                 self.outgoing.push(PaxosMessage {
                     from: self.pid,
                     to: self.leader.pid,
-                    msg: PaxosMsg::PrepareReq,
+                    msg: PaxosMsg::PrepareReq(prepreq),
                 });
             }
             _ => (),
@@ -299,7 +318,7 @@ where
     /// Handle an incoming message.
     pub(crate) fn handle(&mut self, m: PaxosMessage<T>) {
         match m.msg {
-            PaxosMsg::PrepareReq => self.handle_preparereq(m.from),
+            PaxosMsg::PrepareReq(prepreq) => self.handle_preparereq(prepreq, m.from),
             PaxosMsg::Prepare(prep) => self.handle_prepare(prep, m.from),
             PaxosMsg::Promise(prom) => match &self.state {
                 (Role::Leader, Phase::Prepare) => self.handle_promise_prepare(prom, m.from),
@@ -308,6 +327,7 @@ where
             },
             PaxosMsg::AcceptSync(acc_sync) => self.handle_acceptsync(acc_sync, m.from),
             PaxosMsg::AcceptDecide(acc) => self.handle_acceptdecide(acc),
+            PaxosMsg::NotAccepted(not_acc) => self.handle_notaccepted(not_acc, m.from),
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
             PaxosMsg::ProposalForward(proposals) => self.handle_forwarded_proposal(proposals),
@@ -424,10 +444,13 @@ where
         } else if pid == self.leader.pid {
             self.state = (Role::Follower, Phase::Recover);
         }
+        let prepreq = PrepareReq {
+            n: self.get_promise(),
+        };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
             to: pid,
-            msg: PaxosMsg::PrepareReq,
+            msg: PaxosMsg::PrepareReq(prepreq),
         });
     }
 
@@ -439,10 +462,14 @@ where
             _ => self.forward_proposals(vec![entry]),
         }
     }
+
+    pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {
+        &self.leader_state
+    }
 }
 
 #[derive(PartialEq, Debug)]
-enum Phase {
+pub(crate) enum Phase {
     Prepare,
     Accept,
     Recover,
@@ -472,6 +499,8 @@ pub(crate) struct SequencePaxosConfig {
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,
+    #[cfg(feature = "logging")]
+    custom_logger: Option<Logger>,
 }
 
 impl From<OmniPaxosConfig> for SequencePaxosConfig {
@@ -491,6 +520,8 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             batch_size: config.server_config.batch_size,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
+            #[cfg(feature = "logging")]
+            custom_logger: config.server_config.custom_logger,
         }
     }
 }

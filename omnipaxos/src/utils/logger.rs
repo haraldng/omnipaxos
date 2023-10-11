@@ -1,9 +1,6 @@
-#[cfg(feature = "logging")]
 use slog::{o, Drain, Logger};
-#[cfg(feature = "logging")]
 use std::{fs::OpenOptions, sync::Mutex};
 
-#[cfg(feature = "logging")]
 /// Creates an asynchronous logger which outputs to both the terminal and a specified file_path.
 pub fn create_logger(file_path: &str) -> Logger {
     let path = std::path::Path::new(file_path);
@@ -25,5 +22,5 @@ pub fn create_logger(file_path: &str) -> Logger {
 
     let both = Mutex::new(slog::Duplicate::new(term_fuse, file_fuse)).fuse();
     let both = slog_async::Async::new(both).build().fuse();
-    slog::Logger::root(both, o!())
+    Logger::root(both, o!())
 }

@@ -225,9 +225,10 @@ mod docs_integration_test {
         // END_CODE_EXAMPLE
     }
 
-    // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#trim
-    fn trim() {
-        let mut omni_paxos = creating_a_node();
+// https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/compaction.md#trim
+#[test]
+fn trim() {
+    let mut omni_paxos = creating_a_node();
 
         // CODE_EXAMPLE
         use omnipaxos::CompactionErr;

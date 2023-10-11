@@ -8,7 +8,7 @@ use omnipaxos::{
     util::{LogEntry, NodeId},
 };
 use serial_test::serial;
-use std::{thread, time::Duration};
+use std::thread;
 use utils::{TestConfig, TestSystem, Value};
 
 const TRIM_INDEX_INCREMENT: u64 = 10;
@@ -27,7 +27,7 @@ fn snapshot_test() {
     sys.start_all_nodes();
 
     let elected_pid = kfuture
-        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
+        .wait_timeout(cfg.wait_timeout)
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
@@ -42,10 +42,7 @@ fn snapshot_test() {
         futures.push(kfuture);
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -56,7 +53,7 @@ fn snapshot_test() {
             .expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
+    thread::sleep(cfg.wait_timeout);
 
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
@@ -92,7 +89,7 @@ fn double_snapshot_test() {
     sys.start_all_nodes();
 
     let elected_pid = kfuture
-        .wait_timeout(Duration::from_millis(cfg.wait_timeout_ms))
+        .wait_timeout(cfg.wait_timeout)
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
@@ -107,10 +104,7 @@ fn double_snapshot_test() {
         futures.push(kfuture);
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
@@ -121,7 +115,7 @@ fn double_snapshot_test() {
             .expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
+    thread::sleep(cfg.wait_timeout);
 
     elected_leader.on_definition(|x| {
         x.paxos
@@ -129,7 +123,7 @@ fn double_snapshot_test() {
             .expect("Failed to trim");
     });
 
-    thread::sleep(Duration::from_millis(cfg.wait_timeout_ms));
+    thread::sleep(cfg.wait_timeout);
 
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {

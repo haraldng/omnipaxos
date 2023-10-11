@@ -34,10 +34,7 @@ fn batching_test() {
         });
     }
 
-    match FutureCollection::collect_with_timeout::<Vec<_>>(
-        futures,
-        Duration::from_millis(cfg.wait_timeout_ms),
-    ) {
+    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }

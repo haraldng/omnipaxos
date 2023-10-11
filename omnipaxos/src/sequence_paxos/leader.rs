@@ -14,17 +14,17 @@ where
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
     pub(crate) fn handle_leader(&mut self, n: Ballot) {
-        #[cfg(feature = "logging")]
-        debug!(self.logger, "Newly elected leader: {:?}", n);
         if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
+        #[cfg(feature = "logging")]
+        debug!(self.logger, "Newly elected leader: {:?}", n);
         if self.pending_reconfiguration() {
             self.pending_proposals.clear();
         }
         if self.pid == n.pid {
             self.leader_state =
-                LeaderState::with(n, None, self.leader_state.max_pid, self.leader_state.quorum);
+                LeaderState::with(n, self.leader_state.max_pid, self.leader_state.quorum);
             self.leader = n;
             self.internal_storage
                 .flush_batch()
@@ -64,15 +64,19 @@ where
                 // info!(self.logger, "PREPARE: {:?}, my log: {:?}, snapshot: {:?}", self.outgoing.last().unwrap(), self.internal_storage.read(0..), self.internal_storage.get_snapshot());
             }
         } else {
-            self.state.0 = Role::Follower;
+            self.become_follower();
         }
     }
 
-    pub(crate) fn handle_preparereq(&mut self, from: NodeId) {
+    pub(crate) fn become_follower(&mut self) {
+        self.state.0 = Role::Follower;
+    }
+
+    pub(crate) fn handle_preparereq(&mut self, prepreq: PrepareReq, from: NodeId) {
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
-        if self.state.0 == Role::Leader {
-            self.leader_state.set_decided_idx(from, None);
+        if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
+            self.leader_state.reset_promise(from);
             #[cfg(feature = "batch_accept")]
             {
                 self.leader_state.set_batch_accept_meta(from, None);
@@ -405,13 +409,7 @@ where
         let max_stopsign = self.leader_state.take_max_promise_stopsign();
         let max_promise = self.leader_state.take_max_promise();
         let max_promise_meta = self.leader_state.get_max_promise_meta();
-        let decided_idx = self
-            .leader_state
-            .decided_indexes
-            .iter()
-            .max()
-            .unwrap()
-            .unwrap();
+        let decided_idx = self.leader_state.get_max_decided_idx().unwrap();
         let old_decided_idx = self.internal_storage.get_decided_idx();
         let old_accepted_round = self.internal_storage.get_accepted_round();
         self.internal_storage
@@ -599,6 +597,12 @@ where
                     }
                 }
             }
+        }
+    }
+
+    pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {
+        if self.state.0 == Role::Leader && self.leader_state.n_leader < not_acc.n {
+            self.leader_state.lost_promise(from);
         }
     }
 }
