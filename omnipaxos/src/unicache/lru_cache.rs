@@ -1,6 +1,5 @@
-use crate::{storage::Entry, unicache::*};
+use crate::unicache::*;
 use lru::LruCache;
-use num_traits::identities::One;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -21,6 +20,7 @@ impl<Encodable, Encoded> std::ops::DerefMut for LruWrapper<Encodable, Encoded> {
     }
 }
 
+/// UniCache with least-recently-used eviction policy
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg(feature = "serde")]
 #[serde(bound(deserialize = ""))]
@@ -35,6 +35,7 @@ where
     size: usize,
 }
 
+/// UniCache with least-recently-used eviction policy
 #[cfg(not(feature = "serde"))]
 pub struct LRUniCache<Encodable, Encoded>
 where

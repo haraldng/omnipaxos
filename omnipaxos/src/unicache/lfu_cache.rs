@@ -1,7 +1,7 @@
 use crate::unicache::*;
 use lfu::LFUCache;
-use std::fmt::format;
 
+/// UniCache with least-frequently-used eviction policy
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LFUniCache<Encodable, Encoded>

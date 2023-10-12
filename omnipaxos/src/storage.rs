@@ -26,7 +26,7 @@ pub trait Entry: Clone + Debug {
     type Snapshot: Snapshot<Self> + Serialize + for<'a> Deserialize<'a>;
 
     #[cfg(feature = "unicache")]
-    /// The type for the encoded data. E.g., if `u8` then the cached `Entry` will be sent as `u8` instead.
+    /// The encoded type of some data. If there is a cache hit in UniCache, the data will be replaced and get sent over the network as this type instead. E.g., if `u8` then the cached `Entry` (or field of it) will be sent as `u8` instead.
     type Encoded: Encoded;
     #[cfg(feature = "unicache")]
     /// The type representing the encodable parts of an `Entry`. It can be set to `Self` if the whole `Entry` is cachable. See docs of `pre_process()` for an example of deriving `Encodable` from an `Entry`.
@@ -36,16 +36,18 @@ pub trait Entry: Clone + Debug {
     type NotEncodable: NotEncodable;
 
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
+    /// The type that represents if there was a cache hit or miss in UniCache.
     type EncodeResult: Clone + Debug;
 
     #[cfg(all(feature = "unicache", feature = "serde"))]
+    /// The type that represents the results of trying to encode i.e., if there was a cache hit or miss in UniCache.
     type EncodeResult: Clone + Debug + Serialize + for<'a> Deserialize<'a>;
 
     #[cfg(all(feature = "unicache", not(feature = "serde")))]
-    /// The unicache type for caching popular/re-occurring entries.
+    /// The type that represents the results of trying to encode i.e., if there was a cache hit or miss in UniCache.
     type UniCache: UniCache<T = Self>;
     #[cfg(all(feature = "unicache", feature = "serde"))]
-    // /// The unicache type for caching popular/re-occurring entries.
+    /// The unicache type for caching popular/re-occurring fields of an entry.
     type UniCache: UniCache<T = Self> + Serialize + for<'a> Deserialize<'a>;
 }
 
