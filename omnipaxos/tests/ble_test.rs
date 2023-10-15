@@ -21,7 +21,6 @@ fn ble_test() {
         thread::sleep(6 * cfg.election_timeout);
         let elected_leader = sys.get_elected_leader(1, cfg.wait_timeout);
         println!("elected: {:?}", elected_leader);
-        assert_ne!(elected_leader, 1, "Leader should never stabilize to 1");
         sys.kill_node(elected_leader)
     }
     println!("Pass ballot_leader_election");

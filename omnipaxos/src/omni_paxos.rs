@@ -266,17 +266,17 @@ where
 
     /// Returns the id of the current leader.
     pub fn get_current_leader(&self) -> Option<NodeId> {
-        self.get_current_leader_ballot().map(|ballot| ballot.pid)
-    }
-
-    /// Returns the ballot of the current leader.
-    pub fn get_current_leader_ballot(&self) -> Option<Ballot> {
-        let ballot = self.seq_paxos.get_current_leader();
-        if ballot == Ballot::default() {
+        let promised_pid = self.seq_paxos.get_promise().pid;
+        if promised_pid == 0 {
             None
         } else {
-            Some(ballot)
+            Some(promised_pid)
         }
+    }
+
+    /// Returns the promised ballot of this node.
+    pub fn get_promise(&self) -> Ballot {
+        self.seq_paxos.get_promise()
     }
 
     /// Returns the outgoing messages from this server. The messages should then be sent via the network implementation.

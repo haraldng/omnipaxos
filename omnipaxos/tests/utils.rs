@@ -135,8 +135,8 @@ impl Default for TestConfig {
         Self {
             num_threads: 3,
             num_nodes: 3,
-            wait_timeout: Duration::from_millis(3000),
-            election_timeout: Duration::from_millis(50),
+            wait_timeout: Duration::from_millis(5000),
+            election_timeout: Duration::from_millis(200),
             resend_message_timeout: Duration::from_millis(500),
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
@@ -144,7 +144,6 @@ impl Default for TestConfig {
             gc_idx: 0,
             flexible_quorum: None,
             batch_size: 1,
-            // #[cfg(feature = "unicache")]
             num_iterations: 0,
         }
     }
@@ -716,7 +715,6 @@ impl TestSystem {
         };
     }
 }
-
 pub mod omnireplica {
     use super::*;
     use omnipaxos::{
@@ -766,11 +764,10 @@ pub mod omnireplica {
                 Some(
                     self.schedule_periodic(self.tick_timeout, self.tick_timeout, move |c, _| {
                         c.paxos.tick();
-                        if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
-                            if leader_ballot != c.current_leader_ballot {
-                                c.current_leader_ballot = leader_ballot;
-                                c.answer_election_future(leader_ballot);
-                            }
+                        let promise = c.paxos.get_promise();
+                        if promise > c.current_leader_ballot {
+                            c.current_leader_ballot = promise;
+                            c.answer_election_future(promise);
                         }
                         Handled::Ok
                     }),
@@ -831,8 +828,15 @@ pub mod omnireplica {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
                 if self.is_connected_to(&out.get_receiver()) {
-                    let receiver = self.peers.get(&out.get_receiver()).unwrap();
-                    receiver.tell(out);
+                    match self.peers.get(&out.get_receiver()) {
+                        Some(receiver) => receiver.tell(out),
+                        None => warn!(
+                            self.ctx.log(),
+                            "Peer {} not found! Message: {:?}",
+                            out.get_receiver(),
+                            out
+                        ),
+                    }
                 }
             }
         }

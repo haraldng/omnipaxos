@@ -16,7 +16,6 @@ where
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
-            self.leader = prep.n;
             self.internal_storage
                 .flush_batch()
                 .expect("storage error while trying to flush batch");
@@ -255,7 +254,7 @@ where
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
-                to: self.leader.pid,
+                to: acc_ss.n.pid,
                 msg: PaxosMsg::Accepted(a),
             });
         }
@@ -316,7 +315,7 @@ where
                 self.latest_accepted_meta = Some((n, cached_idx));
                 self.outgoing.push(PaxosMessage {
                     from: self.pid,
-                    to: self.leader.pid,
+                    to: n.pid,
                     msg: PaxosMsg::Accepted(accepted),
                 });
             }
@@ -328,8 +327,13 @@ where
         let my_promise = self.internal_storage.get_promise();
         match my_promise.cmp(&message_ballot) {
             std::cmp::Ordering::Equal => true,
-            std::cmp::Ordering::Less => {
+            std::cmp::Ordering::Greater => {
                 let not_acc = NotAccepted { n: my_promise };
+                #[cfg(feature = "logging")]
+                warn!(
+                    self.logger,
+                    "NotAccepted. My promise: {:?}, theirs: {:?}", my_promise, message_ballot
+                );
                 self.outgoing.push(PaxosMessage {
                     from: self.pid,
                     to: message_ballot.pid,
@@ -337,12 +341,12 @@ where
                 });
                 false
             }
-            std::cmp::Ordering::Greater => {
+            std::cmp::Ordering::Less => {
                 // Should never happen, but to be safe send PrepareReq
                 #[cfg(feature = "logging")]
                 warn!(
                     self.logger,
-                    "Received non-prepare message from a leader I've never promised."
+                    "Received non-prepare message from a leader I've never promised. My: {:?}, theirs: {:?}", my_promise, message_ballot
                 );
                 self.reconnected(message_ballot.pid);
                 false

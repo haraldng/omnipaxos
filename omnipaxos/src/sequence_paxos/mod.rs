@@ -30,7 +30,6 @@ where
     pid: NodeId,
     peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
-    leader: Ballot,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T>>,
@@ -88,7 +87,6 @@ where
             state,
             pending_proposals: vec![],
             pending_stopsign: None,
-            leader,
             outgoing,
             leader_state: LeaderState::<T>::with(leader, max_pid, quorum),
             latest_accepted_meta: None,
@@ -171,7 +169,7 @@ where
                         .expect("storage error while trying to trim log")
                 })
             }
-            _ => Err(CompactionErr::NotCurrentLeader(self.leader.pid)),
+            _ => Err(CompactionErr::NotCurrentLeader(self.get_current_leader())),
         }
     }
 
@@ -272,35 +270,29 @@ where
                         #[cfg(feature = "logging")]
                         warn!(self.logger, "In Prepare phase without a cached promise!");
                         self.state = (Role::Follower, Phase::Recover);
-                        let prepreq = PrepareReq {
-                            n: self.get_promise(),
-                        };
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: self.leader.pid,
-                            msg: PaxosMsg::PrepareReq(prepreq),
-                        });
+                        self.send_preparereq_to_all_peers();
                     }
                 }
             }
             (Role::Follower, Phase::Recover) => {
                 // Resend PrepareReq
-                let prepreq = PrepareReq {
-                    n: self.get_promise(),
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: self.leader.pid,
-                    msg: PaxosMsg::PrepareReq(prepreq),
-                });
+                self.send_preparereq_to_all_peers();
             }
             _ => (),
         }
     }
 
-    /// Returns the id of the current leader.
-    pub(crate) fn get_current_leader(&self) -> Ballot {
-        self.leader
+    fn send_preparereq_to_all_peers(&mut self) {
+        let prepreq = PrepareReq {
+            n: self.get_promise(),
+        };
+        for peer in &self.peers {
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: *peer,
+                msg: PaxosMsg::PrepareReq(prepreq.clone()),
+            });
+        }
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
@@ -436,12 +428,16 @@ where
         }
     }
 
+    fn get_current_leader(&self) -> NodeId {
+        self.get_promise().pid
+    }
+
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub(crate) fn reconnected(&mut self, pid: NodeId) {
         if pid == self.pid {
             return;
-        } else if pid == self.leader.pid {
+        } else if pid == self.get_current_leader() {
             self.state = (Role::Follower, Phase::Recover);
         }
         let prepreq = PrepareReq {
@@ -465,6 +461,38 @@ where
 
     pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {
         &self.leader_state
+    }
+
+    pub(crate) fn forward_proposals(&mut self, mut entries: Vec<T>) {
+        let leader = self.get_current_leader();
+        if leader > 0 && self.pid != leader {
+            let pf = PaxosMsg::ProposalForward(entries);
+            let msg = PaxosMessage {
+                from: self.pid,
+                to: leader,
+                msg: pf,
+            };
+            self.outgoing.push(msg);
+        } else {
+            self.pending_proposals.append(&mut entries);
+        }
+    }
+
+    pub(crate) fn forward_stopsign(&mut self, ss: StopSign) {
+        let leader = self.get_current_leader();
+        if leader > 0 && self.pid != leader {
+            #[cfg(feature = "logging")]
+            trace!(self.logger, "Forwarding StopSign to Leader {:?}", leader);
+            let fs = PaxosMsg::ForwardStopSign(ss);
+            let msg = PaxosMessage {
+                from: self.pid,
+                to: leader,
+                msg: fs,
+            };
+            self.outgoing.push(msg);
+        } else if self.pending_stopsign.as_mut().is_none() {
+            self.pending_stopsign = Some(ss);
+        }
     }
 }
 

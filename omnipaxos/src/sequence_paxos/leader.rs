@@ -25,7 +25,6 @@ where
         if self.pid == n.pid {
             self.leader_state =
                 LeaderState::with(n, self.leader_state.max_pid, self.leader_state.quorum);
-            self.leader = n;
             self.internal_storage
                 .flush_batch()
                 .expect("storage error while trying to flush batch");
@@ -82,46 +81,6 @@ where
                 self.leader_state.set_batch_accept_meta(from, None);
             }
             self.send_prepare(from);
-        }
-    }
-
-    pub(crate) fn forward_proposals(&mut self, mut entries: Vec<T>) {
-        if self.leader.pid > 0 && self.leader.pid != self.pid {
-            #[cfg(feature = "logging")]
-            trace!(
-                self.logger,
-                "Forwarding proposal to Leader {:?}",
-                self.leader
-            );
-            let pf = PaxosMsg::ProposalForward(entries);
-            let msg = PaxosMessage {
-                from: self.pid,
-                to: self.leader.pid,
-                msg: pf,
-            };
-            self.outgoing.push(msg);
-        } else {
-            self.pending_proposals.append(&mut entries);
-        }
-    }
-
-    pub(crate) fn forward_stopsign(&mut self, ss: StopSign) {
-        if self.leader.pid > 0 && self.leader.pid != self.pid {
-            #[cfg(feature = "logging")]
-            trace!(
-                self.logger,
-                "Forwarding StopSign to Leader {:?}",
-                self.leader
-            );
-            let fs = PaxosMsg::ForwardStopSign(ss);
-            let msg = PaxosMessage {
-                from: self.pid,
-                to: self.leader.pid,
-                msg: fs,
-            };
-            self.outgoing.push(msg);
-        } else if self.pending_stopsign.as_mut().is_none() {
-            self.pending_stopsign = Some(ss);
         }
     }
 

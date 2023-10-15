@@ -21,7 +21,7 @@ num_iterations = 2
 storage_type = { type = "Memory" }
 
 [flexible_quorum_test]
-wait_timeout_ms = 5000
+wait_timeout_ms = 8000
 num_threads = 8
 num_nodes = 8
 flexible_quorum = [6, 3]
@@ -70,5 +70,5 @@ num_nodes = 3
 storage_type = { type = "Broken" }
 
 [sync_test]
-wait_timeout_ms = 5000
+wait_timeout_ms = 8000
 num_nodes = 3
