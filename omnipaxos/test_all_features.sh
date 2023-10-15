@@ -4,7 +4,7 @@
 # Usage: ./test_all_features.sh [-c], -c runs cargo check instead of cargo test
 
 # Define an array of feature names
-features=("logging" "toml_config" "unicache")
+features=("batch_accept" "macros" "logging" "toml_config" "unicache")
 
 # Initialize a variable to track whether to run the tests or not
 check_only=false
@@ -33,24 +33,24 @@ total_combinations=$((1 << num_features))
 failing_combinations=""
 
 # Loop through all possible feature combinations
-for ((i = 0; i < total_combinations; i++)); do
-    feature_flags="--features macros"
+for ((i = 1; i < total_combinations; i++)); do
+    feature_flags="--features "
 
     # Generate feature flags for the current combination
     for ((j = 0; j < num_features; j++)); do
         if (( (i >> j) & 1 )); then
-            feature_flags+=",${features[j]}"
+            feature_flags+="${features[j]},"
         fi
     done
 
     if [ "$check_only" = true ]; then
         # Run cargo check with the current feature combination
         echo "Checking with features: ${feature_flags}"
-        cargo check $feature_flags
+        cargo check --no-default-features $feature_flags
     else
         # Run cargo test with the current feature combination
         echo "Testing with features: ${feature_flags}"
-        cargo test $feature_flags
+        cargo test --no-default-features $feature_flags
     fi
 
     # Check if cargo test failed

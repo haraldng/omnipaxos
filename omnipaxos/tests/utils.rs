@@ -3,12 +3,12 @@ use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
     ballot_leader_election::Ballot,
+    macros::*,
     messages::Message,
     storage::{Entry, Snapshot, Storage, StorageResult},
     util::{FlexibleQuorum, NodeId},
     ClusterConfig, OmniPaxosConfig, ServerConfig,
 };
-use omnipaxos_macros::*;
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
@@ -31,8 +31,6 @@ const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
 #[cfg(feature = "unicache")]
 use omnipaxos::unicache::{MaybeEncoded, UniCache};
-#[cfg(feature = "unicache")]
-use omnipaxos_macros::UniCacheEntry;
 
 /// Serde deserialize function to deserialize toml milliseconds u64s to std::time::Duration
 fn deserialize_duration_millis<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -930,8 +928,9 @@ pub struct Value {
 }
 
 #[cfg(feature = "unicache")]
-#[cfg_attr(feature = "unicache", derive(UniCacheEntry))]
-#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(
+    Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
+)]
 #[snapshot(LatestValue)]
 pub struct Value {
     pub id: u64,
