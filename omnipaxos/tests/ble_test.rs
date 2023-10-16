@@ -15,11 +15,17 @@ fn ble_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
+    let mut prev_leader = 0;
     let num_elections = cfg.num_nodes / 2;
     for _ in 0..num_elections {
         // Wait to ensure stabilized leader
         thread::sleep(6 * cfg.election_timeout);
         let elected_leader = sys.get_elected_leader(1, cfg.wait_timeout);
+        assert_ne!(
+            elected_leader, prev_leader,
+            "Failed to elect new leader after timeout"
+        );
+        prev_leader = elected_leader;
         println!("elected: {:?}", elected_leader);
         sys.kill_node(elected_leader)
     }

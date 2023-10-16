@@ -290,7 +290,7 @@ where
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: *peer,
-                msg: PaxosMsg::PrepareReq(prepreq.clone()),
+                msg: PaxosMsg::PrepareReq(prepreq),
             });
         }
     }
