@@ -52,12 +52,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --features default,logging,toml_config
+          args: --verbose --features default,logging,toml_config --no-fail-fast
       - name: Run UniCache tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --features default,logging,toml_config,unicache
+          args: --verbose --features default,logging,toml_config,unicache --no-fail-fast
 
   format:
     name: cargo fmt
