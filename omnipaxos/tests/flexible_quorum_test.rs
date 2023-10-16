@@ -21,6 +21,9 @@ fn flexible_quorum_prepare_phase_test() {
         .collect();
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
+    // Wait for leader to get elected
+    thread::sleep(20 * cfg.election_timeout);
+
     // Propose some initial values
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
@@ -36,7 +39,7 @@ fn flexible_quorum_prepare_phase_test() {
     sys.kill_node(leader_id);
 
     // Wait for next leader to get elected
-    thread::sleep(8 * cfg.election_timeout);
+    thread::sleep(20 * cfg.election_timeout);
 
     // Make some propsals
     let still_alive_node_id = sys.nodes.keys().next().unwrap();
@@ -68,6 +71,9 @@ fn flexible_quorum_accept_phase_test() {
         .collect();
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
+    // Wait for leader to get elected
+    thread::sleep(20 * cfg.election_timeout);
+
     // Propose some values
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
@@ -81,7 +87,7 @@ fn flexible_quorum_accept_phase_test() {
     }
 
     // Wait for next leader to get elected
-    thread::sleep(8 * cfg.election_timeout);
+    thread::sleep(20 * cfg.election_timeout);
 
     // Make some more propsals
     sys.make_proposals(leader_id, last_proposals, cfg.wait_timeout);
