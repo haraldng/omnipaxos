@@ -615,7 +615,6 @@ impl TestSystem {
     /// wait until a leader is elected in the allocated time.
     pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
         let node = self.nodes.get(&node_id).expect("No BLE component found");
-
         let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
         leader_pid.unwrap_or_else(|| self.get_next_leader(node_id, wait_timeout))
     }

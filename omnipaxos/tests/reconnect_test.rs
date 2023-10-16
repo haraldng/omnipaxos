@@ -185,7 +185,14 @@ fn reconnect_after_dropped_prepare_test() {
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
+
+    // leader is stopped and follower is partitioned, so pick a node that can actually see the new leader.
+    let node = sys
+        .nodes
+        .keys()
+        .find(|x| **x != leader_id && **x != follower_id)
+        .unwrap();
+    let new_leader_id = sys.get_elected_leader(*node, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_prepare_test failed to elect a different leader"
@@ -261,7 +268,14 @@ fn reconnect_after_dropped_promise_test() {
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
+
+    // leader is stopped and follower is partitioned, so pick a node that can actually see the new leader.
+    let node = sys
+        .nodes
+        .keys()
+        .find(|x| **x != leader_id && **x != follower_id)
+        .unwrap();
+    let new_leader_id = sys.get_elected_leader(*node, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_promise_test failed to elect a different leader"

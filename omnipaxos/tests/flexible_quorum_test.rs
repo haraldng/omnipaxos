@@ -80,6 +80,9 @@ fn flexible_quorum_accept_phase_test() {
         sys.kill_node(node_id);
     }
 
+    // Wait for next leader to get elected
+    thread::sleep(8 * cfg.election_timeout);
+
     // Make some more propsals
     sys.make_proposals(leader_id, last_proposals, cfg.wait_timeout);
 
