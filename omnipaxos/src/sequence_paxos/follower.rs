@@ -219,7 +219,7 @@ where
 
     #[cfg(feature = "unicache")]
     pub(crate) fn handle_encoded_acceptdecide(&mut self, e: EncodedAcceptDecide<T>) {
-        if self.internal_storage.get_promise() == e.n
+        if self.check_valid_ballot(e.n)
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(e.seq_num, e.n.pid) == MessageStatus::Expected
         {
