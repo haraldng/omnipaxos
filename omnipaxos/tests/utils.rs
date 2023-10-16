@@ -726,8 +726,11 @@ pub mod omnireplica {
 
     const SNAPSHOTTED_DECIDE: Value = Value {
         id: 0,
+        #[cfg(feature = "unicache")]
         first_name: String::new(),
+        #[cfg(feature = "unicache")]
         last_name: String::new(),
+        #[cfg(feature = "unicache")]
         job: String::new(),
     };
 
@@ -925,9 +928,6 @@ pub mod omnireplica {
 #[snapshot(LatestValue)]
 pub struct Value {
     id: u64,
-    first_name: String,
-    last_name: String,
-    job: String,
 }
 
 #[cfg(feature = "unicache")]
