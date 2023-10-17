@@ -77,7 +77,7 @@ pub struct TestConfig {
     #[serde(rename(deserialize = "election_timeout_ms"))]
     #[serde(deserialize_with = "deserialize_duration_millis")]
     pub election_timeout: Duration,
-    #[serde(rename(deserialize = "resend_timeout_ms"))]
+    #[serde(rename(deserialize = "resend_message_timeout_ms"))]
     #[serde(deserialize_with = "deserialize_duration_millis")]
     pub resend_message_timeout: Duration,
     pub storage_type: StorageTypeSelector,
