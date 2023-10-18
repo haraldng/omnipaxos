@@ -175,8 +175,6 @@ where
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
-            // info!(self.logger, "ACCEPTED0: accepted_idx: {:?}, compacted_idx: {}", self.internal_storage.get_accepted_idx(), self.internal_storage.get_compacted_idx());
-            // info!(self.logger, "ACCEPTED: {:?}, my log: {:?}", accepted, self.internal_storage.read(0..));
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,
@@ -232,7 +230,6 @@ where
             }
             // handle accept
             let encoded_entries = e.entries;
-            // info!(self.logger, "ENCODED ACCEPT: {:?}, {:?}, ", e.n, encoded_entries);
             let result = self.accept_encoded_entries_follower(e.n, encoded_entries);
             self.internal_storage.rollback_and_panic_if_err(
                 &result,

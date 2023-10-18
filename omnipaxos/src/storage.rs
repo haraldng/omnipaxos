@@ -2,7 +2,7 @@ use super::ballot_leader_election::Ballot;
 #[cfg(feature = "unicache")]
 use crate::unicache::*;
 use crate::{
-    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
+    util::{AcceptedMetaData, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
     ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
@@ -202,6 +202,8 @@ struct StateCache<T>
 where
     T: Entry,
 {
+    /// Id of this node
+    pid: NodeId,
     /// The maximum number of entries to batch.
     batch_size: usize,
     /// Vector which contains all the logged entries in-memory.
@@ -229,8 +231,9 @@ impl<T> StateCache<T>
 where
     T: Entry,
 {
-    pub fn new(config: InternalStorageConfig) -> Self {
+    pub fn new(config: InternalStorageConfig, pid: NodeId) -> Self {
         StateCache {
+            pid,
             batch_size: config.batch_size,
             batched_entries: Vec::with_capacity(config.batch_size),
             promise: Ballot::default(),
@@ -278,9 +281,12 @@ where
     fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
         #[cfg(feature = "unicache")]
         {
-            for entry in &entries {
-                let processed = self.unicache.try_encode(entry);
-                self.batched_processed_by_leader.push(processed);
+            if self.promise.pid == self.pid {
+                // only try encoding if we're the leader
+                for entry in &entries {
+                    let processed = self.unicache.try_encode(entry);
+                    self.batched_processed_by_leader.push(processed);
+                }
             }
         }
         self.batched_entries.extend(entries);
@@ -329,10 +335,10 @@ where
     I: Storage<T>,
     T: Entry,
 {
-    pub(crate) fn with(storage: I, config: InternalStorageConfig) -> Self {
+    pub(crate) fn with(storage: I, config: InternalStorageConfig, pid: NodeId) -> Self {
         let mut internal_store = InternalStorage {
             storage,
-            state_cache: StateCache::new(config),
+            state_cache: StateCache::new(config, pid),
             _t: Default::default(),
         };
         internal_store.load_cache();

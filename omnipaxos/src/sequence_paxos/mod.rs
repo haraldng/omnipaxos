@@ -81,7 +81,7 @@ where
             batch_size: config.batch_size,
         };
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage, internal_storage_config),
+            internal_storage: InternalStorage::with(storage, internal_storage_config, pid),
             pid,
             peers,
             state,
