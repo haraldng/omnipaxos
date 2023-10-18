@@ -40,15 +40,15 @@ fn consensus_test() {
     let mut log = vec![];
     for (pid, node) in sys.nodes {
         log.push(node.on_definition(|x| {
-            let log = x.get_trimmed_suffix();
-            (pid, log.to_vec())
+            let log = x.read_decided_log();
+            (pid, log)
         }));
     }
 
     let quorum_size = cfg.num_nodes / 2 + 1;
     check_quorum(&log, quorum_size, &vec_proposals);
     check_validity(&log, &vec_proposals);
-    check_uniform_agreement(&log);
+    check_consistent_log_prefixes(&log);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");

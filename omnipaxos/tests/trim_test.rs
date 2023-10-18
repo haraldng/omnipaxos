@@ -1,9 +1,10 @@
 pub mod utils;
 
-use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{ballot_leader_election::Ballot, util::NodeId};
+use crate::utils::omnireplica::OmniPaxosComponent;
+use kompact::prelude::{promise, Ask, Component, FutureCollection};
+use omnipaxos::{ballot_leader_election::Ballot, util::LogEntry};
 use serial_test::serial;
-use std::thread;
+use std::{sync::Arc, thread};
 use utils::{TestConfig, TestSystem, Value};
 
 const TRIM_INDEX_INCREMENT: u64 = 10;
@@ -30,35 +31,35 @@ fn trim_test() {
 
     let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
-    for v in &vec_proposals {
+    let last = vec_proposals.last().unwrap();
+    for node in sys.nodes.values() {
         let (kprom, kfuture) = promise::<()>();
-        elected_leader.on_definition(|x| {
-            x.insert_decided_future(Ask::new(kprom, v.clone()));
-            x.paxos.append(v.clone()).expect("Failed to append");
+        node.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, last.clone()));
         });
         futures.push(kfuture);
     }
+    for v in &vec_proposals {
+        elected_leader.on_definition(|x| {
+            x.paxos.append(v.clone()).expect("Failed to append");
+        });
+    }
 
+    // wait until all nodes have decided last entry
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes decide
-
     elected_leader.on_definition(|x| {
         x.paxos.trim(Some(cfg.trim_idx)).expect("Failed to trim");
     });
 
-    let mut seqs_after = vec![];
-    for (i, px) in sys.nodes {
-        seqs_after.push(px.on_definition(|x| {
-            let seq = x.get_trimmed_suffix();
-            (i, seq.to_vec())
-        }));
-    }
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get trim
 
-    check_trim(&vec_proposals, &seqs_after, cfg.trim_idx, elected_pid);
+    for (_pid, node) in sys.nodes {
+        check_trim(&vec_proposals, cfg.trim_idx, node);
+    }
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -124,20 +125,11 @@ fn double_trim_test() {
             .expect(format!("Failed to trim {}", second_trim_idx).as_str());
     });
 
-    let mut seq_after_double = vec![];
-    for (i, px) in sys.nodes {
-        seq_after_double.push(px.on_definition(|x| {
-            let seq = x.get_trimmed_suffix();
-            (i, seq.to_vec())
-        }));
-    }
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes trim
 
-    check_trim(
-        &vec_proposals,
-        &seq_after_double,
-        cfg.trim_idx + TRIM_INDEX_INCREMENT,
-        elected_pid,
-    );
+    for (_pid, node) in sys.nodes {
+        check_trim(&vec_proposals, cfg.trim_idx + TRIM_INDEX_INCREMENT, node);
+    }
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -147,25 +139,30 @@ fn double_trim_test() {
     };
 }
 
-fn check_trim(
-    vec_proposals: &Vec<Value>,
-    seq_after: &Vec<(u64, Vec<Value>)>,
-    trim_idx: u64,
-    leader: NodeId,
-) {
-    for (pid, after) in seq_after {
-        if *pid == leader {
-            // leader must have successfully trimmed
-            assert_eq!(vec_proposals.len(), (after.len() + trim_idx as usize));
-            assert_eq!(vec_proposals.get(trim_idx as usize), after.get(0));
-        } else if after.len() + trim_idx as usize == vec_proposals.len() {
-            // successful trim
-            assert_eq!(vec_proposals.get(trim_idx as usize), after.get(0));
-        } else {
-            // must be prefix
-            for (entry_idx, entry) in after.iter().enumerate() {
-                assert_eq!(Some(entry), vec_proposals.get(entry_idx));
+fn check_trim(vec_proposals: &Vec<Value>, trim_idx: u64, node: Arc<Component<OmniPaxosComponent>>) {
+    let num_proposals = vec_proposals.len();
+    node.on_definition(|x| {
+        let op = &x.paxos;
+        for trimmed_idx in 0..trim_idx {
+            match op.read(trimmed_idx).unwrap() {
+                LogEntry::Trimmed(idx) if idx == trim_idx => {}
+                e => panic!(
+                    "Entry must be trimmed at idx {}, but was {:?}",
+                    trimmed_idx, e
+                ),
             }
         }
-    }
+        for idx in trim_idx as usize..num_proposals {
+            let expected_value = vec_proposals.get(idx).unwrap();
+            match op.read(idx as u64).unwrap() {
+                LogEntry::Decided(v) if &v == expected_value => {}
+                e => panic!(
+                    "Entry must be decided with {:?} at idx {}, but was {:?}",
+                    expected_value, idx, e
+                ),
+            }
+        }
+        let decided_sfx = op.read_decided_suffix(0).unwrap();
+        assert_eq!(decided_sfx.len(), num_proposals - trim_idx as usize + 1); // +1 as all trimmed entries are represented by LogEntry::Trimmed
+    });
 }

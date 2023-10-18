@@ -806,25 +806,6 @@ pub mod omnireplica {
             self.paxos.read_decided_suffix(0).unwrap()
         }
 
-        pub fn get_trimmed_suffix(&self) -> Vec<Value> {
-            if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
-                let ents = match decided_ents.first().unwrap() {
-                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
-                        decided_ents.get(1..).unwrap()
-                    }
-                    _ => decided_ents.as_slice(),
-                };
-                ents.iter()
-                    .map(|x| match x {
-                        LogEntry::Decided(i) => i.clone(),
-                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
-                    })
-                    .collect()
-            } else {
-                vec![]
-            }
-        }
-
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
@@ -1110,14 +1091,14 @@ pub mod verification {
 
     /// Verifies that there is a majority when an entry is proposed.
     pub fn check_quorum(
-        log_responses: &[(u64, Vec<Value>)],
+        logs: &[(u64, Vec<LogEntry<Value>>)],
         quorum_size: usize,
-        num_proposals: &[Value],
+        proposals: &[Value],
     ) {
-        for i in num_proposals {
-            let num_nodes: usize = log_responses
+        for v in proposals {
+            let num_nodes: usize = logs
                 .iter()
-                .filter(|(_, sr)| sr.contains(i))
+                .filter(|(_pid, log)| log.contains(&LogEntry::Decided(v.clone())))
                 .count();
             let timed_out_proposal = num_nodes == 0;
             if !timed_out_proposal {
@@ -1131,31 +1112,28 @@ pub mod verification {
     }
 
     /// Verifies that only proposed values are decided.
-    pub fn check_validity(log_responses: &[(u64, Vec<Value>)], num_proposals: &[Value]) {
-        let invalid_nodes: Vec<_> = log_responses
-            .iter()
-            .filter(|(_, sr)| {
-                sr.iter()
-                    .filter(|ent| !num_proposals.contains(*ent))
-                    .count()
-                    != 0
-            })
-            .collect();
-        assert!(
-            invalid_nodes.is_empty(),
-            "Nodes decided unproposed values. invalid_nodes: {:?}",
-            invalid_nodes
-        );
+    pub fn check_validity(logs: &[(u64, Vec<LogEntry<Value>>)], proposals: &[Value]) {
+        logs.iter().for_each(|(_pid, log)| {
+            for entry in log {
+                if let LogEntry::Decided(v) = entry {
+                    assert!(
+                        proposals.contains(v),
+                        "Node decided unproposed value: {:?}",
+                        v
+                    );
+                }
+            }
+        });
     }
 
-    /// Verifies if one correct node receives a message, then everyone will eventually receive it.
-    pub fn check_uniform_agreement(log_responses: &Vec<(u64, Vec<Value>)>) {
-        let (_, longest_log) = log_responses
+    /// Verifies logs do not diverge. **NOTE**: this check assumes normal execution within one round without any snapshots, trimming.
+    pub fn check_consistent_log_prefixes(logs: &Vec<(u64, Vec<LogEntry<Value>>)>) {
+        let (_, longest_log) = logs
             .iter()
             .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
-            .expect("Empty SequenceResp from nodes!");
-        for (_, sr) in log_responses {
-            assert!(longest_log.starts_with(sr.as_slice()));
+            .expect("Empty log from nodes!");
+        for (_, log) in logs {
+            assert!(longest_log.starts_with(log.as_slice()));
         }
     }
 }
