@@ -29,6 +29,8 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
+pub const STOPSIGN_ID: u64 = u64::MAX;
+
 #[cfg(feature = "unicache")]
 use omnipaxos::unicache::{MaybeEncoded, UniCache};
 
@@ -41,26 +43,29 @@ where
     Ok(Duration::from_millis(val))
 }
 
-#[cfg(feature = "unicache")]
-const UNICACHE_ITERATIONS: u64 = 2;
-
-pub fn create_proposals(num_proposals: u64) -> Vec<Value> {
+pub fn create_proposals(from: u64, to: u64) -> Vec<Value> {
     #[cfg(feature = "unicache")]
     {
-        assert!(
-            UNICACHE_ITERATIONS > 1,
-            "Must be greater than 1 to test UniCache hits"
-        );
-        let (start, end) = (1, num_proposals / UNICACHE_ITERATIONS);
-        (start..=end)
-            .cycle()
-            .take((end - start) as usize * UNICACHE_ITERATIONS as usize)
-            .map(|v| Value::with_id(v))
+        (from..=to)
+            .map(|id| {
+                let mut v = Value::with_id(id);
+                // Different combinations of cache hit/miss in Value depending on the id
+                if id % 2 == 0 {
+                    v.first_name = "John".to_string()
+                }
+                if id % 3 == 0 {
+                    v.job = "Software Engineer".to_string();
+                }
+                if id % 5 == 0 {
+                    v.last_name = "Doe".to_string()
+                }
+                v
+            })
             .collect()
     }
     #[cfg(not(feature = "unicache"))]
     {
-        (1..=num_proposals).map(Value::with_id).collect()
+        (from..=to).map(Value::with_id).collect()
     }
 }
 
@@ -83,7 +88,7 @@ pub struct TestConfig {
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
-    pub gc_idx: u64,
+    pub trim_idx: u64,
     pub flexible_quorum: Option<(usize, usize)>,
     pub batch_size: usize,
     // #[cfg(feature = "unicache")]
@@ -141,7 +146,7 @@ impl Default for TestConfig {
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,
-            gc_idx: 0,
+            trim_idx: 0,
             flexible_quorum: None,
             batch_size: 1,
             num_iterations: 0,
@@ -664,10 +669,10 @@ impl TestSystem {
 
         let mut proposal_futures = vec![];
         proposer.on_definition(|x| {
-            for val in proposals {
-                let (kprom, kfuture) = promise::<Value>();
-                x.paxos.append(val).expect("Failed to append");
-                x.decided_futures.push(Ask::new(kprom, ()));
+            for v in proposals {
+                let (kprom, kfuture) = promise::<()>();
+                x.paxos.append(v.clone()).expect("Failed to append");
+                x.insert_decided_future(Ask::new(kprom, v));
                 proposal_futures.push(kfuture);
             }
         });
@@ -691,11 +696,11 @@ impl TestSystem {
             .expect("No SequencePaxos component found");
 
         let reconfig_future = proposer.on_definition(|x| {
-            let (kprom, kfuture) = promise::<Value>();
+            let (kprom, kfuture) = promise::<()>();
             x.paxos
                 .reconfigure(new_configuration, metadata)
                 .expect("Failed to reconfigure");
-            x.decided_futures.push(Ask::new(kprom, ()));
+            x.insert_decided_future(Ask::new(kprom, Value::with_id(STOPSIGN_ID)));
             kfuture
         });
 
@@ -724,16 +729,6 @@ pub mod omnireplica {
     };
     use std::collections::{HashMap, HashSet};
 
-    const SNAPSHOTTED_DECIDE: Value = Value {
-        id: 0,
-        #[cfg(feature = "unicache")]
-        first_name: String::new(),
-        #[cfg(feature = "unicache")]
-        last_name: String::new(),
-        #[cfg(feature = "unicache")]
-        job: String::new(),
-    };
-
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosComponent {
         ctx: ComponentContext<Self>,
@@ -745,7 +740,7 @@ pub mod omnireplica {
         tick_timer: Option<ScheduledTimer>,
         tick_timeout: Duration,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
-        pub decided_futures: Vec<Ask<(), Value>>,
+        decided_futures: HashMap<u64, Ask<Value, ()>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: u64,
@@ -801,7 +796,7 @@ pub mod omnireplica {
                 tick_timeout,
                 decided_idx: paxos.get_decided_idx(),
                 paxos,
-                decided_futures: vec![],
+                decided_futures: HashMap::new(),
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
             }
@@ -865,43 +860,35 @@ pub mod omnireplica {
             }
         }
 
+        pub fn insert_decided_future(&mut self, a: Ask<Value, ()>) {
+            let id = a.request().id;
+            let replaced = self.decided_futures.insert(id, a);
+            assert!(replaced.is_none(), "Future for {:?} already exists!", id);
+        }
+
+        fn try_answer_decided_future(&mut self, id: u64) {
+            if let Some(ask) = self.decided_futures.remove(&id) {
+                ask.reply(()).expect("Failed to reply promise!");
+            }
+        }
+
         fn answer_decided_future(&mut self) {
             if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
-                if !self.decided_futures.is_empty() {
-                    for e in entries {
-                        match e {
-                            LogEntry::Decided(i) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(i)
-                                .expect("Failed to reply promise!"),
-                            LogEntry::Snapshotted(s) => {
-                                // Reply with dummy value for futures which were trimmed away
-                                for _ in 1..(s.trimmed_idx - self.decided_idx) {
-                                    self.decided_futures
-                                        .pop()
-                                        .unwrap()
-                                        .reply(SNAPSHOTTED_DECIDE)
-                                        .expect("Failed to reply promise!");
-                                }
-                                self.decided_futures
-                                    .pop()
-                                    .unwrap()
-                                    .reply(s.snapshot.0)
-                                    .expect("Failed to reply promise!");
-                            }
-                            LogEntry::StopSign(ss, _is_decided) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(Value {
-                                    id: ss.next_config.configuration_id as u64,
-                                    ..Default::default()
-                                })
-                                .expect("Failed to reply stopsign promise"),
-                            err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                for e in entries {
+                    match e {
+                        LogEntry::Decided(i) => {
+                            self.try_answer_decided_future(i.id);
                         }
+                        LogEntry::Snapshotted(s) => {
+                            // Reply futures that were trimmed away
+                            for id in s.snapshot.snapshotted.iter().map(|x| x.id) {
+                                self.try_answer_decided_future(id)
+                            }
+                        }
+                        LogEntry::StopSign(_ss, _is_decided) => {
+                            self.try_answer_decided_future(STOPSIGN_ID);
+                        }
+                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                     }
                 }
                 self.decided_idx = self.paxos.get_decided_idx();
@@ -925,7 +912,7 @@ pub mod omnireplica {
 
 #[cfg(not(feature = "unicache"))]
 #[derive(Entry, Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
-#[snapshot(LatestValue)]
+#[snapshot(ValueSnapshot)]
 pub struct Value {
     id: u64,
 }
@@ -934,7 +921,7 @@ pub struct Value {
 #[derive(
     Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
 )]
-#[snapshot(LatestValue)]
+#[snapshot(ValueSnapshot)]
 pub struct Value {
     pub id: u64,
     #[unicache(encoding(u8), size(100))]
@@ -949,33 +936,55 @@ impl Value {
     pub fn with_id(id: u64) -> Self {
         Self {
             id,
-            ..Default::default()
+            #[cfg(feature = "unicache")]
+            first_name: id.to_string(),
+            #[cfg(feature = "unicache")]
+            last_name: id.to_string(),
+            #[cfg(feature = "unicache")]
+            job: id.to_string(),
         }
     }
 }
 
-#[derive(Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
-pub struct LatestValue(Value);
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ValueSnapshot {
+    pub latest_value: Value,
+    pub snapshotted: Vec<Value>,
+}
 
-impl Snapshot<Value> for LatestValue {
+impl Snapshot<Value> for ValueSnapshot {
     fn create(entries: &[Value]) -> Self {
-        match entries.last() {
-            Some(l) => Self(l.clone()),
-            None => Self(Value {
-                id: 0,
-                ..Default::default()
-            }),
+        Self {
+            latest_value: entries.last().cloned().unwrap_or_default(),
+            snapshotted: entries.iter().cloned().collect(),
         }
     }
 
     fn merge(&mut self, delta: Self) {
-        self.0 = delta.0;
+        if !delta.snapshotted.is_empty() {
+            self.latest_value = delta.snapshotted.last().unwrap().clone();
+            self.snapshotted.extend(delta.snapshotted);
+        }
     }
 
     fn use_snapshots() -> bool {
         true
     }
 }
+
+impl ValueSnapshot {
+    pub fn contains_id(&self, id: &u64) -> bool {
+        self.snapshotted.iter().any(|x| &x.id == id)
+    }
+}
+
+impl PartialEq<Self> for ValueSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.latest_value == other.latest_value
+    }
+}
+
+impl Eq for ValueSnapshot {}
 
 /// Create a temporary directory in /tmp/
 pub fn create_temp_dir() -> String {
@@ -985,7 +994,7 @@ pub fn create_temp_dir() -> String {
 }
 
 pub mod verification {
-    use super::{LatestValue, Value};
+    use super::{Value, ValueSnapshot};
     use omnipaxos::{
         storage::{Snapshot, StopSign},
         util::LogEntry,
@@ -1001,14 +1010,14 @@ pub mod verification {
         match &read_log[..] {
             [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
             [LogEntry::Snapshotted(s)] => {
-                let exp_snapshot = LatestValue::create(proposals.as_slice());
+                let exp_snapshot = ValueSnapshot::create(proposals.as_slice());
                 verify_snapshot(&read_log, s.trimmed_idx, &exp_snapshot);
             }
             [LogEntry::Snapshotted(s), LogEntry::Decided(_), ..] => {
                 let (snapshotted_proposals, last_proposals) =
                     proposals.split_at(s.trimmed_idx as usize);
                 let (snapshot_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
-                let exp_snapshot = LatestValue::create(snapshotted_proposals);
+                let exp_snapshot = ValueSnapshot::create(snapshotted_proposals);
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);
                 verify_entries(decided_entries, last_proposals, 0, num_proposals);
             }
@@ -1025,7 +1034,7 @@ pub mod verification {
     pub fn verify_snapshot(
         read_entries: &[LogEntry<Value>],
         exp_compacted_idx: u64,
-        exp_snapshot: &LatestValue,
+        exp_snapshot: &ValueSnapshot,
     ) {
         assert_eq!(
             read_entries.len(),

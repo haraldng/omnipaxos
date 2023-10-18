@@ -1,5 +1,6 @@
 pub mod utils;
 
+use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask};
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
@@ -419,9 +420,10 @@ fn resync_after_dropped_acceptstopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Force follower to become leader and wait for follower to decide the stopsign
-    let (kprom, kfuture) = promise::<Value>();
-    follower.on_definition(|comp| {
-        comp.decided_futures.push(Ask::new(kprom, ()));
+    let (kprom, kfuture) = promise::<()>();
+    let value = Value::with_id(STOPSIGN_ID);
+    follower.on_definition(|x| {
+        x.insert_decided_future(Ask::new(kprom, value));
     });
     sys.force_leader_change(follower_id, cfg.wait_timeout);
     kfuture

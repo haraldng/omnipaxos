@@ -3,7 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{TestConfig, TestSystem, Value};
+use utils::{TestConfig, TestSystem};
 
 /// Test case for batching.
 #[test]
@@ -18,11 +18,12 @@ fn batching_test() {
 
     let mut futures = vec![];
     let mut last_decided_idx = 0;
-    for v in utils::create_proposals(cfg.num_proposals) {
-        let (kprom, kfuture) = promise::<Value>();
+    let proposals = utils::create_proposals(1, cfg.num_proposals);
+    for v in proposals {
+        let (kprom, kfuture) = promise::<()>();
         first_node.on_definition(|x| {
-            x.paxos.append(v).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()))
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
+            x.paxos.append(v.clone()).expect("Failed to append");
         });
         futures.push(kfuture);
         thread::sleep(wait_time_between_propose);

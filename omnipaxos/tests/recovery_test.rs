@@ -189,19 +189,21 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .get(&recover)
         .expect("No SequencePaxos component found");
 
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
+    let proposals = utils::create_proposals((cfg.num_proposals / 2) + 1, cfg.num_proposals);
+    let futures: Vec<KFuture<()>> = proposals
+        .iter()
+        .map(|v| {
+            let (kprom, kfuture) = promise::<()>();
             recover_px.on_definition(|x| {
-                x.decided_futures.push(Ask::new(kprom, ()));
+                x.insert_decided_future(Ask::new(kprom, v.clone()));
             });
             kfuture
         })
         .collect();
 
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
+    for v in proposals {
         proposer_px.on_definition(|x| {
-            x.paxos.append(Value::with_id(i)).expect("Failed to append");
+            x.paxos.append(v).expect("Failed to append");
         });
     }
 

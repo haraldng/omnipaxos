@@ -7,7 +7,7 @@ use omnipaxos::{
 };
 use serial_test::serial;
 use utils::{
-    create_temp_dir, verification::*, LatestValue, StorageType, TestConfig, TestSystem, Value,
+    create_temp_dir, verification::*, StorageType, TestConfig, TestSystem, Value, ValueSnapshot,
 };
 
 /// Verifies the 3 properties that the Paxos algorithm offers
@@ -20,12 +20,12 @@ fn consensus_test() {
 
     let first_node = sys.nodes.get(&1).unwrap();
     let mut futures = vec![];
-    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     for v in &vec_proposals {
-        let (kprom, kfuture) = promise::<Value>();
+        let (kprom, kfuture) = promise::<()>();
         first_node.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
             x.paxos.append(v.clone()).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()))
         });
         futures.push(kfuture);
     }
@@ -71,7 +71,7 @@ fn read_test() {
     let snapshotted_idx: u64 = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
 
-    let exp_snapshot = LatestValue::create(snapshotted);
+    let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
@@ -160,7 +160,7 @@ fn read_entries_test() {
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
-    let exp_snapshot = LatestValue::create(snapshotted);
+    let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
@@ -279,6 +279,6 @@ fn read_entries_test() {
         .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
-    verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
+    verify_snapshot(snapshot, snapshotted_idx, &ValueSnapshot::create(&log));
     verify_stopsign(stopsign, &ss);
 }

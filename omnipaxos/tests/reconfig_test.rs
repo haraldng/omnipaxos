@@ -1,7 +1,8 @@
 pub mod utils;
 
+use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask};
-use omnipaxos::ClusterConfig;
+use omnipaxos::{util::LogEntry, ClusterConfig};
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
 
@@ -13,25 +14,12 @@ const SS_METADATA: u8 = 255;
 fn reconfig_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
     let mut sys = TestSystem::with(cfg);
-
-    let first_node = sys.nodes.get(&1).unwrap();
-    let mut vec_proposals = vec![];
-    let mut futures = vec![];
-    for v in utils::create_proposals(cfg.num_proposals) {
-        let (kprom, kfuture) = promise::<Value>();
-        let value = v;
-        vec_proposals.push(value.clone());
-        first_node.on_definition(|x| {
-            x.paxos.append(value).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()))
-        });
-        futures.push(kfuture);
-    }
-
     sys.start_all_nodes();
-
-    let vec_proposals = (1..=cfg.num_proposals).map(Value::with_id).collect();
-    sys.make_proposals(1, vec_proposals, cfg.wait_timeout);
+    sys.make_proposals(
+        1,
+        utils::create_proposals(1, cfg.num_proposals),
+        cfg.wait_timeout,
+    );
 
     let new_config_id = 2;
     let new_nodes: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
@@ -44,18 +32,33 @@ fn reconfig_test() {
 
     let first_node = sys.nodes.get(&1).unwrap();
     let reconfig_f = first_node.on_definition(|x| {
-        let (kprom, kfuture) = promise::<Value>();
+        let (kprom, kfuture) = promise::<()>();
         x.paxos
             .reconfigure(new_config.clone(), metadata.clone())
             .expect("Failed to reconfigure");
-        x.decided_futures.push(Ask::new(kprom, ()));
+        let stopsign_value = Value::with_id(STOPSIGN_ID);
+        x.insert_decided_future(Ask::new(kprom, stopsign_value));
         kfuture
     });
 
-    let decided_ss_config = reconfig_f
+    reconfig_f
         .wait_timeout(cfg.wait_timeout)
         .expect("Failed to collect reconfiguration future");
-    assert_eq!(decided_ss_config, Value::with_id(new_config_id as u64));
+
+    first_node.on_definition(|x| {
+        let decided = x
+            .paxos
+            .read_decided_suffix(0)
+            .expect("Failed to read decided suffix");
+        match decided.last().expect("Failed to read last decided entry") {
+            LogEntry::StopSign(ss, decided) => {
+                assert_eq!(ss.next_config, new_config);
+                assert_eq!(ss.metadata, metadata);
+                assert!(decided, "StopSign should be decided")
+            }
+            e => panic!("Last decided entry is not a StopSign: {:?}", e),
+        }
+    });
 
     let decided_nodes = sys.nodes.iter().fold(vec![], |mut x, (pid, paxos)| {
         let ss = paxos.on_definition(|x| x.paxos.is_reconfigured());

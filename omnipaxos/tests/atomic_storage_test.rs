@@ -35,7 +35,7 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Mutex},
 };
-use utils::{BrokenStorageConfig, LatestValue, TestConfig, Value};
+use utils::{BrokenStorageConfig, TestConfig, Value, ValueSnapshot};
 
 type MemoryStore = Arc<Mutex<MemoryStorage<Value>>>;
 type BrokenStore = Arc<Mutex<BrokenStorageConfig>>;
@@ -550,7 +550,7 @@ fn atomic_storage_majority_promises_test() {
                 decided_idx: 2,
                 accepted_idx: 3,
                 n_accepted: n_old,
-                decided_snapshot: Some(SnapshotType::Complete(LatestValue::create(&[
+                decided_snapshot: Some(SnapshotType::Complete(ValueSnapshot::create(&[
                     Value::with_id(1),
                     Value::with_id(2),
                 ]))),

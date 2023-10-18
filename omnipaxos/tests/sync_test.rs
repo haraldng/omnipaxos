@@ -1,5 +1,6 @@
 pub mod utils;
 
+use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{storage::StopSign, ClusterConfig};
 use serial_test::serial;
@@ -174,14 +175,9 @@ fn sync_test(test: SyncTest) {
     } else {
         test.leaders_dec_idx
     };
-    let leaders_new_decided =
-        test.leaders_log[test.followers_dec_idx..leaders_log_dec_idx].to_vec();
-    let leaders_accepted = test.leaders_log[leaders_log_dec_idx..].to_vec();
-    let followers_new_decided_len = if test.leaders_ss.is_some() {
-        1 + test.leaders_log.len() - test.followers_dec_idx
-    } else {
-        test.leaders_log.len() - test.followers_dec_idx
-    };
+    let leaders_new_decided = &test.leaders_log[test.followers_dec_idx..leaders_log_dec_idx];
+    let leaders_accepted = &test.leaders_log[leaders_log_dec_idx..];
+    let followers_missing_entries = &test.leaders_log[test.followers_dec_idx..];
 
     // Set up followers log
     let follower_id = sys.get_elected_leader(1, cfg.wait_timeout);
@@ -207,7 +203,7 @@ fn sync_test(test: SyncTest) {
     assert_ne!(follower_id, leader_id, "New leader must be chosen!");
     let leader = sys.nodes.get(&leader_id).unwrap();
     // Propose leader's decided entries
-    sys.make_proposals(leader_id, leaders_new_decided, cfg.wait_timeout);
+    sys.make_proposals(leader_id, leaders_new_decided.into(), cfg.wait_timeout);
     match test.leaders_ss.clone() {
         Some(ss) if leaders_ss_is_decided => {
             sys.reconfigure(leader_id, ss.next_config, ss.metadata, cfg.wait_timeout)
@@ -233,12 +229,12 @@ fn sync_test(test: SyncTest) {
                 .expect("Couldn't snapshot");
         }
         for entry in leaders_accepted {
-            comp.paxos.append(entry).expect("Couldn't append");
+            comp.paxos.append(entry.clone()).expect("Couldn't append");
         }
-        match test.leaders_ss.clone() {
+        match &test.leaders_ss {
             Some(ss) if !leaders_ss_is_decided => {
                 comp.paxos
-                    .reconfigure(ss.next_config, ss.metadata)
+                    .reconfigure(ss.next_config.clone(), ss.metadata.clone())
                     .expect("Couldn't reconfigure");
             }
             _ => (),
@@ -247,13 +243,20 @@ fn sync_test(test: SyncTest) {
 
     // Reconnect follower and wait for new entries from AccSync to be decided so we can verify log
     let mut proposal_futures = vec![];
-    follower.on_definition(|comp| {
-        for _ in 0..followers_new_decided_len {
-            let (kprom, kfuture) = promise::<Value>();
-            comp.decided_futures.push(Ask::new(kprom, ()));
+    follower.on_definition(|x| {
+        for v in followers_missing_entries {
+            let (kprom, kfuture) = promise::<()>();
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
             proposal_futures.push(kfuture);
         }
     });
+    if test.leaders_ss.is_some() {
+        let (kprom, kfuture) = promise::<()>();
+        follower.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, Value::with_id(STOPSIGN_ID)));
+        });
+        proposal_futures.push(kfuture);
+    }
     sys.set_node_connections(follower_id, true);
     match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
         Ok(_) => {}

@@ -14,7 +14,8 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 #[test]
 #[serial]
 fn trim_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
+    assert_ne!(cfg.trim_idx, 0, "trim_idx must be greater than 0");
     let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
@@ -27,13 +28,13 @@ fn trim_test() {
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
     for v in &vec_proposals {
-        let (kprom, kfuture) = promise::<Value>();
+        let (kprom, kfuture) = promise::<()>();
         elected_leader.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
             x.paxos.append(v.clone()).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
     }
@@ -43,11 +44,11 @@ fn trim_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    elected_leader.on_definition(|x| {
-        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
-    });
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes decide
 
-    thread::sleep(cfg.wait_timeout);
+    elected_leader.on_definition(|x| {
+        x.paxos.trim(Some(cfg.trim_idx)).expect("Failed to trim");
+    });
 
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
@@ -57,7 +58,7 @@ fn trim_test() {
         }));
     }
 
-    check_trim(&vec_proposals, &seqs_after, cfg.gc_idx, elected_pid);
+    check_trim(&vec_proposals, &seqs_after, cfg.trim_idx, elected_pid);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -73,7 +74,12 @@ fn trim_test() {
 #[test]
 #[serial]
 fn double_trim_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
+    assert_ne!(cfg.trim_idx, 0, "trim_idx must be greater than 0");
+    assert!(
+        cfg.num_proposals >= cfg.trim_idx + TRIM_INDEX_INCREMENT,
+        "Not enough proposals to test double trim"
+    );
     let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
@@ -86,13 +92,18 @@ fn double_trim_test() {
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
     for v in &vec_proposals {
-        let (kprom, kfuture) = promise::<Value>();
         elected_leader.on_definition(|x| {
             x.paxos.append(v.clone()).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
+        });
+    }
+    let last = vec_proposals.last().unwrap();
+    for node in sys.nodes.values() {
+        let (kprom, kfuture) = promise::<()>();
+        node.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, last.clone()));
         });
         futures.push(kfuture);
     }
@@ -102,19 +113,15 @@ fn double_trim_test() {
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
 
-    elected_leader.on_definition(|x| {
-        x.paxos.trim(Some(cfg.gc_idx)).expect("Failed to trim");
-    });
-
-    thread::sleep(cfg.wait_timeout);
-
+    let second_trim_idx = cfg.trim_idx + TRIM_INDEX_INCREMENT;
     elected_leader.on_definition(|x| {
         x.paxos
-            .trim(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT))
-            .expect("Failed to trim");
+            .trim(Some(cfg.trim_idx))
+            .expect(format!("Failed to trim {}", cfg.trim_idx).as_str());
+        x.paxos
+            .trim(Some(second_trim_idx))
+            .expect(format!("Failed to trim {}", second_trim_idx).as_str());
     });
-
-    thread::sleep(cfg.wait_timeout);
 
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {
@@ -127,7 +134,7 @@ fn double_trim_test() {
     check_trim(
         &vec_proposals,
         &seq_after_double,
-        cfg.gc_idx + TRIM_INDEX_INCREMENT,
+        cfg.trim_idx + TRIM_INDEX_INCREMENT,
         elected_pid,
     );
 
@@ -142,17 +149,17 @@ fn double_trim_test() {
 fn check_trim(
     vec_proposals: &Vec<Value>,
     seq_after: &Vec<(u64, Vec<Value>)>,
-    gc_idx: u64,
+    trim_idx: u64,
     leader: NodeId,
 ) {
     for (pid, after) in seq_after {
         if *pid == leader {
             // leader must have successfully trimmed
-            assert_eq!(vec_proposals.len(), (after.len() + gc_idx as usize));
-            assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
-        } else if after.len() + gc_idx as usize == vec_proposals.len() {
+            assert_eq!(vec_proposals.len(), (after.len() + trim_idx as usize));
+            assert_eq!(vec_proposals.get(trim_idx as usize), after.get(0));
+        } else if after.len() + trim_idx as usize == vec_proposals.len() {
             // successful trim
-            assert_eq!(vec_proposals.get(gc_idx as usize), after.get(0));
+            assert_eq!(vec_proposals.get(trim_idx as usize), after.get(0));
         } else {
             // must be prefix
             for (entry_idx, entry) in after.iter().enumerate() {

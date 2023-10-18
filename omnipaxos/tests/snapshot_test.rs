@@ -1,6 +1,6 @@
 pub mod utils;
 
-use crate::utils::LatestValue;
+use crate::utils::ValueSnapshot;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use omnipaxos::{
     ballot_leader_election::Ballot,
@@ -19,7 +19,7 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 #[test]
 #[serial]
 fn snapshot_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
@@ -31,13 +31,13 @@ fn snapshot_test() {
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
-    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
     for v in &vec_proposals {
-        let (kprom, kfuture) = promise::<Value>();
+        let (kprom, kfuture) = promise::<()>();
         elected_leader.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
             x.paxos.append(v.clone()).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
     }
@@ -49,7 +49,7 @@ fn snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx), false)
+            .snapshot(Some(cfg.trim_idx), false)
             .expect("Failed to trim");
     });
 
@@ -63,7 +63,7 @@ fn snapshot_test() {
         }));
     }
 
-    check_snapshot(&vec_proposals, &seqs_after, cfg.gc_idx, elected_pid);
+    check_snapshot(&vec_proposals, &seqs_after, cfg.trim_idx, elected_pid);
 
     println!("Pass trim");
 
@@ -81,7 +81,7 @@ fn snapshot_test() {
 #[test]
 #[serial]
 fn double_snapshot_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     let mut sys = TestSystem::with(cfg);
     let first_node = sys.nodes.get(&1).unwrap();
     let (kprom, kfuture) = promise::<Ballot>();
@@ -93,13 +93,13 @@ fn double_snapshot_test() {
         .expect("No elected leader in election")
         .pid;
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
-    let vec_proposals = utils::create_proposals(cfg.num_proposals);
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
     for v in &vec_proposals {
-        let (kprom, kfuture) = promise::<Value>();
+        let (kprom, kfuture) = promise::<()>();
         elected_leader.on_definition(|x| {
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
             x.paxos.append(v.clone()).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
         });
         futures.push(kfuture);
     }
@@ -111,7 +111,7 @@ fn double_snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx), false)
+            .snapshot(Some(cfg.trim_idx), false)
             .expect("Failed to trim");
     });
 
@@ -119,7 +119,7 @@ fn double_snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT), false)
+            .snapshot(Some(cfg.trim_idx + TRIM_INDEX_INCREMENT), false)
             .expect("Failed to trim");
     });
 
@@ -136,7 +136,7 @@ fn double_snapshot_test() {
     check_snapshot(
         &vec_proposals,
         &seq_after_double,
-        cfg.gc_idx + TRIM_INDEX_INCREMENT,
+        cfg.trim_idx + TRIM_INDEX_INCREMENT,
         elected_pid,
     );
 
@@ -153,16 +153,16 @@ fn double_snapshot_test() {
 fn check_snapshot(
     vec_proposals: &Vec<Value>,
     seq_after: &Vec<(u64, Vec<LogEntry<Value>>)>,
-    gc_idx: u64,
+    trim_idx: u64,
     leader: NodeId,
 ) {
-    let exp_snapshot = LatestValue::create(&vec_proposals[0..gc_idx as usize]);
+    let exp_snapshot = ValueSnapshot::create(&vec_proposals[0..trim_idx as usize]);
     for (pid, after) in seq_after {
         if *pid == leader {
             let snapshot = after.first().unwrap();
             match snapshot {
                 LogEntry::Snapshotted(s) => {
-                    assert_eq!(s.trimmed_idx, gc_idx);
+                    assert_eq!(s.trimmed_idx, trim_idx);
                     assert_eq!(&s.snapshot, &exp_snapshot);
                 }
                 l => panic!(
@@ -172,12 +172,12 @@ fn check_snapshot(
             }
             // leader must have successfully trimmed
             // -1 as snapshot is one entry
-            assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize));
-        } else if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
+            assert_eq!(vec_proposals.len(), (after.len() - 1 + trim_idx as usize));
+        } else if (after.len() - 1 + trim_idx as usize) == vec_proposals.len() {
             let snapshot = after.first().unwrap();
             match snapshot {
                 LogEntry::Snapshotted(s) => {
-                    assert_eq!(s.trimmed_idx, gc_idx);
+                    assert_eq!(s.trimmed_idx, trim_idx);
                     assert_eq!(&s.snapshot, &exp_snapshot);
                 }
                 _ => panic!("First entry is not a snapshot"),
