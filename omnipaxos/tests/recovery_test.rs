@@ -33,11 +33,7 @@ fn leader_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -73,11 +69,7 @@ fn leader_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -116,11 +108,7 @@ fn follower_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -159,11 +147,7 @@ fn follower_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 

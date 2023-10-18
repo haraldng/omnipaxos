@@ -300,14 +300,12 @@ where
                 match msg {
                     PaxosMsg::Accepted(a) => {
                         a.accepted_idx = accepted_idx;
-                        // info!(self.logger, "ACCEPTED enc: {:?}, my log: {:?}", a, self.internal_storage.read(0..));
                     }
                     _ => panic!("Cached idx is not an Accepted Message<T>!"),
                 }
             }
             _ => {
                 let accepted = Accepted { n, accepted_idx };
-                // info!(self.logger, "ACCEPTED enc: {:?}, my log: {:?}", accepted, self.internal_storage.read(0..));
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
                 self.outgoing.push(PaxosMessage {

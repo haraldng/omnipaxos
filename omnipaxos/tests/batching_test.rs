@@ -42,8 +42,8 @@ fn batching_test() {
 
     let mut log = vec![];
     for (pid, node) in sys.nodes {
-        log.push(node.on_definition(|comp| {
-            let log = comp.paxos.get_decided_idx();
+        log.push(node.on_definition(|x| {
+            let log = x.paxos.get_decided_idx();
             (pid, log)
         }));
     }

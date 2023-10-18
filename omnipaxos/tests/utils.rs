@@ -602,16 +602,16 @@ impl TestSystem {
     pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
         // Remove outgoing connections
         let node = self.nodes.get(&pid).expect("Cannot find {pid}");
-        node.on_definition(|comp| {
+        node.on_definition(|x| {
             for node_id in self.nodes.keys() {
-                comp.set_connection(*node_id, connection_status);
+                x.set_connection(*node_id, connection_status);
             }
         });
         // Remove incoming connections
         for node_id in self.nodes.keys() {
             let node = self.nodes.get(node_id).expect("Cannot find {pid}");
-            node.on_definition(|comp| {
-                comp.set_connection(pid, connection_status);
+            node.on_definition(|x| {
+                x.set_connection(pid, connection_status);
             });
         }
     }
@@ -802,6 +802,10 @@ pub mod omnireplica {
             }
         }
 
+        pub fn read_decided_log(&self) -> Vec<LogEntry<Value>> {
+            self.paxos.read_decided_suffix(0).unwrap()
+        }
+
         pub fn get_trimmed_suffix(&self) -> Vec<Value> {
             if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
                 let ents = match decided_ents.first().unwrap() {
@@ -956,7 +960,7 @@ impl Snapshot<Value> for ValueSnapshot {
     fn create(entries: &[Value]) -> Self {
         Self {
             latest_value: entries.last().cloned().unwrap_or_default(),
-            snapshotted: entries.iter().cloned().collect(),
+            snapshotted: entries.to_vec(),
         }
     }
 

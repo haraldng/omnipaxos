@@ -47,11 +47,7 @@ fn flexible_quorum_prepare_phase_test() {
     sys.make_proposals(*still_alive_node_id, last_proposals, cfg.wait_timeout);
 
     // Verify log
-    let nodes_log = still_alive_node.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let nodes_log = still_alive_node.on_definition(|x| x.read_decided_log());
     verify_log(nodes_log, expected_log);
 }
 
@@ -94,10 +90,6 @@ fn flexible_quorum_accept_phase_test() {
 
     // Verify log
     let leader = sys.nodes.get(&leader_id).unwrap();
-    let leaders_log = leader.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let leaders_log = leader.on_definition(|x| x.read_decided_log());
     verify_log(leaders_log, expected_log);
 }

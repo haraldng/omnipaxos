@@ -52,8 +52,8 @@ fn trim_test() {
 
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
-        seqs_after.push(px.on_definition(|comp| {
-            let seq = comp.get_trimmed_suffix();
+        seqs_after.push(px.on_definition(|x| {
+            let seq = x.get_trimmed_suffix();
             (i, seq.to_vec())
         }));
     }
@@ -94,11 +94,6 @@ fn double_trim_test() {
 
     let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
-    for v in &vec_proposals {
-        elected_leader.on_definition(|x| {
-            x.paxos.append(v.clone()).expect("Failed to append");
-        });
-    }
     let last = vec_proposals.last().unwrap();
     for node in sys.nodes.values() {
         let (kprom, kfuture) = promise::<()>();
@@ -107,7 +102,13 @@ fn double_trim_test() {
         });
         futures.push(kfuture);
     }
+    for v in &vec_proposals {
+        elected_leader.on_definition(|x| {
+            x.paxos.append(v.clone()).expect("Failed to append");
+        });
+    }
 
+    // wait until all nodes have decided last entry
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
@@ -125,8 +126,8 @@ fn double_trim_test() {
 
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {
-        seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.get_trimmed_suffix();
+        seq_after_double.push(px.on_definition(|x| {
+            let seq = x.get_trimmed_suffix();
             (i, seq.to_vec())
         }));
     }

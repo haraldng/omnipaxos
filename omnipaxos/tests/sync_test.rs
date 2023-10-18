@@ -184,23 +184,24 @@ fn sync_test(test: SyncTest) {
     let follower = sys.nodes.get(&follower_id).unwrap();
     sys.make_proposals(follower_id, followers_decided.to_vec(), cfg.wait_timeout);
     sys.set_node_connections(follower_id, false);
-    follower.on_definition(|comp| {
+    follower.on_definition(|x| {
         if let Some(compact_idx) = test.followers_compacted_idx {
-            comp.paxos
+            x.paxos
                 .snapshot(Some(compact_idx), true)
                 .expect("Couldn't snapshot");
         }
         for entry in followers_accepted {
-            comp.paxos.append(entry.clone()).expect("Couldn't append");
+            x.paxos.append(entry.clone()).expect("Couldn't append");
         }
     });
 
-    // Set up leaders log
     // Wait a bit so next leader is stabilized (otherwise we can lose proposals)
     std::thread::sleep(20 * cfg.election_timeout);
     let node = sys.nodes.keys().find(|x| **x != follower_id).unwrap(); // a node that can actually see the current leader.
     let leader_id = sys.get_elected_leader(*node, cfg.wait_timeout);
     assert_ne!(follower_id, leader_id, "New leader must be chosen!");
+
+    // Set up leaders log
     let leader = sys.nodes.get(&leader_id).unwrap();
     // Propose leader's decided entries
     sys.make_proposals(leader_id, leaders_new_decided.into(), cfg.wait_timeout);
@@ -210,7 +211,8 @@ fn sync_test(test: SyncTest) {
         }
         _ => (),
     }
-    // Propose leader's accepted entries and also snapshot
+
+    // Propose leader's accepted entries and also snapshot. To ensure they are only accepted, stop a write quorum of nodes.
     let write_quorum_size = match cfg.flexible_quorum {
         Some((_, write_quorum)) => write_quorum,
         None => cfg.num_nodes / 2 + 1,
@@ -219,21 +221,19 @@ fn sync_test(test: SyncTest) {
     let nodes_to_stop = (1..cfg.num_nodes as u64)
         .filter(|&n| n != follower_id && n != leader_id)
         .take(num_nodes_to_stop);
-    for pid in nodes_to_stop {
-        sys.stop_node(pid);
-    }
-    leader.on_definition(|comp| {
+    nodes_to_stop.for_each(|pid| sys.stop_node(pid));
+    leader.on_definition(|x| {
         if let Some(compact_idx) = test.leaders_compacted_idx {
-            comp.paxos
+            x.paxos
                 .snapshot(Some(compact_idx), true)
                 .expect("Couldn't snapshot");
         }
         for entry in leaders_accepted {
-            comp.paxos.append(entry.clone()).expect("Couldn't append");
+            x.paxos.append(entry.clone()).expect("Couldn't append");
         }
         match &test.leaders_ss {
             Some(ss) if !leaders_ss_is_decided => {
-                comp.paxos
+                x.paxos
                     .reconfigure(ss.next_config.clone(), ss.metadata.clone())
                     .expect("Couldn't reconfigure");
             }
@@ -260,15 +260,15 @@ fn sync_test(test: SyncTest) {
     sys.set_node_connections(follower_id, true);
     match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
         Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
+        Err(e) => {
+            let follower_entries = follower.on_definition(|x| x.read_decided_log());
+            let leader_entries = leader.on_definition(|x| x.read_decided_log());
+            panic!("Error on collecting futures of decided proposals: {}. Follower log: {:?}, Leader log: {:?}", e, follower_entries, leader_entries);
+        }
     }
 
     // Verify log
-    let mut followers_entries = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read log entry")
-    });
+    let mut followers_entries = follower.on_definition(|x| x.read_decided_log());
     if let Some(ss) = &test.leaders_ss {
         let followers_ss = followers_entries.pop().expect("Follower had no entries");
         verify_stopsign(&[followers_ss], ss);

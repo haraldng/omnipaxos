@@ -1,8 +1,8 @@
 use super::ballot_leader_election::Ballot;
 #[cfg(feature = "unicache")]
-use crate::unicache::*;
+use crate::{unicache::*, util::NodeId};
 use crate::{
-    util::{AcceptedMetaData, IndexEntry, LogEntry, NodeId, SnapshottedEntry},
+    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
     ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
@@ -202,6 +202,7 @@ struct StateCache<T>
 where
     T: Entry,
 {
+    #[cfg(feature = "unicache")]
     /// Id of this node
     pid: NodeId,
     /// The maximum number of entries to batch.
@@ -231,8 +232,9 @@ impl<T> StateCache<T>
 where
     T: Entry,
 {
-    pub fn new(config: InternalStorageConfig, pid: NodeId) -> Self {
+    pub fn new(config: InternalStorageConfig, #[cfg(feature = "unicache")] pid: NodeId) -> Self {
         StateCache {
+            #[cfg(feature = "unicache")]
             pid,
             batch_size: config.batch_size,
             batched_entries: Vec::with_capacity(config.batch_size),
@@ -335,10 +337,18 @@ where
     I: Storage<T>,
     T: Entry,
 {
-    pub(crate) fn with(storage: I, config: InternalStorageConfig, pid: NodeId) -> Self {
+    pub(crate) fn with(
+        storage: I,
+        config: InternalStorageConfig,
+        #[cfg(feature = "unicache")] pid: NodeId,
+    ) -> Self {
         let mut internal_store = InternalStorage {
             storage,
-            state_cache: StateCache::new(config, pid),
+            state_cache: StateCache::new(
+                config,
+                #[cfg(feature = "unicache")]
+                pid,
+            ),
             _t: Default::default(),
         };
         internal_store.load_cache();

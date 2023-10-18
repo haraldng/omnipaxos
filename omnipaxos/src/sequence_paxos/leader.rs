@@ -60,7 +60,6 @@ where
                     to: *pid,
                     msg: PaxosMsg::Prepare(prep),
                 });
-                // info!(self.logger, "PREPARE: {:?}, my log: {:?}, snapshot: {:?}", self.outgoing.last().unwrap(), self.internal_storage.read(0..), self.internal_storage.get_snapshot());
             }
         } else {
             self.become_follower();
@@ -248,7 +247,6 @@ where
             to,
             msg: PaxosMsg::AcceptSync(acc_sync),
         };
-        // info!(self.logger, "ROUND: {:?} ACCSYNC MSG: {:?}", self.leader_state.n_leader, msg);
         self.outgoing.push(msg);
     }
 
@@ -528,7 +526,6 @@ where
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
-                // info!(self.logger, "New decided index: {} in round: {:?}", decided_idx, self.leader_state.n_leader);
                 self.internal_storage
                     .set_decided_idx(decided_idx)
                     .expect("storage error while trying to write decided index");

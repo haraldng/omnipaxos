@@ -39,8 +39,8 @@ fn consensus_test() {
 
     let mut log = vec![];
     for (pid, node) in sys.nodes {
-        log.push(node.on_definition(|comp| {
-            let log = comp.get_trimmed_suffix();
+        log.push(node.on_definition(|x| {
+            let log = x.get_trimmed_suffix();
             (pid, log.to_vec())
         }));
     }

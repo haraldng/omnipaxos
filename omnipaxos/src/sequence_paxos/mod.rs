@@ -81,7 +81,12 @@ where
             batch_size: config.batch_size,
         };
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage, internal_storage_config, pid),
+            internal_storage: InternalStorage::with(
+                storage,
+                internal_storage_config,
+                #[cfg(feature = "unicache")]
+                pid,
+            ),
             pid,
             peers,
             state,
@@ -451,7 +456,6 @@ where
     }
 
     fn propose_entry(&mut self, entry: T) {
-        // info!(self.logger, "Propose {:?}, state: {:?}, ballot: {:?}", entry, self.state, self.leader_state.n_leader);
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.accept_entry(entry),

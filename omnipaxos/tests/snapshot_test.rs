@@ -57,8 +57,8 @@ fn snapshot_test() {
 
     let mut seqs_after = vec![];
     for (i, px) in sys.nodes {
-        seqs_after.push(px.on_definition(|comp| {
-            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
+        seqs_after.push(px.on_definition(|x| {
+            let seq = x.paxos.read_entries(0..).expect("No log in paxos");
             (i, seq)
         }));
     }
@@ -127,8 +127,8 @@ fn double_snapshot_test() {
 
     let mut seq_after_double = vec![];
     for (i, px) in sys.nodes {
-        seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
+        seq_after_double.push(px.on_definition(|x| {
+            let seq = x.paxos.read_entries(0..).expect("No log in paxos");
             (i, seq)
         }));
     }

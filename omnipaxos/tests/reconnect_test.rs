@@ -119,14 +119,14 @@ fn reconnect_after_dropped_accepts_test() {
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Decide entries during omission period
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
     });
     sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
@@ -134,11 +134,7 @@ fn reconnect_after_dropped_accepts_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -179,8 +175,8 @@ fn reconnect_after_dropped_prepare_test() {
 
     // Disconnect everyone from follower and choose a new leader
     for node in sys.nodes.values() {
-        node.on_definition(|comp| {
-            comp.set_connection(follower_id, false);
+        node.on_definition(|x| {
+            x.set_connection(follower_id, false);
         });
     }
     sys.stop_node(leader_id);
@@ -208,17 +204,13 @@ fn reconnect_after_dropped_prepare_test() {
 
     // Reconnect everyone to follower
     for node in sys.nodes.values() {
-        node.on_definition(|comp| {
-            comp.set_connection(follower_id, true);
+        node.on_definition(|x| {
+            x.set_connection(follower_id, true);
         });
     }
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -258,10 +250,10 @@ fn reconnect_after_dropped_promise_test() {
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Drop outgoing messages from follower so that a Promise is lost when next leader is chosen
-    follower.on_definition(|comp| {
+    follower.on_definition(|x| {
         for &node_id in sys.nodes.keys() {
             if node_id != follower_id {
-                comp.set_connection(node_id, false);
+                x.set_connection(node_id, false);
             }
         }
     });
@@ -290,21 +282,17 @@ fn reconnect_after_dropped_promise_test() {
     );
 
     // Reconnect follower and wait for re-sync with leader
-    follower.on_definition(|comp| {
+    follower.on_definition(|x| {
         for &node_id in sys.nodes.keys() {
             if node_id != follower_id {
-                comp.set_connection(node_id, true);
+                x.set_connection(node_id, true);
             }
         }
     });
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -349,32 +337,28 @@ fn reconnect_after_dropped_preparereq_test() {
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Disconnect leader from follower and decide new entries
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
     });
     sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break but drop PrepareReq
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
-    follower.on_definition(|comp| {
-        comp.set_connection(leader_id, false);
+    follower.on_definition(|x| {
+        x.set_connection(leader_id, false);
     });
     sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
     // Reconnect follower to leader
-    follower.on_definition(|comp| {
-        comp.set_connection(leader_id, true);
+    follower.on_definition(|x| {
+        x.set_connection(leader_id, true);
     });
     // Wait for Re-Sync with leader to finish
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -410,9 +394,9 @@ fn resync_after_dropped_acceptstopsign_test() {
         nodes: vec![1, 2],
         flexible_quorum: None,
     };
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), None)
             .expect("Couldn't reconfigure!")
     });
@@ -431,11 +415,7 @@ fn resync_after_dropped_acceptstopsign_test() {
         .expect("Timeout for collecting future of decided proposal expired");
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_stopsign(&followers_log, &StopSign::with(next_config, None));
 
     // Shutdown system
@@ -483,9 +463,9 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         flexible_quorum: None,
     };
     let leader = sys.nodes.get(&leader_id).unwrap();
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), Some(vec![1, 2, 3]))
             .expect("Couldn't reconfigure!")
     });
@@ -493,19 +473,16 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Reconnect leader to follower
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     // Wait for leader to resend AcceptStopSign
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
     let follower = sys.nodes.get(&follower_id).unwrap();
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_entries(0..1)
-            .expect("Cannot read log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> =
+        follower.on_definition(|x| x.paxos.read_entries(0..1).expect("Cannot read log entry"));
     verify_stopsign(
         &followers_log,
         &StopSign::with(next_config, Some(vec![1, 2, 3])),
@@ -543,16 +520,13 @@ fn reconnect_after_dropped_decidestopsign_test() {
         flexible_quorum: None,
     };
     for other_follower in followers.clone() {
-        sys.nodes
-            .get(&other_follower)
-            .unwrap()
-            .on_definition(|comp| {
-                comp.set_connection(follower_id, false);
-            });
+        sys.nodes.get(&other_follower).unwrap().on_definition(|x| {
+            x.set_connection(follower_id, false);
+        });
     }
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), None)
             .expect("Couldn't reconfigure!")
     });
@@ -560,16 +534,16 @@ fn reconnect_after_dropped_decidestopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Reconnect leader to follower
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     // Wait for leader to resend DecideStopSign
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
     let follower = sys.nodes.get(&follower_id).unwrap();
-    follower.on_definition(|comp| {
-        comp.paxos
+    follower.on_definition(|x| {
+        x.paxos
             .is_reconfigured()
             .expect("Stopsign entry wasn't decided");
     });
