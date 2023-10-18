@@ -2,7 +2,7 @@ pub mod utils;
 
 use crate::utils::omnireplica::OmniPaxosComponent;
 use kompact::prelude::{promise, Ask, Component, FutureCollection};
-use omnipaxos::{ballot_leader_election::Ballot, util::LogEntry};
+use omnipaxos::util::LogEntry;
 use serial_test::serial;
 use std::{sync::Arc, thread};
 use utils::{TestConfig, TestSystem, Value};
@@ -18,16 +18,11 @@ fn trim_test() {
     let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     assert_ne!(cfg.trim_idx, 0, "trim_idx must be greater than 0");
     let mut sys = TestSystem::with(cfg);
-    let first_node = sys.nodes.get(&1).unwrap();
-    let (kprom, kfuture) = promise::<Ballot>();
-    first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
     sys.start_all_nodes();
-
-    let elected_pid = kfuture
-        .wait_timeout(cfg.wait_timeout)
-        .expect("No elected leader in election")
-        .pid;
+    let elected_pid = sys.get_elected_leader(1, cfg.wait_timeout);
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
+
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get prepared with empty logs
 
     let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
@@ -82,16 +77,11 @@ fn double_trim_test() {
         "Not enough proposals to test double trim"
     );
     let mut sys = TestSystem::with(cfg);
-    let first_node = sys.nodes.get(&1).unwrap();
-    let (kprom, kfuture) = promise::<Ballot>();
-    first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
     sys.start_all_nodes();
-
-    let elected_pid = kfuture
-        .wait_timeout(cfg.wait_timeout)
-        .expect("No elected leader in election")
-        .pid;
+    let elected_pid = sys.get_elected_leader(1, cfg.wait_timeout);
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
+
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get prepared with empty logs
 
     let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
@@ -147,8 +137,8 @@ fn check_trim(vec_proposals: &Vec<Value>, trim_idx: u64, node: Arc<Component<Omn
             match op.read(trimmed_idx).unwrap() {
                 LogEntry::Trimmed(idx) if idx == trim_idx => {}
                 e => panic!(
-                    "Entry must be trimmed at idx {}, but was {:?}",
-                    trimmed_idx, e
+                    "Entry {} must be Trimmed({}), but was {:?}",
+                    trimmed_idx, trim_idx, e
                 ),
             }
         }
