@@ -18,7 +18,7 @@ use crate::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "logging")]
-use slog::{info, trace, Logger};
+use slog::{info, trace, Logger, warn};
 
 /// Used to define a Sequence Paxos epoch
 #[derive(Clone, Copy, Eq, Debug, Default, PartialEq)]
@@ -244,6 +244,12 @@ impl BallotLeaderElection {
                     .heartbeat_replies
                     .iter()
                     .any(|r| r.leader > self.current_ballot && r.happy);
+                if !see_larger_happy_leader {
+                    #[cfg(feature = "logging")]
+                    warn!(
+                        self.logger,
+                        "UNHAPPY: Cannot form quorum and don't see larger happy leader. num_replies: {}, state: {:?}", potential_followers + 1, seq_paxos_state);
+                }
                 see_larger_happy_leader
             }
         } else {
