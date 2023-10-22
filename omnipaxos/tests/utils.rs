@@ -600,14 +600,14 @@ impl TestSystem {
     }
 
     pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
-        // Remove outgoing connections
+        // set outgoing connections
         let node = self.nodes.get(&pid).expect("Cannot find {pid}");
         node.on_definition(|x| {
             for node_id in self.nodes.keys() {
                 x.set_connection(*node_id, connection_status);
             }
         });
-        // Remove incoming connections
+        // set incoming connections
         for node_id in self.nodes.keys() {
             let node = self.nodes.get(node_id).expect("Cannot find {pid}");
             node.on_definition(|x| {

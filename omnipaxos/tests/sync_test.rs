@@ -179,7 +179,7 @@ fn sync_test(test: SyncTest) {
     let leaders_accepted = &test.leaders_log[leaders_log_dec_idx..];
     let followers_missing_entries = &test.leaders_log[test.followers_dec_idx..];
 
-    // Set up followers log
+    // Set up followers log. We do this by taking the leader, append some entries and then disconnect it.
     let follower_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = sys.nodes.get(&follower_id).unwrap();
     sys.make_proposals(follower_id, followers_decided.to_vec(), cfg.wait_timeout);
@@ -217,8 +217,8 @@ fn sync_test(test: SyncTest) {
         Some((_, write_quorum)) => write_quorum,
         None => cfg.num_nodes / 2 + 1,
     };
-    let num_nodes_to_stop = cfg.num_nodes - write_quorum_size;
-    let nodes_to_stop = (1..cfg.num_nodes as u64)
+    let num_nodes_to_stop = cfg.num_nodes - write_quorum_size - 1; // -1 as leader and one follower are already disconnected
+    let nodes_to_stop = (1..=cfg.num_nodes as u64)
         .filter(|&n| n != follower_id && n != leader_id)
         .take(num_nodes_to_stop);
     nodes_to_stop.for_each(|pid| sys.stop_node(pid));
