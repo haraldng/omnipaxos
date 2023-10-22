@@ -434,13 +434,6 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if max_stopsign.is_none() {
-                            self.append_pending_proposals();
-                            self.adopt_pending_stopsign();
-                        }
-                        self.internal_storage
-                            .set_stopsign(max_stopsign)
-                            .expect("storage error while trying to write stopsign");
                     }
                     None => {
                         // no snapshot, only suffix
@@ -458,18 +451,20 @@ where
                             ],
                             "storage error while trying to write log entries",
                         );
-                        if max_stopsign.is_none() {
-                            self.append_pending_proposals();
-                            self.adopt_pending_stopsign();
-                        }
-                        self.internal_storage
-                            .set_stopsign(max_stopsign)
-                            .expect("storage error while trying to write stopsign");
                     }
                 }
             }
             None => {
                 // I am the most updated
+                self.append_pending_proposals();
+                self.adopt_pending_stopsign();
+            }
+        }
+        match max_stopsign {
+            Some(ss) => {
+                self.accept_stopsign(ss);
+            }
+            None => {
                 self.append_pending_proposals();
                 self.adopt_pending_stopsign();
             }

@@ -369,11 +369,6 @@ where
         new_config: ClusterConfig,
         metadata: Option<Vec<u8>>,
     ) -> Result<(), ProposeErr<T>> {
-        #[cfg(feature = "logging")]
-        info!(
-            self.logger,
-            "Propose reconfiguration {:?}", new_config.nodes
-        );
         if self.pending_reconfiguration() {
             Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
         } else {
@@ -388,6 +383,13 @@ where
                 }
                 (Role::Leader, Phase::Accept) => {
                     if !self.pending_reconfiguration() {
+                        #[cfg(feature = "logging")]
+                        info!(
+                            self.logger,
+                            "Propose reconfiguration {:?} with {:?}",
+                            new_config.nodes,
+                            self.leader_state.n_leader
+                        );
                         let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         for pid in self.leader_state.get_promised_followers() {

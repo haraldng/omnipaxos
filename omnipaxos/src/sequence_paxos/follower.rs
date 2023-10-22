@@ -161,12 +161,10 @@ where
                     );
                 }
             };
-            if accsync.stopsign.is_none() {
-                self.forward_pending_proposals();
+            match accsync.stopsign {
+                Some(ss) => self.accept_stopsign(ss),
+                None => self.forward_pending_proposals(),
             }
-            self.internal_storage
-                .set_stopsign(accsync.stopsign)
-                .expect("storage error while trying to write stopsign");
             let accepted = Accepted {
                 n: accsync.n,
                 accepted_idx: self.internal_storage.get_accepted_idx(),

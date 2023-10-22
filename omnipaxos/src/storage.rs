@@ -781,6 +781,7 @@ where
         self.state_cache.promise
     }
 
+    /// Sets the stopsign. This function should not be used directly from sequence paxos. Instead, use accept_stopsign.
     pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         self.state_cache.stopsign = s.clone();
         self.storage.set_stopsign(s)
