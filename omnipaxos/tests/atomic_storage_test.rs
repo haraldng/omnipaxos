@@ -13,6 +13,10 @@
 pub mod utils;
 
 use crate::utils::StorageType;
+#[cfg(feature = "unicache")]
+use omnipaxos::storage::Entry;
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::UniCache;
 use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
@@ -31,14 +35,17 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Mutex},
 };
-use utils::{BrokenStorageConfig, LatestValue, TestConfig, Value};
+use utils::{BrokenStorageConfig, TestConfig, Value, ValueSnapshot};
+
+type MemoryStore = Arc<Mutex<MemoryStorage<Value>>>;
+type BrokenStore = Arc<Mutex<BrokenStorageConfig>>;
 
 /// Creates a new OmniPaxos instance with `BrokenStorage` in its initial state.
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
 /// `BrokenStorageConfig` to enable injecting storage errors.
 fn basic_setup() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
@@ -61,8 +68,8 @@ fn basic_setup() -> (
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
 /// `BrokenStorageConfig` to enable injecting storage errors.
 fn _setup_leader() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
@@ -138,8 +145,8 @@ fn _setup_leader() -> (
 /// `BrokenStorageConfig` to enable injecting storage errors.
 /// The next expected sequence number is `SequenceNumber{session: 1, counter: 2}`.
 fn setup_follower() -> (
-    Arc<Mutex<MemoryStorage<Value>>>,
-    Arc<Mutex<BrokenStorageConfig>>,
+    MemoryStore,
+    BrokenStore,
     OmniPaxos<Value, StorageType<Value>>,
 ) {
     let (mem_storage, storage_conf, mut op) = basic_setup();
@@ -179,6 +186,8 @@ fn setup_follower() -> (
             sync_idx: 0,
             decided_idx: 0,
             stopsign: None,
+            #[cfg(feature = "unicache")]
+            unicache: <Value as Entry>::UniCache::new(),
         }),
     });
     op.handle_incoming(setup_msg);
@@ -228,10 +237,12 @@ fn atomic_storage_acceptsync_test() {
                 n,
                 seq_num: seq,
                 decided_snapshot: None,
-                suffix: vec![Value(1), Value(2), Value(3)],
+                suffix: vec![Value::with_id(1), Value::with_id(2), Value::with_id(3)],
                 sync_idx: 0,
                 decided_idx: 1,
                 stopsign: None,
+                #[cfg(feature = "unicache")]
+                unicache: <Value as Entry>::UniCache::new(),
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
@@ -268,7 +279,14 @@ fn atomic_storage_trim_test() {
                     counter: 2,
                 },
                 decided_idx: 5,
-                entries: vec![Value(1), Value(2), Value(3), Value(4), Value(5), Value(6)],
+                entries: vec![
+                    Value::with_id(1),
+                    Value::with_id(2),
+                    Value::with_id(3),
+                    Value::with_id(4),
+                    Value::with_id(5),
+                    Value::with_id(6),
+                ],
             }),
         });
         op.handle_incoming(setup_msg);
@@ -324,7 +342,14 @@ fn atomic_storage_snapshot_test() {
                     counter: 2,
                 },
                 decided_idx: 5,
-                entries: vec![Value(1), Value(2), Value(3), Value(4), Value(5), Value(6)],
+                entries: vec![
+                    Value::with_id(1),
+                    Value::with_id(2),
+                    Value::with_id(3),
+                    Value::with_id(4),
+                    Value::with_id(5),
+                    Value::with_id(6),
+                ],
             }),
         });
         op.handle_incoming(setup_msg);
@@ -395,7 +420,14 @@ fn atomic_storage_accept_decide_test() {
                     counter: 2,
                 },
                 decided_idx: 5,
-                entries: vec![Value(1), Value(2), Value(3), Value(4), Value(5), Value(6)],
+                entries: vec![
+                    Value::with_id(1),
+                    Value::with_id(2),
+                    Value::with_id(3),
+                    Value::with_id(4),
+                    Value::with_id(5),
+                    Value::with_id(6),
+                ],
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));
@@ -514,13 +546,13 @@ fn atomic_storage_majority_promises_test() {
             to: 1,
             msg: PaxosMsg::Promise(Promise {
                 n,
-                suffix: vec![Value(3)],
+                suffix: vec![Value::with_id(3)],
                 decided_idx: 2,
                 accepted_idx: 3,
                 n_accepted: n_old,
-                decided_snapshot: Some(SnapshotType::Complete(LatestValue::create(&[
-                    Value(1),
-                    Value(2),
+                decided_snapshot: Some(SnapshotType::Complete(ValueSnapshot::create(&[
+                    Value::with_id(1),
+                    Value::with_id(2),
                 ]))),
                 stopsign: None,
             }),

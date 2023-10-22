@@ -3,6 +3,7 @@ use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
     ballot_leader_election::Ballot,
+    macros::*,
     messages::Message,
     storage::{Entry, Snapshot, Storage, StorageResult},
     util::{FlexibleQuorum, NodeId},
@@ -22,13 +23,16 @@ use std::{
     time::Duration,
 };
 use tempfile::TempDir;
-use toml;
 
 const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 const COMMITLOG: &str = "/commitlog/";
+pub const STOPSIGN_ID: u64 = u64::MAX;
+
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::{MaybeEncoded, UniCache};
 
 /// Serde deserialize function to deserialize toml milliseconds u64s to std::time::Duration
 fn deserialize_duration_millis<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -37,6 +41,32 @@ where
 {
     let val = Deserialize::deserialize(deserializer)?;
     Ok(Duration::from_millis(val))
+}
+
+pub fn create_proposals(from: u64, to: u64) -> Vec<Value> {
+    #[cfg(feature = "unicache")]
+    {
+        (from..=to)
+            .map(|id| {
+                let mut v = Value::with_id(id);
+                // Different combinations of cache hit/miss in Value depending on the id
+                if id % 2 == 0 {
+                    v.first_name = "John".to_string()
+                }
+                if id % 3 == 0 {
+                    v.job = "Software Engineer".to_string();
+                }
+                if id % 5 == 0 {
+                    v.last_name = "Doe".to_string()
+                }
+                v
+            })
+            .collect()
+    }
+    #[cfg(not(feature = "unicache"))]
+    {
+        (from..=to).map(Value::with_id).collect()
+    }
 }
 
 /// Configuration for `TestSystem`. TestConfig loads the values from
@@ -52,15 +82,17 @@ pub struct TestConfig {
     #[serde(rename(deserialize = "election_timeout_ms"))]
     #[serde(deserialize_with = "deserialize_duration_millis")]
     pub election_timeout: Duration,
-    #[serde(rename(deserialize = "resend_timeout_ms"))]
+    #[serde(rename(deserialize = "resend_message_timeout_ms"))]
     #[serde(deserialize_with = "deserialize_duration_millis")]
     pub resend_message_timeout: Duration,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
-    pub gc_idx: u64,
+    pub trim_idx: u64,
     pub flexible_quorum: Option<(usize, usize)>,
     pub batch_size: usize,
+    // #[cfg(feature = "unicache")]
+    pub num_iterations: u64,
 }
 
 impl TestConfig {
@@ -70,25 +102,22 @@ impl TestConfig {
         let mut configs: HashMap<String, TestConfig> = toml::from_str(&config_file)?;
         let config = configs
             .remove(name)
-            .expect(&format!("Couldnt find config for {}", name));
+            .unwrap_or_else(|| panic!("Couldnt find config for {}", name));
         Ok(config)
     }
 
     pub fn into_omnipaxos_config(&self, pid: NodeId) -> OmniPaxosConfig {
         let all_pids: Vec<u64> = (1..=self.num_nodes as u64).collect();
-        let flexible_quorum =
-            self.flexible_quorum
-                .and_then(|(read_quorum_size, write_quorum_size)| {
-                    Some(FlexibleQuorum {
-                        read_quorum_size,
-                        write_quorum_size,
-                    })
-                });
+        let flexible_quorum = self
+            .flexible_quorum
+            .map(|(read_quorum_size, write_quorum_size)| FlexibleQuorum {
+                read_quorum_size,
+                write_quorum_size,
+            });
         let cluster_config = ClusterConfig {
             configuration_id: 1,
-            nodes: all_pids.clone(),
+            nodes: all_pids,
             flexible_quorum,
-            ..Default::default()
         };
         let server_config = ServerConfig {
             pid,
@@ -111,15 +140,16 @@ impl Default for TestConfig {
         Self {
             num_threads: 3,
             num_nodes: 3,
-            wait_timeout: Duration::from_millis(3000),
-            election_timeout: Duration::from_millis(50),
+            wait_timeout: Duration::from_millis(5000),
+            election_timeout: Duration::from_millis(200),
             resend_message_timeout: Duration::from_millis(500),
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,
-            gc_idx: 0,
+            trim_idx: 0,
             flexible_quorum: None,
             batch_size: 1,
+            num_iterations: 0,
         }
     }
 }
@@ -145,7 +175,7 @@ impl BrokenStorageConfig {
     /// Should be called before every operation on the broken storage.
     /// Returns Ok(_) if the operation should be performed without error.
     /// Returns Err(_) if the operation should fail.
-    pub fn next(&mut self) -> StorageResult<()> {
+    pub fn tick(&mut self) -> StorageResult<()> {
         let err = Err("test error from mocked broken storage".into());
         self.op_counter += 1;
         if self.fail_in > 0 {
@@ -217,7 +247,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_entry(entry)
             }
         }
@@ -228,7 +258,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_entries(entries)
             }
         }
@@ -239,7 +269,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().append_on_prefix(from_idx, entries)
             }
         }
@@ -250,7 +280,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_promise(n_prom),
             StorageType::Memory(mem_s) => mem_s.set_promise(n_prom),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_promise(n_prom)
             }
         }
@@ -261,7 +291,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_decided_idx(ld)
             }
         }
@@ -272,7 +302,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_decided_idx()
             }
         }
@@ -283,7 +313,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_accepted_round(na),
             StorageType::Memory(mem_s) => mem_s.set_accepted_round(na),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_accepted_round(na)
             }
         }
@@ -294,7 +324,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_accepted_round(),
             StorageType::Memory(mem_s) => mem_s.get_accepted_round(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_accepted_round()
             }
         }
@@ -305,7 +335,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_entries(from, to)
             }
         }
@@ -316,7 +346,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_log_len()
             }
         }
@@ -327,7 +357,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_suffix(from)
             }
         }
@@ -338,7 +368,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_promise(),
             StorageType::Memory(mem_s) => mem_s.get_promise(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_promise()
             }
         }
@@ -349,7 +379,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_stopsign(s),
             StorageType::Memory(mem_s) => mem_s.set_stopsign(s),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_stopsign(s)
             }
         }
@@ -360,7 +390,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_stopsign(),
             StorageType::Memory(mem_s) => mem_s.get_stopsign(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_stopsign()
             }
         }
@@ -371,7 +401,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().trim(idx)
             }
         }
@@ -382,7 +412,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_compacted_idx(idx)
             }
         }
@@ -393,7 +423,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_compacted_idx()
             }
         }
@@ -404,7 +434,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.set_snapshot(snapshot),
             StorageType::Memory(mem_s) => mem_s.set_snapshot(snapshot),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().set_snapshot(snapshot)
             }
         }
@@ -415,7 +445,7 @@ where
             StorageType::Persistent(persist_s) => persist_s.get_snapshot(),
             StorageType::Memory(mem_s) => mem_s.get_snapshot(),
             StorageType::Broken(mem_s, conf) => {
-                conf.lock().unwrap().next()?;
+                conf.lock().unwrap().tick()?;
                 mem_s.lock().unwrap().get_snapshot()
             }
         }
@@ -547,7 +577,7 @@ impl TestSystem {
         let node = self
             .nodes
             .get(&pid)
-            .expect(&format!("Cannot find node {pid}"));
+            .unwrap_or_else(|| panic!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
@@ -560,7 +590,7 @@ impl TestSystem {
         let node = self
             .nodes
             .get(&pid)
-            .expect(&format!("Cannot find node {pid}"));
+            .unwrap_or_else(|| panic!("Cannot find node {pid}"));
         self.kompact_system
             .as_ref()
             .expect("No KompactSystem found!")
@@ -570,18 +600,18 @@ impl TestSystem {
     }
 
     pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
-        // Remove outgoing connections
+        // set outgoing connections
         let node = self.nodes.get(&pid).expect("Cannot find {pid}");
-        node.on_definition(|comp| {
+        node.on_definition(|x| {
             for node_id in self.nodes.keys() {
-                comp.set_connection(*node_id, connection_status);
+                x.set_connection(*node_id, connection_status);
             }
         });
-        // Remove incoming connections
+        // set incoming connections
         for node_id in self.nodes.keys() {
-            let node = self.nodes.get(&node_id).expect("Cannot find {pid}");
-            node.on_definition(|comp| {
-                comp.set_connection(pid, connection_status);
+            let node = self.nodes.get(node_id).expect("Cannot find {pid}");
+            node.on_definition(|x| {
+                x.set_connection(pid, connection_status);
             });
         }
     }
@@ -590,7 +620,6 @@ impl TestSystem {
     /// wait until a leader is elected in the allocated time.
     pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
         let node = self.nodes.get(&node_id).expect("No BLE component found");
-
         let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
         leader_pid.unwrap_or_else(|| self.get_next_leader(node_id, wait_timeout))
     }
@@ -640,10 +669,10 @@ impl TestSystem {
 
         let mut proposal_futures = vec![];
         proposer.on_definition(|x| {
-            for val in proposals {
-                let (kprom, kfuture) = promise::<Value>();
-                x.paxos.append(val).expect("Failed to append");
-                x.decided_futures.push(Ask::new(kprom, ()));
+            for v in proposals {
+                let (kprom, kfuture) = promise::<()>();
+                x.paxos.append(v.clone()).expect("Failed to append");
+                x.insert_decided_future(Ask::new(kprom, v));
                 proposal_futures.push(kfuture);
             }
         });
@@ -667,11 +696,11 @@ impl TestSystem {
             .expect("No SequencePaxos component found");
 
         let reconfig_future = proposer.on_definition(|x| {
-            let (kprom, kfuture) = promise::<Value>();
+            let (kprom, kfuture) = promise::<()>();
             x.paxos
                 .reconfigure(new_configuration, metadata)
                 .expect("Failed to reconfigure");
-            x.decided_futures.push(Ask::new(kprom, ()));
+            x.insert_decided_future(Ask::new(kprom, Value::with_id(STOPSIGN_ID)));
             kfuture
         });
 
@@ -680,17 +709,16 @@ impl TestSystem {
             .expect("Failed to collect reconfiguration future");
     }
 
-    fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) -> () {
+    fn set_executor_for_threads(threads: usize, conf: &mut KompactConfig) {
         if threads <= 32 {
-            conf.executor(|t| crossbeam_workstealing_pool::small_pool(t))
+            conf.executor(crossbeam_workstealing_pool::small_pool)
         } else if threads <= 64 {
-            conf.executor(|t| crossbeam_workstealing_pool::large_pool(t))
+            conf.executor(crossbeam_workstealing_pool::large_pool)
         } else {
-            conf.executor(|t| crossbeam_workstealing_pool::dyn_pool(t))
+            conf.executor(crossbeam_workstealing_pool::dyn_pool)
         };
     }
 }
-
 pub mod omnireplica {
     use super::*;
     use omnipaxos::{
@@ -700,8 +728,6 @@ pub mod omnireplica {
         OmniPaxos,
     };
     use std::collections::{HashMap, HashSet};
-
-    const SNAPSHOTTED_DECIDE: Value = Value(0);
 
     #[derive(ComponentDefinition)]
     pub struct OmniPaxosComponent {
@@ -714,7 +740,7 @@ pub mod omnireplica {
         tick_timer: Option<ScheduledTimer>,
         tick_timeout: Duration,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
-        pub decided_futures: Vec<Ask<(), Value>>,
+        decided_futures: HashMap<u64, Ask<Value, ()>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: u64,
@@ -735,11 +761,10 @@ pub mod omnireplica {
                 Some(
                     self.schedule_periodic(self.tick_timeout, self.tick_timeout, move |c, _| {
                         c.paxos.tick();
-                        if let Some(leader_ballot) = c.paxos.get_current_leader_ballot() {
-                            if leader_ballot != c.current_leader_ballot {
-                                c.current_leader_ballot = leader_ballot;
-                                c.answer_election_future(leader_ballot);
-                            }
+                        let promise = c.paxos.get_promise();
+                        if promise > c.current_leader_ballot {
+                            c.current_leader_ballot = promise;
+                            c.answer_election_future(promise);
                         }
                         Handled::Ok
                     }),
@@ -771,37 +796,29 @@ pub mod omnireplica {
                 tick_timeout,
                 decided_idx: paxos.get_decided_idx(),
                 paxos,
-                decided_futures: vec![],
+                decided_futures: HashMap::new(),
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
             }
         }
 
-        pub fn get_trimmed_suffix(&self) -> Vec<Value> {
-            if let Some(decided_ents) = self.paxos.read_decided_suffix(0) {
-                let ents = match decided_ents.first().unwrap() {
-                    LogEntry::Trimmed(_) | LogEntry::Snapshotted(_) => {
-                        decided_ents.get(1..).unwrap()
-                    }
-                    _ => decided_ents.as_slice(),
-                };
-                ents.iter()
-                    .map(|x| match x {
-                        LogEntry::Decided(i) => *i,
-                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
-                    })
-                    .collect()
-            } else {
-                vec![]
-            }
+        pub fn read_decided_log(&self) -> Vec<LogEntry<Value>> {
+            self.paxos.read_decided_suffix(0).unwrap()
         }
 
         fn send_outgoing_msgs(&mut self) {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
                 if self.is_connected_to(&out.get_receiver()) {
-                    let receiver = self.peers.get(&out.get_receiver()).unwrap();
-                    receiver.tell(out);
+                    match self.peers.get(&out.get_receiver()) {
+                        Some(receiver) => receiver.tell(out),
+                        None => warn!(
+                            self.ctx.log(),
+                            "Peer {} not found! Message: {:?}",
+                            out.get_receiver(),
+                            out
+                        ),
+                    }
                 }
             }
         }
@@ -828,40 +845,35 @@ pub mod omnireplica {
             }
         }
 
+        pub fn insert_decided_future(&mut self, a: Ask<Value, ()>) {
+            let id = a.request().id;
+            let replaced = self.decided_futures.insert(id, a);
+            assert!(replaced.is_none(), "Future for {:?} already exists!", id);
+        }
+
+        fn try_answer_decided_future(&mut self, id: u64) {
+            if let Some(ask) = self.decided_futures.remove(&id) {
+                ask.reply(()).expect("Failed to reply promise!");
+            }
+        }
+
         fn answer_decided_future(&mut self) {
             if let Some(entries) = self.paxos.read_decided_suffix(self.decided_idx) {
-                if !self.decided_futures.is_empty() {
-                    for e in entries {
-                        match e {
-                            LogEntry::Decided(i) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(i)
-                                .expect("Failed to reply promise!"),
-                            LogEntry::Snapshotted(s) => {
-                                // Reply with dummy value for futures which were trimmed away
-                                for _ in 1..(s.trimmed_idx - self.decided_idx) {
-                                    self.decided_futures
-                                        .pop()
-                                        .unwrap()
-                                        .reply(SNAPSHOTTED_DECIDE)
-                                        .expect("Failed to reply promise!");
-                                }
-                                self.decided_futures
-                                    .pop()
-                                    .unwrap()
-                                    .reply(s.snapshot.value)
-                                    .expect("Failed to reply promise!");
-                            }
-                            LogEntry::StopSign(ss, _is_decided) => self
-                                .decided_futures
-                                .pop()
-                                .unwrap()
-                                .reply(Value(ss.next_config.configuration_id as u64))
-                                .expect("Failed to reply stopsign promise"),
-                            err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
+                for e in entries {
+                    match e {
+                        LogEntry::Decided(i) => {
+                            self.try_answer_decided_future(i.id);
                         }
+                        LogEntry::Snapshotted(s) => {
+                            // Reply futures that were trimmed away
+                            for id in s.snapshot.snapshotted.iter().map(|x| x.id) {
+                                self.try_answer_decided_future(id)
+                            }
+                        }
+                        LogEntry::StopSign(_ss, _is_decided) => {
+                            self.try_answer_decided_future(STOPSIGN_ID);
+                        }
+                        err => panic!("{}", format!("Got unexpected entry: {:?}", err)),
                     }
                 }
                 self.decided_idx = self.paxos.get_decided_idx();
@@ -883,23 +895,61 @@ pub mod omnireplica {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
-pub struct Value(pub u64);
-
-#[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize)]
-pub struct LatestValue {
-    value: Value,
+#[cfg(not(feature = "unicache"))]
+#[derive(Entry, Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[snapshot(ValueSnapshot)]
+pub struct Value {
+    id: u64,
 }
 
-impl Snapshot<Value> for LatestValue {
+#[cfg(feature = "unicache")]
+#[derive(
+    Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
+)]
+#[snapshot(ValueSnapshot)]
+pub struct Value {
+    pub id: u64,
+    #[unicache(encoding(u8), size(100))]
+    first_name: String,
+    #[unicache(encoding(u32))]
+    last_name: String,
+    #[unicache(size(20), cache(lfu), encoding(u64))]
+    job: String,
+}
+
+impl Value {
+    pub fn with_id(id: u64) -> Self {
+        Self {
+            id,
+            #[cfg(feature = "unicache")]
+            first_name: id.to_string(),
+            #[cfg(feature = "unicache")]
+            last_name: id.to_string(),
+            #[cfg(feature = "unicache")]
+            job: id.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ValueSnapshot {
+    pub latest_value: Value,
+    pub snapshotted: Vec<Value>,
+}
+
+impl Snapshot<Value> for ValueSnapshot {
     fn create(entries: &[Value]) -> Self {
         Self {
-            value: *entries.last().unwrap_or(&Value(0)),
+            latest_value: entries.last().cloned().unwrap_or_default(),
+            snapshotted: entries.to_vec(),
         }
     }
 
     fn merge(&mut self, delta: Self) {
-        self.value = delta.value;
+        if !delta.snapshotted.is_empty() {
+            self.latest_value = delta.snapshotted.last().unwrap().clone();
+            self.snapshotted.extend(delta.snapshotted);
+        }
     }
 
     fn use_snapshots() -> bool {
@@ -907,9 +957,19 @@ impl Snapshot<Value> for LatestValue {
     }
 }
 
-impl Entry for Value {
-    type Snapshot = LatestValue;
+impl ValueSnapshot {
+    pub fn contains_id(&self, id: &u64) -> bool {
+        self.snapshotted.iter().any(|x| &x.id == id)
+    }
 }
+
+impl PartialEq<Self> for ValueSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.latest_value == other.latest_value
+    }
+}
+
+impl Eq for ValueSnapshot {}
 
 /// Create a temporary directory in /tmp/
 pub fn create_temp_dir() -> String {
@@ -919,7 +979,7 @@ pub fn create_temp_dir() -> String {
 }
 
 pub mod verification {
-    use super::{LatestValue, Value};
+    use super::{Value, ValueSnapshot};
     use omnipaxos::{
         storage::{Snapshot, StopSign},
         util::LogEntry,
@@ -935,19 +995,19 @@ pub mod verification {
         match &read_log[..] {
             [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
             [LogEntry::Snapshotted(s)] => {
-                let exp_snapshot = LatestValue::create(proposals.as_slice());
+                let exp_snapshot = ValueSnapshot::create(proposals.as_slice());
                 verify_snapshot(&read_log, s.trimmed_idx, &exp_snapshot);
             }
             [LogEntry::Snapshotted(s), LogEntry::Decided(_), ..] => {
                 let (snapshotted_proposals, last_proposals) =
                     proposals.split_at(s.trimmed_idx as usize);
                 let (snapshot_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
-                let exp_snapshot = LatestValue::create(snapshotted_proposals);
+                let exp_snapshot = ValueSnapshot::create(snapshotted_proposals);
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);
                 verify_entries(decided_entries, last_proposals, 0, num_proposals);
             }
             [] => assert!(
-                proposals.len() == 0,
+                proposals.is_empty(),
                 "Log is empty but should be {:?}",
                 proposals
             ),
@@ -959,7 +1019,7 @@ pub mod verification {
     pub fn verify_snapshot(
         read_entries: &[LogEntry<Value>],
         exp_compacted_idx: u64,
-        exp_snapshot: &LatestValue,
+        exp_snapshot: &ValueSnapshot,
     ) {
         assert_eq!(
             read_entries.len(),
@@ -1026,6 +1086,54 @@ pub mod verification {
             e => {
                 panic!("{}", format!("Not a StopSign: {:?}", e))
             }
+        }
+    }
+
+    /// Verifies that there is a majority when an entry is proposed.
+    pub fn check_quorum(
+        logs: &[(u64, Vec<LogEntry<Value>>)],
+        quorum_size: usize,
+        proposals: &[Value],
+    ) {
+        for v in proposals {
+            let num_nodes: usize = logs
+                .iter()
+                .filter(|(_pid, log)| log.contains(&LogEntry::Decided(v.clone())))
+                .count();
+            let timed_out_proposal = num_nodes == 0;
+            if !timed_out_proposal {
+                assert!(
+                    num_nodes >= quorum_size,
+                    "Decided value did NOT have majority quorum! contained: {:?}",
+                    num_nodes
+                );
+            }
+        }
+    }
+
+    /// Verifies that only proposed values are decided.
+    pub fn check_validity(logs: &[(u64, Vec<LogEntry<Value>>)], proposals: &[Value]) {
+        logs.iter().for_each(|(_pid, log)| {
+            for entry in log {
+                if let LogEntry::Decided(v) = entry {
+                    assert!(
+                        proposals.contains(v),
+                        "Node decided unproposed value: {:?}",
+                        v
+                    );
+                }
+            }
+        });
+    }
+
+    /// Verifies logs do not diverge. **NOTE**: this check assumes normal execution within one round without any snapshots, trimming.
+    pub fn check_consistent_log_prefixes(logs: &Vec<(u64, Vec<LogEntry<Value>>)>) {
+        let (_, longest_log) = logs
+            .iter()
+            .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
+            .expect("Empty log from nodes!");
+        for (_, log) in logs {
+            assert!(longest_log.starts_with(log.as_slice()));
         }
     }
 }

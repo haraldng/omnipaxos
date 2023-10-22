@@ -35,22 +35,17 @@ fn forward_proposal_test() {
     }
 
     let px = sys.nodes.get(&proposal_node).unwrap();
-
-    let v = Value(1);
-    let (kprom_px, kfuture_px) = promise::<Value>();
+    let v = Value::with_id(proposal_node);
+    let (kprom, kfuture) = promise();
     px.on_definition(|x| {
-        x.decided_futures.push(Ask::new(kprom_px, ()));
-        x.paxos.append(v).expect("Failed to call Append");
+        x.insert_decided_future(Ask::new(kprom, v.clone()));
+        x.paxos.append(v.clone()).expect("Failed to call Append");
     });
 
-    let decided = kfuture_px
+    kfuture
         .wait_timeout(cfg.wait_timeout)
         .expect("The message was not proposed in the allocated time!");
 
-    assert_eq!(
-        v, decided,
-        "The decided value is not the same as the forwarded proposal"
-    );
     println!("Pass forward_proposal");
 
     let kompact_system =

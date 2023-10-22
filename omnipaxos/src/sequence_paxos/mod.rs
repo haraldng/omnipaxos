@@ -7,7 +7,7 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    storage::InternalStorage,
+    storage::{InternalStorage, InternalStorageConfig},
     util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
@@ -30,7 +30,6 @@ where
     pid: NodeId,
     peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
-    leader: Ballot,
     pending_proposals: Vec<T>,
     pending_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T>>,
@@ -78,15 +77,21 @@ where
             }
             None => ((Role::Follower, Phase::None), Ballot::default()),
         };
-
+        let internal_storage_config = InternalStorageConfig {
+            batch_size: config.batch_size,
+        };
         let mut paxos = SequencePaxos {
-            internal_storage: InternalStorage::with(storage, config.batch_size),
+            internal_storage: InternalStorage::with(
+                storage,
+                internal_storage_config,
+                #[cfg(feature = "unicache")]
+                pid,
+            ),
             pid,
             peers,
             state,
             pending_proposals: vec![],
             pending_stopsign: None,
-            leader,
             outgoing,
             leader_state: LeaderState::<T>::with(leader, max_pid, quorum),
             latest_accepted_meta: None,
@@ -169,7 +174,7 @@ where
                         .expect("storage error while trying to trim log")
                 })
             }
-            _ => Err(CompactionErr::NotCurrentLeader(self.leader.pid)),
+            _ => Err(CompactionErr::NotCurrentLeader(self.get_current_leader())),
         }
     }
 
@@ -270,35 +275,29 @@ where
                         #[cfg(feature = "logging")]
                         warn!(self.logger, "In Prepare phase without a cached promise!");
                         self.state = (Role::Follower, Phase::Recover);
-                        let prepreq = PrepareReq {
-                            n: self.get_promise(),
-                        };
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: self.leader.pid,
-                            msg: PaxosMsg::PrepareReq(prepreq),
-                        });
+                        self.send_preparereq_to_all_peers();
                     }
                 }
             }
             (Role::Follower, Phase::Recover) => {
                 // Resend PrepareReq
-                let prepreq = PrepareReq {
-                    n: self.get_promise(),
-                };
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: self.leader.pid,
-                    msg: PaxosMsg::PrepareReq(prepreq),
-                });
+                self.send_preparereq_to_all_peers();
             }
             _ => (),
         }
     }
 
-    /// Returns the id of the current leader.
-    pub(crate) fn get_current_leader(&self) -> Ballot {
-        self.leader
+    fn send_preparereq_to_all_peers(&mut self) {
+        let prepreq = PrepareReq {
+            n: self.get_promise(),
+        };
+        for peer in &self.peers {
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: *peer,
+                msg: PaxosMsg::PrepareReq(prepreq),
+            });
+        }
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
@@ -332,6 +331,10 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
+            #[cfg(feature = "unicache")]
+            PaxosMsg::EncodedAcceptDecide(e) => {
+                self.handle_encoded_acceptdecide(e);
+            }
         }
     }
 
@@ -366,11 +369,6 @@ where
         new_config: ClusterConfig,
         metadata: Option<Vec<u8>>,
     ) -> Result<(), ProposeErr<T>> {
-        #[cfg(feature = "logging")]
-        info!(
-            self.logger,
-            "Propose reconfiguration {:?}", new_config.nodes
-        );
         if self.pending_reconfiguration() {
             Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
         } else {
@@ -385,6 +383,13 @@ where
                 }
                 (Role::Leader, Phase::Accept) => {
                     if !self.pending_reconfiguration() {
+                        #[cfg(feature = "logging")]
+                        info!(
+                            self.logger,
+                            "Propose reconfiguration {:?} with {:?}",
+                            new_config.nodes,
+                            self.leader_state.n_leader
+                        );
                         let ss = StopSign::with(new_config, metadata);
                         self.accept_stopsign(ss.clone());
                         for pid in self.leader_state.get_promised_followers() {
@@ -430,12 +435,16 @@ where
         }
     }
 
+    fn get_current_leader(&self) -> NodeId {
+        self.get_promise().pid
+    }
+
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub(crate) fn reconnected(&mut self, pid: NodeId) {
         if pid == self.pid {
             return;
-        } else if pid == self.leader.pid {
+        } else if pid == self.get_current_leader() {
             self.state = (Role::Follower, Phase::Recover);
         }
         let prepreq = PrepareReq {
@@ -458,6 +467,38 @@ where
 
     pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {
         &self.leader_state
+    }
+
+    pub(crate) fn forward_proposals(&mut self, mut entries: Vec<T>) {
+        let leader = self.get_current_leader();
+        if leader > 0 && self.pid != leader {
+            let pf = PaxosMsg::ProposalForward(entries);
+            let msg = PaxosMessage {
+                from: self.pid,
+                to: leader,
+                msg: pf,
+            };
+            self.outgoing.push(msg);
+        } else {
+            self.pending_proposals.append(&mut entries);
+        }
+    }
+
+    pub(crate) fn forward_stopsign(&mut self, ss: StopSign) {
+        let leader = self.get_current_leader();
+        if leader > 0 && self.pid != leader {
+            #[cfg(feature = "logging")]
+            trace!(self.logger, "Forwarding StopSign to Leader {:?}", leader);
+            let fs = PaxosMsg::ForwardStopSign(ss);
+            let msg = PaxosMessage {
+                from: self.pid,
+                to: leader,
+                msg: fs,
+            };
+            self.outgoing.push(msg);
+        } else if self.pending_stopsign.as_mut().is_none() {
+            self.pending_stopsign = Some(ss);
+        }
     }
 }
 
@@ -488,7 +529,7 @@ pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<NodeId>,
     buffer_size: usize,
-    batch_size: usize,
+    pub(crate) batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
     logger_file_path: Option<String>,

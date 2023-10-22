@@ -16,15 +16,11 @@ fn leader_fail_follower_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -37,11 +33,7 @@ fn leader_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -63,10 +55,7 @@ fn leader_fail_leader_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
@@ -80,11 +69,7 @@ fn leader_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -106,15 +91,11 @@ fn follower_fail_leader_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -127,11 +108,7 @@ fn follower_fail_leader_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -153,15 +130,11 @@ fn follower_fail_follower_propose_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let proposals: Vec<Value> = (1..=cfg.num_proposals)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let proposals: Vec<Value> = (1..=cfg.num_proposals).map(Value::with_id).collect();
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
     let follower = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -174,11 +147,7 @@ fn follower_fail_follower_propose_test() {
         .nodes
         .get(&leader)
         .expect("No SequencePaxos component found");
-    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let read_log: Vec<LogEntry<Value>> = recovery_px.on_definition(|x| x.read_decided_log());
 
     verify_log(read_log, proposals);
 
@@ -204,19 +173,21 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
         .get(&recover)
         .expect("No SequencePaxos component found");
 
-    let futures: Vec<KFuture<Value>> = ((cfg.num_proposals / 2) + 1..=cfg.num_proposals)
-        .map(|_| {
-            let (kprom, kfuture) = promise::<Value>();
+    let proposals = utils::create_proposals((cfg.num_proposals / 2) + 1, cfg.num_proposals);
+    let futures: Vec<KFuture<()>> = proposals
+        .iter()
+        .map(|v| {
+            let (kprom, kfuture) = promise::<()>();
             recover_px.on_definition(|x| {
-                x.decided_futures.push(Ask::new(kprom, ()));
+                x.insert_decided_future(Ask::new(kprom, v.clone()));
             });
             kfuture
         })
         .collect();
 
-    for i in (cfg.num_proposals / 2) + 1..=cfg.num_proposals {
+    for v in proposals {
         proposer_px.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
+            x.paxos.append(v).expect("Failed to append");
         });
     }
 

@@ -3,7 +3,7 @@ pub mod utils;
 use kompact::prelude::{promise, Ask, FutureCollection};
 use serial_test::serial;
 use std::{thread, time::Duration};
-use utils::{TestConfig, TestSystem, Value};
+use utils::{TestConfig, TestSystem};
 
 /// Test case for batching.
 #[test]
@@ -17,14 +17,13 @@ fn batching_test() {
     sys.start_all_nodes();
 
     let mut futures = vec![];
-    let mut vec_proposals = vec![];
     let mut last_decided_idx = 0;
-    for i in 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+    let proposals = utils::create_proposals(1, cfg.num_proposals);
+    for v in proposals {
+        let (kprom, kfuture) = promise::<()>();
         first_node.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()))
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
+            x.paxos.append(v.clone()).expect("Failed to append");
         });
         futures.push(kfuture);
         thread::sleep(wait_time_between_propose);
@@ -43,8 +42,8 @@ fn batching_test() {
 
     let mut log = vec![];
     for (pid, node) in sys.nodes {
-        log.push(node.on_definition(|comp| {
-            let log = comp.paxos.get_decided_idx();
+        log.push(node.on_definition(|x| {
+            let log = x.paxos.get_decided_idx();
             (pid, log)
         }));
     }

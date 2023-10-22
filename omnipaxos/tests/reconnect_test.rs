@@ -1,5 +1,6 @@
 pub mod utils;
 
+use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask};
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
@@ -29,13 +30,9 @@ fn increasing_accept_seq_num_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let initial_proposals: Vec<Value> = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let leaders_proposals: Vec<Value> = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     // We skip seq# 1 (AcceptSync), 2 (batched initial_proposals), and 3 (decide initial_proposals)
     let expected_seq_nums: Vec<SequenceNumber> = (4..4 + SECOND_PROPOSALS)
@@ -50,7 +47,6 @@ fn increasing_accept_seq_num_test() {
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
 
@@ -73,6 +69,8 @@ fn increasing_accept_seq_num_test() {
                 PaxosMsg::AcceptSync(m) => Some(m.seq_num),
                 PaxosMsg::AcceptDecide(m) => Some(m.seq_num),
                 PaxosMsg::Decide(m) => Some(m.seq_num),
+                #[cfg(feature = "unicache")]
+                PaxosMsg::EncodedAcceptDecide(e) => Some(e.seq_num),
                 _ => None,
             });
         accept_seq_nums.extend(seq_nums);
@@ -99,22 +97,16 @@ fn reconnect_after_dropped_accepts_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -122,20 +114,19 @@ fn reconnect_after_dropped_accepts_test() {
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Decide entries during omission period
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
     });
     sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
@@ -143,11 +134,7 @@ fn reconnect_after_dropped_accepts_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -170,38 +157,39 @@ fn reconnect_after_dropped_prepare_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Disconnect everyone from follower and choose a new leader
     for node in sys.nodes.values() {
-        node.on_definition(|comp| {
-            comp.set_connection(follower_id, false);
+        node.on_definition(|x| {
+            x.set_connection(follower_id, false);
         });
     }
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
+
+    // leader is stopped and follower is partitioned, so pick a node that can actually see the new leader.
+    let node = sys
+        .nodes
+        .keys()
+        .find(|x| **x != leader_id && **x != follower_id)
+        .unwrap();
+    let new_leader_id = sys.get_elected_leader(*node, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_prepare_test failed to elect a different leader"
@@ -216,17 +204,13 @@ fn reconnect_after_dropped_prepare_test() {
 
     // Reconnect everyone to follower
     for node in sys.nodes.values() {
-        node.on_definition(|comp| {
-            comp.set_connection(follower_id, true);
+        node.on_definition(|x| {
+            x.set_connection(follower_id, true);
         });
     }
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -249,33 +233,27 @@ fn reconnect_after_dropped_promise_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Drop outgoing messages from follower so that a Promise is lost when next leader is chosen
-    follower.on_definition(|comp| {
+    follower.on_definition(|x| {
         for &node_id in sys.nodes.keys() {
             if node_id != follower_id {
-                comp.set_connection(node_id, false);
+                x.set_connection(node_id, false);
             }
         }
     });
@@ -283,7 +261,14 @@ fn reconnect_after_dropped_promise_test() {
     sys.stop_node(leader_id);
     thread::sleep(SLEEP_TIMEOUT);
     sys.start_node(leader_id);
-    let new_leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
+
+    // leader is stopped and follower is partitioned, so pick a node that can actually see the new leader.
+    let node = sys
+        .nodes
+        .keys()
+        .find(|x| **x != leader_id && **x != follower_id)
+        .unwrap();
+    let new_leader_id = sys.get_elected_leader(*node, cfg.wait_timeout);
     assert_ne!(
         leader_id, new_leader_id,
         "reconnect_after_dropped_promise_test failed to elect a different leader"
@@ -297,21 +282,17 @@ fn reconnect_after_dropped_promise_test() {
     );
 
     // Reconnect follower and wait for re-sync with leader
-    follower.on_definition(|comp| {
+    follower.on_definition(|x| {
         for &node_id in sys.nodes.keys() {
             if node_id != follower_id {
-                comp.set_connection(node_id, true);
+                x.set_connection(node_id, true);
             }
         }
     });
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -334,22 +315,16 @@ fn reconnect_after_dropped_preparereq_test() {
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
-    let initial_proposals = (0..INITIAL_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
-        .collect();
+    let initial_proposals = (0..INITIAL_PROPOSALS).map(Value::with_id).collect();
     let unseen_by_follower_proposals = (INITIAL_PROPOSALS..INITIAL_PROPOSALS + DROPPED_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let seen_by_follower_proposals = (INITIAL_PROPOSALS + DROPPED_PROPOSALS
         ..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
     let expected_log = (0..INITIAL_PROPOSALS + DROPPED_PROPOSALS + SECOND_PROPOSALS)
-        .into_iter()
-        .map(|v| Value(v))
+        .map(Value::with_id)
         .collect();
 
     // Propose some values so that a leader is elected
@@ -357,38 +332,33 @@ fn reconnect_after_dropped_preparereq_test() {
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
 
     // Disconnect leader from follower and decide new entries
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
     });
     sys.make_proposals(leader_id, unseen_by_follower_proposals, cfg.wait_timeout);
 
     // Decide entries after omission period so follower finds seq break but drop PrepareReq
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
-    follower.on_definition(|comp| {
-        comp.set_connection(leader_id, false);
+    follower.on_definition(|x| {
+        x.set_connection(leader_id, false);
     });
     sys.make_proposals(leader_id, seen_by_follower_proposals, cfg.wait_timeout);
 
     // Reconnect follower to leader
-    follower.on_definition(|comp| {
-        comp.set_connection(leader_id, true);
+    follower.on_definition(|x| {
+        x.set_connection(leader_id, true);
     });
     // Wait for Re-Sync with leader to finish
     thread::sleep(SLEEP_TIMEOUT);
 
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read decided log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_log(followers_log, expected_log);
 
     // Shutdown system
@@ -414,7 +384,6 @@ fn resync_after_dropped_acceptstopsign_test() {
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
     let follower_id = (1..=cfg.num_nodes as u64)
-        .into_iter()
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -425,9 +394,9 @@ fn resync_after_dropped_acceptstopsign_test() {
         nodes: vec![1, 2],
         flexible_quorum: None,
     };
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), None)
             .expect("Couldn't reconfigure!")
     });
@@ -435,9 +404,10 @@ fn resync_after_dropped_acceptstopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Force follower to become leader and wait for follower to decide the stopsign
-    let (kprom, kfuture) = promise::<Value>();
-    follower.on_definition(|comp| {
-        comp.decided_futures.push(Ask::new(kprom, ()));
+    let (kprom, kfuture) = promise::<()>();
+    let value = Value::with_id(STOPSIGN_ID);
+    follower.on_definition(|x| {
+        x.insert_decided_future(Ask::new(kprom, value));
     });
     sys.force_leader_change(follower_id, cfg.wait_timeout);
     kfuture
@@ -445,11 +415,7 @@ fn resync_after_dropped_acceptstopsign_test() {
         .expect("Timeout for collecting future of decided proposal expired");
 
     // Verify log
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_decided_suffix(0)
-            .expect("Cannot read log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|x| x.read_decided_log());
     verify_stopsign(&followers_log, &StopSign::with(next_config, None));
 
     // Shutdown system
@@ -475,9 +441,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
-    let mut followers = (1..=cfg.num_nodes as u64)
-        .into_iter()
-        .filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
 
     let write_quorum_size = match cfg.flexible_quorum {
@@ -499,9 +463,9 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         flexible_quorum: None,
     };
     let leader = sys.nodes.get(&leader_id).unwrap();
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), Some(vec![1, 2, 3]))
             .expect("Couldn't reconfigure!")
     });
@@ -509,19 +473,16 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Reconnect leader to follower
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     // Wait for leader to resend AcceptStopSign
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
     let follower = sys.nodes.get(&follower_id).unwrap();
-    let followers_log: Vec<LogEntry<Value>> = follower.on_definition(|comp| {
-        comp.paxos
-            .read_entries(0..1)
-            .expect("Cannot read log entry")
-    });
+    let followers_log: Vec<LogEntry<Value>> =
+        follower.on_definition(|x| x.paxos.read_entries(0..1).expect("Cannot read log entry"));
     verify_stopsign(
         &followers_log,
         &StopSign::with(next_config, Some(vec![1, 2, 3])),
@@ -548,9 +509,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
-    let mut followers = (1..=cfg.num_nodes as u64)
-        .into_iter()
-        .filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
     let leader = sys.nodes.get(&leader_id).unwrap();
 
@@ -561,16 +520,13 @@ fn reconnect_after_dropped_decidestopsign_test() {
         flexible_quorum: None,
     };
     for other_follower in followers.clone() {
-        sys.nodes
-            .get(&other_follower)
-            .unwrap()
-            .on_definition(|comp| {
-                comp.set_connection(follower_id, false);
-            });
+        sys.nodes.get(&other_follower).unwrap().on_definition(|x| {
+            x.set_connection(follower_id, false);
+        });
     }
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, false);
-        comp.paxos
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, false);
+        x.paxos
             .reconfigure(next_config.clone(), None)
             .expect("Couldn't reconfigure!")
     });
@@ -578,16 +534,16 @@ fn reconnect_after_dropped_decidestopsign_test() {
     thread::sleep(SLEEP_TIMEOUT);
 
     // Reconnect leader to follower
-    leader.on_definition(|comp| {
-        comp.set_connection(follower_id, true);
+    leader.on_definition(|x| {
+        x.set_connection(follower_id, true);
     });
     // Wait for leader to resend DecideStopSign
     thread::sleep(SLEEP_TIMEOUT);
 
     // Verify log
     let follower = sys.nodes.get(&follower_id).unwrap();
-    follower.on_definition(|comp| {
-        comp.paxos
+    follower.on_definition(|x| {
+        x.paxos
             .is_reconfigured()
             .expect("Stopsign entry wasn't decided");
     });

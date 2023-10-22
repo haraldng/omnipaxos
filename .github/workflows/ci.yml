@@ -14,6 +14,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  check_features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run check features
+        run: |
+          cd omnipaxos
+          chmod +x test_all_features.sh
+          ./test_all_features.sh -c
+        shell: bash
+
   tests:
     runs-on: ubuntu-latest
     strategy:
@@ -41,7 +52,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose --features default,logging,toml_config
+          args: --verbose --features default,logging,toml_config --no-fail-fast
+      - name: Run UniCache tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -p omnipaxos --verbose --features default,logging,toml_config,unicache --no-fail-fast
 
   format:
     name: cargo fmt

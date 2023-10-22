@@ -1,17 +1,13 @@
 pub mod utils;
 
-use crate::utils::LatestValue;
-use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{
-    ballot_leader_election::Ballot,
-    storage::Snapshot,
-    util::{LogEntry, NodeId},
-};
+use crate::utils::{omnireplica::OmniPaxosComponent, ValueSnapshot};
+use kompact::prelude::{promise, Ask, Component, FutureCollection};
+use omnipaxos::{storage::Snapshot, util::LogEntry};
 use serial_test::serial;
-use std::thread;
+use std::{sync::Arc, thread};
 use utils::{TestConfig, TestSystem, Value};
 
-const TRIM_INDEX_INCREMENT: u64 = 10;
+const SNAPSHOT_INDEX_INCREMENT: u64 = 10;
 
 /// Test trimming the log.
 /// At the end the log is retrieved from each replica and verified
@@ -19,27 +15,21 @@ const TRIM_INDEX_INCREMENT: u64 = 10;
 #[test]
 #[serial]
 fn snapshot_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     let mut sys = TestSystem::with(cfg);
-    let first_node = sys.nodes.get(&1).unwrap();
-    let (kprom, kfuture) = promise::<Ballot>();
-    first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
     sys.start_all_nodes();
-
-    let elected_pid = kfuture
-        .wait_timeout(cfg.wait_timeout)
-        .expect("No elected leader in election")
-        .pid;
+    let elected_pid = sys.get_elected_leader(1, cfg.wait_timeout);
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let mut vec_proposals = vec![];
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get prepared with empty logs
+
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+    for v in &vec_proposals {
+        let (kprom, kfuture) = promise::<()>();
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
+            x.paxos.append(v.clone()).expect("Failed to append");
         });
         futures.push(kfuture);
     }
@@ -51,23 +41,17 @@ fn snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx), false)
+            .snapshot(Some(cfg.trim_idx), false)
             .expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seqs_after = vec![];
-    for (i, px) in sys.nodes {
-        seqs_after.push(px.on_definition(|comp| {
-            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
-            (i, seq)
-        }));
+    for (_pid, node) in sys.nodes {
+        check_snapshot(&vec_proposals, cfg.trim_idx, node);
     }
 
-    check_snapshot(vec_proposals, seqs_after, cfg.gc_idx, elected_pid);
-
-    println!("Pass trim");
+    println!("Pass snapshot");
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -83,27 +67,21 @@ fn snapshot_test() {
 #[test]
 #[serial]
 fn double_snapshot_test() {
-    let cfg = TestConfig::load("gc_test").expect("Test config loaded");
+    let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     let mut sys = TestSystem::with(cfg);
-    let first_node = sys.nodes.get(&1).unwrap();
-    let (kprom, kfuture) = promise::<Ballot>();
-    first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
     sys.start_all_nodes();
-
-    let elected_pid = kfuture
-        .wait_timeout(cfg.wait_timeout)
-        .expect("No elected leader in election")
-        .pid;
+    let elected_pid = sys.get_elected_leader(1, cfg.wait_timeout);
     let elected_leader = sys.nodes.get(&elected_pid).unwrap();
 
-    let mut vec_proposals = vec![];
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get prepared with empty logs
+
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+    for v in &vec_proposals {
+        let (kprom, kfuture) = promise::<()>();
         elected_leader.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()));
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
+            x.paxos.append(v.clone()).expect("Failed to append");
         });
         futures.push(kfuture);
     }
@@ -115,7 +93,7 @@ fn double_snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx), false)
+            .snapshot(Some(cfg.trim_idx), false)
             .expect("Failed to trim");
     });
 
@@ -123,28 +101,21 @@ fn double_snapshot_test() {
 
     elected_leader.on_definition(|x| {
         x.paxos
-            .snapshot(Some(cfg.gc_idx + TRIM_INDEX_INCREMENT), false)
+            .snapshot(Some(cfg.trim_idx + SNAPSHOT_INDEX_INCREMENT), false)
             .expect("Failed to trim");
     });
 
     thread::sleep(cfg.wait_timeout);
 
-    let mut seq_after_double = vec![];
-    for (i, px) in sys.nodes {
-        seq_after_double.push(px.on_definition(|comp| {
-            let seq = comp.paxos.read_entries(0..).expect("No log in paxos");
-            (i, seq)
-        }));
+    for (_pid, node) in sys.nodes {
+        check_snapshot(
+            &vec_proposals,
+            cfg.trim_idx + SNAPSHOT_INDEX_INCREMENT,
+            node,
+        );
     }
 
-    check_snapshot(
-        vec_proposals,
-        seq_after_double,
-        cfg.gc_idx + TRIM_INDEX_INCREMENT,
-        elected_pid,
-    );
-
-    println!("Pass double trim");
+    println!("Pass double snapshot");
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
@@ -155,52 +126,35 @@ fn double_snapshot_test() {
 }
 
 fn check_snapshot(
-    vec_proposals: Vec<Value>,
-    seq_after: Vec<(u64, Vec<LogEntry<Value>>)>,
-    gc_idx: u64,
-    leader: NodeId,
+    vec_proposals: &Vec<Value>,
+    snapshot_idx: u64,
+    node: Arc<Component<OmniPaxosComponent>>,
 ) {
-    let exp_snapshot = LatestValue::create(&vec_proposals[0..gc_idx as usize]);
-    for (pid, after) in seq_after {
-        if pid == leader {
-            let snapshot = after.first().unwrap();
-            match snapshot {
-                LogEntry::Snapshotted(s) => {
-                    assert_eq!(s.trimmed_idx, gc_idx);
-                    assert_eq!(&s.snapshot, &exp_snapshot);
-                }
-                l => panic!(
-                    "Leader's first entry is not snapshot. Node {}, {:?}",
-                    pid, l
+    let exp_snapshot = ValueSnapshot::create(&vec_proposals[0..snapshot_idx as usize]);
+    let num_proposals = vec_proposals.len();
+    node.on_definition(|x| {
+        let op = &x.paxos;
+        for snapshotted_idx in 0..snapshot_idx {
+            match op.read(snapshotted_idx).unwrap() {
+                LogEntry::Snapshotted(s)
+                    if s.snapshot == exp_snapshot && s.trimmed_idx == snapshot_idx => {}
+                e => panic!(
+                    "Unexpected entry at {}. Should be snapshot with trimmed index {} and latest value: {:?}, but got {:?}",
+                    snapshotted_idx, snapshot_idx, exp_snapshot.latest_value, e
                 ),
             }
-            // leader must have successfully trimmed
-            // -1 as snapshot is one entry
-            assert_eq!(vec_proposals.len(), (after.len() - 1 + gc_idx as usize));
-        } else {
-            if (after.len() - 1 + gc_idx as usize) == vec_proposals.len() {
-                let snapshot = after.first().unwrap();
-                match snapshot {
-                    LogEntry::Snapshotted(s) => {
-                        assert_eq!(s.trimmed_idx, gc_idx);
-                        assert_eq!(&s.snapshot, &exp_snapshot);
-                    }
-                    _ => panic!("First entry is not a snapshot"),
-                }
-            } else {
-                // must be prefix
-                for (entry_idx, entry) in after.iter().enumerate() {
-                    match entry {
-                        LogEntry::Decided(d) => {
-                            assert_eq!(d, &vec_proposals[entry_idx]);
-                        }
-                        l => panic!(
-                            "Unexpected entry for node {}, idx: {}: {:?}",
-                            pid, entry_idx, l
-                        ),
-                    }
-                }
+        }
+        for idx in snapshot_idx as usize..num_proposals {
+            let expected_value = vec_proposals.get(idx).unwrap();
+            match op.read(idx as u64).unwrap() {
+                LogEntry::Decided(v) if &v == expected_value => {}
+                e => panic!(
+                    "Entry {} must be decided with {:?}, but was {:?}",
+                    idx, expected_value, e
+                ),
             }
         }
-    }
+        let decided_sfx = op.read_decided_suffix(0).unwrap();
+        assert_eq!(decided_sfx.len(), num_proposals - snapshot_idx as usize + 1); // +1 as all snapshotted entries are represented by LogEntry::Snapshotted
+    });
 }

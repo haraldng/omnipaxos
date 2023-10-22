@@ -24,6 +24,8 @@ OmniPaxos:
     path: "omnipaxos/reconfiguration.md"
   Flexible Quorums:
     path: "omnipaxos/flexible_quorums.md"
+  UniCache - Data-driven Replication:
+    path: "omnipaxos/unicache.md"
   Features:
     path: "omnipaxos/features.md"
   Logging:

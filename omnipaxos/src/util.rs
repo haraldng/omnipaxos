@@ -10,7 +10,10 @@ use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 #[derive(Debug, Clone)]
 pub(crate) struct AcceptedMetaData<T: Entry> {
     pub accepted_idx: u64,
+    #[cfg(not(feature = "unicache"))]
     pub flushed_entries: Vec<T>,
+    #[cfg(feature = "unicache")]
+    pub flushed_processed: Vec<T::EncodeResult>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -285,6 +288,22 @@ where
     StopSign(StopSign, bool),
 }
 
+impl<T: PartialEq + Entry> PartialEq for LogEntry<T>
+where
+    <T as Entry>::Snapshot: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (LogEntry::Decided(v1), LogEntry::Decided(v2)) => v1 == v2,
+            (LogEntry::Undecided(v1), LogEntry::Undecided(v2)) => v1 == v2,
+            (LogEntry::Trimmed(idx1), LogEntry::Trimmed(idx2)) => idx1 == idx2,
+            (LogEntry::Snapshotted(s1), LogEntry::Snapshotted(s2)) => s1 == s2,
+            (LogEntry::StopSign(ss1, b1), LogEntry::StopSign(ss2, b2)) => ss1 == ss2 && b1 == b2,
+            _ => false,
+        }
+    }
+}
+
 /// Convenience struct for checking if a certain index exists, is compacted or is a StopSign.
 #[derive(Debug, Clone)]
 pub(crate) enum IndexEntry {
@@ -314,6 +333,15 @@ where
             snapshot,
             _p: PhantomData,
         }
+    }
+}
+
+impl<T: Entry> PartialEq for SnapshottedEntry<T>
+where
+    <T as Entry>::Snapshot: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.trimmed_idx == other.trimmed_idx && self.snapshot == other.snapshot
     }
 }
 

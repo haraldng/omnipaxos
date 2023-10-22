@@ -6,7 +6,7 @@ Please make sure these boxes are checked, before submitting a new PR.
 
 ## Issues
 
-Reference or describe the issues this PR addresses.
+Reference or describe the issues this PR addresses. For each issue that should be closed after this PR is merged, please refer it using "fix" so that they get closed automatically (e.g., `Fix #X, Fix #Y`).
 
 ## Breaking Changes
 

@@ -7,9 +7,7 @@ use omnipaxos::{
 };
 use serial_test::serial;
 use utils::{
-    create_temp_dir,
-    verification::{verify_entries, verify_snapshot, verify_stopsign},
-    LatestValue, StorageType, TestConfig, TestSystem, Value,
+    create_temp_dir, verification::*, StorageType, TestConfig, TestSystem, Value, ValueSnapshot,
 };
 
 /// Verifies the 3 properties that the Paxos algorithm offers
@@ -21,14 +19,13 @@ fn consensus_test() {
     let mut sys = TestSystem::with(cfg);
 
     let first_node = sys.nodes.get(&1).unwrap();
-    let mut vec_proposals = vec![];
     let mut futures = vec![];
-    for i in 1..=cfg.num_proposals {
-        let (kprom, kfuture) = promise::<Value>();
-        vec_proposals.push(Value(i));
+    let vec_proposals = utils::create_proposals(1, cfg.num_proposals);
+    for v in &vec_proposals {
+        let (kprom, kfuture) = promise::<()>();
         first_node.on_definition(|x| {
-            x.paxos.append(Value(i)).expect("Failed to append");
-            x.decided_futures.push(Ask::new(kprom, ()))
+            x.insert_decided_future(Ask::new(kprom, v.clone()));
+            x.paxos.append(v.clone()).expect("Failed to append");
         });
         futures.push(kfuture);
     }
@@ -42,16 +39,16 @@ fn consensus_test() {
 
     let mut log = vec![];
     for (pid, node) in sys.nodes {
-        log.push(node.on_definition(|comp| {
-            let log = comp.get_trimmed_suffix();
-            (pid, log.to_vec())
+        log.push(node.on_definition(|x| {
+            let log = x.read_decided_log();
+            (pid, log)
         }));
     }
 
-    let quorum_size = cfg.num_nodes as usize / 2 + 1;
-    check_quorum(log.clone(), quorum_size, vec_proposals.clone());
-    check_validity(log.clone(), vec_proposals);
-    check_uniform_agreement(log);
+    let quorum_size = cfg.num_nodes / 2 + 1;
+    check_quorum(&log, quorum_size, &vec_proposals);
+    check_validity(&log, &vec_proposals);
+    check_consistent_log_prefixes(&log);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
@@ -68,13 +65,13 @@ fn read_test() {
 
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
-        .map(|v| Value(*v as u64))
+        .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
 
-    let exp_snapshot = LatestValue::create(snapshotted);
+    let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
@@ -89,6 +86,7 @@ fn read_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
+
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
 
     // read decided entries
@@ -157,12 +155,12 @@ fn read_entries_test() {
 
     let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
-        .map(|v| Value(*v as u64))
+        .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
     let snapshotted_idx: u64 = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
-    let exp_snapshot = LatestValue::create(snapshotted);
+    let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
     let mut storage = StorageType::<Value>::with(cfg.storage_type, &temp_dir);
@@ -176,6 +174,7 @@ fn read_entries_test() {
     op_config.server_config.pid = 1;
     op_config.cluster_config.nodes = vec![1, 2, 3];
     op_config.cluster_config.configuration_id = 1;
+
     let mut omni_paxos = op_config.clone().build(storage).unwrap();
     omni_paxos
         .snapshot(Some(snapshotted_idx), true)
@@ -280,64 +279,6 @@ fn read_entries_test() {
         .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (snapshot, stopsign) = entries.split_at(entries.len() - 1);
-    verify_snapshot(snapshot, snapshotted_idx, &LatestValue::create(&log));
+    verify_snapshot(snapshot, snapshotted_idx, &ValueSnapshot::create(&log));
     verify_stopsign(stopsign, &ss);
-}
-
-/// Verifies that there is a majority when an entry is proposed.
-fn check_quorum(
-    log_responses: Vec<(u64, Vec<Value>)>,
-    quorum_size: usize,
-    num_proposals: Vec<Value>,
-) {
-    for i in num_proposals {
-        let num_nodes: usize = log_responses
-            .iter()
-            .filter(|(_, sr)| sr.contains(&i))
-            .map(|sr| sr.0)
-            .count();
-        let timed_out_proposal = num_nodes == 0;
-        if !timed_out_proposal {
-            assert!(
-                num_nodes >= quorum_size,
-                "Decided value did NOT have majority quorum! contained: {:?}",
-                num_nodes
-            );
-        }
-    }
-
-    println!("Pass check_quorum");
-}
-
-/// Verifies that only proposed values are decided.
-fn check_validity(log_responses: Vec<(u64, Vec<Value>)>, num_proposals: Vec<Value>) {
-    let invalid_nodes: Vec<_> = log_responses
-        .iter()
-        .filter(|(_, sr)| {
-            sr.iter()
-                .filter(|ent| !num_proposals.contains(*ent))
-                .count()
-                != 0
-        })
-        .collect();
-    assert!(
-        invalid_nodes.len() < 1,
-        "Nodes decided unproposed values. invalid_nodes: {:?}",
-        invalid_nodes
-    );
-
-    println!("Pass check_validity");
-}
-
-/// Verifies if one correct node receives a message, then everyone will eventually receive it.
-fn check_uniform_agreement(log_responses: Vec<(u64, Vec<Value>)>) {
-    let (_, longest_log) = log_responses
-        .iter()
-        .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
-        .expect("Empty SequenceResp from nodes!");
-    for (_, sr) in &log_responses {
-        assert!(longest_log.starts_with(sr.as_slice()));
-    }
-
-    println!("Pass check_uniform_agreement");
 }

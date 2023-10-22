@@ -16,7 +16,6 @@ where
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
-            self.leader = prep.n;
             self.internal_storage
                 .flush_batch()
                 .expect("storage error while trying to flush batch");
@@ -162,12 +161,10 @@ where
                     );
                 }
             };
-            if accsync.stopsign.is_none() {
-                self.forward_pending_proposals();
+            match accsync.stopsign {
+                Some(ss) => self.accept_stopsign(ss),
+                None => self.forward_pending_proposals(),
             }
-            self.internal_storage
-                .set_stopsign(accsync.stopsign)
-                .expect("storage error while trying to write stopsign");
             let accepted = Accepted {
                 n: accsync.n,
                 accepted_idx: self.internal_storage.get_accepted_idx(),
@@ -181,6 +178,8 @@ where
                 to: from,
                 msg: PaxosMsg::Accepted(accepted),
             });
+            #[cfg(feature = "unicache")]
+            self.internal_storage.set_unicache(accsync.unicache);
         }
     }
 
@@ -214,6 +213,30 @@ where
         }
     }
 
+    #[cfg(feature = "unicache")]
+    pub(crate) fn handle_encoded_acceptdecide(&mut self, e: EncodedAcceptDecide<T>) {
+        if self.check_valid_ballot(e.n)
+            && self.state == (Role::Follower, Phase::Accept)
+            && self.handle_sequence_num(e.seq_num, e.n.pid) == MessageStatus::Expected
+        {
+            // handle decide
+            let old_decided_idx = self.get_decided_idx();
+            if e.decided_idx > old_decided_idx {
+                self.internal_storage
+                    .set_decided_idx(e.decided_idx)
+                    .expect("storage error while trying to write decided index");
+            }
+            // handle accept
+            let encoded_entries = e.entries;
+            let result = self.accept_encoded_entries_follower(e.n, encoded_entries);
+            self.internal_storage.rollback_and_panic_if_err(
+                &result,
+                vec![RollbackValue::DecidedIdx(old_decided_idx)],
+                "storage error while trying to write log entries.",
+            );
+        }
+    }
+
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
         if self.check_valid_ballot(acc_ss.n)
             && self.state == (Role::Follower, Phase::Accept)
@@ -226,7 +249,7 @@ where
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
-                to: self.leader.pid,
+                to: acc_ss.n.pid,
                 msg: PaxosMsg::Accepted(a),
             });
         }
@@ -248,29 +271,48 @@ where
             .internal_storage
             .append_entries_and_get_accepted_idx(entries)?;
         if let Some(accepted_idx) = accepted_res {
-            match &self.latest_accepted_meta {
-                Some((round, outgoing_idx)) if round == &n => {
-                    let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
-                    match msg {
-                        PaxosMsg::Accepted(a) => {
-                            a.accepted_idx = accepted_idx;
-                        }
-                        _ => panic!("Cached idx is not an Accepted Message<T>!"),
-                    }
-                }
-                _ => {
-                    let accepted = Accepted { n, accepted_idx };
-                    let cached_idx = self.outgoing.len();
-                    self.latest_accepted_meta = Some((n, cached_idx));
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: self.leader.pid,
-                        msg: PaxosMsg::Accepted(accepted),
-                    });
-                }
-            };
+            self.handle_flushed_accepted(n, accepted_idx);
         }
         Ok(())
+    }
+
+    #[cfg(feature = "unicache")]
+    fn accept_encoded_entries_follower(
+        &mut self,
+        n: Ballot,
+        encoded_entries: Vec<T::EncodeResult>,
+    ) -> StorageResult<()> {
+        let accepted_res = self
+            .internal_storage
+            .append_encoded_entries_and_get_accepted_idx(encoded_entries)?;
+        if let Some(accepted_idx) = accepted_res {
+            self.handle_flushed_accepted(n, accepted_idx);
+        }
+        Ok(())
+    }
+
+    fn handle_flushed_accepted(&mut self, n: Ballot, accepted_idx: u64) {
+        match &self.latest_accepted_meta {
+            Some((round, outgoing_idx)) if round == &n => {
+                let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
+                match msg {
+                    PaxosMsg::Accepted(a) => {
+                        a.accepted_idx = accepted_idx;
+                    }
+                    _ => panic!("Cached idx is not an Accepted Message<T>!"),
+                }
+            }
+            _ => {
+                let accepted = Accepted { n, accepted_idx };
+                let cached_idx = self.outgoing.len();
+                self.latest_accepted_meta = Some((n, cached_idx));
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: n.pid,
+                    msg: PaxosMsg::Accepted(accepted),
+                });
+            }
+        };
     }
 
     /// Also returns whether the message's ballot was promised
@@ -278,8 +320,13 @@ where
         let my_promise = self.internal_storage.get_promise();
         match my_promise.cmp(&message_ballot) {
             std::cmp::Ordering::Equal => true,
-            std::cmp::Ordering::Less => {
+            std::cmp::Ordering::Greater => {
                 let not_acc = NotAccepted { n: my_promise };
+                #[cfg(feature = "logging")]
+                warn!(
+                    self.logger,
+                    "NotAccepted. My promise: {:?}, theirs: {:?}", my_promise, message_ballot
+                );
                 self.outgoing.push(PaxosMessage {
                     from: self.pid,
                     to: message_ballot.pid,
@@ -287,12 +334,12 @@ where
                 });
                 false
             }
-            std::cmp::Ordering::Greater => {
+            std::cmp::Ordering::Less => {
                 // Should never happen, but to be safe send PrepareReq
                 #[cfg(feature = "logging")]
                 warn!(
                     self.logger,
-                    "Received non-prepare message from a leader I've never promised."
+                    "Received non-prepare message from a leader I've never promised. My: {:?}, theirs: {:?}", my_promise, message_ballot
                 );
                 self.reconnected(message_ballot.pid);
                 false
