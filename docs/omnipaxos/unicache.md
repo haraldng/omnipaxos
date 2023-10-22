@@ -1,4 +1,4 @@
-UniCache is a feature that introduces a cache in OmniPaxos to handle skewed data. **UniCache acts as a dictionary that maps popular data to smaller encodings**. Users annotate fields in the `Entry` that are cachable, and when such a value is encountered, it gets transmitted as an encoding instead. In this way, OmniPaxos can reduce the network I/O in skewed workloads by encoding frequently repeated data.
+UniCache is a feature that can reduce the amount of data sent between servers if the data is skewed and certain values reoccur often. **UniCache acts as a dictionary that maps popular data to smaller encodings**. Users annotate fields in the `Entry` that are cachable, and when such a value is encountered, it gets transmitted as an encoding instead. In this way, OmniPaxos can reduce the network I/O in skewed workloads by encoding frequently repeated data as smaller types.
 
 ![unicache](../images/unicache-example.png)
 
@@ -40,7 +40,7 @@ struct Customer {
     profession: String,
 }
 ``` 
-Instead of deriving `Entry` for the struct `Customer`, we are now deriving `UniCacheEntry`. The `first_name` is annotated with
+Note that instead of deriving `Entry` for the struct `Customer`, we are now deriving `UniCacheEntry`. The `first_name` is annotated with
 `#[unicache(encoding(u8)]` which implies that if there is a cache hit, the value will be sent as a `u8` instead of the original type (`String`). Other attributes are the `size` and `cache`. The `size` lets users define the cache size for the field. The `cache` lets us set the eviction policy to `lfu` (least-frequently-used) or `lru` (least-recently-used).
 
 > **Note:** Users only need to specify which fields are cachable (e.g., `first_name` and `profession`) and not the values of them. UniCache will cache the values of those fields according to the eviction policy.
@@ -73,10 +73,10 @@ When we replicate the second customer, UniCache will replace any cached values w
 /* Encoded version of second_customer in OmniPaxos */
 let enc_customer1 = EncodedCustomer {
     id: 1,
-    first_name = 0,       // "John" is replaced by an integer (u16)
+    first_name = 0,       // "John" is replaced by an integer (u8)
     last_name = "Johnson", // "Johnson" was a cache miss. So it is sent in its original form.
     email = "jj@kth.se",
-    profession = 0,        // "Developer" is replaced by an integer (u8)
+    profession = 0,        // "Developer" is replaced by an integer (u16)
 }
 ```
 As `"John"` and `"Developer"` were in the cache, they get sent over the network as encoded integers (`u8` and `u16`) instead of their original `String` values. The benefit here is that we send less data over the network by remembering the values we have sent before. So instead of sending `"John"` as 4 bytes and `"Developer"` as 9 bytes, we send them as `u8` and `u16` instead that are one byte and 2 bytes respectively. In this way, we compress these two fields by `1 - (3/13) = 77%`.
@@ -91,6 +91,6 @@ match read_second_customer {
     _ => {},
 }
 ```
-> **Note:** The cached values only get encoded in the messages being sent in OmniPaxos. UniCache can therefore only reduce the size of the messages but not the storage.
+> **Note:** The cached values only get encoded in the messages being sent in OmniPaxos. UniCache can therefore only compress the messages but not the storage.
  
 For more details on the design and benefits of UniCache, check out our [paper](https://openproceedings.org/2023/conf/edbt/3-paper-117.pdf) from EDBT2023.
