@@ -15,7 +15,7 @@ use utils::{
     TestConfig, TestSystem, Value,
 };
 
-const SLEEP_TIMEOUT: Duration = Duration::from_secs(5);
+const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 const INITIAL_PROPOSALS: u64 = 5;
 const DROPPED_PROPOSALS: u64 = 5;
 const SECOND_PROPOSALS: u64 = 5;

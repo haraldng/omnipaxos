@@ -2,7 +2,7 @@
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 10
-election_timeout_ms = 300
+election_timeout_ms = 100
 storage_type = { type = "Memory" }
 
 [consensus_test]

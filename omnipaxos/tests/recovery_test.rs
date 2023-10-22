@@ -6,7 +6,7 @@ use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{verification::verify_log, StorageType, TestConfig, TestSystem, Value};
 
-const SLEEP_TIMEOUT: Duration = Duration::from_secs(3);
+const SLEEP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[test]
 #[serial]

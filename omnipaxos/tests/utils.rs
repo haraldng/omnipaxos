@@ -141,7 +141,7 @@ impl Default for TestConfig {
             num_threads: 3,
             num_nodes: 3,
             wait_timeout: Duration::from_millis(5000),
-            election_timeout: Duration::from_millis(300),
+            election_timeout: Duration::from_millis(200),
             resend_message_timeout: Duration::from_millis(500),
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
