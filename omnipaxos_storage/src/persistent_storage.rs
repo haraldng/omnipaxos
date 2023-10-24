@@ -158,31 +158,31 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
+    fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         let entry_bytes = bincode::serialize(&entry)?;
-        let offset = self.commitlog.append_msg(entry_bytes)?;
+        self.commitlog.append_msg(entry_bytes)?;
         self.commitlog.flush()?; // ensure durable writes
-        Ok(offset + 1) // +1 as commitlog returns the offset the entry was appended at, while we should return the index that the entry got in the log.
+        Ok(())
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         // Required check because Commitlog has a bug where appending an empty set of entries will
         // always return an offset.first() with 0 despite entries being in the log.
         if entries.is_empty() {
-            return self.get_log_len();
+            return Ok(());
         }
         let mut serialized = vec![];
         for entry in entries {
             serialized.push(bincode::serialize(&entry)?)
         }
-        let offset = self
+        self
             .commitlog
             .append(&mut MessageBuf::from_iter(serialized))?;
         self.commitlog.flush()?; // ensure durable writes
-        Ok(offset.first() + offset.len() as u64)
+        Ok(())
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
         if from_idx > 0 && from_idx < self.get_log_len()? {
             self.commitlog.truncate(from_idx)?;
         }

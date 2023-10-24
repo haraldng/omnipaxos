@@ -242,7 +242,7 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
+    fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
             StorageType::Memory(mem_s) => mem_s.append_entry(entry),
@@ -253,7 +253,7 @@ where
         }
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entries(entries),
             StorageType::Memory(mem_s) => mem_s.append_entries(entries),
@@ -264,7 +264,7 @@ where
         }
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),

@@ -28,18 +28,18 @@ impl<T> Storage<T> for MemoryStorage<T>
 where
     T: Entry,
 {
-    fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
+    fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         self.log.push(entry);
-        self.get_log_len()
+        Ok(())
     }
 
-    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         let mut e = entries;
         self.log.append(&mut e);
-        self.get_log_len()
+        Ok(())
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
         self.log.truncate(from_idx as usize);
         self.append_entries(entries)
     }

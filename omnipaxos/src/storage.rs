@@ -109,13 +109,13 @@ where
     T: Entry,
 {
     /// Appends an entry to the end of the log and returns the log length.
-    fn append_entry(&mut self, entry: T) -> StorageResult<u64>;
+    fn append_entry(&mut self, entry: T) -> StorageResult<()>;
 
     /// Appends the entries of `entries` to the end of the log and returns the log length.
-    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64>;
+    fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()>;
 
     /// Appends the entries of `entries` to the prefix from index `from_index` in the log and returns the log length.
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64>;
+    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()>;
 
     /// Sets the round that has been promised.
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()>;
@@ -698,16 +698,19 @@ where
         &mut self,
         entries: Vec<T>,
     ) -> StorageResult<u64> {
-        self.state_cache.real_log_len = self.storage.append_entries(entries)?;
+        let new_entries = entries.len() as u64;
+        self.storage.append_entries(entries)?;
+        self.state_cache.real_log_len += new_entries;
         Ok(self.get_accepted_idx())
     }
 
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<u64> {
         let decided_idx = self.get_decided_idx();
         let compacted_idx = self.get_compacted_idx();
-        self.state_cache.real_log_len = self
-            .storage
-            .append_on_prefix(decided_idx - compacted_idx, entries)?;
+        let new_entries = entries.len() as u64;
+        self.storage.append_on_prefix(decided_idx - compacted_idx, entries)?;
+        self.state_cache.real_log_len = decided_idx - compacted_idx + new_entries as u64;
+
         Ok(self.get_accepted_idx())
     }
 
@@ -717,9 +720,9 @@ where
         entries: Vec<T>,
     ) -> StorageResult<u64> {
         let compacted_idx = self.get_compacted_idx();
-        self.state_cache.real_log_len = self
-            .storage
-            .append_on_prefix(from_idx - compacted_idx, entries)?;
+        let new_entries = entries.len() as u64;
+        self.storage.append_on_prefix(from_idx - compacted_idx, entries)?;
+        self.state_cache.real_log_len = from_idx - compacted_idx + new_entries;
         Ok(self.get_accepted_idx())
     }
 
