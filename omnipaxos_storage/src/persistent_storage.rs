@@ -175,8 +175,7 @@ where
         for entry in entries {
             serialized.push(bincode::serialize(&entry)?)
         }
-        self
-            .commitlog
+        self.commitlog
             .append(&mut MessageBuf::from_iter(serialized))?;
         self.commitlog.flush()?; // ensure durable writes
         Ok(())

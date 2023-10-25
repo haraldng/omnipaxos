@@ -477,57 +477,28 @@ where
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
-        let decided_idx = self.get_decided_idx();
         match (from_type, to_type) {
             (IndexEntry::Entry, IndexEntry::Entry) => {
-                let from_suffix_idx = from_idx - compacted_idx;
-                let to_suffix_idx = to_idx - compacted_idx;
-                Ok(Some(self.create_read_log_entries_with_real_idx(
-                    from_suffix_idx,
-                    to_suffix_idx,
-                    compacted_idx,
-                    decided_idx,
-                )?))
+                Ok(Some(self.create_read_log_entries(from_idx, to_idx)?))
             }
             (IndexEntry::Entry, IndexEntry::StopSign(ss)) => {
-                let from_suffix_idx = from_idx - compacted_idx;
-                let to_suffix_idx = to_idx - compacted_idx - 1;
-                let mut entries = self.create_read_log_entries_with_real_idx(
-                    from_suffix_idx,
-                    to_suffix_idx,
-                    compacted_idx,
-                    decided_idx,
-                )?;
+                let mut entries = self.create_read_log_entries(from_idx, to_idx - 1)?;
                 entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::Entry) => {
-                let from_suffix_idx = 0;
-                let to_suffix_idx = to_idx - compacted_idx;
-                let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
+                let mut entries = Vec::with_capacity((to_idx - compacted_idx + 1) as usize);
                 let compacted = self.create_compacted_entry(compacted_idx)?;
                 entries.push(compacted);
-                let mut e = self.create_read_log_entries_with_real_idx(
-                    from_suffix_idx,
-                    to_suffix_idx,
-                    compacted_idx,
-                    decided_idx,
-                )?;
+                let mut e = self.create_read_log_entries(compacted_idx, to_idx)?;
                 entries.append(&mut e);
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::StopSign(ss)) => {
-                let from_suffix_idx = 0;
-                let to_suffix_idx = to_idx - compacted_idx - 1;
-                let mut entries = Vec::with_capacity((to_suffix_idx + 1) as usize);
+                let mut entries = Vec::with_capacity((to_idx - compacted_idx + 1) as usize);
                 let compacted = self.create_compacted_entry(compacted_idx)?;
                 entries.push(compacted);
-                let mut e = self.create_read_log_entries_with_real_idx(
-                    from_suffix_idx,
-                    to_suffix_idx,
-                    compacted_idx,
-                    decided_idx,
-                )?;
+                let mut e = self.create_read_log_entries(compacted_idx, to_idx - 1)?;
                 entries.append(&mut e);
                 entries.push(LogEntry::StopSign(ss, self.stopsign_is_decided()));
                 Ok(Some(entries))
@@ -544,19 +515,14 @@ where
         }
     }
 
-    fn create_read_log_entries_with_real_idx(
-        &self,
-        from_sfx_idx: u64,
-        to_sfx_idx: u64,
-        compacted_idx: u64,
-        decided_idx: u64,
-    ) -> StorageResult<Vec<LogEntry<T>>> {
+    fn create_read_log_entries(&self, from: u64, to: u64) -> StorageResult<Vec<LogEntry<T>>> {
+        let decided_idx = self.get_decided_idx();
         let entries = self
-            .get_entries_with_real_idx(from_sfx_idx, to_sfx_idx)?
+            .get_entries(from, to)?
             .into_iter()
             .enumerate()
             .map(|(idx, e)| {
-                let log_idx = idx as u64 + compacted_idx;
+                let log_idx = idx as u64 + from;
                 if log_idx > decided_idx {
                     LogEntry::Undecided(e)
                 } else {
@@ -708,9 +674,8 @@ where
         let decided_idx = self.get_decided_idx();
         let compacted_idx = self.get_compacted_idx();
         let new_entries = entries.len() as u64;
-        self.storage.append_on_prefix(decided_idx - compacted_idx, entries)?;
+        self.storage.append_on_prefix(decided_idx, entries)?;
         self.state_cache.real_log_len = decided_idx - compacted_idx + new_entries as u64;
-
         Ok(self.get_accepted_idx())
     }
 
@@ -721,7 +686,7 @@ where
     ) -> StorageResult<u64> {
         let compacted_idx = self.get_compacted_idx();
         let new_entries = entries.len() as u64;
-        self.storage.append_on_prefix(from_idx - compacted_idx, entries)?;
+        self.storage.append_on_prefix(from_idx, entries)?;
         self.state_cache.real_log_len = from_idx - compacted_idx + new_entries;
         Ok(self.get_accepted_idx())
     }
@@ -757,17 +722,7 @@ where
     }
 
     pub(crate) fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        let compacted_idx = self.get_compacted_idx();
-        self.get_entries_with_real_idx(from - compacted_idx.min(from), to - compacted_idx.min(to))
-    }
-
-    /// Get entries with real physical log indexes i.e. the index with the compacted offset.
-    fn get_entries_with_real_idx(
-        &self,
-        from_sfx_idx: u64,
-        to_sfx_idx: u64,
-    ) -> StorageResult<Vec<T>> {
-        self.storage.get_entries(from_sfx_idx, to_sfx_idx)
+        self.storage.get_entries(from, to)
     }
 
     /// The length of the replicated log, as if log was never compacted.
@@ -776,8 +731,7 @@ where
     }
 
     pub(crate) fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        let compacted_idx = self.get_compacted_idx();
-        self.storage.get_suffix(from - compacted_idx.min(from))
+        self.storage.get_suffix(from)
     }
 
     pub(crate) fn get_promise(&self) -> Ballot {
@@ -800,11 +754,13 @@ where
     }
 
     pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
-        let compacted_idx = self.get_compacted_idx();
-        if compact_idx < compacted_idx {
-            Err(CompactionErr::TrimmedIndex(compacted_idx))?
+        let current_compacted_idx = self.get_compacted_idx();
+        if compact_idx < current_compacted_idx {
+            Err(CompactionErr::TrimmedIndex(current_compacted_idx))?
         }
-        let entries = self.storage.get_entries(0, compact_idx - compacted_idx)?;
+        let entries = self
+            .storage
+            .get_entries(current_compacted_idx, compact_idx)?;
         let delta = T::Snapshot::create(entries.as_slice());
         match self.storage.get_snapshot()? {
             Some(mut s) => {
@@ -868,7 +824,7 @@ where
                 return Err(e);
             }
             let old_log_len = self.state_cache.real_log_len;
-            if let Err(e) = self.storage.trim(idx - old_compacted_idx) {
+            if let Err(e) = self.storage.trim(idx) {
                 self.set_compacted_idx(old_compacted_idx)?;
                 self.storage.set_snapshot(old_snapshot)?;
                 return Err(e);
@@ -897,7 +853,7 @@ where
             let decided_idx = self.get_decided_idx();
             if idx <= decided_idx {
                 self.set_compacted_idx(idx)?;
-                if let Err(e) = self.storage.trim(idx - compacted_idx) {
+                if let Err(e) = self.storage.trim(idx) {
                     self.set_compacted_idx(compacted_idx)?;
                     Err(e)
                 } else {

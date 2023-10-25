@@ -18,6 +18,8 @@ where
     ld: u64,
     /// Garbage collected index.
     trimmed_idx: u64,
+    /// Stored compact index
+    compacted_idx: u64,
     /// Stored snapshot
     snapshot: Option<T::Snapshot>,
     /// Stored StopSign
@@ -40,7 +42,7 @@ where
     }
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
-        self.log.truncate(from_idx as usize);
+        self.log.truncate((from_idx - self.trimmed_idx) as usize);
         self.append_entries(entries)
     }
 
@@ -68,11 +70,9 @@ where
     }
 
     fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        Ok(self
-            .log
-            .get(from as usize..to as usize)
-            .unwrap_or(&[])
-            .to_vec())
+        let from = (from - self.trimmed_idx) as usize;
+        let to = (to - self.trimmed_idx) as usize;
+        Ok(self.log.get(from..to).unwrap_or(&[]).to_vec())
     }
 
     fn get_log_len(&self) -> StorageResult<u64> {
@@ -80,7 +80,7 @@ where
     }
 
     fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        Ok(match self.log.get(from as usize..) {
+        Ok(match self.log.get((from - self.trimmed_idx) as usize..) {
             Some(s) => s.to_vec(),
             None => vec![],
         })
@@ -100,18 +100,19 @@ where
     }
 
     fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
-        self.log
-            .drain(0..(trimmed_idx as usize).min(self.log.len()));
-        Ok(())
-    }
-
-    fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
+        let to_trim = ((trimmed_idx - self.trimmed_idx) as usize).min(self.log.len());
+        self.log.drain(0..to_trim);
         self.trimmed_idx = trimmed_idx;
         Ok(())
     }
 
+    fn set_compacted_idx(&mut self, compact_idx: u64) -> StorageResult<()> {
+        self.compacted_idx = compact_idx;
+        Ok(())
+    }
+
     fn get_compacted_idx(&self) -> StorageResult<u64> {
-        Ok(self.trimmed_idx)
+        Ok(self.compacted_idx)
     }
 
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
@@ -132,6 +133,7 @@ impl<T: Entry> Default for MemoryStorage<T> {
             acc_round: Ballot::default(),
             ld: 0,
             trimmed_idx: 0,
+            compacted_idx: 0,
             snapshot: None,
             stopsign: None,
         }
