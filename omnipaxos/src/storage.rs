@@ -549,7 +549,11 @@ where
     }
 
     fn load_cache(&mut self) {
-        self.state_cache.promise = self.storage.get_promise().expect("Failed to load cache from storage.").unwrap_or_default();
+        self.state_cache.promise = self
+            .storage
+            .get_promise()
+            .expect("Failed to load cache from storage.")
+            .unwrap_or_default();
         self.state_cache.decided_idx = self.storage.get_decided_idx().unwrap();
         self.state_cache.accepted_round = self
             .storage
@@ -558,7 +562,8 @@ where
             .unwrap_or_default();
         self.state_cache.compacted_idx = self.storage.get_compacted_idx().unwrap();
         self.state_cache.stopsign = self.storage.get_stopsign().unwrap();
-        self.state_cache.accepted_idx = self.storage.get_log_len().unwrap() + self.state_cache.compacted_idx;
+        self.state_cache.accepted_idx =
+            self.storage.get_log_len().unwrap() + self.state_cache.compacted_idx;
         if self.state_cache.stopsign.is_some() {
             self.state_cache.accepted_idx += 1;
         }
@@ -731,7 +736,8 @@ where
     pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         self.state_cache.stopsign = s.clone();
         self.storage.set_stopsign(s)?;
-        self.state_cache.accepted_idx = self.storage.get_log_len()? + self.state_cache.compacted_idx;
+        self.state_cache.accepted_idx =
+            self.storage.get_log_len()? + self.state_cache.compacted_idx;
         if self.state_cache.stopsign.is_some() {
             self.state_cache.accepted_idx += 1;
         }

@@ -215,8 +215,7 @@ where
     pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let persist_conf =
-                    PersistentStorageConfig::with_path(my_path.to_string());
+                let persist_conf = PersistentStorageConfig::with_path(my_path.to_string());
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
@@ -1054,7 +1053,9 @@ pub mod verification {
             let log_idx = idx + offset;
             match entry {
                 LogEntry::Decided(i) if log_idx < decided_idx => assert_eq!(*i, exp_entries[idx]),
-                LogEntry::Undecided(i) if log_idx >= decided_idx => assert_eq!(*i, exp_entries[idx]),
+                LogEntry::Undecided(i) if log_idx >= decided_idx => {
+                    assert_eq!(*i, exp_entries[idx])
+                }
                 e => panic!(
                     "{}",
                     format!(

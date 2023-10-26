@@ -5,7 +5,7 @@ use kompact::prelude::{promise, Ask};
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::StopSign,
-    util::{LogEntry, SequenceNumber, NodeId},
+    util::{LogEntry, NodeId, SequenceNumber},
     ClusterConfig,
 };
 use serial_test::serial;

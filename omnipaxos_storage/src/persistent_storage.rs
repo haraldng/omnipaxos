@@ -2,8 +2,8 @@ use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, Storage, StorageResult},
 };
+use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, Options, WriteBatchWithTransaction, DB};
 use serde::{Deserialize, Serialize};
-use rocksdb::{Options, DB, ColumnFamilyDescriptor, WriteBatchWithTransaction, ColumnFamilyRef};
 use std::marker::PhantomData;
 use zerocopy::{AsBytes, FromBytes};
 
@@ -94,7 +94,7 @@ impl Default for PersistentStorageConfig {
 /// into slice of bytes when read or written from the log.
 pub struct PersistentStorage<T>
 where
-T: Entry,
+    T: Entry,
 {
     /// Local RocksDB key-value store
     db: DB,
@@ -111,19 +111,32 @@ impl<T: Entry> PersistentStorage<T> {
         let path = storage_config.path;
         let log_cf = ColumnFamilyDescriptor::new(LOG, storage_config.log_options);
         let db_opts = storage_config.rocksdb_options;
-        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, vec![log_cf]).expect("Failed to create RocksDB");
-        let log_handle = db.cf_handle(LOG).expect("Failed to create RocksDB log column family");
+        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, vec![log_cf])
+            .expect("Failed to create RocksDB");
+        let log_handle = db
+            .cf_handle(LOG)
+            .expect("Failed to create RocksDB log column family");
 
         // Create next log key from the current max log key
         let mut log_iter = db.raw_iterator_cf(log_handle);
         log_iter.seek_to_last();
-        let next_log_key = if log_iter.valid(){
+        let next_log_key = if log_iter.valid() {
             let key = log_iter.key().unwrap();
-            assert_eq!(key.len(), 8, "Couldn't recover storage: Log key has unexpected format.");
-            usize::from_be_bytes([key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7]]) + 1
+            assert_eq!(
+                key.len(),
+                8,
+                "Couldn't recover storage: Log key has unexpected format."
+            );
+            usize::from_be_bytes([
+                key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7],
+            ]) + 1
         } else {
-            match db.get(TRIM).expect("Couldn't recover storage: Reading compacted_idx failed.") {
-                Some(bytes) => usize::read_from(bytes.as_bytes()).expect("Couldn't recover storage: Commpacted index has unexpected format."),
+            match db
+                .get(TRIM)
+                .expect("Couldn't recover storage: Reading compacted_idx failed.")
+            {
+                Some(bytes) => usize::read_from(bytes.as_bytes())
+                    .expect("Couldn't recover storage: Commpacted index has unexpected format."),
                 None => 0,
             }
         };
@@ -139,15 +152,17 @@ impl<T: Entry> PersistentStorage<T> {
     /// Creates a new storage instance, panics if a RocksDB instance already exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
         std::fs::metadata(format!("{}", storage_config.path)).expect_err(&format!(
-                "Cannot create new instance, database already exists in {}",
-                storage_config.path
-                ));
+            "Cannot create new instance, database already exists in {}",
+            storage_config.path
+        ));
         Self::open(storage_config)
     }
 
     /// Get handle to the log column family of the database
     fn get_log_handle(&self) -> ColumnFamilyRef {
-        self.db.cf_handle(LOG).expect("Failed to create RocksDB log column family")
+        self.db
+            .cf_handle(LOG)
+            .expect("Failed to create RocksDB log column family")
     }
 }
 
@@ -163,12 +178,16 @@ impl std::fmt::Display for ErrHelper {
 
 impl<T> Storage<T> for PersistentStorage<T>
 where
-T: Entry + Serialize + for<'a> Deserialize<'a>,
-T::Snapshot: Serialize + for<'a> Deserialize<'a>,
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
+    T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         let entry_bytes = bincode::serialize(&entry)?;
-        self.db.put_cf(self.get_log_handle(), self.next_log_key.to_be_bytes(), entry_bytes)?;
+        self.db.put_cf(
+            self.get_log_handle(),
+            self.next_log_key.to_be_bytes(),
+            entry_bytes,
+        )?;
         self.next_log_key += 1;
         Ok(())
     }
@@ -177,7 +196,11 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         let mut batch = WriteBatchWithTransaction::<false>::default();
         for entry in entries {
-            batch.put_cf(self.get_log_handle(), self.next_log_key.to_be_bytes(), bincode::serialize(&entry)?);
+            batch.put_cf(
+                self.get_log_handle(),
+                self.next_log_key.to_be_bytes(),
+                bincode::serialize(&entry)?,
+            );
             self.next_log_key += 1;
         }
         self.db.write(batch)?;
@@ -188,7 +211,8 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
         if from_idx < self.next_log_key {
             let from_key = from_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
-            self.db.delete_range_cf(self.get_log_handle(), from_key, to_key)?;
+            self.db
+                .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
             self.next_log_key = from_idx;
         }
         self.append_entries(entries)
@@ -317,7 +341,8 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
     fn trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
         let from_key = 0_usize.to_be_bytes();
         let to_key = trimmed_idx.to_be_bytes();
-        self.db.delete_range_cf(self.get_log_handle(), from_key, to_key)?;
+        self.db
+            .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
         Ok(())
     }
 }
