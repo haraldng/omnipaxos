@@ -165,7 +165,7 @@ fn setup_follower() -> (
                 .unwrap()
                 .get_accepted_round()
                 .unwrap()
-                .unwrap(),
+                .unwrap_or_default(),
             n,
         }),
     });

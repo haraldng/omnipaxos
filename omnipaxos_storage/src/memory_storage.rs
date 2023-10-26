@@ -11,9 +11,9 @@ where
     /// Vector which contains all the logged entries in-memory.
     log: Vec<T>,
     /// Last promised round.
-    n_prom: Ballot,
+    n_prom: Option<Ballot>,
     /// Last accepted round.
-    acc_round: Ballot,
+    acc_round: Option<Ballot>,
     /// Length of the decided log.
     ld: u64,
     /// Garbage collected index.
@@ -47,7 +47,7 @@ where
     }
 
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
-        self.n_prom = n_prom;
+        self.n_prom = Some(n_prom);
         Ok(())
     }
 
@@ -61,12 +61,12 @@ where
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        self.acc_round = na;
+        self.acc_round = Some(na);
         Ok(())
     }
 
     fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
-        Ok(Some(self.acc_round))
+        Ok(self.acc_round)
     }
 
     fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
@@ -87,7 +87,7 @@ where
     }
 
     fn get_promise(&self) -> StorageResult<Option<Ballot>> {
-        Ok(Some(self.n_prom))
+        Ok(self.n_prom)
     }
 
     fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
@@ -129,8 +129,8 @@ impl<T: Entry> Default for MemoryStorage<T> {
     fn default() -> Self {
         Self {
             log: vec![],
-            n_prom: Ballot::default(),
-            acc_round: Ballot::default(),
+            n_prom: None,
+            acc_round: None,
             ld: 0,
             trimmed_idx: 0,
             compacted_idx: 0,
