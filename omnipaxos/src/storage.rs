@@ -215,10 +215,10 @@ where
     accepted_round: Ballot,
     /// Length of the decided log.
     decided_idx: u64,
+    /// Length of the accepted log.
+    accepted_idx: u64,
     /// Garbage collected index.
     compacted_idx: u64,
-    /// Real length of logs in the storage.
-    real_log_len: u64,
     /// Stopsign entry.
     stopsign: Option<StopSign>,
     #[cfg(feature = "unicache")]
@@ -241,8 +241,8 @@ where
             promise: Ballot::default(),
             accepted_round: Ballot::default(),
             decided_idx: 0,
+            accepted_idx: 0,
             compacted_idx: 0,
-            real_log_len: 0,
             stopsign: None,
             #[cfg(feature = "unicache")]
             batched_processed_by_leader: Vec::with_capacity(config.batch_size),
@@ -253,12 +253,7 @@ where
 
     // Returns the index of the last accepted entry.
     fn get_accepted_idx(&self) -> u64 {
-        let log_len = self.compacted_idx + self.real_log_len;
-        if self.stopsign.is_some() {
-            log_len + 1
-        } else {
-            log_len
-        }
+        self.accepted_idx
     }
 
     // Returns whether a stopsign is decided
@@ -429,16 +424,16 @@ where
         &self,
         idx: u64,
         compacted_idx: u64,
-        virtual_log_len: u64,
+        accepted_idx: u64,
     ) -> StorageResult<Option<IndexEntry>> {
         if idx < compacted_idx {
             Ok(Some(IndexEntry::Compacted))
-        } else if idx < virtual_log_len {
+        } else if idx < accepted_idx - 1 {
             Ok(Some(IndexEntry::Entry))
-        } else if idx == virtual_log_len {
+        } else if idx == accepted_idx - 1 {
             match self.get_stopsign() {
                 Some(ss) => Ok(Some(IndexEntry::StopSign(ss))),
-                _ => Ok(None),
+                _ => Ok(Some(IndexEntry::Entry)),
             }
         } else {
             Ok(None)
@@ -464,16 +459,16 @@ where
             return Ok(None);
         }
         let compacted_idx = self.get_compacted_idx();
-        let log_len = self.state_cache.real_log_len + self.state_cache.compacted_idx;
-        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, log_len)? {
-            // use to_idx-1 when getting the entry type as to_idx is exclusive
+        let accepted_idx = self.get_accepted_idx();
+        // use to_idx-1 when getting the entry type as to_idx is exclusive
+        let to_type = match self.get_entry_type(to_idx - 1, compacted_idx, accepted_idx)? {
             Some(IndexEntry::Compacted) => {
                 return Ok(Some(vec![self.create_compacted_entry(compacted_idx)?]))
             }
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
-        let from_type = match self.get_entry_type(from_idx, compacted_idx, log_len)? {
+        let from_type = match self.get_entry_type(from_idx, compacted_idx, accepted_idx)? {
             Some(from_type) => from_type,
             _ => return Ok(None),
         };
@@ -562,8 +557,11 @@ where
             .unwrap()
             .unwrap_or_default();
         self.state_cache.compacted_idx = self.storage.get_compacted_idx().unwrap();
-        self.state_cache.real_log_len = self.storage.get_log_len().unwrap();
         self.state_cache.stopsign = self.storage.get_stopsign().unwrap();
+        self.state_cache.accepted_idx = self.storage.get_log_len().unwrap() + self.state_cache.compacted_idx;
+        if self.state_cache.stopsign.is_some() {
+            self.state_cache.accepted_idx += 1;
+        }
     }
 
     /*** Writing ***/
@@ -659,16 +657,15 @@ where
     ) -> StorageResult<u64> {
         let new_entries = entries.len() as u64;
         self.storage.append_entries(entries)?;
-        self.state_cache.real_log_len += new_entries;
+        self.state_cache.accepted_idx += new_entries;
         Ok(self.get_accepted_idx())
     }
 
     pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<u64> {
         let decided_idx = self.get_decided_idx();
-        let compacted_idx = self.get_compacted_idx();
         let new_entries = entries.len() as u64;
         self.storage.append_on_prefix(decided_idx, entries)?;
-        self.state_cache.real_log_len = decided_idx - compacted_idx + new_entries as u64;
+        self.state_cache.accepted_idx = decided_idx + new_entries as u64;
         Ok(self.get_accepted_idx())
     }
 
@@ -677,10 +674,9 @@ where
         from_idx: u64,
         entries: Vec<T>,
     ) -> StorageResult<u64> {
-        let compacted_idx = self.get_compacted_idx();
         let new_entries = entries.len() as u64;
         self.storage.append_on_prefix(from_idx, entries)?;
-        self.state_cache.real_log_len = from_idx - compacted_idx + new_entries;
+        self.state_cache.accepted_idx = from_idx + new_entries;
         Ok(self.get_accepted_idx())
     }
 
@@ -734,7 +730,12 @@ where
     /// Sets the stopsign. This function should not be used directly from sequence paxos. Instead, use accept_stopsign.
     pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         self.state_cache.stopsign = s.clone();
-        self.storage.set_stopsign(s)
+        self.storage.set_stopsign(s)?;
+        self.state_cache.accepted_idx = self.storage.get_log_len()? + self.state_cache.compacted_idx;
+        if self.state_cache.stopsign.is_some() {
+            self.state_cache.accepted_idx += 1;
+        }
+        Ok(())
     }
 
     pub(crate) fn get_stopsign(&self) -> Option<StopSign> {
@@ -816,14 +817,11 @@ where
                 self.set_compacted_idx(old_compacted_idx)?;
                 return Err(e);
             }
-            let old_log_len = self.state_cache.real_log_len;
             if let Err(e) = self.storage.trim(idx) {
                 self.set_compacted_idx(old_compacted_idx)?;
                 self.storage.set_snapshot(old_snapshot)?;
                 return Err(e);
             }
-            self.state_cache.real_log_len =
-                old_log_len - (idx - old_compacted_idx).min(old_log_len);
         }
         Ok(())
     }
@@ -850,7 +848,6 @@ where
                     self.set_compacted_idx(compacted_idx)?;
                     Err(e)
                 } else {
-                    self.state_cache.real_log_len = self.storage.get_log_len()?;
                     Ok(())
                 }
             } else {
