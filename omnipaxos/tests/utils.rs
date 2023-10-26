@@ -1,5 +1,4 @@
 use self::omnireplica::OmniPaxosComponent;
-use commitlog::LogOptions;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
     ballot_leader_election::Ballot,
@@ -14,7 +13,6 @@ use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use sled::Config;
 use std::{
     collections::HashMap,
     error::Error,
@@ -28,7 +26,6 @@ const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
-const COMMITLOG: &str = "/commitlog/";
 pub const STOPSIGN_ID: u64 = u64::MAX;
 
 #[cfg(feature = "unicache")]
@@ -218,10 +215,8 @@ where
     pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let my_logopts = LogOptions::new(format!("{my_path}{COMMITLOG}"));
-                let my_sledopts = Config::new();
                 let persist_conf =
-                    PersistentStorageConfig::with(my_path.to_string(), my_logopts, my_sledopts);
+                    PersistentStorageConfig::with_path(my_path.to_string());
                 StorageType::Persistent(PersistentStorage::open(persist_conf))
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),

@@ -1,19 +1,14 @@
-use commitlog::{
-    message::{MessageBuf, MessageSet},
-    CommitLog, LogOptions, ReadLimit,
-};
 use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, Storage, StorageResult},
 };
 use serde::{Deserialize, Serialize};
-use sled::{Config, Db};
-use std::{iter::FromIterator, marker::PhantomData};
+use rocksdb::{Options, DB, ColumnFamilyDescriptor, WriteBatchWithTransaction, ColumnFamilyRef};
+use std::marker::PhantomData;
 use zerocopy::{AsBytes, FromBytes};
 
 const DEFAULT: &str = "/default_storage/";
-const COMMITLOG: &str = "/commitlog/";
-const DATABASE: &str = "/database/";
+const LOG: &str = "log";
 const NPROM: &[u8] = b"NPROM";
 const ACC: &[u8] = b"ACC";
 const DECIDE: &[u8] = b"DECIDE";
@@ -23,64 +18,73 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 
 // Configuration for `PersistentStorage`.
 /// # Fields
-/// * `path`: Path to the Commitlog and state storage
-/// * `commitlog_options`: Options for the Commitlog
-/// * `sled_options` : Options for the sled store, enabled by default
+/// * `path`: Path to the storage directory
+/// * `rocksdb_options`: Options for the RocksDB state store
+/// * `log_options` : Options for the the RocksDB log store
 pub struct PersistentStorageConfig {
-    path: Option<String>,
-    commitlog_options: LogOptions,
-    sled_options: Config,
+    path: String,
+    rocksdb_options: Options,
+    log_options: Options,
 }
 
 impl PersistentStorageConfig {
     /// Returns the current path to the persistent storage.
-    pub fn get_path(&self) -> Option<&String> {
-        self.path.as_ref()
+    pub fn get_path(&self) -> &String {
+        &self.path
     }
 
     /// Sets the path to the persistent storage.
     pub fn set_path(&mut self, path: String) {
-        self.path = Some(path);
+        self.path = path;
     }
 
-    /// Returns the options for the Commitlog.
-    pub fn get_commitlog_options(&self) -> LogOptions {
-        self.commitlog_options.clone()
+    /// Returns the RocksDB options for the log.
+    pub fn get_log_options(&self) -> Options {
+        self.log_options.clone()
     }
 
-    /// Sets the options for the Commitlog.
-    pub fn set_commitlog_options(&mut self, commitlog_opts: LogOptions) {
-        self.commitlog_options = commitlog_opts;
+    /// Sets the RocksDB options for the log.
+    pub fn set_log_options(&mut self, log_opts: Options) {
+        self.log_options = log_opts;
     }
 
-    /// Returns the options for the sled store.
-    pub fn get_database_options(&self) -> Config {
-        self.sled_options.clone()
+    /// Returns the RocksDB options for the state store.
+    pub fn get_database_options(&self) -> Options {
+        self.rocksdb_options.clone()
     }
 
-    /// Sets the options for the sled store.
-    pub fn set_database_options(&mut self, opts: Config) {
-        self.sled_options = opts;
+    /// Sets the RocksDB options for the state store.
+    pub fn set_database_options(&mut self, opts: Options) {
+        self.rocksdb_options = opts;
     }
 
     /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and sled
-    pub fn with(path: String, commitlog_options: LogOptions, sled_options: Config) -> Self {
+    pub fn with(path: String, log_options: Options, rocksdb_options: Options) -> Self {
         Self {
-            path: Some(path),
-            commitlog_options,
-            sled_options,
+            path: path,
+            log_options,
+            rocksdb_options,
         }
+    }
+
+    /// Creates a configuration for `PersistentStorage` with the given path and default configs
+    pub fn with_path(path: String) -> Self {
+        let mut config = Self::default();
+        config.path = path;
+        config
     }
 }
 
 impl Default for PersistentStorageConfig {
     fn default() -> Self {
-        let commitlog_options = LogOptions::new(format!("{DEFAULT}{COMMITLOG}"));
+        let mut rocksdb_options = Options::default();
+        rocksdb_options.create_missing_column_families(true);
+        rocksdb_options.create_if_missing(true);
 
         Self {
-            path: Some(DEFAULT.to_string()),
-            commitlog_options,
-            sled_options: Config::new(),
+            path: DEFAULT.to_string(),
+            log_options: Options::default(),
+            rocksdb_options,
         }
     }
 }
@@ -90,14 +94,12 @@ impl Default for PersistentStorageConfig {
 /// into slice of bytes when read or written from the log.
 pub struct PersistentStorage<T>
 where
-    T: Entry,
+T: Entry,
 {
-    /// Disk-based commit log for entries
-    commitlog: CommitLog,
-    /// The path to the directory containing a commitlog
-    log_path: String,
-    /// Local sled key-value store, enabled by default
-    sled: Db,
+    /// Local RocksDB key-value store
+    db: DB,
+    /// The index of the next log entry to be appended
+    next_log_key: usize,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
 }
@@ -105,41 +107,47 @@ where
 impl<T: Entry> PersistentStorage<T> {
     /// Creates or opens an existing storage
     pub fn open(storage_config: PersistentStorageConfig) -> Self {
-        let path = storage_config.path.expect("No path found in config");
+        // Create database with log column
+        let path = storage_config.path;
+        let log_cf = ColumnFamilyDescriptor::new(LOG, storage_config.log_options);
+        let db_opts = storage_config.rocksdb_options;
+        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, vec![log_cf]).expect("Failed to create RocksDB");
+        let log_handle = db.cf_handle(LOG).expect("Failed to create RocksDB log column family");
 
-        let commitlog =
-            CommitLog::new(storage_config.commitlog_options).expect("Failed to create Commitlog");
+        // Create next log key from the current max log key
+        let mut log_iter = db.raw_iterator_cf(log_handle);
+        log_iter.seek_to_last();
+        let next_log_key = if log_iter.valid(){
+            let key = log_iter.key().unwrap();
+            assert_eq!(key.len(), 8, "Couldn't recover storage: Log key has unexpected format.");
+            usize::from_be_bytes([key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7]]) + 1
+        } else {
+            match db.get(TRIM).expect("Couldn't recover storage: Reading compacted_idx failed.") {
+                Some(bytes) => u64::read_from(bytes.as_bytes()).expect("Couldn't recover storage: Commpacted index has unexpected format.") as usize,
+                None => 0,
+            }
+        };
+        drop(log_iter);
 
         Self {
-            commitlog,
-            log_path: format!("{path}{COMMITLOG}"),
-            sled: {
-                let opts = storage_config
-                    .sled_options
-                    .path(format!("{path}{DATABASE}"));
-                Config::open(&opts).expect("Failed to create sled database")
-            },
+            db,
+            next_log_key,
             t: PhantomData,
         }
     }
 
-    /// Creates a new storage instance, panics if a commitlog or sled instance already exists in the given path
+    /// Creates a new storage instance, panics if a RocksDB instance already exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
-        let path = storage_config
-            .path
-            .as_ref()
-            .expect("No path found in config");
-
-        std::fs::metadata(format!("{path}{COMMITLOG}")).expect_err(&format!(
-            "Cannot create new instance, commitlog already exists in {}",
-            path
-        ));
-        std::fs::metadata(format!("{path}{DATABASE}")).expect_err(&format!(
-            "Cannot create new instance, database already exists in {}",
-            path
-        ));
-
+        std::fs::metadata(format!("{}", storage_config.path)).expect_err(&format!(
+                "Cannot create new instance, database already exists in {}",
+                storage_config.path
+                ));
         Self::open(storage_config)
+    }
+
+    /// Get handle to the log column family of the database
+    fn get_log_handle(&self) -> ColumnFamilyRef {
+        self.db.cf_handle(LOG).expect("Failed to create RocksDB log column family")
     }
 }
 
@@ -155,84 +163,88 @@ impl std::fmt::Display for ErrHelper {
 
 impl<T> Storage<T> for PersistentStorage<T>
 where
-    T: Entry + Serialize + for<'a> Deserialize<'a>,
-    T::Snapshot: Serialize + for<'a> Deserialize<'a>,
+T: Entry + Serialize + for<'a> Deserialize<'a>,
+T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         let entry_bytes = bincode::serialize(&entry)?;
-        self.commitlog.append_msg(entry_bytes)?;
-        self.commitlog.flush()?; // ensure durable writes
+        self.db.put_cf(self.get_log_handle(), self.next_log_key.to_be_bytes(), entry_bytes)?;
+        self.next_log_key += 1;
         Ok(())
     }
 
+    // TODO: if this fails self.log_len will be incorrect
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
-        // Required check because Commitlog has a bug where appending an empty set of entries will
-        // always return an offset.first() with 0 despite entries being in the log.
-        if entries.is_empty() {
-            return Ok(());
-        }
-        let mut serialized = vec![];
+        let mut batch = WriteBatchWithTransaction::<false>::default();
         for entry in entries {
-            serialized.push(bincode::serialize(&entry)?)
+            batch.put_cf(self.get_log_handle(), self.next_log_key.to_be_bytes(), bincode::serialize(&entry)?);
+            self.next_log_key += 1;
         }
-        self.commitlog
-            .append(&mut MessageBuf::from_iter(serialized))?;
-        self.commitlog.flush()?; // ensure durable writes
+        self.db.write(batch)?;
         Ok(())
     }
 
     fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
-        if from_idx > 0 && from_idx < self.get_log_len()? {
-            self.commitlog.truncate(from_idx)?;
+        let from_idx = from_idx as usize;
+        if from_idx < self.next_log_key {
+            let from_key = from_idx.to_be_bytes();
+            let to_key = self.next_log_key.to_be_bytes();
+            self.db.delete_range_cf(self.get_log_handle(), from_key, to_key)?;
+            self.next_log_key = from_idx;
         }
         self.append_entries(entries)
     }
 
     fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        // Check if the commit log has entries up to the requested endpoint.
-        if to > self.commitlog.next_offset() || from >= to {
+        // TODO: rework to usize
+        let mut from = from as usize;
+        let to = to as usize;
+
+        // Check if the log has entries up to the requested endpoint.
+        if to > self.next_log_key || from >= to {
             return Ok(vec![]); // Do an early return
         }
 
-        let buffer = self.commitlog.read(from, ReadLimit::default())?;
-        let mut entries = Vec::<T>::with_capacity((to - from) as usize);
-        let mut iter = buffer.iter();
-        for _ in from..to {
-            let msg = iter.next().ok_or(ErrHelper {})?;
-            entries.push(bincode::deserialize(msg.payload())?);
+        let mut iter = self.db.raw_iterator_cf(self.get_log_handle());
+        let mut entries = Vec::with_capacity(to - from);
+        iter.seek(from.to_be_bytes());
+        loop {
+            let entry_bytes = iter.value().ok_or(ErrHelper {})?;
+            entries.push(bincode::deserialize(entry_bytes)?);
+            from += 1;
+            if from == to {
+                break;
+            }
+            iter.next();
         }
         Ok(entries)
     }
 
+    // TODO: What should this return? Maybe remove real_log_len from internal_storage
     fn get_log_len(&self) -> StorageResult<u64> {
-        Ok(self.commitlog.next_offset())
+        Ok(self.next_log_key as u64 - self.get_compacted_idx()?)
     }
 
     fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        self.get_entries(from, self.commitlog.next_offset())
+        self.get_entries(from, self.next_log_key as u64)
     }
 
     fn get_promise(&self) -> StorageResult<Option<Ballot>> {
-        {
-            let promised = self.sled.get(NPROM)?;
-            match promised {
-                Some(prom_bytes) => {
-                    let ballot = bincode::deserialize(&prom_bytes)?;
-                    Ok(Some(ballot))
-                }
-                None => Ok(Some(Ballot::default())),
-            }
+        let promise = self.db.get_pinned(NPROM)?;
+        match promise {
+            Some(pinned_bytes) => Ok(Some(bincode::deserialize(&pinned_bytes)?)),
+            None => Ok(None),
         }
     }
 
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
         let prom_bytes = bincode::serialize(&n_prom)?;
-        self.sled.insert(NPROM, prom_bytes)?;
+        self.db.put(NPROM, prom_bytes)?;
         Ok(())
     }
 
     fn get_decided_idx(&self) -> StorageResult<u64> {
-        let decided = self.sled.get(DECIDE)?;
+        let decided = self.db.get_pinned(DECIDE)?;
         match decided {
             Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
             None => Ok(0),
@@ -241,29 +253,29 @@ where
 
     fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
         let ld_bytes = u64::as_bytes(&ld);
-        self.sled.insert(DECIDE, ld_bytes)?;
+        self.db.put(DECIDE, ld_bytes)?;
         Ok(())
     }
 
     fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
-        let accepted = self.sled.get(ACC)?;
+        let accepted = self.db.get_pinned(ACC)?;
         match accepted {
             Some(acc_bytes) => {
                 let ballot = bincode::deserialize(&acc_bytes)?;
                 Ok(Some(ballot))
             }
-            None => Ok(Some(Ballot::default())),
+            None => Ok(None),
         }
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
         let acc_bytes = bincode::serialize(&na)?;
-        self.sled.insert(ACC, acc_bytes)?;
+        self.db.put(ACC, acc_bytes)?;
         Ok(())
     }
 
     fn get_compacted_idx(&self) -> StorageResult<u64> {
-        let trim = self.sled.get(TRIM)?;
+        let trim = self.db.get(TRIM)?;
         match trim {
             Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
             None => Ok(0),
@@ -272,12 +284,12 @@ where
 
     fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
         let trim_bytes = u64::as_bytes(&trimmed_idx);
-        self.sled.insert(TRIM, trim_bytes)?;
+        self.db.put(TRIM, trim_bytes)?;
         Ok(())
     }
 
     fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
-        let stopsign = self.sled.get(STOPSIGN)?;
+        let stopsign = self.db.get_pinned(STOPSIGN)?;
         match stopsign {
             Some(ss_bytes) => Ok(bincode::deserialize(&ss_bytes)?),
             None => Ok(None),
@@ -286,12 +298,12 @@ where
 
     fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&s)?;
-        self.sled.insert(STOPSIGN, stopsign)?;
+        self.db.put(STOPSIGN, stopsign)?;
         Ok(())
     }
 
     fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
-        let snapshot = self.sled.get(SNAPSHOT)?;
+        let snapshot = self.db.get_pinned(SNAPSHOT)?;
         if let Some(snapshot_bytes) = snapshot {
             Ok(bincode::deserialize(snapshot_bytes.as_bytes())?)
         } else {
@@ -301,17 +313,16 @@ where
 
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
         let stopsign = bincode::serialize(&snapshot)?;
-        self.sled.insert(SNAPSHOT, stopsign)?;
+        self.db.put(SNAPSHOT, stopsign)?;
         Ok(())
     }
 
-    // TODO: A way to trim the commitlog without deleting and recreating the log
+    // TODO: if compact_idx isn't set atomically with this then self.next_log_key could get out of
+    // sync on recovery
     fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
-        let trimmed_log: Vec<T> = self.get_entries(trimmed_idx, self.commitlog.next_offset())?; // get the log entries from 'trimmed_idx' to latest
-        std::fs::remove_dir_all(&self.log_path)?; // remove old log
-        let c_opts = LogOptions::new(&self.log_path);
-        self.commitlog = CommitLog::new(c_opts)?; // create new commitlog
-        self.append_entries(trimmed_log)?;
+        let from_key = 0_usize.to_be_bytes();
+        let to_key = (trimmed_idx as usize).to_be_bytes();
+        self.db.delete_range_cf(self.get_log_handle(), from_key, to_key)?;
         Ok(())
     }
 }
