@@ -523,10 +523,10 @@ where
             .enumerate()
             .map(|(idx, e)| {
                 let log_idx = idx as u64 + from;
-                if log_idx > decided_idx {
-                    LogEntry::Undecided(e)
-                } else {
+                if log_idx < decided_idx {
                     LogEntry::Decided(e)
+                } else {
+                    LogEntry::Undecided(e)
                 }
             })
             .collect();

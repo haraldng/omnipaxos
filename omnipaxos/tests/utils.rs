@@ -1053,8 +1053,8 @@ pub mod verification {
         for (idx, entry) in read_entries.iter().enumerate() {
             let log_idx = idx as u64 + offset;
             match entry {
-                LogEntry::Decided(i) if log_idx <= decided_idx => assert_eq!(*i, exp_entries[idx]),
-                LogEntry::Undecided(i) if log_idx > decided_idx => assert_eq!(*i, exp_entries[idx]),
+                LogEntry::Decided(i) if log_idx < decided_idx => assert_eq!(*i, exp_entries[idx]),
+                LogEntry::Undecided(i) if log_idx >= decided_idx => assert_eq!(*i, exp_entries[idx]),
                 e => panic!(
                     "{}",
                     format!(
