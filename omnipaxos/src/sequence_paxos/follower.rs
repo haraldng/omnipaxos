@@ -291,7 +291,7 @@ where
         Ok(())
     }
 
-    fn handle_flushed_accepted(&mut self, n: Ballot, accepted_idx: u64) {
+    fn handle_flushed_accepted(&mut self, n: Ballot, accepted_idx: usize) {
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
                 let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();

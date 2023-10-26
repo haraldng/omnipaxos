@@ -16,7 +16,7 @@ mod util;
 
 type OmniPaxosLog = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
 
-const SERVERS: [u64; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const SERVERS: [NodeId; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 #[allow(clippy::type_complexity)]
 fn initialise_channels() -> (
@@ -46,7 +46,7 @@ fn main() {
         .unwrap();
 
     let configuration_id = 1;
-    let majority = (SERVERS.len() / 2) + 1;
+    let majority = (SERVERS.len() as NodeId / 2) + 1;
     let mut op_server_handles = HashMap::new();
     let (sender_channels, mut receiver_channels) = initialise_channels();
 
@@ -69,7 +69,7 @@ fn main() {
         };
         // set up the ui with the same configration as for the OmniPaxos
         let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
-        if pid == majority as u64 {
+        if pid == majority {
             // start UI for the the node with id equals to majority, which will be the leader later
             omni_paxos_ui.start();
         }
@@ -94,9 +94,9 @@ fn main() {
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
 
     // start loop
-    let mut idx = SERVERS.len();
+    let mut idx = SERVERS.len() as NodeId;
     loop {
-        let (server, handler) = op_server_handles.get(&(idx as u64)).unwrap();
+        let (server, handler) = op_server_handles.get(&(idx)).unwrap();
         // batch append log entries
         for i in 0..BATCH_SIZE {
             let kv = LogEntry(i);

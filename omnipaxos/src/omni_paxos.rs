@@ -238,7 +238,7 @@ where
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_index` - Deletes all entries up to [`trim_index`], if the [`trim_index`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_index`].
-    pub fn trim(&mut self, trim_index: Option<u64>) -> Result<(), CompactionErr> {
+    pub fn trim(&mut self, trim_index: Option<usize>) -> Result<(), CompactionErr> {
         self.seq_paxos.trim(trim_index)
     }
 
@@ -248,19 +248,19 @@ where
     /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
     pub fn snapshot(
         &mut self,
-        compact_idx: Option<u64>,
+        compact_idx: Option<usize>,
         local_only: bool,
     ) -> Result<(), CompactionErr> {
         self.seq_paxos.snapshot(compact_idx, local_only)
     }
 
     /// Return the decided index.
-    pub fn get_decided_idx(&self) -> u64 {
+    pub fn get_decided_idx(&self) -> usize {
         self.seq_paxos.get_decided_idx()
     }
 
     /// Return trim index from storage.
-    pub fn get_compacted_idx(&self) -> u64 {
+    pub fn get_compacted_idx(&self) -> usize {
         self.seq_paxos.get_compacted_idx()
     }
 
@@ -295,7 +295,7 @@ where
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
-    pub fn read(&self, idx: u64) -> Option<LogEntry<T>> {
+    pub fn read(&self, idx: usize) -> Option<LogEntry<T>> {
         match self
             .seq_paxos
             .internal_storage
@@ -310,7 +310,7 @@ where
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
     pub fn read_entries<R>(&self, r: R) -> Option<Vec<LogEntry<T>>>
     where
-        R: RangeBounds<u64>,
+        R: RangeBounds<usize>,
     {
         self.seq_paxos
             .internal_storage
@@ -319,7 +319,7 @@ where
     }
 
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
-    pub fn read_decided_suffix(&self, from_idx: u64) -> Option<Vec<LogEntry<T>>> {
+    pub fn read_decided_suffix(&self, from_idx: usize) -> Option<Vec<LogEntry<T>>> {
         self.seq_paxos
             .internal_storage
             .read_decided_suffix(from_idx)
@@ -435,11 +435,11 @@ where
 #[derive(Copy, Clone, Debug)]
 pub enum CompactionErr {
     /// Snapshot was called with an index that is not decided yet. Returns the currently decided index.
-    UndecidedIndex(u64),
+    UndecidedIndex(usize),
     /// Snapshot was called with an index which is already trimmed. Returns the currently compacted index.
-    TrimmedIndex(u64),
+    TrimmedIndex(usize),
     /// Trim was called with an index that is not decided by all servers yet. Returns the index decided by ALL servers currently.
-    NotAllDecided(u64),
+    NotAllDecided(usize),
     /// Trim was called at a follower node. Trim must be called by the leader, which is the returned NodeId.
     NotCurrentLeader(NodeId),
 }

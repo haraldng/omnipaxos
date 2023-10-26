@@ -322,7 +322,7 @@ where
         }
     }
 
-    pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: u64, resend: bool) {
+    pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: usize, resend: bool) {
         let seq_num = match resend {
             true => self.leader_state.get_seq_num(to),
             false => self.leader_state.next_seq_num(to),

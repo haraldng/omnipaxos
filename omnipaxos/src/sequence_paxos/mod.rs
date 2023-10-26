@@ -139,7 +139,7 @@ where
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_idx` - Deletes all entries up to [`trim_idx`], if the [`trim_idx`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_idx`].
-    pub(crate) fn trim(&mut self, trim_idx: Option<u64>) -> Result<(), CompactionErr> {
+    pub(crate) fn trim(&mut self, trim_idx: Option<usize>) -> Result<(), CompactionErr> {
         match self.state {
             (Role::Leader, _) => {
                 let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
@@ -184,7 +184,7 @@ where
     /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
     pub(crate) fn snapshot(
         &mut self,
-        idx: Option<u64>,
+        idx: Option<usize>,
         local_only: bool,
     ) -> Result<(), CompactionErr> {
         let result = self.internal_storage.try_snapshot(idx);
@@ -206,12 +206,12 @@ where
     }
 
     /// Return the decided index.
-    pub(crate) fn get_decided_idx(&self) -> u64 {
+    pub(crate) fn get_decided_idx(&self) -> usize {
         self.internal_storage.get_decided_idx()
     }
 
     /// Return trim index from storage.
-    pub(crate) fn get_compacted_idx(&self) -> u64 {
+    pub(crate) fn get_compacted_idx(&self) -> usize {
         self.internal_storage.get_compacted_idx()
     }
 

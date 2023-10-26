@@ -97,7 +97,7 @@ where
     /// Whether `T` is snapshottable. If not, simply return `false` and leave the other functions `unimplemented!()`.
     fn use_snapshots() -> bool;
 
-    //fn size_hint() -> u64;  // TODO: To let the system know trade-off of using entries vs snapshot?
+    //fn size_hint() -> usize;  // TODO: To let the system know trade-off of using entries vs snapshot?
 }
 
 /// The Result type returned by the storage API.
@@ -115,16 +115,16 @@ where
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()>;
 
     /// Appends the entries of `entries` to the prefix from index `from_index` in the log and returns the log length.
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()>;
+    fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()>;
 
     /// Sets the round that has been promised.
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()>;
 
     /// Sets the decided index in the log.
-    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()>;
+    fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()>;
 
     /// Returns the decided index in the log.
-    fn get_decided_idx(&self) -> StorageResult<u64>;
+    fn get_decided_idx(&self) -> StorageResult<usize>;
 
     /// Sets the latest accepted round.
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()>;
@@ -135,13 +135,13 @@ where
 
     /// Returns the entries in the log in the index interval of [from, to).
     /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
-    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>>;
+    fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>>;
 
     /// Returns the current length of the log.
-    fn get_log_len(&self) -> StorageResult<u64>;
+    fn get_log_len(&self) -> StorageResult<usize>;
 
     /// Returns the suffix of entries in the log from index `from`.
-    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>>;
+    fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>>;
 
     /// Returns the round that has been promised.
     fn get_promise(&self) -> StorageResult<Option<Ballot>>;
@@ -153,13 +153,13 @@ where
     fn get_stopsign(&self) -> StorageResult<Option<StopSign>>;
 
     /// Removes elements up to the given [`idx`] from storage.
-    fn trim(&mut self, idx: u64) -> StorageResult<()>;
+    fn trim(&mut self, idx: usize) -> StorageResult<()>;
 
     /// Sets the compacted (i.e. trimmed or snapshotted) index.
-    fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()>;
+    fn set_compacted_idx(&mut self, idx: usize) -> StorageResult<()>;
 
     /// Returns the garbage collector index from storage.
-    fn get_compacted_idx(&self) -> StorageResult<u64>;
+    fn get_compacted_idx(&self) -> StorageResult<usize>;
 
     /// Sets the snapshot.
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()>;
@@ -190,11 +190,11 @@ impl<T: Entry> Snapshot<T> for NoSnapshot {
 /// Used to perform convenient rollbacks of storage operations on internal storage.
 /// Represents only values that can and will actually be rolled back from outside internal storage.
 pub(crate) enum RollbackValue<T: Entry> {
-    DecidedIdx(u64),
+    DecidedIdx(usize),
     AcceptedRound(Ballot),
     Log(Vec<T>),
     /// compacted index and snapshot
-    Snapshot(u64, Option<T::Snapshot>),
+    Snapshot(usize, Option<T::Snapshot>),
 }
 
 /// A simple in-memory storage for simple state values of OmniPaxos.
@@ -214,11 +214,11 @@ where
     /// Last accepted round.
     accepted_round: Ballot,
     /// Length of the decided log.
-    decided_idx: u64,
+    decided_idx: usize,
     /// Length of the accepted log.
-    accepted_idx: u64,
+    accepted_idx: usize,
     /// Garbage collected index.
-    compacted_idx: u64,
+    compacted_idx: usize,
     /// Stopsign entry.
     stopsign: Option<StopSign>,
     #[cfg(feature = "unicache")]
@@ -252,7 +252,7 @@ where
     }
 
     // Returns the index of the last accepted entry.
-    fn get_accepted_idx(&self) -> u64 {
+    fn get_accepted_idx(&self) -> usize {
         self.accepted_idx
     }
 
@@ -408,7 +408,7 @@ where
     }
 
     /// Rollback the snapshot in the storage using given compacted_idx and snapshot.
-    fn rollback_snapshot(&mut self, compacted_idx: u64, snapshot: Option<T::Snapshot>) {
+    fn rollback_snapshot(&mut self, compacted_idx: usize, snapshot: Option<T::Snapshot>) {
         if let Some(old_snapshot) = snapshot {
             self.set_snapshot(compacted_idx, old_snapshot)
                 .expect("storage error while trying to rollback snapshot");
@@ -422,9 +422,9 @@ where
 
     fn get_entry_type(
         &self,
-        idx: u64,
-        compacted_idx: u64,
-        accepted_idx: u64,
+        idx: usize,
+        compacted_idx: usize,
+        accepted_idx: usize,
     ) -> StorageResult<Option<IndexEntry>> {
         if idx < compacted_idx {
             Ok(Some(IndexEntry::Compacted))
@@ -443,7 +443,7 @@ where
     /// Read entries in the range `r` in the log. Returns `None` if `r` is out of bounds.
     pub(crate) fn read<R>(&self, r: R) -> StorageResult<Option<Vec<LogEntry<T>>>>
     where
-        R: RangeBounds<u64>,
+        R: RangeBounds<usize>,
     {
         let from_idx = match r.start_bound() {
             Bound::Included(i) => *i,
@@ -510,14 +510,14 @@ where
         }
     }
 
-    fn create_read_log_entries(&self, from: u64, to: u64) -> StorageResult<Vec<LogEntry<T>>> {
+    fn create_read_log_entries(&self, from: usize, to: usize) -> StorageResult<Vec<LogEntry<T>>> {
         let decided_idx = self.get_decided_idx();
         let entries = self
             .get_entries(from, to)?
             .into_iter()
             .enumerate()
             .map(|(idx, e)| {
-                let log_idx = idx as u64 + from;
+                let log_idx = idx + from;
                 if log_idx < decided_idx {
                     LogEntry::Decided(e)
                 } else {
@@ -531,7 +531,7 @@ where
     /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
     pub(crate) fn read_decided_suffix(
         &self,
-        from_idx: u64,
+        from_idx: usize,
     ) -> StorageResult<Option<Vec<LogEntry<T>>>> {
         let decided_idx = self.get_decided_idx();
         if from_idx < decided_idx {
@@ -541,7 +541,7 @@ where
         }
     }
 
-    fn create_compacted_entry(&self, compacted_idx: u64) -> StorageResult<LogEntry<T>> {
+    fn create_compacted_entry(&self, compacted_idx: usize) -> StorageResult<LogEntry<T>> {
         self.storage.get_snapshot().map(|snap| match snap {
             Some(s) => LogEntry::Snapshotted(SnapshottedEntry::with(compacted_idx, s)),
             None => LogEntry::Trimmed(compacted_idx),
@@ -608,7 +608,7 @@ where
     pub(crate) fn append_entries_and_get_accepted_idx(
         &mut self,
         entries: Vec<T>,
-    ) -> StorageResult<Option<u64>> {
+    ) -> StorageResult<Option<usize>> {
         let append_res = self.state_cache.append_entries(entries);
         if let Some(flushed_entries) = append_res {
             let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
@@ -632,7 +632,7 @@ where
     pub(crate) fn append_encoded_entries_and_get_accepted_idx(
         &mut self,
         encoded_entries: Vec<<T as Entry>::EncodeResult>,
-    ) -> StorageResult<Option<u64>> {
+    ) -> StorageResult<Option<usize>> {
         let entries = encoded_entries
             .into_iter()
             .map(|x| self.state_cache.unicache.decode(x))
@@ -640,7 +640,7 @@ where
         self.append_entries_and_get_accepted_idx(entries)
     }
 
-    pub(crate) fn flush_batch(&mut self) -> StorageResult<u64> {
+    pub(crate) fn flush_batch(&mut self) -> StorageResult<usize> {
         #[cfg(feature = "unicache")]
         {
             // clear the processed batch
@@ -654,27 +654,27 @@ where
     pub(crate) fn append_entries_without_batching(
         &mut self,
         entries: Vec<T>,
-    ) -> StorageResult<u64> {
-        let new_entries = entries.len() as u64;
+    ) -> StorageResult<usize> {
+        let new_entries = entries.len();
         self.storage.append_entries(entries)?;
         self.state_cache.accepted_idx += new_entries;
         Ok(self.get_accepted_idx())
     }
 
-    pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+    pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<usize> {
         let decided_idx = self.get_decided_idx();
-        let new_entries = entries.len() as u64;
+        let new_entries = entries.len();
         self.storage.append_on_prefix(decided_idx, entries)?;
-        self.state_cache.accepted_idx = decided_idx + new_entries as u64;
+        self.state_cache.accepted_idx = decided_idx + new_entries;
         Ok(self.get_accepted_idx())
     }
 
     pub(crate) fn append_on_prefix(
         &mut self,
-        from_idx: u64,
+        from_idx: usize,
         entries: Vec<T>,
-    ) -> StorageResult<u64> {
-        let new_entries = entries.len() as u64;
+    ) -> StorageResult<usize> {
+        let new_entries = entries.len();
         self.storage.append_on_prefix(from_idx, entries)?;
         self.state_cache.accepted_idx = from_idx + new_entries;
         Ok(self.get_accepted_idx())
@@ -685,16 +685,16 @@ where
         self.storage.set_promise(n_prom)
     }
 
-    pub(crate) fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
+    pub(crate) fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
         self.state_cache.decided_idx = ld;
         self.storage.set_decided_idx(ld)
     }
 
-    pub(crate) fn get_decided_idx(&self) -> u64 {
+    pub(crate) fn get_decided_idx(&self) -> usize {
         self.state_cache.decided_idx
     }
 
-    fn get_decided_idx_without_stopsign(&self) -> u64 {
+    fn get_decided_idx_without_stopsign(&self) -> usize {
         match self.stopsign_is_decided() {
             true => self.get_decided_idx() - 1,
             false => self.get_decided_idx(),
@@ -710,16 +710,16 @@ where
         self.state_cache.accepted_round
     }
 
-    pub(crate) fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
+    pub(crate) fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
         self.storage.get_entries(from, to)
     }
 
     /// The length of the replicated log, as if log was never compacted.
-    pub(crate) fn get_accepted_idx(&self) -> u64 {
+    pub(crate) fn get_accepted_idx(&self) -> usize {
         self.state_cache.get_accepted_idx()
     }
 
-    pub(crate) fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
+    pub(crate) fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
         self.storage.get_suffix(from)
     }
 
@@ -747,7 +747,7 @@ where
         self.state_cache.stopsign_is_decided()
     }
 
-    pub(crate) fn create_snapshot(&mut self, compact_idx: u64) -> StorageResult<T::Snapshot> {
+    pub(crate) fn create_snapshot(&mut self, compact_idx: usize) -> StorageResult<T::Snapshot> {
         let current_compacted_idx = self.get_compacted_idx();
         if compact_idx < current_compacted_idx {
             Err(CompactionErr::TrimmedIndex(current_compacted_idx))?
@@ -780,8 +780,8 @@ where
     // snapshot of the entire decided log instead.
     pub(crate) fn create_diff_snapshot(
         &mut self,
-        from_idx: u64,
-    ) -> StorageResult<(Option<SnapshotType<T>>, u64)> {
+        from_idx: usize,
+    ) -> StorageResult<(Option<SnapshotType<T>>, usize)> {
         let log_decided_idx = self.get_decided_idx_without_stopsign();
         let compacted_idx = self.get_compacted_idx();
         let snapshot = if from_idx <= compacted_idx {
@@ -808,7 +808,7 @@ where
     }
 
     /// This operation is atomic, but non-reversible after completion
-    pub(crate) fn set_snapshot(&mut self, idx: u64, snapshot: T::Snapshot) -> StorageResult<()> {
+    pub(crate) fn set_snapshot(&mut self, idx: usize, snapshot: T::Snapshot) -> StorageResult<()> {
         let old_compacted_idx = self.get_compacted_idx();
         let old_snapshot = self.storage.get_snapshot()?;
         if idx > old_compacted_idx {
@@ -826,7 +826,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn merge_snapshot(&mut self, idx: u64, delta: T::Snapshot) -> StorageResult<()> {
+    pub(crate) fn merge_snapshot(&mut self, idx: usize, delta: T::Snapshot) -> StorageResult<()> {
         let mut snapshot = if let Some(snap) = self.storage.get_snapshot()? {
             snap
         } else {
@@ -836,7 +836,7 @@ where
         self.set_snapshot(idx, snapshot)
     }
 
-    pub(crate) fn try_trim(&mut self, idx: u64) -> StorageResult<()> {
+    pub(crate) fn try_trim(&mut self, idx: usize) -> StorageResult<()> {
         let compacted_idx = self.get_compacted_idx();
         if idx <= compacted_idx {
             Ok(()) // already trimmed or snapshotted this index.
@@ -856,16 +856,16 @@ where
         }
     }
 
-    pub(crate) fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()> {
+    pub(crate) fn set_compacted_idx(&mut self, idx: usize) -> StorageResult<()> {
         self.state_cache.compacted_idx = idx;
         self.storage.set_compacted_idx(idx)
     }
 
-    pub(crate) fn get_compacted_idx(&self) -> u64 {
+    pub(crate) fn get_compacted_idx(&self) -> usize {
         self.state_cache.compacted_idx
     }
 
-    pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<u64>) -> StorageResult<()> {
+    pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<usize>) -> StorageResult<()> {
         let decided_idx = self.get_decided_idx();
         let log_decided_idx = self.get_decided_idx_without_stopsign();
         let idx = match snapshot_idx {

@@ -38,7 +38,7 @@ pub(crate) struct App {
     /// Role of the current node.
     pub(crate) current_role: Role,
     /// Max index of the decided log entry.
-    pub(crate) decided_idx: u64,
+    pub(crate) decided_idx: usize,
     /// Ids of all the nodes in the cluster specified in the configuration, includes the current node.
     pub(crate) nodes: Vec<Node>,
     /// All the active nodes in the cluster that current node is connected to.
@@ -46,14 +46,14 @@ pub(crate) struct App {
     /// The last time the ui states were updated.
     last_update_time: Instant,
     /// The throughput data of the current node, (current ballot, throughput).
-    pub(crate) throughput_data: Vec<(String, u64)>,
+    pub(crate) throughput_data: Vec<(String, usize)>,
     /// Number of decided log entries per second, calculated from throughput_data.
     pub(crate) dps: f64,
     /// The progress of all the followers, calculated by accepted_idx / leader’s accepted index.
     /// Calculated only when the current node is the leader. Idx is the pid of the node.
     pub(crate) followers_progress: Vec<f64>,
     /// The accepted_idx of all the followers. Idx is the pid of the node.
-    pub(crate) followers_accepted_idx: Vec<u64>,
+    pub(crate) followers_accepted_idx: Vec<usize>,
 }
 
 impl App {
@@ -101,7 +101,7 @@ impl App {
         }
     }
 
-    pub(crate) fn set_decided_idx(&mut self, decided_idx: u64) {
+    pub(crate) fn set_decided_idx(&mut self, decided_idx: usize) {
         let period = self.last_update_time.elapsed().as_secs_f64();
         let throughput = decided_idx - self.decided_idx;
         self.throughput_data
@@ -114,7 +114,7 @@ impl App {
 }
 
 pub struct UIAppConfig {
-    pub(crate) pid: u64,
-    pub(crate) peers: Vec<u64>,
+    pub(crate) pid: NodeId,
+    pub(crate) peers: Vec<NodeId>,
     pub(crate) configuration_id: ConfigurationId,
 }

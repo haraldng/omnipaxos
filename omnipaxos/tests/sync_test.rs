@@ -2,7 +2,7 @@ pub mod utils;
 
 use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask, FutureCollection};
-use omnipaxos::{storage::StopSign, ClusterConfig};
+use omnipaxos::{storage::StopSign, ClusterConfig, util::NodeId};
 use serial_test::serial;
 use utils::{
     verification::{verify_log, verify_stopsign},
@@ -14,11 +14,11 @@ use utils::{
 struct SyncTest {
     leaders_log: Vec<Value>,
     leaders_dec_idx: usize,
-    leaders_compacted_idx: Option<u64>,
+    leaders_compacted_idx: Option<usize>,
     leaders_ss: Option<StopSign>,
     followers_log: Vec<Value>,
     followers_dec_idx: usize,
-    followers_compacted_idx: Option<u64>,
+    followers_compacted_idx: Option<usize>,
 }
 
 /// Tests that a leader whose log consists of everything a log can be made up of (snapshot, decided entries,
@@ -218,7 +218,7 @@ fn sync_test(test: SyncTest) {
         None => cfg.num_nodes / 2 + 1,
     };
     let num_nodes_to_stop = cfg.num_nodes - write_quorum_size - 1; // -1 as leader and one follower are already disconnected
-    let nodes_to_stop = (1..=cfg.num_nodes as u64)
+    let nodes_to_stop = (1..=cfg.num_nodes as NodeId)
         .filter(|&n| n != follower_id && n != leader_id)
         .take(num_nodes_to_stop);
     nodes_to_stop.for_each(|pid| sys.stop_node(pid));

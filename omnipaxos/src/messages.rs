@@ -32,11 +32,11 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The decided index of this leader.
-        pub decided_idx: u64,
+        pub decided_idx: usize,
         /// The latest round in which an entry was accepted.
         pub n_accepted: Ballot,
         /// The log length of this leader.
-        pub accepted_idx: u64,
+        pub accepted_idx: usize,
     }
 
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
@@ -55,9 +55,9 @@ pub mod sequence_paxos {
         /// The log suffix.
         pub suffix: Vec<T>,
         /// The decided index of this follower.
-        pub decided_idx: u64,
+        pub decided_idx: usize,
         /// The log length of this follower.
-        pub accepted_idx: u64,
+        pub accepted_idx: usize,
         /// The StopSign accepted by this follower
         pub stopsign: Option<StopSign>,
     }
@@ -78,9 +78,9 @@ pub mod sequence_paxos {
         /// The log suffix.
         pub suffix: Vec<T>,
         /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists)
-        pub sync_idx: u64,
+        pub sync_idx: usize,
         /// The decided index
-        pub decided_idx: u64,
+        pub decided_idx: usize,
         /// StopSign to be accepted
         pub stopsign: Option<StopSign>,
         #[cfg(feature = "unicache")]
@@ -100,7 +100,7 @@ pub mod sequence_paxos {
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided index.
-        pub decided_idx: u64,
+        pub decided_idx: usize,
         /// Entries to be replicated.
         pub entries: Vec<T>,
     }
@@ -118,7 +118,7 @@ pub mod sequence_paxos {
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided index.
-        pub decided_idx: u64,
+        pub decided_idx: usize,
         /// Entries to be replicated.
         pub entries: Vec<T::EncodeResult>,
     }
@@ -130,7 +130,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The accepted index.
-        pub accepted_idx: u64,
+        pub accepted_idx: usize,
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.
@@ -142,7 +142,7 @@ pub mod sequence_paxos {
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
         /// The decided index.
-        pub decided_idx: u64,
+        pub decided_idx: usize,
     }
 
     /// Message sent by leader to followers to accept a StopSign
@@ -171,8 +171,8 @@ pub mod sequence_paxos {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub enum Compaction {
-        Trim(u64),
-        Snapshot(Option<u64>),
+        Trim(usize),
+        Snapshot(Option<usize>),
     }
 
     /// An enum for all the different message types.

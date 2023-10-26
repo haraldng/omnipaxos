@@ -85,7 +85,7 @@ pub struct TestConfig {
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
-    pub trim_idx: u64,
+    pub trim_idx: usize,
     pub flexible_quorum: Option<(usize, usize)>,
     pub batch_size: usize,
     // #[cfg(feature = "unicache")]
@@ -104,7 +104,7 @@ impl TestConfig {
     }
 
     pub fn into_omnipaxos_config(&self, pid: NodeId) -> OmniPaxosConfig {
-        let all_pids: Vec<u64> = (1..=self.num_nodes as u64).collect();
+        let all_pids: Vec<NodeId> = (1..=self.num_nodes as NodeId).collect();
         let flexible_quorum = self
             .flexible_quorum
             .map(|(read_quorum_size, write_quorum_size)| FlexibleQuorum {
@@ -259,7 +259,7 @@ where
         }
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
+    fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_on_prefix(from_idx, entries),
             StorageType::Memory(mem_s) => mem_s.append_on_prefix(from_idx, entries),
@@ -281,7 +281,7 @@ where
         }
     }
 
-    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
+    fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_decided_idx(ld),
             StorageType::Memory(mem_s) => mem_s.set_decided_idx(ld),
@@ -292,7 +292,7 @@ where
         }
     }
 
-    fn get_decided_idx(&self) -> StorageResult<u64> {
+    fn get_decided_idx(&self) -> StorageResult<usize> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_decided_idx(),
             StorageType::Memory(mem_s) => mem_s.get_decided_idx(),
@@ -325,7 +325,7 @@ where
         }
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
+    fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_entries(from, to),
             StorageType::Memory(mem_s) => mem_s.get_entries(from, to),
@@ -336,7 +336,7 @@ where
         }
     }
 
-    fn get_log_len(&self) -> StorageResult<u64> {
+    fn get_log_len(&self) -> StorageResult<usize> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_log_len(),
             StorageType::Memory(mem_s) => mem_s.get_log_len(),
@@ -347,7 +347,7 @@ where
         }
     }
 
-    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
+    fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_suffix(from),
             StorageType::Memory(mem_s) => mem_s.get_suffix(from),
@@ -391,7 +391,7 @@ where
         }
     }
 
-    fn trim(&mut self, idx: u64) -> StorageResult<()> {
+    fn trim(&mut self, idx: usize) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.trim(idx),
             StorageType::Memory(mem_s) => mem_s.trim(idx),
@@ -402,7 +402,7 @@ where
         }
     }
 
-    fn set_compacted_idx(&mut self, idx: u64) -> StorageResult<()> {
+    fn set_compacted_idx(&mut self, idx: usize) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.set_compacted_idx(idx),
             StorageType::Memory(mem_s) => mem_s.set_compacted_idx(idx),
@@ -413,7 +413,7 @@ where
         }
     }
 
-    fn get_compacted_idx(&self) -> StorageResult<u64> {
+    fn get_compacted_idx(&self) -> StorageResult<usize> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.get_compacted_idx(),
             StorageType::Memory(mem_s) => mem_s.get_compacted_idx(),
@@ -450,7 +450,7 @@ where
 pub struct TestSystem {
     pub temp_dir_path: String,
     pub kompact_system: Option<KompactSystem>,
-    pub nodes: HashMap<u64, Arc<Component<OmniPaxosComponent>>>,
+    pub nodes: HashMap<NodeId, Arc<Component<OmniPaxosComponent>>>,
 }
 
 impl TestSystem {
@@ -469,9 +469,9 @@ impl TestSystem {
         let system = conf.build().expect("KompactSystem");
 
         let mut nodes = HashMap::new();
-        let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
+        let mut omni_refs: HashMap<NodeId, ActorRef<Message<Value>>> = HashMap::new();
 
-        for pid in 1..=test_config.num_nodes as u64 {
+        for pid in 1..=test_config.num_nodes as NodeId {
             let op_config = test_config.into_omnipaxos_config(pid);
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
@@ -520,7 +520,7 @@ impl TestSystem {
         }
     }
 
-    pub fn kill_node(&mut self, id: u64) {
+    pub fn kill_node(&mut self, id: NodeId) {
         let node = self.nodes.remove(&id).unwrap();
         self.kompact_system
             .as_ref()
@@ -537,7 +537,7 @@ impl TestSystem {
         test_config: &TestConfig,
         storage: StorageType<Value>,
     ) {
-        let mut omni_refs: HashMap<u64, ActorRef<Message<Value>>> = HashMap::new();
+        let mut omni_refs: HashMap<NodeId, ActorRef<Message<Value>>> = HashMap::new();
         let op_config = test_config.into_omnipaxos_config(pid);
         let (omni_replica, omni_reg_f) = self
             .kompact_system
@@ -568,7 +568,7 @@ impl TestSystem {
         self.nodes.insert(pid, omni_replica);
     }
 
-    pub fn start_node(&self, pid: u64) {
+    pub fn start_node(&self, pid: NodeId) {
         let node = self
             .nodes
             .get(&pid)
@@ -581,7 +581,7 @@ impl TestSystem {
             .expect("ReplicaComp never started!");
     }
 
-    pub fn stop_node(&self, pid: u64) {
+    pub fn stop_node(&self, pid: NodeId) {
         let node = self
             .nodes
             .get(&pid)
@@ -594,7 +594,7 @@ impl TestSystem {
             .expect("ReplicaComp never stopped!");
     }
 
-    pub fn set_node_connections(&self, pid: u64, connection_status: bool) {
+    pub fn set_node_connections(&self, pid: NodeId, connection_status: bool) {
         // set outgoing connections
         let node = self.nodes.get(&pid).expect("Cannot find {pid}");
         node.on_definition(|x| {
@@ -613,7 +613,7 @@ impl TestSystem {
 
     /// Return the elected leader from `node`'s viewpoint. If there is no leader yet then
     /// wait until a leader is elected in the allocated time.
-    pub fn get_elected_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+    pub fn get_elected_leader(&self, node_id: NodeId, wait_timeout: Duration) -> NodeId {
         let node = self.nodes.get(&node_id).expect("No BLE component found");
         let leader_pid = node.on_definition(|x| x.paxos.get_current_leader());
         leader_pid.unwrap_or_else(|| self.get_next_leader(node_id, wait_timeout))
@@ -621,7 +621,7 @@ impl TestSystem {
 
     /// Return the next new elected leader from `node`'s viewpoint. If there is no leader yet then
     /// wait until a leader is elected in the allocated time.
-    pub fn get_next_leader(&self, node_id: u64, wait_timeout: Duration) -> u64 {
+    pub fn get_next_leader(&self, node_id: NodeId, wait_timeout: Duration) -> NodeId {
         let node = self.nodes.get(&node_id).expect("No BLE component found");
         let (kprom, kfuture) = promise::<Ballot>();
         node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
@@ -633,7 +633,7 @@ impl TestSystem {
 
     /// Forces the cluster to elect `next_leader` as leader of the cluster. Note: This modifies
     /// node connections and results in a fully connected network.
-    pub fn force_leader_change(&self, next_leader: u64, wait_timeout: Duration) {
+    pub fn force_leader_change(&self, next_leader: NodeId, wait_timeout: Duration) {
         for node in self.nodes.keys() {
             self.set_node_connections(*node, false);
         }
@@ -656,7 +656,7 @@ impl TestSystem {
 
     /// Use node `proposer` to propose `proposals` then waits for the proposals
     /// to be decided.
-    pub fn make_proposals(&self, proposer: u64, proposals: Vec<Value>, timeout: Duration) {
+    pub fn make_proposals(&self, proposer: NodeId, proposals: Vec<Value>, timeout: Duration) {
         let proposer = self
             .nodes
             .get(&proposer)
@@ -680,7 +680,7 @@ impl TestSystem {
 
     pub fn reconfigure(
         &self,
-        proposer: u64,
+        proposer: NodeId,
         new_configuration: ClusterConfig,
         metadata: Option<Vec<u8>>,
         timeout: Duration,
@@ -729,16 +729,16 @@ pub mod omnireplica {
         ctx: ComponentContext<Self>,
         #[allow(dead_code)]
         pid: NodeId,
-        pub peers: HashMap<u64, ActorRef<Message<Value>>>,
-        pub peer_disconnections: HashSet<u64>,
+        pub peers: HashMap<NodeId, ActorRef<Message<Value>>>,
+        pub peer_disconnections: HashSet<NodeId>,
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
         tick_timeout: Duration,
         pub paxos: OmniPaxos<Value, StorageType<Value>>,
-        decided_futures: HashMap<u64, Ask<Value, ()>>,
+        decided_futures: HashMap<NodeId, Ask<Value, ()>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
-        decided_idx: u64,
+        decided_idx: usize,
     }
 
     impl ComponentLifecycle for OmniPaxosComponent {
@@ -818,19 +818,19 @@ pub mod omnireplica {
             }
         }
 
-        pub fn set_peers(&mut self, peers: HashMap<u64, ActorRef<Message<Value>>>) {
+        pub fn set_peers(&mut self, peers: HashMap<NodeId, ActorRef<Message<Value>>>) {
             self.peers = peers;
         }
 
         // Used to simulate a network fault to Component `pid`.
-        pub fn set_connection(&mut self, pid: u64, is_connected: bool) {
+        pub fn set_connection(&mut self, pid: NodeId, is_connected: bool) {
             match is_connected {
                 true => self.peer_disconnections.remove(&pid),
                 false => self.peer_disconnections.insert(pid),
             };
         }
 
-        pub fn is_connected_to(&self, pid: &u64) -> bool {
+        pub fn is_connected_to(&self, pid: &NodeId) -> bool {
             self.peer_disconnections.get(pid).is_none()
         }
 
@@ -846,7 +846,7 @@ pub mod omnireplica {
             assert!(replaced.is_none(), "Future for {:?} already exists!", id);
         }
 
-        fn try_answer_decided_future(&mut self, id: u64) {
+        fn try_answer_decided_future(&mut self, id: NodeId) {
             if let Some(ask) = self.decided_futures.remove(&id) {
                 ask.reply(()).expect("Failed to reply promise!");
             }
@@ -977,7 +977,7 @@ pub mod verification {
     use super::{Value, ValueSnapshot};
     use omnipaxos::{
         storage::{Snapshot, StopSign},
-        util::LogEntry,
+        util::{LogEntry, NodeId},
     };
 
     /// Verify that the log matches the proposed values, Depending on
@@ -986,7 +986,7 @@ pub mod verification {
     /// * Only a snapshot was taken, verify the snapshot
     /// * A snapshot was taken and entries decided on afterwards, verify both the snapshot and entries
     pub fn verify_log(read_log: Vec<LogEntry<Value>>, proposals: Vec<Value>) {
-        let num_proposals = proposals.len() as u64;
+        let num_proposals = proposals.len();
         match &read_log[..] {
             [LogEntry::Decided(_), ..] => verify_entries(&read_log, &proposals, 0, num_proposals),
             [LogEntry::Snapshotted(s)] => {
@@ -1013,7 +1013,7 @@ pub mod verification {
     /// Verify that the log has a single snapshot of the latest entry.
     pub fn verify_snapshot(
         read_entries: &[LogEntry<Value>],
-        exp_compacted_idx: u64,
+        exp_compacted_idx: usize,
         exp_snapshot: &ValueSnapshot,
     ) {
         assert_eq!(
@@ -1040,8 +1040,8 @@ pub mod verification {
     pub fn verify_entries(
         read_entries: &[LogEntry<Value>],
         exp_entries: &[Value],
-        offset: u64,
-        decided_idx: u64,
+        offset: usize,
+        decided_idx: usize,
     ) {
         assert_eq!(
             read_entries.len(),
@@ -1051,7 +1051,7 @@ pub mod verification {
             exp_entries
         );
         for (idx, entry) in read_entries.iter().enumerate() {
-            let log_idx = idx as u64 + offset;
+            let log_idx = idx + offset;
             match entry {
                 LogEntry::Decided(i) if log_idx < decided_idx => assert_eq!(*i, exp_entries[idx]),
                 LogEntry::Undecided(i) if log_idx >= decided_idx => assert_eq!(*i, exp_entries[idx]),
@@ -1086,7 +1086,7 @@ pub mod verification {
 
     /// Verifies that there is a majority when an entry is proposed.
     pub fn check_quorum(
-        logs: &[(u64, Vec<LogEntry<Value>>)],
+        logs: &[(NodeId, Vec<LogEntry<Value>>)],
         quorum_size: usize,
         proposals: &[Value],
     ) {
@@ -1107,7 +1107,7 @@ pub mod verification {
     }
 
     /// Verifies that only proposed values are decided.
-    pub fn check_validity(logs: &[(u64, Vec<LogEntry<Value>>)], proposals: &[Value]) {
+    pub fn check_validity(logs: &[(NodeId, Vec<LogEntry<Value>>)], proposals: &[Value]) {
         logs.iter().for_each(|(_pid, log)| {
             for entry in log {
                 if let LogEntry::Decided(v) = entry {
@@ -1122,7 +1122,7 @@ pub mod verification {
     }
 
     /// Verifies logs do not diverge. **NOTE**: this check assumes normal execution within one round without any snapshots, trimming.
-    pub fn check_consistent_log_prefixes(logs: &Vec<(u64, Vec<LogEntry<Value>>)>) {
+    pub fn check_consistent_log_prefixes(logs: &Vec<(NodeId, Vec<LogEntry<Value>>)>) {
         let (_, longest_log) = logs
             .iter()
             .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))

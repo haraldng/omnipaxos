@@ -9,7 +9,7 @@ use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone)]
 pub(crate) struct AcceptedMetaData<T: Entry> {
-    pub accepted_idx: u64,
+    pub accepted_idx: usize,
     #[cfg(not(feature = "unicache"))]
     pub flushed_entries: Vec<T>,
     #[cfg(feature = "unicache")]
@@ -20,8 +20,8 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
     pub n_accepted: Ballot,
-    pub accepted_idx: u64,
-    pub decided_idx: u64,
+    pub accepted_idx: usize,
+    pub decided_idx: usize,
     pub pid: NodeId,
     pub stopsign: Option<StopSign>,
 }
@@ -79,7 +79,7 @@ where
     promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
-    pub accepted_indexes: Vec<u64>,
+    pub accepted_indexes: Vec<usize>,
     max_promise_meta: PromiseMetaData,
     max_promise: Option<PromiseData<T>>,
     #[cfg(feature = "batch_accept")]
@@ -130,7 +130,7 @@ where
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
+    pub fn set_promise(&mut self, prom: Promise<T>, from: NodeId, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
@@ -171,7 +171,7 @@ where
         &self.max_promise_meta
     }
 
-    pub fn get_max_decided_idx(&self) -> Option<u64> {
+    pub fn get_max_decided_idx(&self) -> Option<usize> {
         self.promises_meta
             .iter()
             .filter_map(|p| match p {
@@ -188,7 +188,7 @@ where
         }
     }
 
-    pub fn get_min_all_accepted_idx(&self) -> &u64 {
+    pub fn get_min_all_accepted_idx(&self) -> &usize {
         self.accepted_indexes
             .iter()
             .min()
@@ -231,7 +231,7 @@ where
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn set_accepted_idx(&mut self, pid: NodeId, idx: u64) {
+    pub fn set_accepted_idx(&mut self, pid: NodeId, idx: usize) {
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
@@ -244,18 +244,18 @@ where
             .copied()
     }
 
-    pub fn get_decided_idx(&self, pid: NodeId) -> Option<u64> {
+    pub fn get_decided_idx(&self, pid: NodeId) -> Option<usize> {
         match self.promises_meta.get(Self::pid_to_idx(pid)).unwrap() {
             PromiseState::Promised(metadata) => Some(metadata.decided_idx),
             _ => None,
         }
     }
 
-    pub fn get_accepted_idx(&self, pid: NodeId) -> u64 {
+    pub fn get_accepted_idx(&self, pid: NodeId) -> usize {
         *self.accepted_indexes.get(Self::pid_to_idx(pid)).unwrap()
     }
 
-    pub fn is_chosen(&self, idx: u64) -> bool {
+    pub fn is_chosen(&self, idx: usize) -> bool {
         let num_accepted = self
             .accepted_indexes
             .iter()
@@ -327,7 +327,7 @@ impl<T> SnapshottedEntry<T>
 where
     T: Entry,
 {
-    pub(crate) fn with(trimmed_idx: u64, snapshot: T::Snapshot) -> Self {
+    pub(crate) fn with(trimmed_idx: usize, snapshot: T::Snapshot) -> Self {
         Self {
             trimmed_idx,
             snapshot,
@@ -353,7 +353,7 @@ pub(crate) mod defaults {
 }
 
 #[allow(missing_docs)]
-pub type TrimmedIndex = u64;
+pub type TrimmedIndex = usize;
 
 /// ID for an OmniPaxos node
 pub type NodeId = u64;

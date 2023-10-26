@@ -26,7 +26,7 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
         /// Last accepted round.
         acc_round: Ballot,
         /// Length of the decided log.
-        ld: u64,
+        ld: usize,
         ...
     }
 
@@ -34,19 +34,19 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
     where
         T: Entry,
     {
-        fn append_entry(&mut self, entry: T) -> StorageResult<u64> {
+        fn append_entry(&mut self, entry: T) -> StorageResult<usize> {
             self.log.push(entry);
             self.get_log_len()
         }
 
-        fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<u64> {
+        fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<usize> {
             let mut e = entries;
             self.log.append(&mut e);
             self.get_log_len()
         }
 
-        fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<u64> {
-            self.log.truncate(from_idx as usize);
+        fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<usize> {
+            self.log.truncate(from_idx);
             self.append_entries(entries)
         }
 
@@ -55,12 +55,12 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
             Ok(())
         }
 
-        fn set_decided_idx(&mut self, ld: u64) StorageResult<()> {
+        fn set_decided_idx(&mut self, ld: usize) StorageResult<()> {
             self.ld = ld;
             Ok(())
         }
 
-        fn get_decided_idx(&self) -> StorageResult<u64> {
+        fn get_decided_idx(&self) -> StorageResult<usize> {
             Ok(self.ld)
         }
 
@@ -73,19 +73,19 @@ Upon receiving a `StorageResult::Error(_)` from the storage implementation, Omni
             Ok(self.acc_round)
         }
 
-        fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
+        fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
             Ok(self.log
-                .get(from as usize..to as usize)
+                .get(from..to)
                 .unwrap_or(&[])
                 .to_vec())
         }
 
-        fn get_log_len(&self) -> StorageResult<u64> {
-            Ok(self.log.len() as u64)
+        fn get_log_len(&self) -> StorageResult<usize> {
+            Ok(self.log.len())
         }
 
-        fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-            match self.log.get(from as usize..) {
+        fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
+            match self.log.get(from..) {
                 Some(s) => Ok(s.to_vec()),
                 None => Ok(vec![]),
             }

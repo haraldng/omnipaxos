@@ -21,7 +21,7 @@ Calling ``reconfigure()`` will propose a `StopSign` entry to be appended. If it 
     };
     let my_pid = current_config.pid;
     
-    let idx: u64 = 2;  // some index we last read from
+    let idx: usize = 2;  // some index we last read from
     let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omni_paxos.read_decided_suffix(idx);
 
     if let Some(de) = decided_entries {

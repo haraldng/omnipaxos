@@ -9,7 +9,7 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub struct ClusterState {
     /// The accepted indexes of all the nodes in the cluster. The index of the vector is the node id.
-    pub accepted_indexes: Vec<u64>,
+    pub accepted_indexes: Vec<usize>,
     /// All the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
     pub heartbeats: Vec<HeartbeatReply>,
@@ -37,7 +37,7 @@ pub struct OmniPaxosStates {
     /// The current leader
     pub current_leader: Option<NodeId>,
     /// The current decided index
-    pub decided_idx: u64,
+    pub decided_idx: usize,
     /// All the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
     pub heartbeats: Vec<HeartbeatReply>,

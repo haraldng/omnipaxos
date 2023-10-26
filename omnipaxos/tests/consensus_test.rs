@@ -68,7 +68,7 @@ fn read_test() {
         .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
-    let snapshotted_idx: u64 = 4;
+    let snapshotted_idx = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
 
     let exp_snapshot = ValueSnapshot::create(snapshotted);
@@ -112,7 +112,7 @@ fn read_test() {
     verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
 
     // read none
-    let idx = log.len() as u64;
+    let idx = log.len();
     let entry = omni_paxos.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
@@ -126,7 +126,7 @@ fn read_test() {
         },
         None,
     );
-    let log_len = log.len() as u64;
+    let log_len = log.len();
     stopped_storage
         .append_entries(log.clone())
         .expect("Failed to append entries");
@@ -158,7 +158,7 @@ fn read_entries_test() {
         .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
-    let snapshotted_idx: u64 = 4;
+    let snapshotted_idx = 4;
     let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
     let exp_snapshot = ValueSnapshot::create(snapshotted);
 
@@ -206,7 +206,7 @@ fn read_entries_test() {
 
     // read none
     let from_idx = 0;
-    let to_idx = log.len() as u64;
+    let to_idx = log.len();
     let entries = omni_paxos.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
@@ -221,7 +221,7 @@ fn read_entries_test() {
         },
         None,
     );
-    let log_len = log.len() as u64;
+    let log_len = log.len();
     stopped_storage
         .append_entries(log.clone())
         .expect("Failed to append entries");

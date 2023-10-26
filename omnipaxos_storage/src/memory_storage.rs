@@ -15,11 +15,11 @@ where
     /// Last accepted round.
     acc_round: Option<Ballot>,
     /// Length of the decided log.
-    ld: u64,
+    ld: usize,
     /// Garbage collected index.
-    trimmed_idx: u64,
+    trimmed_idx: usize,
     /// Stored compact index
-    compacted_idx: u64,
+    compacted_idx: usize,
     /// Stored snapshot
     snapshot: Option<T::Snapshot>,
     /// Stored StopSign
@@ -41,8 +41,8 @@ where
         Ok(())
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
-        self.log.truncate((from_idx - self.trimmed_idx) as usize);
+    fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
+        self.log.truncate(from_idx - self.trimmed_idx);
         self.append_entries(entries)
     }
 
@@ -51,12 +51,12 @@ where
         Ok(())
     }
 
-    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
+    fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
         self.ld = ld;
         Ok(())
     }
 
-    fn get_decided_idx(&self) -> StorageResult<u64> {
+    fn get_decided_idx(&self) -> StorageResult<usize> {
         Ok(self.ld)
     }
 
@@ -69,18 +69,18 @@ where
         Ok(self.acc_round)
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        let from = (from - self.trimmed_idx) as usize;
-        let to = (to - self.trimmed_idx) as usize;
+    fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
+        let from = from - self.trimmed_idx;
+        let to = to - self.trimmed_idx;
         Ok(self.log.get(from..to).unwrap_or(&[]).to_vec())
     }
 
-    fn get_log_len(&self) -> StorageResult<u64> {
-        Ok(self.log.len() as u64)
+    fn get_log_len(&self) -> StorageResult<usize> {
+        Ok(self.log.len())
     }
 
-    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        Ok(match self.log.get((from - self.trimmed_idx) as usize..) {
+    fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
+        Ok(match self.log.get((from - self.trimmed_idx)..) {
             Some(s) => s.to_vec(),
             None => vec![],
         })
@@ -99,19 +99,19 @@ where
         Ok(self.stopsign.clone())
     }
 
-    fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
-        let to_trim = ((trimmed_idx - self.trimmed_idx) as usize).min(self.log.len());
+    fn trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
+        let to_trim = (trimmed_idx - self.trimmed_idx).min(self.log.len());
         self.log.drain(0..to_trim);
         self.trimmed_idx = trimmed_idx;
         Ok(())
     }
 
-    fn set_compacted_idx(&mut self, compact_idx: u64) -> StorageResult<()> {
+    fn set_compacted_idx(&mut self, compact_idx: usize) -> StorageResult<()> {
         self.compacted_idx = compact_idx;
         Ok(())
     }
 
-    fn get_compacted_idx(&self) -> StorageResult<u64> {
+    fn get_compacted_idx(&self) -> StorageResult<usize> {
         Ok(self.compacted_idx)
     }
 

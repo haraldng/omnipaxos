@@ -123,7 +123,7 @@ impl<T: Entry> PersistentStorage<T> {
             usize::from_be_bytes([key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7]]) + 1
         } else {
             match db.get(TRIM).expect("Couldn't recover storage: Reading compacted_idx failed.") {
-                Some(bytes) => u64::read_from(bytes.as_bytes()).expect("Couldn't recover storage: Commpacted index has unexpected format.") as usize,
+                Some(bytes) => usize::read_from(bytes.as_bytes()).expect("Couldn't recover storage: Commpacted index has unexpected format."),
                 None => 0,
             }
         };
@@ -184,8 +184,7 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
         Ok(())
     }
 
-    fn append_on_prefix(&mut self, from_idx: u64, entries: Vec<T>) -> StorageResult<()> {
-        let from_idx = from_idx as usize;
+    fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
         if from_idx < self.next_log_key {
             let from_key = from_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
@@ -195,11 +194,7 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
         self.append_entries(entries)
     }
 
-    fn get_entries(&self, from: u64, to: u64) -> StorageResult<Vec<T>> {
-        // TODO: rework to usize
-        let mut from = from as usize;
-        let to = to as usize;
-
+    fn get_entries(&self, mut from: usize, to: usize) -> StorageResult<Vec<T>> {
         // Check if the log has entries up to the requested endpoint.
         if to > self.next_log_key || from >= to {
             return Ok(vec![]); // Do an early return
@@ -221,12 +216,12 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
     }
 
     // TODO: What should this return? Maybe remove real_log_len from internal_storage
-    fn get_log_len(&self) -> StorageResult<u64> {
-        Ok(self.next_log_key as u64 - self.get_compacted_idx()?)
+    fn get_log_len(&self) -> StorageResult<usize> {
+        Ok(self.next_log_key - self.get_compacted_idx()?)
     }
 
-    fn get_suffix(&self, from: u64) -> StorageResult<Vec<T>> {
-        self.get_entries(from, self.next_log_key as u64)
+    fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
+        self.get_entries(from, self.next_log_key)
     }
 
     fn get_promise(&self) -> StorageResult<Option<Ballot>> {
@@ -243,16 +238,16 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
         Ok(())
     }
 
-    fn get_decided_idx(&self) -> StorageResult<u64> {
+    fn get_decided_idx(&self) -> StorageResult<usize> {
         let decided = self.db.get_pinned(DECIDE)?;
         match decided {
-            Some(ld_bytes) => Ok(u64::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
+            Some(ld_bytes) => Ok(usize::read_from(ld_bytes.as_bytes()).ok_or(ErrHelper {})?),
             None => Ok(0),
         }
     }
 
-    fn set_decided_idx(&mut self, ld: u64) -> StorageResult<()> {
-        let ld_bytes = u64::as_bytes(&ld);
+    fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
+        let ld_bytes = usize::as_bytes(&ld);
         self.db.put(DECIDE, ld_bytes)?;
         Ok(())
     }
@@ -274,16 +269,16 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
         Ok(())
     }
 
-    fn get_compacted_idx(&self) -> StorageResult<u64> {
+    fn get_compacted_idx(&self) -> StorageResult<usize> {
         let trim = self.db.get(TRIM)?;
         match trim {
-            Some(trim_bytes) => Ok(u64::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
+            Some(trim_bytes) => Ok(usize::read_from(trim_bytes.as_bytes()).ok_or(ErrHelper {})?),
             None => Ok(0),
         }
     }
 
-    fn set_compacted_idx(&mut self, trimmed_idx: u64) -> StorageResult<()> {
-        let trim_bytes = u64::as_bytes(&trimmed_idx);
+    fn set_compacted_idx(&mut self, trimmed_idx: usize) -> StorageResult<()> {
+        let trim_bytes = usize::as_bytes(&trimmed_idx);
         self.db.put(TRIM, trim_bytes)?;
         Ok(())
     }
@@ -319,9 +314,9 @@ T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 
     // TODO: if compact_idx isn't set atomically with this then self.next_log_key could get out of
     // sync on recovery
-    fn trim(&mut self, trimmed_idx: u64) -> StorageResult<()> {
+    fn trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
         let from_key = 0_usize.to_be_bytes();
-        let to_key = (trimmed_idx as usize).to_be_bytes();
+        let to_key = trimmed_idx.to_be_bytes();
         self.db.delete_range_cf(self.get_log_handle(), from_key, to_key)?;
         Ok(())
     }

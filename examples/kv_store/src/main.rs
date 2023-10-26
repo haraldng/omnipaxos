@@ -17,7 +17,7 @@ mod util;
 
 type OmniPaxosKV = OmniPaxos<KeyValue, MemoryStorage<KeyValue>>;
 
-const SERVERS: [u64; 3] = [1, 2, 3];
+const SERVERS: [NodeId; 3] = [1, 2, 3];
 
 #[allow(clippy::type_complexity)]
 fn initialise_channels() -> (

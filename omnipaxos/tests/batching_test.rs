@@ -30,7 +30,7 @@ fn batching_test() {
         // check batching
         first_node.on_definition(|x| {
             let decided_idx = x.paxos.get_decided_idx();
-            check_batching(decided_idx, last_decided_idx, cfg.batch_size as u64);
+            check_batching(decided_idx, last_decided_idx, cfg.batch_size);
             last_decided_idx = decided_idx;
         });
     }
@@ -56,7 +56,7 @@ fn batching_test() {
     };
 }
 
-fn check_batching(decided_idx: u64, last_decided_idx: u64, batch_size: u64) {
+fn check_batching(decided_idx: usize, last_decided_idx: usize, batch_size: usize) {
     let idx_diff = decided_idx - last_decided_idx;
     if idx_diff != 0 {
         assert!(decided_idx - last_decided_idx >= batch_size);
