@@ -994,7 +994,7 @@ pub mod verification {
             }
             [LogEntry::Snapshotted(s), LogEntry::Decided(_), ..] => {
                 let (snapshotted_proposals, last_proposals) =
-                    proposals.split_at(s.trimmed_idx as usize);
+                    proposals.split_at(s.trimmed_idx);
                 let (snapshot_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
                 let exp_snapshot = ValueSnapshot::create(snapshotted_proposals);
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);

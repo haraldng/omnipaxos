@@ -69,7 +69,7 @@ fn read_test() {
         .collect();
     let decided_idx = 6;
     let snapshotted_idx = 4;
-    let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
+    let (snapshotted, _suffix) = log.split_at(snapshotted_idx);
 
     let exp_snapshot = ValueSnapshot::create(snapshotted);
 
@@ -93,7 +93,7 @@ fn read_test() {
     let entries = omni_paxos
         .read_decided_suffix(0)
         .expect("No decided entries");
-    let expected_entries = log.get(0..decided_idx as usize).unwrap();
+    let expected_entries = log.get(0..decided_idx).unwrap();
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
@@ -104,7 +104,7 @@ fn read_test() {
     // read entry
     let idx = snapshotted_idx;
     let entry = omni_paxos.read(idx).expect("No entry");
-    let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
+    let expected_entries = log.get(idx..=idx).unwrap();
     verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
 
     // read snapshot
@@ -159,7 +159,7 @@ fn read_entries_test() {
         .collect();
     let decided_idx = 6;
     let snapshotted_idx = 4;
-    let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
+    let (snapshotted, _suffix) = log.split_at(snapshotted_idx);
     let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
@@ -185,7 +185,7 @@ fn read_entries_test() {
     let entries = omni_paxos
         .read_entries(from_idx..=decided_idx)
         .expect("No entries");
-    let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
+    let expected_entries = log.get(from_idx..=decided_idx).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
     // read snapshot only
     let entries = omni_paxos
@@ -200,7 +200,7 @@ fn read_entries_test() {
         .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
-    let expected_entries = log.get(snapshotted_idx as usize..to_idx as usize).unwrap();
+    let expected_entries = log.get(snapshotted_idx..to_idx).unwrap();
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
     verify_entries(suffix, expected_entries, snapshotted_idx, decided_idx);
 
@@ -246,7 +246,7 @@ fn read_entries_test() {
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
     verify_entries(
         prefix,
-        log.get(from_idx as usize..).unwrap(),
+        log.get(from_idx..).unwrap(),
         from_idx,
         log_len,
     );
@@ -262,7 +262,7 @@ fn read_entries_test() {
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
     verify_entries(
         ents,
-        log.get(snapshotted_idx as usize..).unwrap(),
+        log.get(snapshotted_idx..).unwrap(),
         snapshotted_idx,
         log_len,
     );

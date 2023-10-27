@@ -482,7 +482,7 @@ where
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::Entry) => {
-                let mut entries = Vec::with_capacity((to_idx - compacted_idx + 1) as usize);
+                let mut entries = Vec::with_capacity(to_idx - compacted_idx + 1);
                 let compacted = self.create_compacted_entry(compacted_idx)?;
                 entries.push(compacted);
                 let mut e = self.create_read_log_entries(compacted_idx, to_idx)?;
@@ -490,7 +490,7 @@ where
                 Ok(Some(entries))
             }
             (IndexEntry::Compacted, IndexEntry::StopSign(ss)) => {
-                let mut entries = Vec::with_capacity((to_idx - compacted_idx + 1) as usize);
+                let mut entries = Vec::with_capacity(to_idx - compacted_idx + 1);
                 let compacted = self.create_compacted_entry(compacted_idx)?;
                 entries.push(compacted);
                 let mut e = self.create_read_log_entries(compacted_idx, to_idx - 1)?;
