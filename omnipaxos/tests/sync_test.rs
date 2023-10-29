@@ -263,7 +263,7 @@ fn sync_test(test: SyncTest) {
         Err(e) => {
             let follower_entries = follower.on_definition(|x| x.read_decided_log());
             let leader_entries = leader.on_definition(|x| x.read_decided_log());
-            panic!("Error on collecting futures of decided proposals: {}. Follower log: {:?}, Leader log: {:?}", e, follower_entries, leader_entries);
+            panic!("Error on collecting futures of decided proposals: {}.\nFollower log: {:?}\n Leader log: {:?}", e, follower_entries, leader_entries);
         }
     }
 

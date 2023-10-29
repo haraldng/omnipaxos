@@ -3,8 +3,8 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::{
-    storage::{RollbackValue, Snapshot, SnapshotType, StorageResult},
-    util::MessageStatus,
+    storage::{Snapshot, SnapshotType},
+    util::{MessageStatus, WRITE_ERROR_MSG},
 };
 
 impl<T, B> SequencePaxos<T, B>
@@ -16,9 +16,10 @@ where
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
+            // Flush any pending writes
             self.internal_storage
-                .flush_batch()
-                .expect("storage error while trying to flush batch");
+                .commit_write_batch()
+                .expect(WRITE_ERROR_MSG);
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
             let na = self.internal_storage.get_accepted_round();
@@ -66,6 +67,7 @@ where
             } else {
                 (None, vec![])
             };
+            // TODO: don't need to btach anything? since there is only 1 write
             self.internal_storage
                 .set_promise(prep.n)
                 .expect("storage error while trying to write promise");
@@ -87,84 +89,37 @@ where
         }
     }
 
-    // Correctness: This function performs multiple storage operations that cannot be rolled
-    // back, so instead it relies on writing in a "safe" order for correctness.
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
-            let old_decided_idx = self.internal_storage.get_decided_idx();
-            let old_accepted_round = self.internal_storage.get_accepted_round();
+            // TODO: Flush writes so that decided_idx is up to date for snapshot merge? Shouldn't
+            // be needed (in fact could mess up decided_idx from when we sent Promise)
             self.internal_storage
-                .set_accepted_round(accsync.n)
-                .expect("storage error while trying to write accepted round");
-            let result = self.internal_storage.set_decided_idx(accsync.decided_idx);
-            self.internal_storage.rollback_and_panic_if_err(
-                &result,
-                vec![RollbackValue::AcceptedRound(old_accepted_round)],
-                "storage error while trying to write decided index",
-            );
-            match accsync.decided_snapshot {
-                Some(s) => {
-                    let old_compacted_idx = self.internal_storage.get_compacted_idx();
-                    let old_log_res = self.internal_storage.get_suffix(old_compacted_idx);
-                    let old_snapshot_res = self.internal_storage.get_snapshot();
-                    if old_log_res.is_err() || old_snapshot_res.is_err() {
-                        self.internal_storage.rollback_and_panic(
-                            vec![
-                                RollbackValue::AcceptedRound(old_accepted_round),
-                                RollbackValue::DecidedIdx(old_decided_idx),
-                            ],
-                            "storage error while trying to read old log or snapshot",
-                        );
-                    }
-                    let snapshot_res = match s {
-                        SnapshotType::Complete(c) => {
-                            self.internal_storage.set_snapshot(accsync.sync_idx, c)
-                        }
-                        SnapshotType::Delta(d) => {
-                            self.internal_storage.merge_snapshot(accsync.sync_idx, d)
-                        }
-                    };
-                    self.internal_storage.rollback_and_panic_if_err(
-                        &snapshot_res,
-                        vec![
-                            RollbackValue::AcceptedRound(old_accepted_round),
-                            RollbackValue::DecidedIdx(old_decided_idx),
-                        ],
-                        "storage error while trying to write snapshot",
-                    );
-                    let accepted_res = self
+                .commit_write_batch()
+                .expect(WRITE_ERROR_MSG);
+            self.internal_storage.batch_set_accepted_round(accsync.n);
+            self.internal_storage
+                .batch_set_decided_idx(accsync.decided_idx);
+            if let Some(snap) = accsync.decided_snapshot {
+                match snap {
+                    SnapshotType::Complete(c) => self
                         .internal_storage
-                        .append_on_prefix(accsync.sync_idx, accsync.suffix);
-                    self.internal_storage.rollback_and_panic_if_err(
-                        &accepted_res,
-                        vec![
-                            RollbackValue::AcceptedRound(old_accepted_round),
-                            RollbackValue::DecidedIdx(old_decided_idx),
-                            RollbackValue::Log(old_log_res.unwrap()),
-                            RollbackValue::Snapshot(old_compacted_idx, old_snapshot_res.unwrap()),
-                        ],
-                        "storage error while trying to write log entries",
-                    );
-                }
-                None => {
-                    // no snapshot, only suffix
-                    let accepted_idx = self
+                        .batch_set_snapshot(accsync.sync_idx, c),
+                    SnapshotType::Delta(d) => self
                         .internal_storage
-                        .append_on_prefix(accsync.sync_idx, accsync.suffix);
-                    self.internal_storage.rollback_and_panic_if_err(
-                        &accepted_idx,
-                        vec![
-                            RollbackValue::AcceptedRound(old_accepted_round),
-                            RollbackValue::DecidedIdx(old_decided_idx),
-                        ],
-                        "storage error while trying to write log entries",
-                    );
-                }
-            };
+                        .batch_merge_snapshot(accsync.sync_idx, d)
+                        .expect("Error reading from storage."),
+                };
+            }
+            self.internal_storage
+                .batch_append_on_prefix(accsync.sync_idx, accsync.suffix);
             match accsync.stopsign {
-                Some(ss) => self.accept_stopsign(ss),
+                Some(ss) => self.internal_storage.batch_set_stopsign(Some(ss)),
                 None => self.forward_pending_proposals(),
             }
+            // Commit write and reply
+            self.internal_storage
+                .commit_write_batch()
+                .expect(WRITE_ERROR_MSG);
             let accepted = Accepted {
                 n: accsync.n,
                 accepted_idx: self.internal_storage.get_accepted_idx(),
@@ -190,50 +145,29 @@ where
         }
     }
 
-    pub(crate) fn handle_acceptdecide(&mut self, acc: AcceptDecide<T>) {
-        if self.check_valid_ballot(acc.n)
+    pub(crate) fn handle_acceptdecide(
+        &mut self,
+        n: Ballot,
+        seq_num: SequenceNumber,
+        decided_idx: usize,
+        entries: Vec<T>,
+    ) {
+        if self.check_valid_ballot(n)
             && self.state == (Role::Follower, Phase::Accept)
-            && self.handle_sequence_num(acc.seq_num, acc.n.pid) == MessageStatus::Expected
+            && self.handle_sequence_num(seq_num, n.pid) == MessageStatus::Expected
         {
-            // handle decide
-            let old_decided_idx = self.get_decided_idx();
-            if acc.decided_idx > old_decided_idx {
-                self.internal_storage
-                    .set_decided_idx(acc.decided_idx)
-                    .expect("storage error while trying to write decided index");
+            let entry_cache_full = self.internal_storage.batch_append_entries(entries);
+            if decided_idx > self.internal_storage.get_decided_idx() {
+                self.internal_storage.batch_set_decided_idx(decided_idx);
             }
-            // handle accept
-            let entries = acc.entries;
-            let result = self.accept_entries_follower(acc.n, entries);
-            self.internal_storage.rollback_and_panic_if_err(
-                &result,
-                vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                "storage error while trying to write log entries.",
-            );
-        }
-    }
-
-    #[cfg(feature = "unicache")]
-    pub(crate) fn handle_encoded_acceptdecide(&mut self, e: EncodedAcceptDecide<T>) {
-        if self.check_valid_ballot(e.n)
-            && self.state == (Role::Follower, Phase::Accept)
-            && self.handle_sequence_num(e.seq_num, e.n.pid) == MessageStatus::Expected
-        {
-            // handle decide
-            let old_decided_idx = self.get_decided_idx();
-            if e.decided_idx > old_decided_idx {
-                self.internal_storage
-                    .set_decided_idx(e.decided_idx)
-                    .expect("storage error while trying to write decided index");
+            if entry_cache_full {
+                let new_accepted_idx = self
+                    .internal_storage
+                    .commit_write_batch()
+                    .expect(WRITE_ERROR_MSG)
+                    .unwrap();
+                self.handle_flushed_accepted(n, new_accepted_idx);
             }
-            // handle accept
-            let encoded_entries = e.entries;
-            let result = self.accept_encoded_entries_follower(e.n, encoded_entries);
-            self.internal_storage.rollback_and_panic_if_err(
-                &result,
-                vec![RollbackValue::DecidedIdx(old_decided_idx)],
-                "storage error while trying to write log entries.",
-            );
         }
     }
 
@@ -242,10 +176,15 @@ where
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
-            self.accept_stopsign(acc_ss.ss);
+            self.internal_storage.batch_set_stopsign(Some(acc_ss.ss));
+            let accepted_idx = self
+                .internal_storage
+                .commit_write_batch()
+                .expect(WRITE_ERROR_MSG)
+                .unwrap();
             let a = Accepted {
                 n: acc_ss.n,
-                accepted_idx: self.internal_storage.get_accepted_idx(),
+                accepted_idx,
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
@@ -260,35 +199,17 @@ where
             && self.state.1 == Phase::Accept
             && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
-            self.internal_storage
-                .set_decided_idx(dec.decided_idx)
-                .expect("storage error while trying to write decided index");
+            self.internal_storage.batch_set_decided_idx(dec.decided_idx);
+            // TODO: Don't need to do this, but then tests break when they wait on decided entries
+            // Flush any pending entries
+            let new_accepted_idx = self
+                .internal_storage
+                .commit_write_batch()
+                .expect(WRITE_ERROR_MSG);
+            if let Some(idx) = new_accepted_idx {
+                self.handle_flushed_accepted(dec.n, idx);
+            }
         }
-    }
-
-    fn accept_entries_follower(&mut self, n: Ballot, entries: Vec<T>) -> StorageResult<()> {
-        let accepted_res = self
-            .internal_storage
-            .append_entries_and_get_accepted_idx(entries)?;
-        if let Some(accepted_idx) = accepted_res {
-            self.handle_flushed_accepted(n, accepted_idx);
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "unicache")]
-    fn accept_encoded_entries_follower(
-        &mut self,
-        n: Ballot,
-        encoded_entries: Vec<T::EncodeResult>,
-    ) -> StorageResult<()> {
-        let accepted_res = self
-            .internal_storage
-            .append_encoded_entries_and_get_accepted_idx(encoded_entries)?;
-        if let Some(accepted_idx) = accepted_res {
-            self.handle_flushed_accepted(n, accepted_idx);
-        }
-        Ok(())
     }
 
     fn handle_flushed_accepted(&mut self, n: Ballot, accepted_idx: usize) {

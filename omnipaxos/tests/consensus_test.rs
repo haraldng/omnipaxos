@@ -244,12 +244,7 @@ fn read_entries_test() {
         .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
-    verify_entries(
-        prefix,
-        log.get(from_idx..).unwrap(),
-        from_idx,
-        log_len,
-    );
+    verify_entries(prefix, log.get(from_idx..).unwrap(), from_idx, log_len);
     verify_stopsign(stopsign, &ss);
 
     // read snapshot + entries + stopsign

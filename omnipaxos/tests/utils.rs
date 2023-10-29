@@ -210,7 +210,8 @@ where
 
 impl<T> StorageType<T>
 where
-    T: Entry,
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
+    T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
     pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
         match storage_type {
@@ -236,6 +237,18 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
+    fn write_batch(&mut self, batch: Vec<omnipaxos::storage::StorageOp<T>>) -> StorageResult<()> {
+        match self {
+            StorageType::Persistent(persist_s) => persist_s.write_batch(batch),
+            StorageType::Memory(mem_s) => mem_s.write_batch(batch),
+            StorageType::Broken(mem_s, conf) => {
+                // TODO: can't tick for each write in batch here
+                conf.lock().unwrap().tick()?;
+                mem_s.lock().unwrap().write_batch(batch)
+            }
+        }
+    }
+
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         match self {
             StorageType::Persistent(persist_s) => persist_s.append_entry(entry),
@@ -993,8 +1006,7 @@ pub mod verification {
                 verify_snapshot(&read_log, s.trimmed_idx, &exp_snapshot);
             }
             [LogEntry::Snapshotted(s), LogEntry::Decided(_), ..] => {
-                let (snapshotted_proposals, last_proposals) =
-                    proposals.split_at(s.trimmed_idx);
+                let (snapshotted_proposals, last_proposals) = proposals.split_at(s.trimmed_idx);
                 let (snapshot_entry, decided_entries) = read_log.split_at(1); // separate the snapshot from the decided entries
                 let exp_snapshot = ValueSnapshot::create(snapshotted_proposals);
                 verify_snapshot(snapshot_entry, s.trimmed_idx, &exp_snapshot);

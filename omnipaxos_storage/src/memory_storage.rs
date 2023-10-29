@@ -1,6 +1,6 @@
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSign, Storage, StorageResult},
+    storage::{Entry, StopSign, Storage, StorageOp, StorageResult},
 };
 /// An in-memory storage implementation for SequencePaxos.
 #[derive(Clone)]
@@ -30,6 +30,26 @@ impl<T> Storage<T> for MemoryStorage<T>
 where
     T: Entry,
 {
+    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
+        for op in batch {
+            match op {
+                StorageOp::AppendEntry(entry) => self.append_entry(entry)?,
+                StorageOp::AppendEntries(entries) => self.append_entries(entries)?,
+                StorageOp::AppendOnPrefix(from_idx, entries) => {
+                    self.append_on_prefix(from_idx, entries)?
+                }
+                StorageOp::SetPromise(bal) => self.set_promise(bal)?,
+                StorageOp::SetDecidedIndex(idx) => self.set_decided_idx(idx)?,
+                StorageOp::SetAcceptedRound(bal) => self.set_accepted_round(bal)?,
+                StorageOp::SetCompactedIdx(idx) => self.set_compacted_idx(idx)?,
+                StorageOp::Trim(idx) => self.trim(idx)?,
+                StorageOp::SetStopsign(ss) => self.set_stopsign(ss)?,
+                StorageOp::SetSnapshot(snap) => self.set_snapshot(snap)?,
+            }
+        }
+        Ok(())
+    }
+
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         self.log.push(entry);
         Ok(())

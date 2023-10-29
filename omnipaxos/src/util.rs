@@ -82,7 +82,6 @@ where
     pub accepted_indexes: Vec<usize>,
     max_promise_meta: PromiseMetaData,
     max_promise: Option<PromiseData<T>>,
-    #[cfg(feature = "batch_accept")]
     batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
@@ -102,7 +101,6 @@ where
             accepted_indexes: vec![0; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise: None,
-            #[cfg(feature = "batch_accept")]
             batch_accept_meta: vec![None; max_pid],
             max_pid,
             quorum,
@@ -195,7 +193,6 @@ where
             .expect("Should be all initialised to 0!")
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn reset_batch_accept_meta(&mut self) {
         self.batch_accept_meta = vec![None; self.max_pid];
     }
@@ -225,7 +222,6 @@ where
             .collect()
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn set_batch_accept_meta(&mut self, pid: NodeId, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
@@ -235,7 +231,6 @@ where
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
             .get(Self::pid_to_idx(pid))
@@ -359,6 +354,9 @@ pub type TrimmedIndex = usize;
 pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
+
+/// Error message to display when there was an error writing to the storage implementation.
+pub const WRITE_ERROR_MSG: &str = "Error writing to storage.";
 
 /// Used for checking the ordering of message sequences in the accept phase
 #[derive(PartialEq, Eq)]

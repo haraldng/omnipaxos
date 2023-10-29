@@ -1,6 +1,6 @@
 use omnipaxos::{
     ballot_leader_election::Ballot,
-    storage::{Entry, StopSign, Storage, StorageResult},
+    storage::{Entry, StopSign, Storage, StorageOp, StorageResult},
 };
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, Options, WriteBatchWithTransaction, DB};
 use serde::{Deserialize, Serialize};
@@ -98,13 +98,19 @@ where
 {
     /// Local RocksDB key-value store
     db: DB,
+    /// Buffered, atomic write batch
+    write_batch: WriteBatchWithTransaction<false>,
     /// The index of the next log entry to be appended
     next_log_key: usize,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
 }
 
-impl<T: Entry> PersistentStorage<T> {
+impl<T: Entry> PersistentStorage<T>
+where
+    T: Entry + Serialize + for<'a> Deserialize<'a>,
+    T::Snapshot: Serialize + for<'a> Deserialize<'a>,
+{
     /// Creates or opens an existing storage
     pub fn open(storage_config: PersistentStorageConfig) -> Self {
         // Create database with log column
@@ -144,6 +150,7 @@ impl<T: Entry> PersistentStorage<T> {
 
         Self {
             db,
+            write_batch: WriteBatchWithTransaction::<false>::default(),
             next_log_key,
             t: PhantomData,
         }
@@ -164,6 +171,83 @@ impl<T: Entry> PersistentStorage<T> {
             .cf_handle(LOG)
             .expect("Failed to create RocksDB log column family")
     }
+
+    fn batch_append_entry(&mut self, entry: T) -> StorageResult<()> {
+        self.write_batch.put_cf(
+            self.db.cf_handle(LOG).unwrap(),
+            self.next_log_key.to_be_bytes(),
+            bincode::serialize(&entry)?,
+        );
+        self.next_log_key += 1;
+        Ok(())
+    }
+
+    fn batch_append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
+        for entry in entries {
+            self.write_batch.put_cf(
+                self.db.cf_handle(LOG).unwrap(),
+                self.next_log_key.to_be_bytes(),
+                bincode::serialize(&entry)?,
+            );
+            self.next_log_key += 1;
+        }
+        Ok(())
+    }
+
+    fn batch_append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
+        if from_idx < self.next_log_key {
+            let from_key = from_idx.to_be_bytes();
+            let to_key = self.next_log_key.to_be_bytes();
+            let log = self.db.cf_handle(LOG).unwrap();
+            self.write_batch.delete_range_cf(log, from_key, to_key);
+            self.next_log_key = from_idx;
+        }
+        self.batch_append_entries(entries)
+    }
+
+    fn batch_set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
+        let prom_bytes = bincode::serialize(&n_prom)?;
+        self.write_batch.put(NPROM, prom_bytes);
+        Ok(())
+    }
+
+    fn batch_set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
+        let ld_bytes = usize::as_bytes(&ld);
+        self.write_batch.put(DECIDE, ld_bytes);
+        Ok(())
+    }
+
+    fn batch_set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
+        let acc_bytes = bincode::serialize(&na)?;
+        self.write_batch.put(ACC, acc_bytes);
+        Ok(())
+    }
+
+    fn batch_set_compacted_idx(&mut self, trimmed_idx: usize) -> StorageResult<()> {
+        let trim_bytes = usize::as_bytes(&trimmed_idx);
+        self.write_batch.put(TRIM, trim_bytes);
+        Ok(())
+    }
+
+    fn batch_trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
+        let from_key = 0_usize.to_be_bytes();
+        let to_key = trimmed_idx.to_be_bytes();
+        let log = self.db.cf_handle(LOG).unwrap();
+        self.write_batch.delete_range_cf(log, from_key, to_key);
+        Ok(())
+    }
+
+    fn batch_set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
+        let stopsign = bincode::serialize(&s)?;
+        self.write_batch.put(STOPSIGN, stopsign);
+        Ok(())
+    }
+
+    fn batch_set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
+        let stopsign = bincode::serialize(&snapshot)?;
+        self.write_batch.put(SNAPSHOT, stopsign);
+        Ok(())
+    }
 }
 
 /// An error returning the proposal that was failed due to that the current configuration is stopped.
@@ -181,6 +265,27 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
+    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
+        // TODO: Is it ok that next_log_key doesn't get rolled back on batch or serialization failure?
+        for op in batch {
+            match op {
+                StorageOp::AppendEntry(entry) => self.batch_append_entry(entry)?,
+                StorageOp::AppendEntries(entries) => self.batch_append_entries(entries)?,
+                StorageOp::AppendOnPrefix(from_idx, entries) => {
+                    self.batch_append_on_prefix(from_idx, entries)?
+                }
+                StorageOp::SetPromise(bal) => self.batch_set_promise(bal)?,
+                StorageOp::SetDecidedIndex(idx) => self.batch_set_decided_idx(idx)?,
+                StorageOp::SetAcceptedRound(bal) => self.batch_set_accepted_round(bal)?,
+                StorageOp::SetCompactedIdx(idx) => self.batch_set_compacted_idx(idx)?,
+                StorageOp::Trim(idx) => self.batch_trim(idx)?,
+                StorageOp::SetStopsign(ss) => self.batch_set_stopsign(ss)?,
+                StorageOp::SetSnapshot(snap) => self.batch_set_snapshot(snap)?,
+            }
+        }
+        Ok(self.db.write(std::mem::take(&mut self.write_batch))?)
+    }
+
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
         let entry_bytes = bincode::serialize(&entry)?;
         self.db.put_cf(
@@ -192,7 +297,7 @@ where
         Ok(())
     }
 
-    // TODO: if this fails self.log_len will be incorrect
+    // TODO: if this fails self.next_log_key will be incorrect
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         let mut batch = WriteBatchWithTransaction::<false>::default();
         for entry in entries {
@@ -239,6 +344,8 @@ where
         Ok(entries)
     }
 
+    // TODO: if compact_idx isn't set atomically then self.next_log_key could get out of
+    // sync on recovery
     // TODO: What should this return? Maybe remove real_log_len from internal_storage
     fn get_log_len(&self) -> StorageResult<usize> {
         Ok(self.next_log_key - self.get_compacted_idx()?)
@@ -336,8 +443,6 @@ where
         Ok(())
     }
 
-    // TODO: if compact_idx isn't set atomically with this then self.next_log_key could get out of
-    // sync on recovery
     fn trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
         let from_key = 0_usize.to_be_bytes();
         let to_key = trimmed_idx.to_be_bytes();

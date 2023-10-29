@@ -36,13 +36,12 @@ serial_test = "0.5.1"
 rand = "0.8.4"
 
 [features]
-batch_accept = []
 logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
 macros = ["omnipaxos_macros"]
 unicache = ["lru", "num-traits", "lfu"]
 
-default = ["batch_accept", "macros"]
+default = ["macros"]
 
 [profile.release]
 lto = true

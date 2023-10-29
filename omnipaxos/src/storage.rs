@@ -103,11 +103,40 @@ where
 /// The Result type returned by the storage API.
 pub type StorageResult<T> = Result<T, Box<dyn Error>>;
 
+/// TODO: docs
+#[derive(Debug)]
+pub enum StorageOp<T: Entry> {
+    ///
+    AppendEntry(T),
+    ///
+    AppendEntries(Vec<T>),
+    ///
+    AppendOnPrefix(usize, Vec<T>),
+    ///
+    SetPromise(Ballot),
+    ///
+    SetDecidedIndex(usize),
+    ///
+    SetAcceptedRound(Ballot),
+    ///
+    SetCompactedIdx(usize),
+    ///
+    Trim(usize),
+    ///
+    SetStopsign(Option<StopSign>),
+    ///
+    SetSnapshot(Option<T::Snapshot>),
+}
+
 /// Trait for implementing the storage backend of Sequence Paxos.
 pub trait Storage<T>
 where
     T: Entry,
 {
+    /// Atomically perform and persist all write operations in order.
+    /// Returns an Error if the transaction was not committed (so it was rolled back).
+    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()>;
+
     /// Appends an entry to the end of the log and returns the log length.
     fn append_entry(&mut self, entry: T) -> StorageResult<()>;
 
@@ -209,6 +238,8 @@ where
     batch_size: usize,
     /// Vector which contains all the logged entries in-memory.
     batched_entries: Vec<T>,
+    /// TODO: docs
+    num_batched_entries: usize,
     /// Last promised round.
     promise: Ballot,
     /// Last accepted round.
@@ -238,6 +269,7 @@ where
             pid,
             batch_size: config.batch_size,
             batched_entries: Vec::with_capacity(config.batch_size),
+            num_batched_entries: 0,
             promise: Ballot::default(),
             accepted_round: Ballot::default(),
             decided_idx: 0,
@@ -251,63 +283,9 @@ where
         }
     }
 
-    // Returns the index of the last accepted entry.
-    fn get_accepted_idx(&self) -> usize {
-        self.accepted_idx
-    }
-
     // Returns whether a stopsign is decided
     fn stopsign_is_decided(&self) -> bool {
-        self.stopsign.is_some() && self.decided_idx == self.get_accepted_idx()
-    }
-
-    // Appends an entry to the end of the `batched_entries`. If the batch is full, the
-    // batch is flushed and return flushed entries. Else, return None.
-    fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
-        #[cfg(feature = "unicache")]
-        {
-            let processed = self.unicache.try_encode(&entry);
-            self.batched_processed_by_leader.push(processed);
-        }
-        self.batched_entries.push(entry);
-        self.take_entries_if_batch_is_full()
-    }
-
-    // Appends entries to the end of the `batched_entries`. If the batch is full, the
-    // batch is flushed and return flushed entries. Else, return None.
-    fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
-        #[cfg(feature = "unicache")]
-        {
-            if self.promise.pid == self.pid {
-                // only try encoding if we're the leader
-                for entry in &entries {
-                    let processed = self.unicache.try_encode(entry);
-                    self.batched_processed_by_leader.push(processed);
-                }
-            }
-        }
-        self.batched_entries.extend(entries);
-        self.take_entries_if_batch_is_full()
-    }
-
-    // Return batched entries if the batch is full that need to be flushed in to storage.
-    fn take_entries_if_batch_is_full(&mut self) -> Option<Vec<T>> {
-        if self.batched_entries.len() >= self.batch_size {
-            Some(self.take_batched_entries())
-        } else {
-            None
-        }
-    }
-
-    // Clears the batched entries and returns the cleared entries. If the batch is empty,
-    // return an empty vector.
-    fn take_batched_entries(&mut self) -> Vec<T> {
-        std::mem::take(&mut self.batched_entries)
-    }
-
-    #[cfg(feature = "unicache")]
-    fn take_batched_processed(&mut self) -> Vec<T::EncodeResult> {
-        std::mem::take(&mut self.batched_processed_by_leader)
+        self.stopsign.is_some() && self.decided_idx == self.accepted_idx
     }
 }
 
@@ -323,6 +301,8 @@ where
     T: Entry,
 {
     storage: I,
+    // TODO: make private
+    pub write_batch: Vec<StorageOp<T>>,
     state_cache: StateCache<T>,
     _t: PhantomData<T>,
 }
@@ -339,6 +319,7 @@ where
     ) -> Self {
         let mut internal_store = InternalStorage {
             storage,
+            write_batch: vec![],
             state_cache: StateCache::new(
                 config,
                 #[cfg(feature = "unicache")]
@@ -350,74 +331,87 @@ where
         internal_store
     }
 
-    /// Writes the value.
-    pub(crate) fn single_rollback(&mut self, value: RollbackValue<T>) {
-        match value {
-            RollbackValue::DecidedIdx(idx) => self
-                .set_decided_idx(idx)
-                .expect("storage error while trying to write decided_idx"),
-            RollbackValue::AcceptedRound(b) => self
-                .set_accepted_round(b)
-                .expect("storage error while trying to write accepted_round"),
-            RollbackValue::Log(entries) => {
-                self.rollback_log(entries);
+    pub(crate) fn commit_write_batch(&mut self) -> StorageResult<Option<usize>> {
+        // TODO: do we need to roll back state cache if batch fails?
+        // Update state cache
+        let old_accepted_idx = self.state_cache.accepted_idx;
+        for op in self.write_batch.iter() {
+            match op {
+                StorageOp::AppendEntry(_) => self.state_cache.accepted_idx += 1,
+                StorageOp::AppendEntries(e) => self.state_cache.accepted_idx += e.len(),
+                StorageOp::AppendOnPrefix(from_idx, entries) => {
+                    self.state_cache.stopsign = None;
+                    self.state_cache.accepted_idx = from_idx + entries.len();
+                }
+                StorageOp::SetPromise(bal) => self.state_cache.promise = *bal,
+                StorageOp::SetDecidedIndex(idx) => self.state_cache.decided_idx = *idx,
+                StorageOp::SetAcceptedRound(bal) => self.state_cache.accepted_round = *bal,
+                StorageOp::SetCompactedIdx(idx) => self.state_cache.compacted_idx = *idx,
+                StorageOp::Trim(_) => (),
+                StorageOp::SetStopsign(ss) => {
+                    if ss.is_some() && self.state_cache.stopsign.is_none() {
+                        self.state_cache.accepted_idx += 1;
+                    } else if ss.is_none() && self.state_cache.stopsign.is_some() {
+                        self.state_cache.accepted_idx -= 1;
+                    }
+                    self.state_cache.stopsign = ss.clone();
+                }
+                StorageOp::SetSnapshot(_) => (),
             }
-            RollbackValue::Snapshot(compacted_idx, snapshot) => {
-                self.rollback_snapshot(compacted_idx, snapshot);
-            }
         }
-    }
-
-    /// Writes the values.
-    pub(crate) fn rollback(&mut self, values: Vec<RollbackValue<T>>) {
-        for value in values {
-            self.single_rollback(value);
-        }
-    }
-
-    pub(crate) fn rollback_and_panic(&mut self, values: Vec<RollbackValue<T>>, msg: &str) {
-        for value in values {
-            self.single_rollback(value);
-        }
-        panic!("{}", msg);
-    }
-
-    /// This function is useful to handle `StorageResult::Error`.
-    /// If `result` is an error, this function tries to write the `values` and then panics with `msg`.
-    /// Otherwise it returns.
-    pub(crate) fn rollback_and_panic_if_err<R>(
-        &mut self,
-        result: &StorageResult<R>,
-        values: Vec<RollbackValue<T>>,
-        msg: &str,
-    ) where
-        R: Debug,
-    {
-        if result.is_err() {
-            self.rollback(values);
-            panic!("{}: {}", msg, result.as_ref().unwrap_err());
-        }
-    }
-
-    /// Rollback the log in the storage using given log entries.
-    fn rollback_log(&mut self, entries: Vec<T>) {
-        self.try_trim(self.get_accepted_idx())
-            .expect("storage error while trying to trim log entries before rolling back");
-        self.append_entries_without_batching(entries)
-            .expect("storage error while trying to rollback log entries");
-    }
-
-    /// Rollback the snapshot in the storage using given compacted_idx and snapshot.
-    fn rollback_snapshot(&mut self, compacted_idx: usize, snapshot: Option<T::Snapshot>) {
-        if let Some(old_snapshot) = snapshot {
-            self.set_snapshot(compacted_idx, old_snapshot)
-                .expect("storage error while trying to rollback snapshot");
+        // Commit writes to storage
+        self.storage
+            .write_batch(std::mem::take(&mut self.write_batch))?;
+        self.state_cache.num_batched_entries = 0;
+        if old_accepted_idx == self.state_cache.accepted_idx {
+            Ok(None)
         } else {
-            self.set_compacted_idx(compacted_idx)
-                .expect("storage error while trying to rollback compacted index");
-            self.reset_snapshot()
-                .expect("storage error while trying to reset snapshot");
+            Ok(Some(self.state_cache.accepted_idx))
         }
+    }
+
+    pub(crate) fn get_cached_entries(&self) -> Vec<T> {
+        self.write_batch.iter().fold(Vec::new(), |mut acc, op| {
+            match op {
+                StorageOp::AppendEntry(e) => acc.push(e.clone()),
+                StorageOp::AppendEntries(e) => acc.extend_from_slice(e),
+                StorageOp::AppendOnPrefix(_, e) => acc.extend_from_slice(e),
+                _ => (),
+            }
+            acc
+        })
+
+        // self.write_batch.iter().flat_map(|op| {
+        //     match op {
+        //         StorageOp::AppendEntry(e) => core::slice::from_ref(e),
+        //         StorageOp::AppendEntries(e) => {
+        //             e
+        //         },
+        //         _ => &[],
+        //     }
+        // }).collect()
+    }
+
+    #[cfg(feature = "unicache")]
+    pub(crate) fn get_cached_entries_encoded(&mut self) -> Vec<T::EncodeResult> {
+        let mut encoded = vec![];
+        for op in self.write_batch.iter() {
+            match op {
+                StorageOp::AppendEntry(e) => encoded.push(self.state_cache.unicache.try_encode(e)),
+                StorageOp::AppendEntries(entries) => encoded.extend(
+                    entries
+                        .iter()
+                        .map(|e| self.state_cache.unicache.try_encode(e)),
+                ),
+                StorageOp::AppendOnPrefix(_, entries) => encoded.extend(
+                    entries
+                        .iter()
+                        .map(|e| self.state_cache.unicache.try_encode(e)),
+                ),
+                _ => (),
+            }
+        }
+        encoded
     }
 
     fn get_entry_type(
@@ -570,59 +564,6 @@ where
     }
 
     /*** Writing ***/
-    // Append entry, if the batch size is reached, flush the batch and return the actual
-    // accepted index (not including the batched entries)
-    pub(crate) fn append_entry_with_batching(
-        &mut self,
-        entry: T,
-    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
-        let append_res = self.state_cache.append_entry(entry);
-        self.flush_if_full_batch(append_res)
-    }
-
-    // Append entries in batch, if the batch size is reached, flush the batch and return the
-    // accepted index and the flushed entries. If the batch size is not reached, return None.
-    pub(crate) fn append_entries_with_batching(
-        &mut self,
-        entries: Vec<T>,
-    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
-        let append_res = self.state_cache.append_entries(entries);
-        self.flush_if_full_batch(append_res)
-    }
-
-    fn flush_if_full_batch(
-        &mut self,
-        append_res: Option<Vec<T>>,
-    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
-        if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries.clone())?;
-            Ok(Some(AcceptedMetaData {
-                accepted_idx,
-                #[cfg(not(feature = "unicache"))]
-                flushed_entries,
-                #[cfg(feature = "unicache")]
-                flushed_processed: self.state_cache.take_batched_processed(),
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    // Append entries in batch, if the batch size is reached, flush the batch and return the
-    // accepted index. If the batch size is not reached, return None.
-    pub(crate) fn append_entries_and_get_accepted_idx(
-        &mut self,
-        entries: Vec<T>,
-    ) -> StorageResult<Option<usize>> {
-        let append_res = self.state_cache.append_entries(entries);
-        if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
-            Ok(Some(accepted_idx))
-        } else {
-            Ok(None)
-        }
-    }
-
     #[cfg(feature = "unicache")]
     pub(crate) fn get_unicache(&self) -> T::UniCache {
         self.state_cache.unicache.clone()
@@ -634,55 +575,33 @@ where
     }
 
     #[cfg(feature = "unicache")]
-    pub(crate) fn append_encoded_entries_and_get_accepted_idx(
+    pub(crate) fn decode_entries(
         &mut self,
         encoded_entries: Vec<<T as Entry>::EncodeResult>,
-    ) -> StorageResult<Option<usize>> {
-        let entries = encoded_entries
+    ) -> Vec<T> {
+        encoded_entries
             .into_iter()
             .map(|x| self.state_cache.unicache.decode(x))
-            .collect();
-        self.append_entries_and_get_accepted_idx(entries)
+            .collect()
     }
 
-    pub(crate) fn flush_batch(&mut self) -> StorageResult<usize> {
-        #[cfg(feature = "unicache")]
-        {
-            // clear the processed batch
-            self.state_cache.batched_processed_by_leader.clear();
-        }
-        let flushed_entries = self.state_cache.take_batched_entries();
-        self.append_entries_without_batching(flushed_entries)
+    pub(crate) fn batch_append_entry(&mut self, entry: T) -> bool {
+        self.state_cache.num_batched_entries += 1;
+        self.write_batch.push(StorageOp::AppendEntry(entry));
+        self.state_cache.num_batched_entries >= self.state_cache.batch_size
     }
 
-    // Append entries without batching, return the accepted index
-    pub(crate) fn append_entries_without_batching(
-        &mut self,
-        entries: Vec<T>,
-    ) -> StorageResult<usize> {
-        let new_entries = entries.len();
-        self.storage.append_entries(entries)?;
-        self.state_cache.accepted_idx += new_entries;
-        Ok(self.get_accepted_idx())
+    pub(crate) fn batch_append_entries(&mut self, entries: Vec<T>) -> bool {
+        self.state_cache.num_batched_entries += entries.len();
+        self.write_batch.push(StorageOp::AppendEntries(entries));
+        self.state_cache.num_batched_entries >= self.state_cache.batch_size
     }
 
-    pub(crate) fn append_on_decided_prefix(&mut self, entries: Vec<T>) -> StorageResult<usize> {
-        let decided_idx = self.get_decided_idx();
-        let new_entries = entries.len();
-        self.storage.append_on_prefix(decided_idx, entries)?;
-        self.state_cache.accepted_idx = decided_idx + new_entries;
-        Ok(self.get_accepted_idx())
-    }
-
-    pub(crate) fn append_on_prefix(
-        &mut self,
-        from_idx: usize,
-        entries: Vec<T>,
-    ) -> StorageResult<usize> {
-        let new_entries = entries.len();
-        self.storage.append_on_prefix(from_idx, entries)?;
-        self.state_cache.accepted_idx = from_idx + new_entries;
-        Ok(self.get_accepted_idx())
+    pub(crate) fn batch_append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> bool {
+        self.state_cache.num_batched_entries += entries.len();
+        self.write_batch
+            .push(StorageOp::AppendOnPrefix(from_idx, entries));
+        self.state_cache.num_batched_entries >= self.state_cache.batch_size
     }
 
     pub(crate) fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
@@ -690,9 +609,17 @@ where
         self.storage.set_promise(n_prom)
     }
 
+    pub(crate) fn batch_set_promise(&mut self, promise: Ballot) {
+        self.write_batch.push(StorageOp::SetPromise(promise));
+    }
+
     pub(crate) fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
         self.state_cache.decided_idx = ld;
         self.storage.set_decided_idx(ld)
+    }
+
+    pub(crate) fn batch_set_decided_idx(&mut self, idx: usize) {
+        self.write_batch.push(StorageOp::SetDecidedIndex(idx));
     }
 
     pub(crate) fn get_decided_idx(&self) -> usize {
@@ -706,9 +633,8 @@ where
         }
     }
 
-    pub(crate) fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        self.state_cache.accepted_round = na;
-        self.storage.set_accepted_round(na)
+    pub(crate) fn batch_set_accepted_round(&mut self, bal: Ballot) {
+        self.write_batch.push(StorageOp::SetAcceptedRound(bal));
     }
 
     pub(crate) fn get_accepted_round(&self) -> Ballot {
@@ -721,7 +647,7 @@ where
 
     /// The length of the replicated log, as if log was never compacted.
     pub(crate) fn get_accepted_idx(&self) -> usize {
-        self.state_cache.get_accepted_idx()
+        self.state_cache.accepted_idx
     }
 
     pub(crate) fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
@@ -732,16 +658,8 @@ where
         self.state_cache.promise
     }
 
-    /// Sets the stopsign. This function should not be used directly from sequence paxos. Instead, use accept_stopsign.
-    pub(crate) fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
-        self.state_cache.stopsign = s.clone();
-        self.storage.set_stopsign(s)?;
-        self.state_cache.accepted_idx =
-            self.storage.get_log_len()? + self.state_cache.compacted_idx;
-        if self.state_cache.stopsign.is_some() {
-            self.state_cache.accepted_idx += 1;
-        }
-        Ok(())
+    pub(crate) fn batch_set_stopsign(&mut self, ss: Option<StopSign>) {
+        self.write_batch.push(StorageOp::SetStopsign(ss));
     }
 
     pub(crate) fn get_stopsign(&self) -> Option<StopSign> {
@@ -809,10 +727,6 @@ where
         Ok((snapshot, log_decided_idx))
     }
 
-    pub(crate) fn reset_snapshot(&mut self) -> StorageResult<()> {
-        self.storage.set_snapshot(None)
-    }
-
     /// This operation is atomic, but non-reversible after completion
     pub(crate) fn set_snapshot(&mut self, idx: usize, snapshot: T::Snapshot) -> StorageResult<()> {
         let old_compacted_idx = self.get_compacted_idx();
@@ -832,14 +746,29 @@ where
         Ok(())
     }
 
-    pub(crate) fn merge_snapshot(&mut self, idx: usize, delta: T::Snapshot) -> StorageResult<()> {
+    pub(crate) fn batch_set_snapshot(&mut self, idx: usize, snapshot: T::Snapshot) {
+        let old_compacted_idx = self.get_compacted_idx();
+        if idx > old_compacted_idx {
+            self.write_batch.push(StorageOp::Trim(idx));
+            self.write_batch.push(StorageOp::SetCompactedIdx(idx));
+            self.write_batch
+                .push(StorageOp::SetSnapshot(Some(snapshot)));
+        }
+    }
+
+    pub(crate) fn batch_merge_snapshot(
+        &mut self,
+        idx: usize,
+        delta: T::Snapshot,
+    ) -> StorageResult<()> {
         let mut snapshot = if let Some(snap) = self.storage.get_snapshot()? {
             snap
         } else {
             self.create_decided_snapshot()?
         };
         snapshot.merge(delta);
-        self.set_snapshot(idx, snapshot)
+        self.batch_set_snapshot(idx, snapshot);
+        Ok(())
     }
 
     pub(crate) fn try_trim(&mut self, idx: usize) -> StorageResult<()> {
@@ -849,6 +778,7 @@ where
         } else {
             let decided_idx = self.get_decided_idx();
             if idx <= decided_idx {
+                // TODO: Make batch version? Also we don't trim away decided SS correctly
                 self.set_compacted_idx(idx)?;
                 if let Err(e) = self.storage.trim(idx) {
                     self.set_compacted_idx(compacted_idx)?;
@@ -865,6 +795,10 @@ where
     pub(crate) fn set_compacted_idx(&mut self, idx: usize) -> StorageResult<()> {
         self.state_cache.compacted_idx = idx;
         self.storage.set_compacted_idx(idx)
+    }
+
+    pub(crate) fn batch_set_compacted_idx(&mut self, idx: usize) {
+        self.write_batch.push(StorageOp::SetCompactedIdx(idx));
     }
 
     pub(crate) fn get_compacted_idx(&self) -> usize {

@@ -8,7 +8,7 @@ use super::{
 use crate::utils::logger::create_logger;
 use crate::{
     storage::{InternalStorage, InternalStorageConfig},
-    util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    util::{FlexibleQuorum, NodeId, Quorum, SequenceNumber, WRITE_ERROR_MSG},
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
@@ -110,6 +110,7 @@ where
                 }
             },
         };
+        // TODO: technically don't need to batch write here
         paxos
             .internal_storage
             .set_promise(leader)
@@ -304,10 +305,7 @@ where
     pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T>> {
         let mut outgoing = Vec::with_capacity(self.buffer_size);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
-        #[cfg(feature = "batch_accept")]
-        {
-            self.leader_state.reset_batch_accept_meta();
-        }
+        self.leader_state.reset_batch_accept_meta();
         self.latest_accepted_meta = None;
         outgoing
     }
@@ -323,7 +321,9 @@ where
                 _ => {}
             },
             PaxosMsg::AcceptSync(acc_sync) => self.handle_acceptsync(acc_sync, m.from),
-            PaxosMsg::AcceptDecide(acc) => self.handle_acceptdecide(acc),
+            PaxosMsg::AcceptDecide(acc) => {
+                self.handle_acceptdecide(acc.n, acc.seq_num, acc.decided_idx, acc.entries)
+            }
             PaxosMsg::NotAccepted(not_acc) => self.handle_notaccepted(not_acc, m.from),
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
@@ -332,8 +332,9 @@ where
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
             #[cfg(feature = "unicache")]
-            PaxosMsg::EncodedAcceptDecide(e) => {
-                self.handle_encoded_acceptdecide(e);
+            PaxosMsg::EncodedAcceptDecide(acc) => {
+                let entries = self.internal_storage.decode_entries(acc.entries);
+                self.handle_acceptdecide(acc.n, acc.seq_num, acc.decided_idx, entries);
             }
         }
     }
@@ -391,10 +392,32 @@ where
                             self.leader_state.n_leader
                         );
                         let ss = StopSign::with(new_config, metadata);
-                        self.accept_stopsign(ss.clone());
+                        // TODO: Abstract this into a separate function
+                        // Flush and send any pending AcceptDecide
+                        let entries_to_accept = self.internal_storage.get_cached_entries();
+                        if !entries_to_accept.is_empty() {
+                            let new_accepted_idx = self
+                                .internal_storage
+                                .commit_write_batch()
+                                .expect(WRITE_ERROR_MSG)
+                                .unwrap();
+                            self.send_acceptdecide(new_accepted_idx, entries_to_accept);
+                        }
+                        // Accept stopsign
+                        self.internal_storage.batch_set_stopsign(Some(ss.clone()));
+                        self.internal_storage
+                            .commit_write_batch()
+                            .expect(WRITE_ERROR_MSG);
+                        let accepted_idx = self.internal_storage.get_accepted_idx();
+                        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+                        // Send AcceptStopSign
                         for pid in self.leader_state.get_promised_followers() {
                             self.send_accept_stopsign(pid, ss.clone(), false);
                         }
+                        // self.accept_stopsign(ss.clone());
+                        // for pid in self.leader_state.get_promised_followers() {
+                        //     self.send_accept_stopsign(pid, ss.clone(), false);
+                        // }
                     } else {
                         return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
                     }
@@ -425,16 +448,6 @@ where
         });
     }
 
-    fn accept_stopsign(&mut self, ss: StopSign) {
-        self.internal_storage
-            .set_stopsign(Some(ss))
-            .expect("storage error while trying to write stopsign");
-        if self.state.0 == Role::Leader {
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        }
-    }
-
     fn get_current_leader(&self) -> NodeId {
         self.get_promise().pid
     }
@@ -460,7 +473,7 @@ where
     fn propose_entry(&mut self, entry: T) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.accept_entry(entry),
+            (Role::Leader, Phase::Accept) => self.accept_entry_leader(entry),
             _ => self.forward_proposals(vec![entry]),
         }
     }
