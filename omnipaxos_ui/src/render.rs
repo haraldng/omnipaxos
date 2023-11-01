@@ -347,8 +347,13 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
             Style::default().fg(Color::White).bg(peer.color),
         )));
         cells.push(get_connected_symbol(peer.connected).into());
-        cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(peer.leader.to_string()));
+        let (ballot, leader) = get_ballot_and_leader_string(
+            peer.connected,
+            peer.ballot_number,
+            peer.leader,
+        );
+        cells.push(Cell::from(ballot));
+        cells.push(Cell::from(leader));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
             .bottom_margin(UI_TABLE_ROW_MARGIN)
@@ -377,6 +382,14 @@ fn get_connected_symbol(connected: bool) -> String {
     }
 }
 
+fn get_ballot_and_leader_string(connected: bool, ballot: u32, leader: u64) -> (String, String) {
+    if connected {
+        (ballot.to_string(), leader.to_string())
+    } else {
+        ('\u{2753}'.to_string(), '\u{2753}'.to_string())
+    }
+}
+
 fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
     let header_cells = [PID, CONNECTED, BALLOT, LEADER, ACCEPTED_IDX]
         .iter()
@@ -397,8 +410,13 @@ fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
             Style::default().fg(Color::White).bg(peer.color),
         )));
         cells.push(get_connected_symbol(peer.connected).into());
-        cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(peer.leader.to_string()));
+        let (ballot, leader) = get_ballot_and_leader_string(
+            peer.connected,
+            peer.ballot_number,
+            peer.leader,
+        );
+        cells.push(Cell::from(ballot));
+        cells.push(Cell::from(leader));
         cells.push(Cell::from(
             app.followers_accepted_idx[peer.pid as usize].to_string(),
         ));

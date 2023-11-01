@@ -21,7 +21,7 @@ const SERVERS: [u64; 3] = [1, 2, 3];
 /// each loop, some batched log entries will be appended to the leader, then the leader will be killed.
 /// Finally there will be a majority of nodes remain and keep append log entries.
 fn main() {
-    let (num_nodes, attach_pid, duration) = parse_arguments().unwrap();
+    let (num_nodes, attach_pid, duration, crash) = parse_arguments().unwrap();
     let runtime = Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -71,14 +71,26 @@ fn main() {
         });
         op_server_handles.insert(pid, (omni_paxos, join_handle));
     }
-
+    let not_crash_server_pid = SERVERS.iter().find(|x| **x != crash).unwrap();
+    let (server, _handler) = op_server_handles.get(not_crash_server_pid).unwrap();
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
     for i in 0..BATCH_SIZE {
         let kv = LogEntry(i);
-        let (server, _handler) = op_server_handles.get(&(3)).unwrap();
         server.lock().unwrap().append(kv).expect("append failed");
         std::thread::sleep(BATCH_PERIOD);
     }
-    std::thread::sleep(duration);
+    if crash > 0 {
+        let (_crash_server, crash_handler) = op_server_handles.get(&crash).unwrap();
+        crash_handler.abort();
+        std::thread::sleep(WAIT_LEADER_TIMEOUT);
+        // batch append log entries
+        for i in 0..BATCH_SIZE {
+            let kv = LogEntry(i);
+            server.lock().unwrap().append(kv).expect("append failed");
+            std::thread::sleep(BATCH_PERIOD);
+        }
+    } else {
+        std::thread::sleep(duration);
+    }
 }

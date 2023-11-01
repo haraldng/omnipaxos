@@ -30,12 +30,13 @@ pub(crate) fn initialise_channels(
     (sender_channels, receiver_channels)
 }
 
-pub(crate) fn parse_arguments() -> Result<(u64, u64, Duration), String> {
+pub(crate) fn parse_arguments() -> Result<(u64, u64, Duration, u64), String> {
     let args: Vec<String> = env::args().collect();
 
     let mut number_of_nodes: u64 = 3;
     let mut attach_node = number_of_nodes;
     let mut duration_in_seconds: u64 = 10;
+    let mut crash: u64 = 0;
 
     let mut i = 1;
     while i < args.len() {
@@ -52,6 +53,10 @@ pub(crate) fn parse_arguments() -> Result<(u64, u64, Duration), String> {
                 i += 1;
                 duration_in_seconds = args[i].parse().expect("Invalid duration."); // Set the default duration to 10
             }
+            "crash" => {
+                i += 1;
+                crash = args[i].parse().expect("Invalid crash node.");
+            }
             _ => {
                 return Err(format!("Invalid argument: {}", args[i]));
             }
@@ -63,5 +68,6 @@ pub(crate) fn parse_arguments() -> Result<(u64, u64, Duration), String> {
         number_of_nodes,
         attach_node,
         Duration::from_secs(duration_in_seconds),
+        crash,
     ))
 }
