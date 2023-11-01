@@ -244,10 +244,10 @@ where
     // cluster info
     draw_cluster_info(f, app, chunks[0]);
     // node info
-    let mut node_info = "".to_string();
-    node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
-    node_info.push_str(&format!("\nRole: {:?}", app.current_role));
-    node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
+    let node_info = format!(
+        "\nNode Id: {:?}\nRole: {:?}\nBallot: {:?}\nDecided idx: {:?}",
+        app.current_node.pid, app.current_role, app.current_node.ballot_number, app.decided_idx
+    );
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -272,16 +272,14 @@ where
 
     // cluster info
     draw_cluster_info(f, app, chunks[0]);
-
-    // node info
-    let mut node_info = "".to_string();
-    node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
-    node_info.push_str(&format!("\nRole: {:?}", app.current_role));
-    node_info.push_str(&format!(
-        "\nAccepted idx: {:?}",
-        app.followers_accepted_idx[app.current_node.pid as usize]
-    ));
-    node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
+    let node_info = format!(
+        "\nNode Id: {:?}\nRole: {:?}\nBallot: {:?}\nDecided idx: {:?}\nAccepted idx: {:?}",
+        app.current_node.pid,
+        app.current_role,
+        app.current_node.ballot_number,
+        app.decided_idx,
+        app.followers_accepted_idx[app.current_node.pid as usize],
+    );
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -347,11 +345,8 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
             Style::default().fg(Color::White).bg(peer.color),
         )));
         cells.push(get_connected_symbol(peer.connected).into());
-        let (ballot, leader) = get_ballot_and_leader_string(
-            peer.connected,
-            peer.ballot_number,
-            peer.leader,
-        );
+        let (ballot, leader) =
+            get_ballot_and_leader_string(peer.connected, peer.ballot_number, peer.leader);
         cells.push(Cell::from(ballot));
         cells.push(Cell::from(leader));
         Row::new(cells)
@@ -410,11 +405,8 @@ fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
             Style::default().fg(Color::White).bg(peer.color),
         )));
         cells.push(get_connected_symbol(peer.connected).into());
-        let (ballot, leader) = get_ballot_and_leader_string(
-            peer.connected,
-            peer.ballot_number,
-            peer.leader,
-        );
+        let (ballot, leader) =
+            get_ballot_and_leader_string(peer.connected, peer.ballot_number, peer.leader);
         cells.push(Cell::from(ballot));
         cells.push(Cell::from(leader));
         cells.push(Cell::from(
