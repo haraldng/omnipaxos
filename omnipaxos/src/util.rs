@@ -7,15 +7,6 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
-#[derive(Debug, Clone)]
-pub(crate) struct AcceptedMetaData<T: Entry> {
-    pub accepted_idx: usize,
-    #[cfg(not(feature = "unicache"))]
-    pub flushed_entries: Vec<T>,
-    #[cfg(feature = "unicache")]
-    pub flushed_processed: Vec<T::EncodeResult>,
-}
-
 #[derive(Debug, Clone, Default)]
 /// Promise without the suffix
 pub(crate) struct PromiseMetaData {
@@ -229,6 +220,10 @@ where
 
     pub fn set_accepted_idx(&mut self, pid: NodeId, idx: usize) {
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
+    }
+
+    pub fn increment_accepted_idx(&mut self, amount: usize) {
+        self.accepted_indexes[Self::pid_to_idx(self.n_leader.pid)] += amount;
     }
 
     pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {

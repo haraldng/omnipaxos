@@ -348,13 +348,13 @@ where
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    fn pending_reconfiguration(&self) -> bool {
+    fn accepted_reconfiguration(&self) -> bool {
         self.internal_storage.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
     pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
-        if self.pending_reconfiguration() {
+        if self.accepted_reconfiguration() {
             Err(ProposeErr::PendingReconfigEntry(entry))
         } else {
             self.propose_entry(entry);
@@ -370,65 +370,33 @@ where
         new_config: ClusterConfig,
         metadata: Option<Vec<u8>>,
     ) -> Result<(), ProposeErr<T>> {
-        if self.pending_reconfiguration() {
-            Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
-        } else {
-            match self.state {
-                (Role::Leader, Phase::Prepare) => {
-                    if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(new_config, metadata);
-                        self.pending_stopsign = Some(ss);
-                    } else {
-                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
-                    }
-                }
-                (Role::Leader, Phase::Accept) => {
-                    if !self.pending_reconfiguration() {
-                        #[cfg(feature = "logging")]
-                        info!(
-                            self.logger,
-                            "Propose reconfiguration {:?} with {:?}",
-                            new_config.nodes,
-                            self.leader_state.n_leader
-                        );
-                        let ss = StopSign::with(new_config, metadata);
-                        // TODO: Abstract this into a separate function
-                        // Flush and send any pending AcceptDecide
-                        let entries_to_accept = self.internal_storage.get_cached_entries();
-                        if !entries_to_accept.is_empty() {
-                            let new_accepted_idx = self
-                                .internal_storage
-                                .commit_write_batch()
-                                .expect(WRITE_ERROR_MSG)
-                                .unwrap();
-                            self.send_acceptdecide(new_accepted_idx, entries_to_accept);
-                        }
-                        // Accept stopsign
-                        self.internal_storage.batch_set_stopsign(Some(ss.clone()));
-                        self.internal_storage
-                            .commit_write_batch()
-                            .expect(WRITE_ERROR_MSG);
-                        let accepted_idx = self.internal_storage.get_accepted_idx();
-                        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-                        // Send AcceptStopSign
-                        for pid in self.leader_state.get_promised_followers() {
-                            self.send_accept_stopsign(pid, ss.clone(), false);
-                        }
-                        // self.accept_stopsign(ss.clone());
-                        // for pid in self.leader_state.get_promised_followers() {
-                        //     self.send_accept_stopsign(pid, ss.clone(), false);
-                        // }
-                    } else {
-                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
-                    }
-                }
-                _ => {
-                    let ss = StopSign::with(new_config, metadata);
-                    self.forward_stopsign(ss);
+        if self.accepted_reconfiguration() {
+            return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
+        }
+        #[cfg(feature = "logging")]
+        info!(
+            self.logger,
+            "Propose reconfiguration {:?}", new_config.nodes
+        );
+        let ss = StopSign::with(new_config, metadata);
+        match self.state {
+            (Role::Leader, Phase::Prepare) => {
+                self.pending_stopsign = Some(ss);
+            }
+            (Role::Leader, Phase::Accept) => {
+                self.internal_storage.batch_set_stopsign(Some(ss.clone()));
+                let accepted_idx = self
+                    .internal_storage
+                    .flush_write_batch()
+                    .expect(WRITE_ERROR_MSG);
+                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+                for pid in self.leader_state.get_promised_followers() {
+                    self.send_accept_stopsign(pid, ss.clone(), false);
                 }
             }
-            Ok(())
+            _ => self.forward_stopsign(ss),
         }
+        Ok(())
     }
 
     fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign, resend: bool) {

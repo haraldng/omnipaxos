@@ -817,6 +817,10 @@ pub mod omnireplica {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
                 if self.is_connected_to(&out.get_receiver()) {
+                    // TODO: remove
+                    if let Message::SequencePaxos(m) = &out {
+                        println!("{m:?}");
+                    }
                     match self.peers.get(&out.get_receiver()) {
                         Some(receiver) => receiver.tell(out),
                         None => warn!(
@@ -903,7 +907,7 @@ pub mod omnireplica {
 }
 
 #[cfg(not(feature = "unicache"))]
-#[derive(Entry, Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(Entry, Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
 #[snapshot(ValueSnapshot)]
 pub struct Value {
     id: u64,
@@ -911,7 +915,7 @@ pub struct Value {
 
 #[cfg(feature = "unicache")]
 #[derive(
-    Clone, Debug, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
+    Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
 )]
 #[snapshot(ValueSnapshot)]
 pub struct Value {
@@ -938,6 +942,12 @@ impl Value {
     }
 }
 
+// TODO: revert
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ValueSnapshot {
     pub latest_value: Value,

@@ -2,7 +2,7 @@ use super::ballot_leader_election::Ballot;
 #[cfg(feature = "unicache")]
 use crate::{unicache::*, util::NodeId};
 use crate::{
-    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
+    util::{IndexEntry, LogEntry, SnapshottedEntry},
     ClusterConfig, CompactionErr,
 };
 #[cfg(feature = "serde")]
@@ -216,16 +216,6 @@ impl<T: Entry> Snapshot<T> for NoSnapshot {
     }
 }
 
-/// Used to perform convenient rollbacks of storage operations on internal storage.
-/// Represents only values that can and will actually be rolled back from outside internal storage.
-pub(crate) enum RollbackValue<T: Entry> {
-    DecidedIdx(usize),
-    AcceptedRound(Ballot),
-    Log(Vec<T>),
-    /// compacted index and snapshot
-    Snapshot(usize, Option<T::Snapshot>),
-}
-
 /// A simple in-memory storage for simple state values of OmniPaxos.
 struct StateCache<T>
 where
@@ -331,10 +321,9 @@ where
         internal_store
     }
 
-    pub(crate) fn commit_write_batch(&mut self) -> StorageResult<Option<usize>> {
+    pub(crate) fn flush_write_batch(&mut self) -> StorageResult<usize> {
         // TODO: do we need to roll back state cache if batch fails?
         // Update state cache
-        let old_accepted_idx = self.state_cache.accepted_idx;
         for op in self.write_batch.iter() {
             match op {
                 StorageOp::AppendEntry(_) => self.state_cache.accepted_idx += 1,
@@ -363,55 +352,7 @@ where
         self.storage
             .write_batch(std::mem::take(&mut self.write_batch))?;
         self.state_cache.num_batched_entries = 0;
-        if old_accepted_idx == self.state_cache.accepted_idx {
-            Ok(None)
-        } else {
-            Ok(Some(self.state_cache.accepted_idx))
-        }
-    }
-
-    pub(crate) fn get_cached_entries(&self) -> Vec<T> {
-        self.write_batch.iter().fold(Vec::new(), |mut acc, op| {
-            match op {
-                StorageOp::AppendEntry(e) => acc.push(e.clone()),
-                StorageOp::AppendEntries(e) => acc.extend_from_slice(e),
-                StorageOp::AppendOnPrefix(_, e) => acc.extend_from_slice(e),
-                _ => (),
-            }
-            acc
-        })
-
-        // self.write_batch.iter().flat_map(|op| {
-        //     match op {
-        //         StorageOp::AppendEntry(e) => core::slice::from_ref(e),
-        //         StorageOp::AppendEntries(e) => {
-        //             e
-        //         },
-        //         _ => &[],
-        //     }
-        // }).collect()
-    }
-
-    #[cfg(feature = "unicache")]
-    pub(crate) fn get_cached_entries_encoded(&mut self) -> Vec<T::EncodeResult> {
-        let mut encoded = vec![];
-        for op in self.write_batch.iter() {
-            match op {
-                StorageOp::AppendEntry(e) => encoded.push(self.state_cache.unicache.try_encode(e)),
-                StorageOp::AppendEntries(entries) => encoded.extend(
-                    entries
-                        .iter()
-                        .map(|e| self.state_cache.unicache.try_encode(e)),
-                ),
-                StorageOp::AppendOnPrefix(_, entries) => encoded.extend(
-                    entries
-                        .iter()
-                        .map(|e| self.state_cache.unicache.try_encode(e)),
-                ),
-                _ => (),
-            }
-        }
-        encoded
+        Ok(self.state_cache.accepted_idx)
     }
 
     fn get_entry_type(
@@ -422,9 +363,9 @@ where
     ) -> StorageResult<Option<IndexEntry>> {
         if idx < compacted_idx {
             Ok(Some(IndexEntry::Compacted))
-        } else if idx < accepted_idx - 1 {
+        } else if idx + 1 < accepted_idx {
             Ok(Some(IndexEntry::Entry))
-        } else if idx == accepted_idx - 1 {
+        } else if idx + 1 == accepted_idx {
             match self.get_stopsign() {
                 Some(ss) => Ok(Some(IndexEntry::StopSign(ss))),
                 _ => Ok(Some(IndexEntry::Entry)),
@@ -613,11 +554,6 @@ where
         self.write_batch.push(StorageOp::SetPromise(promise));
     }
 
-    pub(crate) fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
-        self.state_cache.decided_idx = ld;
-        self.storage.set_decided_idx(ld)
-    }
-
     pub(crate) fn batch_set_decided_idx(&mut self, idx: usize) {
         self.write_batch.push(StorageOp::SetDecidedIndex(idx));
     }
@@ -771,6 +707,7 @@ where
         Ok(())
     }
 
+    // TODO: replace with batch version
     pub(crate) fn try_trim(&mut self, idx: usize) -> StorageResult<()> {
         let compacted_idx = self.get_compacted_idx();
         if idx <= compacted_idx {
@@ -805,6 +742,7 @@ where
         self.state_cache.compacted_idx
     }
 
+    // TODO: replace with batch version
     pub(crate) fn try_snapshot(&mut self, snapshot_idx: Option<usize>) -> StorageResult<()> {
         let decided_idx = self.get_decided_idx();
         let log_decided_idx = self.get_decided_idx_without_stopsign();

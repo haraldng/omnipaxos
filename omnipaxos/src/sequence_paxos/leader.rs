@@ -22,16 +22,14 @@ where
         }
         #[cfg(feature = "logging")]
         debug!(self.logger, "Newly elected leader: {:?}", n);
-        if self.pending_reconfiguration() {
-            self.pending_proposals.clear();
-        }
         if self.pid == n.pid {
             self.leader_state =
                 LeaderState::with(n, self.leader_state.max_pid, self.leader_state.quorum);
             // Flush any pending writes
             // Don't have to handle flushed entries here because we will sync with followers
+            self.internal_storage.batch_set_promise(n);
             self.internal_storage
-                .commit_write_batch()
+                .flush_write_batch()
                 .expect(WRITE_ERROR_MSG);
             /* insert my promise */
             let na = self.internal_storage.get_accepted_round();
@@ -55,11 +53,6 @@ where
                 n_accepted: na,
                 accepted_idx,
             };
-            // TODO: technically don't need a batch here
-            self.internal_storage.batch_set_promise(n);
-            self.internal_storage
-                .commit_write_batch()
-                .expect(WRITE_ERROR_MSG);
             /* send prepare */
             for pid in &self.peers {
                 self.outgoing.push(PaxosMessage {
@@ -88,7 +81,7 @@ where
     }
 
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
-        if !self.pending_reconfiguration() {
+        if !self.accepted_reconfiguration() {
             match self.state {
                 (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.accept_entries_leader(entries),
@@ -98,44 +91,30 @@ where
     }
 
     pub(crate) fn handle_forwarded_stopsign(&mut self, ss: StopSign) {
-        if !self.pending_reconfiguration() {
-            match self.state {
-                (Role::Leader, Phase::Prepare) => {
-                    if self.pending_stopsign.as_mut().is_none() {
-                        self.pending_stopsign = Some(ss);
-                    }
+        if self.accepted_reconfiguration() {
+            return;
+        }
+        match self.state {
+            (Role::Leader, Phase::Prepare) => self.pending_stopsign = Some(ss),
+            (Role::Leader, Phase::Accept) => {
+                self.internal_storage.batch_set_stopsign(Some(ss.clone()));
+                let accepted_idx = self
+                    .internal_storage
+                    .flush_write_batch()
+                    .expect(WRITE_ERROR_MSG);
+                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+                for pid in self.leader_state.get_promised_followers() {
+                    self.send_accept_stopsign(pid, ss.clone(), false);
                 }
-                (Role::Leader, Phase::Accept) => {
-                    if self.pending_stopsign.is_none() {
-                        // Flush and send any pending AcceptDecide
-                        let entries_to_accept = self.internal_storage.get_cached_entries();
-                        if !entries_to_accept.is_empty() {
-                            let new_accepted_idx = self
-                                .internal_storage
-                                .commit_write_batch()
-                                .expect(WRITE_ERROR_MSG)
-                                .unwrap();
-                            self.send_acceptdecide(new_accepted_idx, entries_to_accept);
-                        }
-                        // Accept stopsign
-                        self.internal_storage.batch_set_stopsign(Some(ss.clone()));
-                        self.internal_storage
-                            .commit_write_batch()
-                            .expect(WRITE_ERROR_MSG);
-                        let accepted_idx = self.internal_storage.get_accepted_idx();
-                        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-                        // Send AcceptStopSign
-                        for pid in self.leader_state.get_promised_followers() {
-                            self.send_accept_stopsign(pid, ss.clone(), false);
-                        }
-                    }
-                }
-                _ => self.forward_stopsign(ss),
             }
+            _ => self.forward_stopsign(ss),
         }
     }
 
     pub(crate) fn send_prepare(&mut self, to: NodeId) {
+        self.internal_storage
+            .flush_write_batch()
+            .expect(WRITE_ERROR_MSG);
         let prep = Prepare {
             n: self.leader_state.n_leader,
             decided_idx: self.internal_storage.get_decided_idx(),
@@ -150,61 +129,27 @@ where
     }
 
     pub(crate) fn accept_entry_leader(&mut self, entry: T) {
-        let entry_cache_full = self.internal_storage.batch_append_entry(entry);
-        if entry_cache_full {
-            if cfg!(feature = "unicache") {
-                #[cfg(feature = "unicache")]
-                {
-                    let entries_to_accept = self.internal_storage.get_cached_entries_encoded();
-                    let new_accepted_idx = self
-                        .internal_storage
-                        .commit_write_batch()
-                        .expect(WRITE_ERROR_MSG)
-                        .unwrap();
-                    self.send_acceptdecide_encoded(new_accepted_idx, entries_to_accept);
-                }
-            } else {
-                let entries_to_accept = self.internal_storage.get_cached_entries();
-                let new_accepted_idx = self
-                    .internal_storage
-                    .commit_write_batch()
-                    .expect(WRITE_ERROR_MSG)
-                    .unwrap();
-                self.send_acceptdecide(new_accepted_idx, entries_to_accept);
-            }
-        }
+        // TODO: can make faster with batch_append_entry without checking cache size
+        self.leader_state.increment_accepted_idx(1);
+        self.internal_storage.batch_append_entry(entry.clone());
+        #[cfg(not(feature = "unicache"))]
+        self.send_acceptdecide(vec![entry]);
+        #[cfg(feature = "unicache")]
+        // TODO: need to encode
+        self.send_acceptdecide_encoded(vec![entry]);
     }
 
     fn accept_entries_leader(&mut self, entries: Vec<T>) {
-        let entry_cache_full = self.internal_storage.batch_append_entries(entries);
-        if entry_cache_full {
-            if cfg!(feature = "unicache") {
-                #[cfg(feature = "unicache")]
-                {
-                    let entries_to_accept = self.internal_storage.get_cached_entries_encoded();
-                    let new_accepted_idx = self
-                        .internal_storage
-                        .commit_write_batch()
-                        .expect(WRITE_ERROR_MSG)
-                        .unwrap();
-                    self.send_acceptdecide_encoded(new_accepted_idx, entries_to_accept);
-                }
-            } else {
-                let entries_to_accept = self.internal_storage.get_cached_entries();
-                let new_accepted_idx = self
-                    .internal_storage
-                    .commit_write_batch()
-                    .expect(WRITE_ERROR_MSG)
-                    .unwrap();
-                self.send_acceptdecide(new_accepted_idx, entries_to_accept);
-            }
-        }
+        self.leader_state.increment_accepted_idx(entries.len());
+        self.internal_storage.batch_append_entries(entries.clone());
+        #[cfg(not(feature = "unicache"))]
+        self.send_acceptdecide(entries);
+        #[cfg(feature = "unicache")]
+        // TODO: need to encode
+        self.send_acceptdecide_encoded(entries);
     }
 
     fn send_accsync(&mut self, to: NodeId) {
-        // TODO: If we have pending AcceptDecides to other followers we would have to handle that
-        // here. Not sure we even have to flush here.
-        // self.internal_storage.commit_write_batch().expect(WRITE_ERROR_MSG);
         let my_decided_idx = self.get_decided_idx();
         let current_n = self.leader_state.n_leader;
         let PromiseMetaData {
@@ -272,8 +217,7 @@ where
         self.outgoing.push(msg);
     }
 
-    pub(crate) fn send_acceptdecide(&mut self, accepted_idx: usize, entries: Vec<T>) {
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+    pub(crate) fn send_acceptdecide(&mut self, entries: Vec<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
             let pending_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
@@ -313,12 +257,7 @@ where
     }
 
     #[cfg(feature = "unicache")]
-    pub(crate) fn send_acceptdecide_encoded(
-        &mut self,
-        accepted_idx: usize,
-        entries: Vec<T::EncodeResult>,
-    ) {
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+    pub(crate) fn send_acceptdecide_encoded(&mut self, entries: Vec<T::EncodeResult>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
             let pending_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
@@ -374,39 +313,16 @@ where
         });
     }
 
-    fn adopt_pending_stopsign(&mut self) {
-        if let Some(ss) = self.pending_stopsign.take() {
-            self.internal_storage.batch_set_stopsign(Some(ss));
-            let accepted_idx = self
-                .internal_storage
-                .commit_write_batch()
-                .expect(WRITE_ERROR_MSG)
-                .unwrap();
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        }
-    }
-
     fn adopt_pending_proposals(&mut self) {
         if !self.pending_proposals.is_empty() {
             let new_entries = std::mem::take(&mut self.pending_proposals);
-            // append new proposals in my sequence
             self.internal_storage.batch_append_entries(new_entries);
-            let new_accepted_idx = self
-                .internal_storage
-                .commit_write_batch()
-                .expect("WRITE_ERROR_MSG")
-                .unwrap();
-            self.leader_state
-                .set_accepted_idx(self.pid, new_accepted_idx);
+        }
+    }
 
-            // TODO: remove reference
-            // let append_res = self
-            //     .internal_storage
-            //     .append_entries_and_get_accepted_idx(new_entries)
-            //     .expect("storage error while trying to write log entries");
-            // if let Some(accepted_idx) = append_res {
-            //     self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-            // }
+    fn adopt_pending_stopsign(&mut self) {
+        if let Some(ss) = self.pending_stopsign.take() {
+            self.internal_storage.batch_set_stopsign(Some(ss));
         }
     }
 
@@ -422,62 +338,54 @@ where
         self.internal_storage
             .batch_set_accepted_round(self.leader_state.n_leader);
         self.internal_storage.batch_set_decided_idx(decided_idx);
-        match max_promise {
-            Some(PromiseData {
-                decided_snapshot,
-                suffix,
-            }) => {
-                match decided_snapshot {
-                    Some(snap) => {
-                        let decided_idx = self
-                            .leader_state
-                            .get_decided_idx(max_promise_meta.pid)
-                            .unwrap();
-                        match snap {
-                            SnapshotType::Complete(c) => {
-                                self.internal_storage.batch_set_snapshot(decided_idx, c)
-                            }
-                            SnapshotType::Delta(d) => self
-                                .internal_storage
-                                .batch_merge_snapshot(decided_idx, d)
-                                .expect("Error reading from storage."),
-                        };
+        if let Some(PromiseData {
+            decided_snapshot,
+            suffix,
+        }) = max_promise
+        {
+            match decided_snapshot {
+                Some(snap) => {
+                    let compacted_idx = self
+                        .leader_state
+                        .get_decided_idx(max_promise_meta.pid)
+                        .unwrap();
+                    match snap {
+                        SnapshotType::Complete(c) => {
+                            self.internal_storage.batch_set_snapshot(compacted_idx, c)
+                        }
+                        SnapshotType::Delta(d) => self
+                            .internal_storage
+                            .batch_merge_snapshot(compacted_idx, d)
+                            .expect("Error reading from storage."),
+                    };
+                    self.internal_storage.batch_append_entries(suffix);
+                }
+                // No snapshot, only suffix
+                None => {
+                    if max_promise_meta.n_accepted > old_accepted_round {
+                        self.internal_storage
+                            .batch_append_on_prefix(old_decided_idx, suffix);
+                    } else if !suffix.is_empty() {
                         self.internal_storage.batch_append_entries(suffix);
                     }
-                    // No snapshot, only suffix
-                    None => {
-                        if max_promise_meta.n_accepted == old_accepted_round {
-                            self.internal_storage.batch_append_entries(suffix);
-                        } else {
-                            self.internal_storage
-                                .batch_append_on_prefix(old_decided_idx, suffix);
-                        };
-                    }
-                };
-            }
-            // I am the most updated
-            None => {
-                self.adopt_pending_proposals();
-                self.adopt_pending_stopsign();
+                }
             }
         }
-        // TODO: self.adopt...() calls commit_write_batch which is kinda weird here. Especially if
-        // we do it twice.
         match max_stopsign {
             Some(ss) => {
-                // // Accept stopsign
                 self.internal_storage.batch_set_stopsign(Some(ss));
-                self.internal_storage
-                    .commit_write_batch()
-                    .expect(WRITE_ERROR_MSG);
-                let accepted_idx = self.internal_storage.get_accepted_idx();
-                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
             }
             None => {
+                self.internal_storage.batch_set_stopsign(None);
                 self.adopt_pending_proposals();
                 self.adopt_pending_stopsign();
             }
         }
+        let accepted_idx = self
+            .internal_storage
+            .flush_write_batch()
+            .expect(WRITE_ERROR_MSG);
+        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
@@ -523,19 +431,17 @@ where
             self.leader_state.accepted_indexes
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
-            let old_decided_idx = self.internal_storage.get_decided_idx();
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
+            let old_decided_idx = self.internal_storage.get_decided_idx();
             if accepted.accepted_idx > old_decided_idx
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
-                // TODO: technically dont need to batch. Also no pending entries need to be flushed
-                // since they couldn't have been Accepted or decided
+                self.internal_storage.batch_set_decided_idx(decided_idx);
                 self.internal_storage
-                    .set_decided_idx(decided_idx)
-                    .expect("storage error while trying to write decided index");
-                // Send Decides to followers or batch with previous AcceptDecide
+                    .flush_write_batch()
+                    .expect(WRITE_ERROR_MSG);
                 for pid in self.leader_state.get_promised_followers() {
                     match self.leader_state.get_batch_accept_meta(pid) {
                         Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
