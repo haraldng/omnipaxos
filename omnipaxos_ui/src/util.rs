@@ -6,7 +6,7 @@ pub(crate) mod defaults {
 
     pub(crate) const UI_TITLE: &str = "OmniPaxos";
     pub(crate) const UI_THROUGHPUT_TITLE: &str = "Throughput";
-    pub(crate) const UI_TABLE_TITLE: &str = "Active peers";
+    pub(crate) const UI_TABLE_TITLE: &str = "Peers";
     pub(crate) const UI_NODE_INFO_TITLE: &str = "Current node information";
     pub(crate) const UI_CLUSTER_INFO_TITLE: &str = "Cluster information";
     pub(crate) const UI_LOGGING_TITLE: &str = "System log";
@@ -34,7 +34,6 @@ impl From<Ballot> for Node {
     fn from(ballot: Ballot) -> Self {
         Self {
             pid: ballot.pid,
-            configuration_id: ballot.config_id,
             ballot_number: ballot.n,
             ..Default::default()
         }
@@ -51,10 +50,6 @@ impl From<OmniPaxosConfig> for UIAppConfig {
             .filter(|x| *x != pid)
             .collect();
 
-        Self {
-            configuration_id: config.cluster_config.configuration_id,
-            pid,
-            peers,
-        }
+        Self { pid, peers }
     }
 }

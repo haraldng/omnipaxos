@@ -1,4 +1,4 @@
-use crate::app::{App, Node, Role, UIAppConfig};
+use crate::app::{App, Role, UIAppConfig};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -121,19 +121,23 @@ impl OmniPaxosUI {
     }
 
     fn update_active_peers(&mut self, op_states: &OmniPaxosStates) {
-        self.app.active_peers.clear();
-        op_states
-            .cluster_state
-            .heartbeats
-            .iter()
-            .filter(|reply| reply.ballot.pid != self.app.current_node.pid)
-            .for_each(|reply| {
-                let mut node = Node::from(reply.ballot);
-                node.leader = reply.leader.pid;
-                self.app.active_peers.push(node);
-            });
-        // Sort the active peers by pid
-        self.app.active_peers.sort_by(|a, b| a.pid.cmp(&b.pid));
+        for node in self.app.active_peers.iter_mut() {
+            match op_states
+                .cluster_state
+                .heartbeats
+                .iter()
+                .find(|x| x.ballot.pid == node.pid)
+            {
+                Some(heartbeat) => {
+                    node.ballot_number = heartbeat.ballot.n;
+                    node.leader = heartbeat.leader.pid;
+                    node.connected = true;
+                }
+                None => {
+                    node.connected = false;
+                }
+            }
+        }
     }
 
     fn update_leader(&mut self, op_states: &OmniPaxosStates) {
@@ -156,7 +160,6 @@ impl OmniPaxosUI {
         if self.started {
             let ballot = op_states.current_ballot;
             self.app.current_node.ballot_number = ballot.n;
-            self.app.current_node.configuration_id = ballot.config_id;
             self.app.set_decided_idx(op_states.decided_idx);
             self.update_progress(&op_states);
             self.update_active_peers(&op_states);

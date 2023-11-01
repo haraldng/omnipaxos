@@ -1,14 +1,12 @@
-// To run the example with the UI:
-// cargo run --bin dashboard
 use crate::{entry::LogEntry, server::OmniPaxosServer, util::*};
-use omnipaxos::{messages::Message, util::NodeId, *};
+use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use omnipaxos_ui::OmniPaxosUI;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use tokio::{runtime::Builder, sync::mpsc};
+use tokio::runtime::Builder;
 
 mod entry;
 mod server;
@@ -16,29 +14,14 @@ mod util;
 
 type OmniPaxosLog = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
 
-const SERVERS: [u64; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-
-#[allow(clippy::type_complexity)]
-fn initialise_channels() -> (
-    HashMap<NodeId, mpsc::Sender<Message<LogEntry>>>,
-    HashMap<NodeId, mpsc::Receiver<Message<LogEntry>>>,
-) {
-    let mut sender_channels = HashMap::new();
-    let mut receiver_channels = HashMap::new();
-
-    for pid in SERVERS {
-        let (sender, receiver) = mpsc::channel(BUFFER_SIZE);
-        sender_channels.insert(pid, sender);
-        receiver_channels.insert(pid, receiver);
-    }
-    (sender_channels, receiver_channels)
-}
+const SERVERS: [u64; 3] = [1, 2, 3];
 
 /// Here is the main function for the dashboard example. Including the nodes setup, and the main loop.
 /// There will be a dashboard UI showing the status from the view of one node in the terminal, and in
 /// each loop, some batched log entries will be appended to the leader, then the leader will be killed.
 /// Finally there will be a majority of nodes remain and keep append log entries.
 fn main() {
+    let (num_nodes, attach_pid, duration) = parse_arguments().unwrap();
     let runtime = Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -46,12 +29,11 @@ fn main() {
         .unwrap();
 
     let configuration_id = 1;
-    let majority = (SERVERS.len() / 2) + 1;
     let mut op_server_handles = HashMap::new();
-    let (sender_channels, mut receiver_channels) = initialise_channels();
+    let (sender_channels, mut receiver_channels) = initialise_channels(&SERVERS);
 
     // set up nodes
-    for pid in SERVERS {
+    for pid in 1..=num_nodes {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
@@ -69,7 +51,7 @@ fn main() {
         };
         // set up the ui with the same configration as for the OmniPaxos
         let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
-        if pid == majority as u64 {
+        if pid == attach_pid {
             // start UI for the the node with id equals to majority, which will be the leader later
             omni_paxos_ui.start();
         }
@@ -92,24 +74,11 @@ fn main() {
 
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
-
-    // start loop
-    let mut idx = SERVERS.len();
-    loop {
-        let (server, handler) = op_server_handles.get(&(idx as u64)).unwrap();
-        // batch append log entries
-        for i in 0..BATCH_SIZE {
-            let kv = LogEntry(i);
-            server.lock().unwrap().append(kv).expect("append failed");
-            std::thread::sleep(BATCH_PERIOD);
-        }
-        std::thread::sleep(WAIT_DECIDED_TIMEOUT);
-
-        // kill the leader if number of nodes is larger than majority
-        if majority < idx {
-            handler.abort();
-            idx -= 1;
-            std::thread::sleep(WAIT_LEADER_TIMEOUT);
-        }
+    for i in 0..BATCH_SIZE {
+        let kv = LogEntry(i);
+        let (server, _handler) = op_server_handles.get(&(3)).unwrap();
+        server.lock().unwrap().append(kv).expect("append failed");
+        std::thread::sleep(BATCH_PERIOD);
     }
+    std::thread::sleep(duration);
 }

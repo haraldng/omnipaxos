@@ -1,5 +1,5 @@
 use crate::util::defaults::*;
-use omnipaxos::util::{ConfigurationId, NodeId};
+use omnipaxos::util::NodeId;
 use ratatui::style::Color;
 use std::time::Instant;
 
@@ -7,10 +7,10 @@ use std::time::Instant;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Node {
     pub(crate) pid: NodeId,
-    pub(crate) configuration_id: ConfigurationId,
     pub(crate) ballot_number: u32,
     pub(crate) leader: NodeId,
     pub(crate) color: Color,
+    pub(crate) connected: bool,
 }
 
 #[derive(PartialEq, Debug)]
@@ -21,9 +21,7 @@ pub(crate) enum Role {
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.pid == other.pid
-            && self.configuration_id == other.configuration_id
-            && self.ballot_number == other.ballot_number
+        self.pid == other.pid && self.ballot_number == other.ballot_number
     }
 }
 
@@ -62,7 +60,6 @@ impl App {
         let max_pid = *std::cmp::max(max_peer_pid, &config.pid) as usize;
         let mut current_node = Node {
             pid: config.pid,
-            configuration_id: config.configuration_id,
             ballot_number: 0,
             leader: 0,
             ..Default::default()
@@ -85,13 +82,18 @@ impl App {
                 node
             })
             .collect();
+        let active_peers = nodes
+            .iter()
+            .filter(|x| x.pid != config.pid)
+            .cloned()
+            .collect();
         Self {
             current_node,
             current_leader: None,
             leader_color: Default::default(),
             current_role: Role::Follower,
             decided_idx: 0,
-            active_peers: Vec::with_capacity(config.peers.len()),
+            active_peers,
             nodes,
             last_update_time: Instant::now(),
             throughput_data: Vec::with_capacity(THROUGHPUT_DATA_SIZE),
@@ -116,5 +118,4 @@ impl App {
 pub struct UIAppConfig {
     pub(crate) pid: u64,
     pub(crate) peers: Vec<u64>,
-    pub(crate) configuration_id: ConfigurationId,
 }
