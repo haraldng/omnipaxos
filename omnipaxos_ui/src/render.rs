@@ -98,7 +98,7 @@ where
                 // Info
                 Constraint::Length(8),
                 // Table and Logger
-                Constraint::Min(10),
+                Constraint::Min(app.nodes.len() as u16),
             ]
             .as_ref(),
         )

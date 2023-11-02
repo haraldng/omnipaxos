@@ -14,7 +14,6 @@ mod util;
 
 type OmniPaxosLog = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
 
-const SERVERS: [u64; 3] = [1, 2, 3];
 
 /// Here is the main function for the dashboard example. Including the nodes setup, and the main loop.
 /// There will be a dashboard UI showing the status from the view of one node in the terminal, and in
@@ -28,21 +27,21 @@ fn main() {
         .build()
         .unwrap();
 
+    let servers: Vec<u64> = (1..=num_nodes).collect();
     let configuration_id = 1;
     let mut op_server_handles = HashMap::new();
-    let (sender_channels, mut receiver_channels) = initialise_channels(&SERVERS);
-
+    let (sender_channels, mut receiver_channels) = initialise_channels(&servers);
     // set up nodes
-    for pid in 1..=num_nodes {
+    for pid in &servers {
         let server_config = ServerConfig {
-            pid,
+            pid: *pid,
             election_tick_timeout: ELECTION_TICK_TIMEOUT,
             custom_logger: Some(OmniPaxosUI::logger()),
             ..Default::default()
         };
         let cluster_config = ClusterConfig {
             configuration_id,
-            nodes: SERVERS.into(),
+            nodes: servers.clone(),
             ..Default::default()
         };
         let op_config = OmniPaxosConfig {
@@ -51,7 +50,7 @@ fn main() {
         };
         // set up the ui with the same configration as for the OmniPaxos
         let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());
-        if pid == attach_pid {
+        if pid == &attach_pid {
             // start UI for the the node with id equals to majority, which will be the leader later
             omni_paxos_ui.start();
         }
@@ -71,7 +70,7 @@ fn main() {
         });
         op_server_handles.insert(pid, (omni_paxos, join_handle));
     }
-    let not_crash_server_pid = SERVERS.iter().find(|x| **x != crash).unwrap();
+    let not_crash_server_pid = servers.iter().find(|x| **x != crash).unwrap();
     let (server, _handler) = op_server_handles.get(not_crash_server_pid).unwrap();
     // wait for leader to be elected...
     std::thread::sleep(WAIT_LEADER_TIMEOUT);
