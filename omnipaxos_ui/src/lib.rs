@@ -1,4 +1,7 @@
-use crate::app::{App, Role, UIAppConfig};
+//! A library for visualizing [OmniPaxos](https://crates.io/crates/omnipaxos) node in a terminal dashboard.
+
+#![deny(missing_docs)]
+use crate::app::{App, Role};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -10,10 +13,11 @@ use slog::{self, debug, o, Drain};
 use std::{io::stdout, time::Duration};
 use tui_logger::*;
 
-pub mod app;
+mod app;
 mod render;
 mod util;
 
+/// The UI for OmniPaxos. Holds the terminal dashboard and the state used to visualize it.
 pub struct OmniPaxosUI {
     app: App,
     terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -21,6 +25,7 @@ pub struct OmniPaxosUI {
 }
 
 impl OmniPaxosUI {
+    /// Create a new OmniPaxosUI instance with the given configuration.
     pub fn with(config: UIAppConfig) -> Self {
         // Configure Crossterm backend for tui
         let stdout = stdout();
@@ -33,7 +38,7 @@ impl OmniPaxosUI {
         }
     }
 
-    /// Get the logger for logging into UI, need to be used with slog configration.
+    /// Get the logger for logging into UI, need to be used with slog.
     pub fn logger() -> slog::Logger {
         let drain = slog_drain().fuse();
         slog::Logger::root(drain, o!())
@@ -69,6 +74,7 @@ impl OmniPaxosUI {
         }
     }
 
+    /// Returns if the dashboard is started.
     pub fn is_started(&self) -> bool {
         self.started
     }
@@ -155,7 +161,7 @@ impl OmniPaxosUI {
         };
     }
 
-    /// Update the UI if started, with the latest states from the OmniPaxos instance.
+    /// If the UI is started, update and re-render with the latest states from the OmniPaxos instance.
     pub fn tick(&mut self, op_states: OmniPaxosStates) {
         if self.started {
             let ballot = op_states.current_ballot;
@@ -167,4 +173,10 @@ impl OmniPaxosUI {
             self.update_ui();
         }
     }
+}
+
+/// Configuration for the UI.
+pub struct UIAppConfig {
+    pub(crate) pid: u64,
+    pub(crate) peers: Vec<u64>,
 }

@@ -14,7 +14,6 @@ mod util;
 
 type OmniPaxosLog = OmniPaxos<LogEntry, MemoryStorage<LogEntry>>;
 
-
 /// Here is the main function for the dashboard example. Including the nodes setup, and the main loop.
 /// There will be a dashboard UI showing the status from the view of one node in the terminal, and in
 /// each loop, some batched log entries will be appended to the leader, then the leader will be killed.
@@ -60,7 +59,7 @@ fn main() {
         let mut op_server = OmniPaxosServer {
             omni_paxos_ui,
             omni_paxos: Arc::clone(&omni_paxos),
-            incoming: receiver_channels.remove(&pid).unwrap(),
+            incoming: receiver_channels.remove(pid).unwrap(),
             outgoing: sender_channels.clone(),
         };
         let join_handle = runtime.spawn({

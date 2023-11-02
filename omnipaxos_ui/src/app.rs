@@ -1,4 +1,4 @@
-use crate::util::defaults::*;
+use crate::{util::defaults::*, UIAppConfig};
 use omnipaxos::util::NodeId;
 use ratatui::style::Color;
 use std::time::Instant;
@@ -113,9 +113,4 @@ impl App {
         self.last_update_time = Instant::now();
         self.decided_idx = decided_idx;
     }
-}
-
-pub struct UIAppConfig {
-    pub(crate) pid: u64,
-    pub(crate) peers: Vec<u64>,
 }

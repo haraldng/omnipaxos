@@ -1,4 +1,4 @@
-use crate::app::{Node, UIAppConfig};
+use crate::{app::Node, UIAppConfig};
 use omnipaxos::{ballot_leader_election::Ballot, OmniPaxosConfig};
 
 pub(crate) mod defaults {
