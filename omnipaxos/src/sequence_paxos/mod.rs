@@ -110,11 +110,7 @@ where
                 }
             },
         };
-        // TODO: technically don't need to batch write here
-        paxos
-            .internal_storage
-            .set_promise(leader)
-            .expect("storage error while trying to write promise");
+        paxos.internal_storage.set_promise(leader).expect(WRITE_ERROR_MSG);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -220,6 +216,7 @@ where
         // try trimming and snapshotting forwarded compaction. Errors are ignored as that the data will still be kept.
         match c {
             Compaction::Trim(idx) => {
+                // TODO: shouldn't this use self.trim for the checks?
                 let _ = self.internal_storage.try_trim(idx);
             }
             Compaction::Snapshot(idx) => {
@@ -232,72 +229,9 @@ where
     /// has been sent but not been received. If so resends them. Note: We can't detect if a
     /// StopSign's Decide message has been received so we always resend to be safe.
     pub(crate) fn resend_message_timeout(&mut self) {
-        match &self.state {
-            (Role::Leader, Phase::Prepare) => {
-                // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
-                for peer in preparable_peers {
-                    self.send_prepare(peer);
-                }
-            }
-            (Role::Leader, Phase::Accept) => {
-                // Resend AcceptStopSign or StopSign's decide
-                if let Some(ss) = self.internal_storage.get_stopsign() {
-                    let decided_idx = self.internal_storage.get_decided_idx();
-                    for follower in self.leader_state.get_promised_followers() {
-                        if self.internal_storage.stopsign_is_decided() {
-                            self.send_decide(follower, decided_idx, true);
-                        } else if self.leader_state.get_accepted_idx(follower)
-                            != self.internal_storage.get_accepted_idx()
-                        {
-                            self.send_accept_stopsign(follower, ss.clone(), true);
-                        }
-                    }
-                }
-                // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
-                for peer in preparable_peers {
-                    self.send_prepare(peer);
-                }
-            }
-            (Role::Follower, Phase::Prepare) => {
-                // Resend Promise
-                match &self.cached_promise_message {
-                    Some(promise) => {
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: promise.n.pid,
-                            msg: PaxosMsg::Promise(promise.clone()),
-                        });
-                    }
-                    None => {
-                        // Shouldn't be possible to be in prepare phase without having
-                        // cached the promise sent as a response to the prepare
-                        #[cfg(feature = "logging")]
-                        warn!(self.logger, "In Prepare phase without a cached promise!");
-                        self.state = (Role::Follower, Phase::Recover);
-                        self.send_preparereq_to_all_peers();
-                    }
-                }
-            }
-            (Role::Follower, Phase::Recover) => {
-                // Resend PrepareReq
-                self.send_preparereq_to_all_peers();
-            }
-            _ => (),
-        }
-    }
-
-    fn send_preparereq_to_all_peers(&mut self) {
-        let prepreq = PrepareReq {
-            n: self.get_promise(),
-        };
-        for peer in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *peer,
-                msg: PaxosMsg::PrepareReq(prepreq),
-            });
+        match self.state.0 {
+            Role::Leader => self.resend_messages_leader(),
+            Role::Follower => self.resend_messages_follower(),
         }
     }
 
@@ -331,6 +265,7 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
+            // TODO: do we need this message type
             #[cfg(feature = "unicache")]
             PaxosMsg::EncodedAcceptDecide(acc) => {
                 let entries = self.internal_storage.decode_entries(acc.entries);
@@ -380,40 +315,11 @@ where
         );
         let ss = StopSign::with(new_config, metadata);
         match self.state {
-            (Role::Leader, Phase::Prepare) => {
-                self.pending_stopsign = Some(ss);
-            }
-            (Role::Leader, Phase::Accept) => {
-                self.internal_storage.batch_set_stopsign(Some(ss.clone()));
-                let accepted_idx = self
-                    .internal_storage
-                    .flush_write_batch()
-                    .expect(WRITE_ERROR_MSG);
-                self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-                for pid in self.leader_state.get_promised_followers() {
-                    self.send_accept_stopsign(pid, ss.clone(), false);
-                }
-            }
+            (Role::Leader, Phase::Prepare) => self.pending_stopsign = Some(ss),
+            (Role::Leader, Phase::Accept) => self.accept_stopsign_leader(ss),
             _ => self.forward_stopsign(ss),
         }
         Ok(())
-    }
-
-    fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign, resend: bool) {
-        let seq_num = match resend {
-            true => self.leader_state.get_seq_num(to),
-            false => self.leader_state.next_seq_num(to),
-        };
-        let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
-            seq_num,
-            n: self.leader_state.n_leader,
-            ss,
-        });
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: acc_ss,
-        });
     }
 
     fn get_current_leader(&self) -> NodeId {

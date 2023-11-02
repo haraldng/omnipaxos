@@ -457,3 +457,13 @@ impl Quorum {
         }
     }
 }
+
+/// TODO: docs
+pub(crate) struct AcceptedMetaData<T: Entry> {
+    pub accepted_idx: usize,
+    #[cfg(not(feature = "unicache"))]
+    pub entries: Vec<T>,
+    #[cfg(feature = "unicache")]
+    pub entries: Vec<T::Encoded>,
+}
+

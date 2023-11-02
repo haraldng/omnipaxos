@@ -3,7 +3,7 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::{
-    storage::{Snapshot, SnapshotType},
+    storage::{Snapshot, SnapshotType, InternalStorageTxn},
     util::{MessageStatus, WRITE_ERROR_MSG},
 };
 
@@ -17,37 +17,16 @@ where
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
             // Flush any pending writes
-            self.internal_storage.batch_set_promise(prep.n);
             self.internal_storage
-                .flush_write_batch()
+                .flush_batch()
                 .expect(WRITE_ERROR_MSG);
+            self.internal_storage.set_promise(prep.n).expect(WRITE_ERROR_MSG);
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_accepted_idx();
             let decided_idx = self.get_decided_idx();
             let stopsign = self.internal_storage.get_stopsign();
-
-            // TODO: remove
-            if na > prep.n_accepted {
-                // Possible split-brain => only trust their decided entries
-                //( Snap[prep.dec_idx..dec_idx], AppendOnPrefix(dec_idx, [dec_idx..]) )
-                // @@@If no snap ( None,            AppendOnPrefix(prep.dec_idx, [prep.dec_idx..]) )
-            } else if na == prep.n_accepted {
-                // The preparer last added entries from the same leader as me, so no split brain =>
-                // whoever has more entries is more up to date
-                if decided_idx > prep.accepted_idx {
-                    //( Snap[prep.dec_idx..dec_idx], AppendOnPrefix(dec_idx, [dec_idx..]) )
-                } else if accepted_idx > prep.accepted_idx {
-                    // ( None, Append([prep.accepted_idx..])
-                } else {
-                    // ( None, Append([]))
-                }
-            } else {
-                // My entries are potentially stale so their entries take presidence
-                // ( None, Append([]) )
-            }
-
             let (decided_snapshot, suffix) = if na > prep.n_accepted {
                 // I'm more up to date and possible split-brain => append onto preparer's decided entries.
                 let ld = prep.decided_idx;
@@ -112,30 +91,28 @@ where
 
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
-            self.internal_storage.batch_set_accepted_round(accsync.n);
-            self.internal_storage
-                .batch_set_decided_idx(accsync.decided_idx);
+            let txn = InternalStorageTxn::new();
+            txn.set_accepted_round(accsync.n);
+            txn.set_decided_idx(accsync.decided_idx);
             if let Some(snap) = accsync.decided_snapshot {
                 match snap {
-                    SnapshotType::Complete(c) => self
-                        .internal_storage
-                        .batch_set_snapshot(accsync.sync_idx, c),
-                    SnapshotType::Delta(d) => self
-                        .internal_storage
-                        .batch_merge_snapshot(accsync.sync_idx, d)
-                        .expect("Error reading from storage."),
+                    SnapshotType::Complete(c) => txn.set_snapshot(accsync.sync_idx, c),
+                    SnapshotType::Delta(d) => {
+                        let decided_snap = self.internal_storage.create_merged_snapshot(accsync.sync_idx, d)
+                        .expect("Error reading from storage.");
+                        txn.set_snapshot(accsync.sync_idx, decided_snap);
+                    }
                 };
             }
-            self.internal_storage
-                .batch_append_on_prefix(accsync.sync_idx, accsync.suffix);
+            txn.append_on_prefix(accsync.sync_idx, accsync.suffix);
             match accsync.stopsign {
-                Some(ss) => self.internal_storage.batch_set_stopsign(Some(ss)),
+                Some(ss) => txn.set_stopsign(Some(ss)),
                 None => self.forward_pending_proposals(),
             }
             // Commit write and reply
             let accepted_idx = self
                 .internal_storage
-                .flush_write_batch()
+                .execute_txn(txn)
                 .expect(WRITE_ERROR_MSG);
             let accepted = Accepted {
                 n: accsync.n,
@@ -174,16 +151,15 @@ where
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(seq_num, n.pid) == MessageStatus::Expected
         {
-            let entry_cache_full = self.internal_storage.batch_append_entries(entries);
+            let mut new_accepted_idx = self.internal_storage.append_entries_and_get_accepted_idx(entries).expect(WRITE_ERROR_MSG);
             if decided_idx > self.internal_storage.get_decided_idx() {
-                self.internal_storage.batch_set_decided_idx(decided_idx);
+                self.internal_storage.set_decided_idx(decided_idx).expect(WRITE_ERROR_MSG);
+                if decided_idx > self.internal_storage.get_accepted_idx() {
+                    new_accepted_idx = Some(self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG));
+                }
             }
-            if entry_cache_full {
-                let new_accepted_idx = self
-                    .internal_storage
-                    .flush_write_batch()
-                    .expect(WRITE_ERROR_MSG);
-                self.handle_flushed_accepted(n, new_accepted_idx);
+            if let Some(idx) = new_accepted_idx {
+                self.handle_flushed_accepted(n, idx);
             }
         }
     }
@@ -193,12 +169,9 @@ where
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
-            self.internal_storage.batch_set_stopsign(Some(acc_ss.ss));
-            let accepted_idx = self
-                .internal_storage
-                .flush_write_batch()
-                .expect(WRITE_ERROR_MSG);
-            self.handle_flushed_accepted(acc_ss.n, accepted_idx);
+            self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
+            let new_accepted_idx = self.internal_storage.set_stopsign(Some(acc_ss.ss)).expect(WRITE_ERROR_MSG);
+            self.handle_flushed_accepted(acc_ss.n, new_accepted_idx);
         }
     }
 
@@ -207,17 +180,11 @@ where
             && self.state.1 == Phase::Accept
             && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
-            self.internal_storage.batch_set_decided_idx(dec.decided_idx);
-            // TODO: Don't need to do this, but then tests break when they wait on decided entries
-            // Flush any pending entries
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            let new_accepted_idx = self
-                .internal_storage
-                .flush_write_batch()
-                .expect(WRITE_ERROR_MSG);
-            if new_accepted_idx > accepted_idx {
+            if dec.decided_idx > self.internal_storage.get_accepted_idx() {
+                let new_accepted_idx = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
                 self.handle_flushed_accepted(dec.n, new_accepted_idx);
             }
+            self.internal_storage.set_decided_idx(dec.decided_idx).expect(WRITE_ERROR_MSG);
         }
     }
 
@@ -286,5 +253,49 @@ where
             MessageStatus::Outdated => (),
         };
         msg_status
+    }
+
+    pub(crate) fn resend_messages_follower(&mut self) {
+        match self.state.1 {
+            Phase::Prepare => {
+                // Resend Promise
+                match &self.cached_promise_message {
+                    Some(promise) => {
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: promise.n.pid,
+                            msg: PaxosMsg::Promise(promise.clone()),
+                        });
+                    }
+                    None => {
+                        // Shouldn't be possible to be in prepare phase without having
+                        // cached the promise sent as a response to the prepare
+                        #[cfg(feature = "logging")]
+                        warn!(self.logger, "In Prepare phase without a cached promise!");
+                        self.state = (Role::Follower, Phase::Recover);
+                        self.send_preparereq_to_all_peers();
+                    }
+                }
+            }
+            Phase::Recover => {
+                // Resend PrepareReq
+                self.send_preparereq_to_all_peers();
+            }
+            Phase::Accept => (),
+            Phase::None => (),
+        }
+    }
+
+    fn send_preparereq_to_all_peers(&mut self) {
+        let prepreq = PrepareReq {
+            n: self.get_promise(),
+        };
+        for peer in &self.peers {
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: *peer,
+                msg: PaxosMsg::PrepareReq(prepreq),
+            });
+        }
     }
 }

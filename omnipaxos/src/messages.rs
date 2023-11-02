@@ -102,26 +102,29 @@ pub mod sequence_paxos {
         /// The decided index.
         pub decided_idx: usize,
         /// Entries to be replicated.
+        #[cfg(not(features = "unicache"))]
         pub entries: Vec<T>,
+        #[cfg(feature = "unicache")]
+        pub entries: Vec<T::EncodeResult>,
     }
 
     /// TODO
-    #[derive(Clone, Debug)]
-    #[cfg(feature = "unicache")]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct EncodedAcceptDecide<T>
-    where
-        T: Entry,
-    {
-        /// The current round.
-        pub n: Ballot,
-        /// The sequence number of this message in the leader-to-follower accept sequence
-        pub seq_num: SequenceNumber,
-        /// The decided index.
-        pub decided_idx: usize,
-        /// Entries to be replicated.
-        pub entries: Vec<T::EncodeResult>,
-    }
+    // #[derive(Clone, Debug)]
+    // #[cfg(feature = "unicache")]
+    // #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    // pub struct EncodedAcceptDecide<T>
+    // where
+    //     T: Entry,
+    // {
+    //     /// The current round.
+    //     pub n: Ballot,
+    //     /// The sequence number of this message in the leader-to-follower accept sequence
+    //     pub seq_num: SequenceNumber,
+    //     /// The decided index.
+    //     pub decided_idx: usize,
+    //     /// Entries to be replicated.
+    //     pub entries: Vec<T::EncodeResult>,
+    // }
 
     /// Message sent by follower to leader when entries has been accepted.
     #[derive(Copy, Clone, Debug)]
@@ -198,8 +201,8 @@ pub mod sequence_paxos {
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         ForwardStopSign(StopSign),
-        #[cfg(feature = "unicache")]
-        EncodedAcceptDecide(EncodedAcceptDecide<T>),
+        // #[cfg(feature = "unicache")]
+        // EncodedAcceptDecide(AcceptDecide<T>),
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.
