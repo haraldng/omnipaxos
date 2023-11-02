@@ -153,10 +153,10 @@ where
         {
             let mut new_accepted_idx = self.internal_storage.append_entries_and_get_accepted_idx(entries).expect(WRITE_ERROR_MSG);
             if decided_idx > self.internal_storage.get_decided_idx() {
-                self.internal_storage.set_decided_idx(decided_idx).expect(WRITE_ERROR_MSG);
                 if decided_idx > self.internal_storage.get_accepted_idx() {
                     new_accepted_idx = Some(self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG));
                 }
+                self.internal_storage.set_decided_idx(decided_idx).expect(WRITE_ERROR_MSG);
             }
             if let Some(idx) = new_accepted_idx {
                 self.handle_flushed_accepted(n, idx);
