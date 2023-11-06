@@ -1,4 +1,7 @@
 #[cfg(feature = "unicache")]
+/// LFU cache implementation based on the [lfu](https://crates.io/crates/lfu) crate. It has been modified to to support the required operations for UniCache in OmniPaxos.
+pub(crate) mod lfu;
+#[cfg(feature = "unicache")]
 /// UniCache with LFU eviction policy
 pub mod lfu_cache;
 #[cfg(feature = "unicache")]

@@ -8,6 +8,12 @@ use ratatui::{
 };
 use tui_logger::{TuiLoggerLevelOutput, TuiLoggerWidget, TuiWidgetState};
 
+const PID: &str = "PID";
+const BALLOT: &str = "Ballot";
+const LEADER: &str = "Leader";
+const CONNECTED: &str = "Connected";
+const ACCEPTED_IDX: &str = "Accepted idx";
+
 /// Render ui components
 pub(crate) fn render<B>(f: &mut Frame<B>, app: &App)
 where
@@ -92,7 +98,7 @@ where
                 // Info
                 Constraint::Length(8),
                 // Table and Logger
-                Constraint::Min(10),
+                Constraint::Min(app.nodes.len() as u16),
             ]
             .as_ref(),
         )
@@ -122,7 +128,7 @@ where
     // Table and Progress bar
     let table_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(20)].as_ref())
+        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
         .split(body_chunks[1]);
     // Table
     let table = draw_leader_table(app, Borders::TOP | Borders::LEFT | Borders::BOTTOM);
@@ -213,13 +219,6 @@ where
         ));
     });
     let nodes = Line::from(node_spans);
-    lines.push(
-        format!(
-            "\nConfiguration ID: {:?}",
-            app.current_node.configuration_id
-        )
-        .into(),
-    );
     lines.push(nodes);
     let cluster_info_text = Paragraph::new(lines)
         .style(Style::default().fg(Color::LightCyan))
@@ -245,10 +244,10 @@ where
     // cluster info
     draw_cluster_info(f, app, chunks[0]);
     // node info
-    let mut node_info = "".to_string();
-    node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
-    node_info.push_str(&format!("\nRole: {:?}", app.current_role));
-    node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
+    let node_info = format!(
+        "\nNode Id: {:?}\nRole: {:?}\nBallot: {:?}\nDecided idx: {:?}",
+        app.current_node.pid, app.current_role, app.current_node.ballot_number, app.decided_idx
+    );
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -273,16 +272,14 @@ where
 
     // cluster info
     draw_cluster_info(f, app, chunks[0]);
-
-    // node info
-    let mut node_info = "".to_string();
-    node_info.push_str(&format!("\nNode Id: {:?}", app.current_node.pid));
-    node_info.push_str(&format!("\nRole: {:?}", app.current_role));
-    node_info.push_str(&format!(
-        "\nAccepted idx: {:?}",
-        app.followers_accepted_idx[app.current_node.pid as usize]
-    ));
-    node_info.push_str(&format!("\nDecided idx: {:?}", app.decided_idx));
+    let node_info = format!(
+        "\nNode Id: {:?}\nRole: {:?}\nBallot: {:?}\nDecided idx: {:?}\nAccepted idx: {:?}",
+        app.current_node.pid,
+        app.current_role,
+        app.current_node.ballot_number,
+        app.decided_idx,
+        app.followers_accepted_idx[app.current_node.pid as usize],
+    );
     let node_info_text = Paragraph::new(node_info)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
@@ -329,7 +326,7 @@ fn draw_logging<'a>() -> TuiLoggerWidget<'a> {
 }
 
 fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
-    let header_cells = ["PID", "Ballot number", "Leader"]
+    let header_cells = [PID, CONNECTED, BALLOT, LEADER]
         .iter()
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
@@ -343,9 +340,15 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         );
     let rows = app.active_peers.iter().map(|peer| {
         let mut cells = Vec::with_capacity(number_of_columns);
-        cells.push(Cell::from(peer.pid.to_string()));
-        cells.push(Cell::from(peer.ballot_number.to_string()));
-        cells.push(Cell::from(peer.leader.to_string()));
+        cells.push(Cell::from(Span::styled(
+            format!(" {:?} ", peer.pid),
+            Style::default().fg(Color::White).bg(peer.color),
+        )));
+        cells.push(get_connected_symbol(peer.connected).into());
+        let (ballot, leader) =
+            get_ballot_and_leader_string(peer.connected, peer.ballot_number, peer.leader);
+        cells.push(Cell::from(ballot));
+        cells.push(Cell::from(leader));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
             .bottom_margin(UI_TABLE_ROW_MARGIN)
@@ -355,9 +358,10 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         .block(Block::default().borders(borders).title(UI_TABLE_TITLE))
         .widths({
             let widths = &[
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
-                Constraint::Percentage(40),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
             ];
             assert_eq!(widths.len(), number_of_columns);
             widths
@@ -365,8 +369,24 @@ fn draw_follower_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         .style(Style::default().fg(Color::White))
 }
 
+fn get_connected_symbol(connected: bool) -> String {
+    if connected {
+        '\u{2705}'.to_string()
+    } else {
+        '\u{274C}'.to_string()
+    }
+}
+
+fn get_ballot_and_leader_string(connected: bool, ballot: u32, leader: u64) -> (String, String) {
+    if connected {
+        (ballot.to_string(), leader.to_string())
+    } else {
+        ('\u{2753}'.to_string(), '\u{2753}'.to_string())
+    }
+}
+
 fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
-    let header_cells = ["PID", "Ballot number", "Accepted index", "Leader"]
+    let header_cells = [PID, CONNECTED, BALLOT, LEADER, ACCEPTED_IDX]
         .iter()
         .map(|h| Cell::from(*h));
     let number_of_columns = header_cells.len();
@@ -380,12 +400,18 @@ fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         );
     let rows = app.active_peers.iter().map(|peer| {
         let mut cells = Vec::with_capacity(number_of_columns);
-        cells.push(Cell::from(peer.pid.to_string()));
-        cells.push(Cell::from(peer.ballot_number.to_string()));
+        cells.push(Cell::from(Span::styled(
+            format!(" {:?} ", peer.pid),
+            Style::default().fg(Color::White).bg(peer.color),
+        )));
+        cells.push(get_connected_symbol(peer.connected).into());
+        let (ballot, leader) =
+            get_ballot_and_leader_string(peer.connected, peer.ballot_number, peer.leader);
+        cells.push(Cell::from(ballot));
+        cells.push(Cell::from(leader));
         cells.push(Cell::from(
             app.followers_accepted_idx[peer.pid as usize].to_string(),
         ));
-        cells.push(Cell::from(peer.leader.to_string()));
         Row::new(cells)
             .height(UI_TABLE_CONTENT_HEIGHT)
             .bottom_margin(UI_TABLE_ROW_MARGIN)
@@ -395,10 +421,11 @@ fn draw_leader_table<'a>(app: &App, borders: Borders) -> Table<'a> {
         .block(Block::default().borders(borders).title(UI_TABLE_TITLE))
         .widths({
             let widths = &[
-                Constraint::Percentage(10),
-                Constraint::Percentage(25),
+                Constraint::Percentage(17),
+                Constraint::Percentage(17),
+                Constraint::Percentage(17),
+                Constraint::Percentage(17),
                 Constraint::Percentage(32),
-                Constraint::Percentage(25),
             ];
             assert_eq!(widths.len(), number_of_columns);
             widths

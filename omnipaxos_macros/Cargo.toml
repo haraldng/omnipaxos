@@ -1,6 +1,6 @@
 [package]
 name = "omnipaxos_macros"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Harald Ng <hng@kth.se>"]
 edition = "2021"
 description = "Macros for OmniPaxos."

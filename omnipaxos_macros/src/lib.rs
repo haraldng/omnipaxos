@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, Ident};
 
-/// Derive macro for declaring an OmniPaxos log entry type.
+/// Derive macro for declaring an [OmniPaxos](https://crates.io/crates/omnipaxos) log entry type.
 ///
 /// ## Usage
 ///

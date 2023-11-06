@@ -323,9 +323,11 @@ where
             std::cmp::Ordering::Greater => {
                 let not_acc = NotAccepted { n: my_promise };
                 #[cfg(feature = "logging")]
-                warn!(
+                trace!(
                     self.logger,
-                    "NotAccepted. My promise: {:?}, theirs: {:?}", my_promise, message_ballot
+                    "NotAccepted. My promise: {:?}, theirs: {:?}",
+                    my_promise,
+                    message_ballot
                 );
                 self.outgoing.push(PaxosMessage {
                     from: self.pid,

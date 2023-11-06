@@ -1,4 +1,4 @@
-//! A library of storage implementations for SequencePaxos
+//! A library of storage implementations for [OmniPaxos](https://crates.io/crates/omnipaxos)
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![deny(missing_docs)]

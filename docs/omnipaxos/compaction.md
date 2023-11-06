@@ -64,20 +64,16 @@ The ``create()`` function tells `OmniPaxos` how to create a snapshot given a sli
 
 With ``KVSnapshot``, we would have instead implemented our [`KeyValue`](../omnipaxos) that we defined earlier like this:
 ```rust
-use omnipaxos::storage::Entry;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Entry)]
+#[snapshot(KVSnapshot)]
 pub struct KeyValue {
     pub key: String,
     pub value: u64,
 }
-
-impl Entry for KeyValue {
-    type Snapshot = KVSnapshot;
-}
 ```
 
-> **Note:** If you do not wish to use snapshots, then simply derive the blanket implementation for `Entry` using the macro we showed [here](../omnipaxos)
+> **Note:** If you do not wish to use snapshots, then simply derive the blanket implementation for `Entry` without the `#[snapshot]` attribute.
 
 We can now create snapshots and read snapshots from `OmniPaxos`. Furthermore, snapshotting allows us to either just do the snapshot locally or request all nodes in the cluster to do it with the boolean parameter `local_only`.
 ```rust

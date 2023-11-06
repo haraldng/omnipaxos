@@ -1,7 +1,13 @@
 [package]
 name = "omnipaxos_ui"
 version = "0.1.0"
+authors = ["Harald Ng <hng@kth.se>", "Tim Han <xinlong@kth.se>"]
 edition = "2021"
+description = "Dashboard for OmniPaxos."
+readme = "README.md"
+license = "Apache-2.0"
+repository = "https://github.com/haraldng/omnipaxos"
+homepage = "https://omnipaxos.com/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,5 +16,5 @@ log = { version = "0.4.20"}
 slog = { version = "2.7.0"}
 crossterm = { version = "0.26.1" }
 ratatui = { version = "0.23.0" }
-tui-logger  = { version = "0.9.6", default-features = false,features = ["slog-support", "ratatui-support"] }
-omnipaxos = { path = "../omnipaxos", features = ["logging"]}
+tui-logger  = { version = "0.9.6", default-features = false, features = ["slog-support", "ratatui-support"] }
+omnipaxos = { version = "0.2.2", path = "../omnipaxos", features = ["logging"]}
