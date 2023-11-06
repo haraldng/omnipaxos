@@ -286,13 +286,7 @@ impl BallotLeaderElection {
     fn handle_reply(&mut self, rep: HeartbeatReply) {
         if rep.round == self.hb_round && rep.ballot.config_id == self.configuration_id {
             self.heartbeat_replies.push(rep);
-        } /*else {
-              #[cfg(feature = "logging")]
-              warn!(
-                  self.logger,
-                  "Got late response, round {}, ballot {:?}", self.hb_round, rep.ballot
-              );
-          }*/
+        }
     }
 
     pub(crate) fn get_current_ballot(&self) -> Ballot {

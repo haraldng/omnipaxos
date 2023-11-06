@@ -1,4 +1,6 @@
-OmniPaxos provides an in-terminal dashboard that can be connected to one of the OmniPaxos nodes. The dashboard displays the performance, the connectivity, and who is the current leader in the cluster.
+OmniPaxos provides an in-terminal dashboard that can be connected to the OmniPaxos nodes. The dashboard displays the performance, the connectivity, and who is the current leader in the cluster.
+
+![dashboard](../images/dashboard.png)
 
 ## Usage
 To use the dashboard, import the `omnipaxos_ui` dependency:
@@ -8,7 +10,7 @@ To use the dashboard, import the `omnipaxos_ui` dependency:
 omnipaxos_ui = "LATEST_VERSION"
 ```
 
-We need to setup the dashboard using the same `OmniPaxosConfig` that was used to set up OmniPaxos (example [here](../omnipaxos)) and then call the public function `start()` to start showing the UI.
+We need to setup the dashboard using the same `OmniPaxosConfig` that was used to set up OmniPaxos (example [here](../omnipaxos)) and then call the public function `start()` to start showing the UI in the terminal.
 
 ```rust
 // op_config: OmniPaxosConfig
@@ -25,6 +27,6 @@ let ui_states = omni_paxos.get_ui_states();
 omni_paxos_ui.tick(ui_states);
 ```
 
-The dashboard has different views depending on if it is connected to the leader or follower server. The leader's dashboard has more information such as the replication lag of the followers, as shown below:
+The dashboard has different views depending on if it is connected to the leader or follower server. The leader's dashboard has more information such as the replication lag of the followers. 
 
-![dashboard](../images/dashboard.png)
+> :tv: To see the dashboard in action, check out our demo on [YouTube](https://youtu.be/Jq0M39MCnK4).
