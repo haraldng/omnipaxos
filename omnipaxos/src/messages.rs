@@ -50,15 +50,29 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The latest round in which an entry was accepted.
         pub n_accepted: Ballot,
-        /// The decided snapshot.
-        pub decided_snapshot: Option<SnapshotType<T>>,
-        /// The log suffix.
-        pub suffix: Vec<T>,
         /// The decided index of this follower.
         pub decided_idx: usize,
         /// The log length of this follower.
         pub accepted_idx: usize,
-        /// The StopSign accepted by this follower
+        /// The log update which the leader applies to its log in order to sync
+        /// with this follower (if the follower is more up-to-date).
+        pub log_sync: Option<LogSync<T>>,
+    }
+
+    /// An update that a replica applies to its log in order to sync with another replica's log.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct LogSync<T>
+    where
+        T: Entry,
+    {
+        /// The decided snapshot.
+        pub decided_snapshot: Option<SnapshotType<T>>,
+        /// The log suffix.
+        pub suffix: Vec<T>,
+        /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists).
+        pub sync_idx: usize,
+        /// The accepted StopSign.
         pub stopsign: Option<StopSign>,
     }
 
@@ -73,16 +87,11 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
-        /// The decided snapshot.
-        pub decided_snapshot: Option<SnapshotType<T>>,
-        /// The log suffix.
-        pub suffix: Vec<T>,
-        /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists)
-        pub sync_idx: usize,
         /// The decided index
         pub decided_idx: usize,
-        /// StopSign to be accepted
-        pub stopsign: Option<StopSign>,
+        /// The log update which the follower applies to its log in order to sync
+        /// with the leader.
+        pub log_sync: LogSync<T>,
         #[cfg(feature = "unicache")]
         /// The UniCache of the leader
         pub unicache: T::UniCache,
@@ -101,30 +110,13 @@ pub mod sequence_paxos {
         pub seq_num: SequenceNumber,
         /// The decided index.
         pub decided_idx: usize,
+        #[cfg(not(feature = "unicache"))]
         /// Entries to be replicated.
-        #[cfg(not(features = "unicache"))]
         pub entries: Vec<T>,
         #[cfg(feature = "unicache")]
+        /// Entries to be replicated.
         pub entries: Vec<T::EncodeResult>,
     }
-
-    /// TODO
-    // #[derive(Clone, Debug)]
-    // #[cfg(feature = "unicache")]
-    // #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    // pub struct EncodedAcceptDecide<T>
-    // where
-    //     T: Entry,
-    // {
-    //     /// The current round.
-    //     pub n: Ballot,
-    //     /// The sequence number of this message in the leader-to-follower accept sequence
-    //     pub seq_num: SequenceNumber,
-    //     /// The decided index.
-    //     pub decided_idx: usize,
-    //     /// Entries to be replicated.
-    //     pub entries: Vec<T::EncodeResult>,
-    // }
 
     /// Message sent by follower to leader when entries has been accepted.
     #[derive(Copy, Clone, Debug)]

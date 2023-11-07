@@ -1,10 +1,10 @@
 use super::super::{
     ballot_leader_election::Ballot,
-    util::{LeaderState, PromiseData, PromiseMetaData},
+    util::{LeaderState, PromiseMetaData},
 };
 use crate::{
-    storage::{Snapshot, SnapshotType, InternalStorageTxn},
-    util::{WRITE_ERROR_MSG, AcceptedMetaData},
+    storage::Snapshot,
+    util::{AcceptedMetaData, WRITE_ERROR_MSG},
 };
 
 use super::*;
@@ -36,11 +36,9 @@ where
             let my_promise = Promise {
                 n,
                 n_accepted: na,
-                decided_snapshot: None,
                 decided_idx,
                 accepted_idx,
-                suffix: vec![],
-                stopsign: self.internal_storage.get_stopsign(),
+                log_sync: None,
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
@@ -114,23 +112,34 @@ where
     }
 
     pub(crate) fn accept_entry_leader(&mut self, entry: T) {
-        let accepted_metadata = self.internal_storage.append_entry_with_batching(entry).expect(WRITE_ERROR_MSG);
+        let accepted_metadata = self
+            .internal_storage
+            .append_entry_with_batching(entry)
+            .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
-            self.leader_state.set_accepted_idx(self.pid, metadata.accepted_idx);
+            self.leader_state
+                .set_accepted_idx(self.pid, metadata.accepted_idx);
             self.send_acceptdecide(metadata);
         }
     }
 
     pub(crate) fn accept_entries_leader(&mut self, entries: Vec<T>) {
-        let accepted_metadata = self.internal_storage.append_entries_with_batching(entries).expect(WRITE_ERROR_MSG);
+        let accepted_metadata = self
+            .internal_storage
+            .append_entries_with_batching(entries)
+            .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
-            self.leader_state.set_accepted_idx(self.pid, metadata.accepted_idx);
+            self.leader_state
+                .set_accepted_idx(self.pid, metadata.accepted_idx);
             self.send_acceptdecide(metadata);
         }
     }
 
     pub(crate) fn accept_stopsign_leader(&mut self, ss: StopSign) {
-        let accepted_metadata = self.internal_storage.append_stopsign(ss.clone()).expect(WRITE_ERROR_MSG);
+        let accepted_metadata = self
+            .internal_storage
+            .append_stopsign(ss.clone())
+            .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
             self.send_acceptdecide(metadata);
         }
@@ -193,11 +202,13 @@ where
         let acc_sync = AcceptSync {
             n: current_n,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_snapshot: delta_snapshot,
-            suffix,
-            sync_idx,
             decided_idx: my_decided_idx,
-            stopsign: self.internal_storage.get_stopsign(),
+            log_sync: LogSync {
+                decided_snapshot: delta_snapshot,
+                suffix,
+                sync_idx,
+                stopsign: self.internal_storage.get_stopsign(),
+            },
             #[cfg(feature = "unicache")]
             unicache: self.internal_storage.get_unicache(),
         };
@@ -283,66 +294,34 @@ where
     }
 
     fn handle_majority_promises(&mut self) {
-        let max_stopsign = self.leader_state.take_max_promise_stopsign();
-        let max_promise = self.leader_state.take_max_promise();
+        let max_promise_sync = self.leader_state.take_max_promise_sync();
         let max_promise_meta = self.leader_state.get_max_promise_meta();
-        let decided_idx = self.leader_state.get_max_decided_idx().unwrap();
-        let old_accepted_round = self.internal_storage.get_accepted_round();
-        let old_decided_idx = self.internal_storage.get_decided_idx();
+        let decided_idx = self.leader_state.get_max_decided_idx();
+        let mut new_accepted_idx = self
+            .internal_storage
+            .sync_log(max_promise_meta.n_accepted, decided_idx, max_promise_sync)
+            .expect(WRITE_ERROR_MSG);
+
+        if self.internal_storage.get_stopsign().is_none() {
+            // Adopt pending proposals
+            if !self.pending_proposals.is_empty() {
+                let pending_entries = std::mem::take(&mut self.pending_proposals);
+                new_accepted_idx = self
+                    .internal_storage
+                    .append_entries_without_batching(pending_entries)
+                    .expect(WRITE_ERROR_MSG);
+            }
+            if let Some(ss) = self.pending_stopsign.take() {
+                self.internal_storage
+                    .append_stopsign(ss)
+                    .expect(WRITE_ERROR_MSG);
+                new_accepted_idx = self.internal_storage.get_accepted_idx();
+            }
+        }
 
         self.state = (Role::Leader, Phase::Accept);
-        let txn = InternalStorageTxn::new();
-        txn.set_accepted_round(self.leader_state.n_leader);
-        txn.set_decided_idx(decided_idx);
-        if let Some(PromiseData {
-            decided_snapshot,
-            suffix,
-        }) = max_promise
-        {
-            match decided_snapshot {
-                Some(snap) => {
-                    let compacted_idx = self
-                        .leader_state
-                        .get_decided_idx(max_promise_meta.pid)
-                        .unwrap();
-                    match snap {
-                        SnapshotType::Complete(c) => txn.set_snapshot(compacted_idx, c),
-                        SnapshotType::Delta(d) => { 
-                            let snap = self
-                            .internal_storage
-                            .create_merged_snapshot(compacted_idx, d)
-                            .expect("Error reading from storage.");
-                            txn.set_snapshot(compacted_idx, snap);
-                        }
-                    };
-                    txn.append_entries(suffix);
-                }
-                // No snapshot, only suffix
-                None => {
-                    if max_promise_meta.n_accepted > old_accepted_round {
-                        txn.append_on_prefix(old_decided_idx, suffix);
-                    } else if !suffix.is_empty() {
-                        txn.append_entries(suffix);
-                    }
-                }
-            }
-        }
-        match max_stopsign {
-            Some(ss) => txn.set_stopsign(Some(ss)),
-            None => {
-                txn.set_stopsign(None);
-                // Adopt pending proposals / stopsign
-                if !self.pending_proposals.is_empty() {
-                    let new_entries = std::mem::take(&mut self.pending_proposals);
-                    txn.append_entries(new_entries);
-                }
-                if let Some(ss) = self.pending_stopsign.take() {
-                    txn.set_stopsign(Some(ss));
-                }
-            }
-        }
-        let accepted_idx = self.internal_storage.execute_txn(txn).expect(WRITE_ERROR_MSG);
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        self.leader_state
+            .set_accepted_idx(self.pid, new_accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
@@ -395,15 +374,15 @@ where
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
-                self.internal_storage.set_decided_idx(decided_idx).expect(WRITE_ERROR_MSG);
+                self.internal_storage
+                    .set_decided_idx(decided_idx)
+                    .expect(WRITE_ERROR_MSG);
                 for pid in self.leader_state.get_promised_followers() {
                     match self.leader_state.get_batch_accept_meta(pid) {
                         Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
                             let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
                             match msg {
                                 PaxosMsg::AcceptDecide(acc) => acc.decided_idx = decided_idx,
-                                #[cfg(feature = "unicache")]
-                                PaxosMsg::EncodedAcceptDecide(e) => e.decided_idx = decided_idx,
                                 _ => panic!("Cached index is not an AcceptDecide!"),
                             }
                         }

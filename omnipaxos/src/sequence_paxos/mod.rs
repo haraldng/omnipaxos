@@ -110,7 +110,10 @@ where
                 }
             },
         };
-        paxos.internal_storage.set_promise(leader).expect(WRITE_ERROR_MSG);
+        paxos
+            .internal_storage
+            .set_promise(leader)
+            .expect(WRITE_ERROR_MSG);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -216,7 +219,6 @@ where
         // try trimming and snapshotting forwarded compaction. Errors are ignored as that the data will still be kept.
         match c {
             Compaction::Trim(idx) => {
-                // TODO: shouldn't this use self.trim for the checks?
                 let _ = self.internal_storage.try_trim(idx);
             }
             Compaction::Snapshot(idx) => {
@@ -255,9 +257,7 @@ where
                 _ => {}
             },
             PaxosMsg::AcceptSync(acc_sync) => self.handle_acceptsync(acc_sync, m.from),
-            PaxosMsg::AcceptDecide(acc) => {
-                self.handle_acceptdecide(acc.n, acc.seq_num, acc.decided_idx, acc.entries)
-            }
+            PaxosMsg::AcceptDecide(acc) => self.handle_acceptdecide(acc),
             PaxosMsg::NotAccepted(not_acc) => self.handle_notaccepted(not_acc, m.from),
             PaxosMsg::Accepted(accepted) => self.handle_accepted(accepted, m.from),
             PaxosMsg::Decide(d) => self.handle_decide(d),
@@ -265,12 +265,6 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
-            // TODO: do we need this message type
-            #[cfg(feature = "unicache")]
-            PaxosMsg::EncodedAcceptDecide(acc) => {
-                let entries = self.internal_storage.decode_entries(acc.entries);
-                self.handle_acceptdecide(acc.n, acc.seq_num, acc.decided_idx, entries);
-            }
         }
     }
 

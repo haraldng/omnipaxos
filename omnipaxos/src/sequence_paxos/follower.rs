@@ -3,8 +3,8 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::{
-    storage::{Snapshot, SnapshotType, InternalStorageTxn},
-    util::{MessageStatus, WRITE_ERROR_MSG},
+    storage::Snapshot,
+    util::{MessageStatus, READ_ERROR_MSG, WRITE_ERROR_MSG},
 };
 
 impl<T, B> SequencePaxos<T, B>
@@ -17,68 +17,82 @@ where
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
             // Flush any pending writes
+            self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
             self.internal_storage
-                .flush_batch()
+                .set_promise(prep.n)
                 .expect(WRITE_ERROR_MSG);
-            self.internal_storage.set_promise(prep.n).expect(WRITE_ERROR_MSG);
             self.state = (Role::Follower, Phase::Prepare);
             self.current_seq_num = SequenceNumber::default();
+
             let na = self.internal_storage.get_accepted_round();
             let accepted_idx = self.internal_storage.get_accepted_idx();
             let decided_idx = self.get_decided_idx();
             let stopsign = self.internal_storage.get_stopsign();
-            let (decided_snapshot, suffix) = if na > prep.n_accepted {
+            let log_sync = if na > prep.n_accepted {
                 // I'm more up to date and possible split-brain => append onto preparer's decided entries.
-                let ld = prep.decided_idx;
-                if ld < decided_idx && T::Snapshot::use_snapshots() {
-                    let (delta_snapshot, _) = self
-                        .internal_storage
-                        .create_diff_snapshot(ld)
-                        .expect("storage error while trying to read diff snapshot");
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(decided_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (delta_snapshot, suffix)
-                } else {
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(ld)
-                        .expect("storage error while trying to read log suffix");
-                    (None, suffix)
-                }
+                let (decided_snapshot, suffix, sync_idx) =
+                    if T::Snapshot::use_snapshots() && decided_idx > prep.decided_idx {
+                        let (delta_snapshot, compacted_idx) = self
+                            .internal_storage
+                            .create_diff_snapshot(prep.decided_idx)
+                            .expect(READ_ERROR_MSG);
+                        let suffix = self
+                            .internal_storage
+                            .get_suffix(decided_idx)
+                            .expect(READ_ERROR_MSG);
+                        (delta_snapshot, suffix, compacted_idx)
+                    } else {
+                        let suffix = self
+                            .internal_storage
+                            .get_suffix(prep.decided_idx)
+                            .expect(READ_ERROR_MSG);
+                        (None, suffix, prep.decided_idx)
+                    };
+                Some(LogSync {
+                    decided_snapshot,
+                    suffix,
+                    sync_idx,
+                    stopsign,
+                })
             } else if na == prep.n_accepted && accepted_idx > prep.accepted_idx {
                 // I'm more up to date and no split-brain possible => append onto preparer's
                 // accepted entries.
-                let compacted_idx = self.internal_storage.get_compacted_idx();
-                if T::Snapshot::use_snapshots() && compacted_idx > prep.accepted_idx {
-                    let (delta_snapshot, _) = self
-                        .internal_storage
-                        .create_diff_snapshot(prep.decided_idx)
-                        .expect("storage error while trying to read diff snapshot");
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(decided_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (delta_snapshot, suffix)
-                } else {
-                    let suffix = self
-                        .internal_storage
-                        .get_suffix(prep.accepted_idx)
-                        .expect("storage error while trying to read log suffix");
-                    (None, suffix)
-                }
+                let (decided_snapshot, suffix, sync_idx) =
+                    if T::Snapshot::use_snapshots() && decided_idx > prep.accepted_idx {
+                        // Note: We snapshot from preparer's decided and not preparer's accepted because
+                        // snapshots currently can't handle merging onto accepted entries.
+                        let (delta_snapshot, compacted_idx) = self
+                            .internal_storage
+                            .create_diff_snapshot(prep.decided_idx)
+                            .expect(READ_ERROR_MSG);
+                        let suffix = self
+                            .internal_storage
+                            .get_suffix(decided_idx)
+                            .expect(READ_ERROR_MSG);
+                        (delta_snapshot, suffix, compacted_idx)
+                    } else {
+                        let suffix = self
+                            .internal_storage
+                            .get_suffix(prep.accepted_idx)
+                            .expect(READ_ERROR_MSG);
+                        (None, suffix, prep.accepted_idx)
+                    };
+                Some(LogSync {
+                    decided_snapshot,
+                    suffix,
+                    sync_idx,
+                    stopsign,
+                })
             } else {
-                (None, vec![])
+                // I'm equally or less up to date
+                None
             };
             let promise = Promise {
                 n: prep.n,
                 n_accepted: na,
-                decided_snapshot,
-                suffix,
                 decided_idx,
                 accepted_idx,
-                stopsign,
+                log_sync,
             };
             self.cached_promise_message = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
@@ -91,32 +105,16 @@ where
 
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
-            let txn = InternalStorageTxn::new();
-            txn.set_accepted_round(accsync.n);
-            txn.set_decided_idx(accsync.decided_idx);
-            if let Some(snap) = accsync.decided_snapshot {
-                match snap {
-                    SnapshotType::Complete(c) => txn.set_snapshot(accsync.sync_idx, c),
-                    SnapshotType::Delta(d) => {
-                        let decided_snap = self.internal_storage.create_merged_snapshot(accsync.sync_idx, d)
-                        .expect("Error reading from storage.");
-                        txn.set_snapshot(accsync.sync_idx, decided_snap);
-                    }
-                };
-            }
-            txn.append_on_prefix(accsync.sync_idx, accsync.suffix);
-            match accsync.stopsign {
-                Some(ss) => txn.set_stopsign(Some(ss)),
-                None => self.forward_pending_proposals(),
-            }
-            // Commit write and reply
-            let accepted_idx = self
+            let new_accepted_idx = self
                 .internal_storage
-                .execute_txn(txn)
+                .sync_log(accsync.n, accsync.decided_idx, Some(accsync.log_sync))
                 .expect(WRITE_ERROR_MSG);
+            if self.internal_storage.get_stopsign().is_none() {
+                self.forward_pending_proposals();
+            }
             let accepted = Accepted {
                 n: accsync.n,
-                accepted_idx,
+                accepted_idx: new_accepted_idx,
             };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
@@ -139,27 +137,30 @@ where
         }
     }
 
-    // TODO: handle UNIcache flag better (need to check ballot before decoding)
-    pub(crate) fn handle_acceptdecide(
-        &mut self,
-        n: Ballot,
-        seq_num: SequenceNumber,
-        decided_idx: usize,
-        entries: Vec<T>,
-    ) {
-        if self.check_valid_ballot(n)
+    pub(crate) fn handle_acceptdecide(&mut self, acc_dec: AcceptDecide<T>) {
+        if self.check_valid_ballot(acc_dec.n)
             && self.state == (Role::Follower, Phase::Accept)
-            && self.handle_sequence_num(seq_num, n.pid) == MessageStatus::Expected
+            && self.handle_sequence_num(acc_dec.seq_num, acc_dec.n.pid) == MessageStatus::Expected
         {
-            let mut new_accepted_idx = self.internal_storage.append_entries_and_get_accepted_idx(entries).expect(WRITE_ERROR_MSG);
-            if decided_idx > self.internal_storage.get_decided_idx() {
-                if decided_idx > self.internal_storage.get_accepted_idx() {
-                    new_accepted_idx = Some(self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG));
+            #[cfg(not(feature = "unicache"))]
+            let entries = acc_dec.entries;
+            #[cfg(feature = "unicache")]
+            let entries = self.internal_storage.decode_entries(acc_dec.entries);
+            let mut new_accepted_idx = self
+                .internal_storage
+                .append_entries_and_get_accepted_idx(entries)
+                .expect(WRITE_ERROR_MSG);
+            if acc_dec.decided_idx > self.internal_storage.get_decided_idx() {
+                if acc_dec.decided_idx > self.internal_storage.get_accepted_idx() {
+                    new_accepted_idx =
+                        Some(self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG));
                 }
-                self.internal_storage.set_decided_idx(decided_idx).expect(WRITE_ERROR_MSG);
+                self.internal_storage
+                    .set_decided_idx(acc_dec.decided_idx)
+                    .expect(WRITE_ERROR_MSG);
             }
             if let Some(idx) = new_accepted_idx {
-                self.handle_flushed_accepted(n, idx);
+                self.handle_flushed_accepted(acc_dec.n, idx);
             }
         }
     }
@@ -170,7 +171,10 @@ where
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
             self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
-            let new_accepted_idx = self.internal_storage.set_stopsign(Some(acc_ss.ss)).expect(WRITE_ERROR_MSG);
+            let new_accepted_idx = self
+                .internal_storage
+                .set_stopsign(Some(acc_ss.ss))
+                .expect(WRITE_ERROR_MSG);
             self.handle_flushed_accepted(acc_ss.n, new_accepted_idx);
         }
     }
@@ -184,7 +188,9 @@ where
                 let new_accepted_idx = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
                 self.handle_flushed_accepted(dec.n, new_accepted_idx);
             }
-            self.internal_storage.set_decided_idx(dec.decided_idx).expect(WRITE_ERROR_MSG);
+            self.internal_storage
+                .set_decided_idx(dec.decided_idx)
+                .expect(WRITE_ERROR_MSG);
         }
     }
 
