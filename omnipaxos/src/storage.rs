@@ -144,7 +144,7 @@ where
     /// Appends the entries of `entries` to the end of the log.
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()>;
 
-    /// Appends the entries of `entries` to the prefix from index `from_index` in the log. 
+    /// Appends the entries of `entries` to the prefix from index `from_index` in the log.
     fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()>;
 
     /// Sets the round that has been promised.

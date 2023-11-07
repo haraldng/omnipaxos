@@ -1,6 +1,6 @@
 use super::{
     ballot_leader_election::Ballot,
-    messages::sequence_paxos::{Promise, LogSync},
+    messages::sequence_paxos::{LogSync, Promise},
     storage::{Entry, StopSign},
 };
 #[cfg(feature = "serde")]

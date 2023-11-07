@@ -903,7 +903,7 @@ pub mod omnireplica {
 }
 
 #[cfg(not(feature = "unicache"))]
-#[derive(Entry, Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(Entry, Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, Debug)]
 #[snapshot(ValueSnapshot)]
 pub struct Value {
     id: u64,
@@ -911,7 +911,7 @@ pub struct Value {
 
 #[cfg(feature = "unicache")]
 #[derive(
-    Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry,
+    Clone, Default, PartialOrd, PartialEq, Serialize, Deserialize, Eq, Hash, UniCacheEntry, Debug,
 )]
 #[snapshot(ValueSnapshot)]
 pub struct Value {

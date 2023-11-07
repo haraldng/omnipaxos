@@ -438,7 +438,10 @@ fn atomic_storage_accept_decide_test() {
         let new_log_len = s.get_log_len().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
         if new_decided_idx > old_decided_idx {
-            assert!(new_log_len > old_log_len,"AcceptDecide operation order didn't ensure safety.");
+            assert!(
+                new_log_len > old_log_len,
+                "AcceptDecide operation order didn't ensure safety."
+            );
         }
     }
     // run the test with injected failures at different points in time
