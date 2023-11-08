@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
-        storage::{Entry, SnapshotType, StopSign},
-        util::{NodeId, SequenceNumber},
+        storage::{Entry, StopSign},
+        util::{LogSync, NodeId, SequenceNumber},
     };
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
@@ -57,23 +57,6 @@ pub mod sequence_paxos {
         /// The log update which the leader applies to its log in order to sync
         /// with this follower (if the follower is more up-to-date).
         pub log_sync: Option<LogSync<T>>,
-    }
-
-    /// An update that a replica applies to its log in order to sync with another replica's log.
-    #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct LogSync<T>
-    where
-        T: Entry,
-    {
-        /// The decided snapshot.
-        pub decided_snapshot: Option<SnapshotType<T>>,
-        /// The log suffix.
-        pub suffix: Vec<T>,
-        /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists).
-        pub sync_idx: usize,
-        /// The accepted StopSign.
-        pub stopsign: Option<StopSign>,
     }
 
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
@@ -193,8 +176,6 @@ pub mod sequence_paxos {
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         ForwardStopSign(StopSign),
-        // #[cfg(feature = "unicache")]
-        // EncodedAcceptDecide(AcceptDecide<T>),
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

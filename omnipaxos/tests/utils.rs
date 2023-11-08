@@ -237,14 +237,17 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn write_batch(&mut self, batch: Vec<omnipaxos::storage::StorageOp<T>>) -> StorageResult<()> {
+    fn perform_ops_atomically(
+        &mut self,
+        batch: Vec<omnipaxos::storage::StorageOp<T>>,
+    ) -> StorageResult<()> {
         match self {
-            StorageType::Persistent(persist_s) => persist_s.write_batch(batch),
-            StorageType::Memory(mem_s) => mem_s.write_batch(batch),
+            StorageType::Persistent(persist_s) => persist_s.perform_ops_atomically(batch),
+            StorageType::Memory(mem_s) => mem_s.perform_ops_atomically(batch),
             StorageType::Broken(mem_s, conf) => {
                 // NOTE: Can't properly test for atomicity since we can't tick between writes in batch.
                 conf.lock().unwrap().tick()?;
-                mem_s.lock().unwrap().write_batch(batch)
+                mem_s.lock().unwrap().perform_ops_atomically(batch)
             }
         }
     }
@@ -817,6 +820,9 @@ pub mod omnireplica {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
                 if self.is_connected_to(&out.get_receiver()) {
+                    if let Message::SequencePaxos(m) = &out {
+                        println!("{m:?}");
+                    }
                     match self.peers.get(&out.get_receiver()) {
                         Some(receiver) => receiver.tell(out),
                         None => warn!(

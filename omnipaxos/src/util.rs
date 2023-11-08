@@ -1,11 +1,28 @@
 use super::{
     ballot_leader_election::Ballot,
-    messages::sequence_paxos::{LogSync, Promise},
-    storage::{Entry, StopSign},
+    messages::sequence_paxos::Promise,
+    storage::{Entry, SnapshotType, StopSign},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+
+/// An update that a replica applies to its log in order to sync with another replica's log.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct LogSync<T>
+where
+    T: Entry,
+{
+    /// The decided snapshot.
+    pub decided_snapshot: Option<SnapshotType<T>>,
+    /// The log suffix.
+    pub suffix: Vec<T>,
+    /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists).
+    pub sync_idx: usize,
+    /// The accepted StopSign.
+    pub stopsign: Option<StopSign>,
+}
 
 #[derive(Debug, Clone, Default)]
 /// Promise without the log update

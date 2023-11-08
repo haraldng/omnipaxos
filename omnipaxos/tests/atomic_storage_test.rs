@@ -21,12 +21,12 @@ use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
-            AcceptDecide, AcceptSync, Compaction, LogSync, PaxosMessage, PaxosMsg, Prepare, Promise,
+            AcceptDecide, AcceptSync, Compaction, PaxosMessage, PaxosMsg, Prepare, Promise,
         },
         Message,
     },
     storage::{Snapshot, SnapshotType, Storage},
-    util::{NodeId, SequenceNumber},
+    util::{LogSync, NodeId, SequenceNumber},
     OmniPaxos, OmniPaxosConfig,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;

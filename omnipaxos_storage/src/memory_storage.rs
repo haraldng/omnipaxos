@@ -30,7 +30,7 @@ impl<T> Storage<T> for MemoryStorage<T>
 where
     T: Entry,
 {
-    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
+    fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
         for op in batch {
             match op {
                 StorageOp::AppendEntry(entry) => self.append_entry(entry)?,

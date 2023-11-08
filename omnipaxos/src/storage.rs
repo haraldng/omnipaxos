@@ -1,11 +1,10 @@
 use super::ballot_leader_election::Ballot;
-use crate::{
-    messages::sequence_paxos::LogSync,
-    util::{AcceptedMetaData, IndexEntry, LogEntry, SnapshottedEntry},
-    ClusterConfig, CompactionErr,
-};
 #[cfg(feature = "unicache")]
 use crate::{unicache::*, util::NodeId};
+use crate::{
+    util::{AcceptedMetaData, IndexEntry, LogEntry, LogSync, SnapshottedEntry},
+    ClusterConfig, CompactionErr,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -134,9 +133,9 @@ pub trait Storage<T>
 where
     T: Entry,
 {
-    /// Atomically perform and persist all write operations in order.
-    /// Returns an Error if the write batch was not committed (so it was rolled back).
-    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()>;
+    /// Atomically perform and persist all storage operations in order.
+    /// Returns an Error if the transaction was not committed (so it was rolled back).
+    fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()>;
 
     /// Appends an entry to the end of the log.
     fn append_entry(&mut self, entry: T) -> StorageResult<()>;
@@ -728,17 +727,23 @@ where
             }
             self.state_cache.accepted_idx = sync.sync_idx + sync.suffix.len();
             sync_txn.push(StorageOp::AppendOnPrefix(sync.sync_idx, sync.suffix));
-            self.state_cache.stopsign = sync.stopsign.clone();
-            if sync.stopsign.is_some() {
-                self.state_cache.accepted_idx += 1;
+            match sync.stopsign {
+                Some(ss) => {
+                    self.state_cache.stopsign = Some(ss.clone());
+                    self.state_cache.accepted_idx += 1;
+                    sync_txn.push(StorageOp::SetStopsign(Some(ss)));
+                }
+                None => {
+                    self.state_cache.stopsign = None;
+                    sync_txn.push(StorageOp::SetStopsign(None));
+                }
             }
-            sync_txn.push(StorageOp::SetStopsign(sync.stopsign));
         }
-        self.storage.write_batch(sync_txn)?;
+        self.storage.perform_ops_atomically(sync_txn)?;
         Ok(self.state_cache.accepted_idx)
     }
 
-    pub(crate) fn create_snapshot(&mut self, compact_idx: usize) -> StorageResult<T::Snapshot> {
+    pub(crate) fn create_snapshot(&self, compact_idx: usize) -> StorageResult<T::Snapshot> {
         let current_compacted_idx = self.get_compacted_idx();
         if compact_idx < current_compacted_idx {
             Err(CompactionErr::TrimmedIndex(current_compacted_idx))?
@@ -770,7 +775,7 @@ where
     // which have already been compacted a valid delta cannot be created, so creates a Complete
     // snapshot of the entire decided log instead.
     pub(crate) fn create_diff_snapshot(
-        &mut self,
+        &self,
         from_idx: usize,
     ) -> StorageResult<(Option<SnapshotType<T>>, usize)> {
         let log_decided_idx = self.get_decided_idx_without_stopsign();
@@ -803,7 +808,7 @@ where
             Ordering::Greater => Err(CompactionErr::UndecidedIndex(decided_idx))?,
         };
         if new_compacted_idx > self.get_compacted_idx() {
-            self.storage.write_batch(vec![
+            self.storage.perform_ops_atomically(vec![
                 StorageOp::Trim(new_compacted_idx),
                 StorageOp::SetCompactedIdx(new_compacted_idx),
             ])?;
@@ -829,7 +834,7 @@ where
         };
         if new_compacted_idx > self.get_compacted_idx() {
             let snapshot = self.create_snapshot(new_compacted_idx)?;
-            self.storage.write_batch(vec![
+            self.storage.perform_ops_atomically(vec![
                 StorageOp::Trim(new_compacted_idx),
                 StorageOp::SetCompactedIdx(new_compacted_idx),
                 StorageOp::SetSnapshot(Some(snapshot)),

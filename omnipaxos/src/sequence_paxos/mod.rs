@@ -7,8 +7,10 @@ use super::{
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    storage::{InternalStorage, InternalStorageConfig},
-    util::{FlexibleQuorum, NodeId, Quorum, SequenceNumber, WRITE_ERROR_MSG},
+    storage::{InternalStorage, InternalStorageConfig, Snapshot},
+    util::{
+        FlexibleQuorum, LogSync, NodeId, Quorum, SequenceNumber, READ_ERROR_MSG, WRITE_ERROR_MSG,
+    },
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
@@ -30,8 +32,8 @@ where
     pid: NodeId,
     peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
-    pending_proposals: Vec<T>,
-    pending_stopsign: Option<StopSign>,
+    buffered_proposals: Vec<T>,
+    buffered_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T>>,
     leader_state: LeaderState<T>,
     latest_accepted_meta: Option<(Ballot, usize)>,
@@ -90,8 +92,8 @@ where
             pid,
             peers,
             state,
-            pending_proposals: vec![],
-            pending_stopsign: None,
+            buffered_proposals: vec![],
+            buffered_stopsign: None,
             outgoing,
             leader_state: LeaderState::<T>::with(leader, max_pid, quorum),
             latest_accepted_meta: None,
@@ -305,11 +307,11 @@ where
         #[cfg(feature = "logging")]
         info!(
             self.logger,
-            "Propose reconfiguration {:?}", new_config.nodes
+            "Accepting reconfiguration {:?}", new_config.nodes
         );
         let ss = StopSign::with(new_config, metadata);
         match self.state {
-            (Role::Leader, Phase::Prepare) => self.pending_stopsign = Some(ss),
+            (Role::Leader, Phase::Prepare) => self.buffered_stopsign = Some(ss),
             (Role::Leader, Phase::Accept) => self.accept_stopsign_leader(ss),
             _ => self.forward_stopsign(ss),
         }
@@ -340,7 +342,7 @@ where
 
     fn propose_entry(&mut self, entry: T) {
         match self.state {
-            (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
+            (Role::Leader, Phase::Prepare) => self.buffered_proposals.push(entry),
             (Role::Leader, Phase::Accept) => self.accept_entry_leader(entry),
             _ => self.forward_proposals(vec![entry]),
         }
@@ -361,7 +363,7 @@ where
             };
             self.outgoing.push(msg);
         } else {
-            self.pending_proposals.append(&mut entries);
+            self.buffered_proposals.append(&mut entries);
         }
     }
 
@@ -377,8 +379,46 @@ where
                 msg: fs,
             };
             self.outgoing.push(msg);
-        } else if self.pending_stopsign.as_mut().is_none() {
-            self.pending_stopsign = Some(ss);
+        } else if self.buffered_stopsign.as_mut().is_none() {
+            self.buffered_stopsign = Some(ss);
+        }
+    }
+
+    /// Creates a log sync, which can be used by other replicas to synchronize their logs with the
+    /// current state of this replica's log. To avoid sending the entire log to the other replica,
+    /// the log sync is created by specifying the index where the other replica's entries diverge
+    /// from this replica's; the [`common_prefix_idx`].
+    fn create_log_sync(
+        &self,
+        common_prefix_idx: usize,
+        other_logs_decided_idx: usize,
+    ) -> LogSync<T> {
+        let decided_idx = self.internal_storage.get_decided_idx();
+        let (decided_snapshot, suffix, sync_idx) =
+            if T::Snapshot::use_snapshots() && decided_idx > common_prefix_idx {
+                // Note: We snapshot from the other log's decided index and not the common prefix because
+                // snapshots currently can't handle merging onto accepted entries.
+                let (delta_snapshot, compacted_idx) = self
+                    .internal_storage
+                    .create_diff_snapshot(other_logs_decided_idx)
+                    .expect(READ_ERROR_MSG);
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(decided_idx)
+                    .expect(READ_ERROR_MSG);
+                (delta_snapshot, suffix, compacted_idx)
+            } else {
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(common_prefix_idx)
+                    .expect(READ_ERROR_MSG);
+                (None, suffix, common_prefix_idx)
+            };
+        LogSync {
+            decided_snapshot,
+            suffix,
+            sync_idx,
+            stopsign: self.internal_storage.get_stopsign(),
         }
     }
 }

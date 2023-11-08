@@ -265,7 +265,7 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn write_batch(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
+    fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
         // TODO: Is it ok that next_log_key doesn't get rolled back on batch or serialization failure?
         for op in batch {
             match op {
@@ -346,7 +346,10 @@ where
 
     // TODO: if compact_idx isn't set atomically then self.next_log_key could get out of
     // sync on recovery
-    // TODO: What should this return? Maybe remove real_log_len from internal_storage
+    // TODO: What should this return? The only time this is used is to initially set the
+    // accepted_idx in the state_cache, where we immediately re-add the compacted_idx. This is part
+    // of a bigger problem which is that internal_storage.state_cache.accepted_idx and
+    // self.next_log_key keep track of the same thing in two different spots in memory.
     fn get_log_len(&self) -> StorageResult<usize> {
         Ok(self.next_log_key - self.get_compacted_idx()?)
     }

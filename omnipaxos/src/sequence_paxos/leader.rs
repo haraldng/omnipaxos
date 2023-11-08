@@ -2,10 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseMetaData},
 };
-use crate::{
-    storage::Snapshot,
-    util::{AcceptedMetaData, WRITE_ERROR_MSG},
-};
+use crate::util::{AcceptedMetaData, WRITE_ERROR_MSG};
 
 use super::*;
 
@@ -27,7 +24,7 @@ where
                 LeaderState::with(n, self.leader_state.max_pid, self.leader_state.quorum);
             // Flush any pending writes
             // Don't have to handle flushed entries here because we will sync with followers
-            self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
+            let _ = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
             self.internal_storage.set_promise(n).expect(WRITE_ERROR_MSG);
             /* insert my promise */
             let na = self.internal_storage.get_accepted_round();
@@ -79,7 +76,7 @@ where
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
         if !self.accepted_reconfiguration() {
             match self.state {
-                (Role::Leader, Phase::Prepare) => self.pending_proposals.append(&mut entries),
+                (Role::Leader, Phase::Prepare) => self.buffered_proposals.append(&mut entries),
                 (Role::Leader, Phase::Accept) => self.accept_entries_leader(entries),
                 _ => self.forward_proposals(entries),
             }
@@ -91,7 +88,7 @@ where
             return;
         }
         match self.state {
-            (Role::Leader, Phase::Prepare) => self.pending_stopsign = Some(ss),
+            (Role::Leader, Phase::Prepare) => self.buffered_stopsign = Some(ss),
             (Role::Leader, Phase::Accept) => self.accept_stopsign_leader(ss),
             _ => self.forward_stopsign(ss),
         }
@@ -151,7 +148,6 @@ where
     }
 
     fn send_accsync(&mut self, to: NodeId) {
-        let my_decided_idx = self.get_decided_idx();
         let current_n = self.leader_state.n_leader;
         let PromiseMetaData {
             n_accepted: prev_round_max_promise_n,
@@ -176,39 +172,13 @@ where
         } else {
             followers_decided_idx
         };
-        let (delta_snapshot, suffix, sync_idx) =
-            if T::Snapshot::use_snapshots() && followers_valid_entries_idx < my_decided_idx {
-                // Synchronize by sending a snapshot from the follower's decided index up to
-                // leader's decided index and any suffix.
-                // Note: we snapshot from follower's decided and not follower's valid because
-                // snapshots currently can't handle merging onto accepted entries.
-                let (delta_snapshot, compacted_idx) = self
-                    .internal_storage
-                    .create_diff_snapshot(followers_decided_idx)
-                    .expect("storage error while trying to read diff snapshot");
-                let suffix = self
-                    .internal_storage
-                    .get_suffix(my_decided_idx)
-                    .expect("storage error while trying to read log suffix");
-                (delta_snapshot, suffix, compacted_idx)
-            } else {
-                let sfx = self
-                    .internal_storage
-                    .get_suffix(followers_valid_entries_idx)
-                    .expect("storage error while trying to read log suffix");
-                (None, sfx, followers_valid_entries_idx)
-            };
+        let log_sync = self.create_log_sync(followers_valid_entries_idx, followers_decided_idx);
         self.leader_state.increment_seq_num_session(to);
         let acc_sync = AcceptSync {
             n: current_n,
             seq_num: self.leader_state.next_seq_num(to),
-            decided_idx: my_decided_idx,
-            log_sync: LogSync {
-                decided_snapshot: delta_snapshot,
-                suffix,
-                sync_idx,
-                stopsign: self.internal_storage.get_stopsign(),
-            },
+            decided_idx: self.get_decided_idx(),
+            log_sync,
             #[cfg(feature = "unicache")]
             unicache: self.internal_storage.get_unicache(),
         };
@@ -223,7 +193,7 @@ where
     fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
-            let pending_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
+            let cached_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
                 Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
                     let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
                     match msg {
@@ -233,13 +203,13 @@ where
                 }
                 _ => None,
             };
-            match pending_acceptdecide {
-                // Modify existing pending AcceptDecide message to follower
+            match cached_acceptdecide {
+                // Modify existing AcceptDecide message to follower
                 Some(acc) => {
                     acc.entries.append(accepted.entries.clone().as_mut());
                     acc.decided_idx = decided_idx;
                 }
-                // Add new pending AcceptDecide message to follower
+                // Add new AcceptDecide message to follower
                 None => {
                     self.leader_state
                         .set_batch_accept_meta(pid, Some(self.outgoing.len()));
@@ -301,24 +271,21 @@ where
             .internal_storage
             .sync_log(max_promise_meta.n_accepted, decided_idx, max_promise_sync)
             .expect(WRITE_ERROR_MSG);
-
-        if self.internal_storage.get_stopsign().is_none() {
-            // Adopt pending proposals
-            if !self.pending_proposals.is_empty() {
-                let pending_entries = std::mem::take(&mut self.pending_proposals);
+        if !self.accepted_reconfiguration() {
+            if !self.buffered_proposals.is_empty() {
+                let entries = std::mem::take(&mut self.buffered_proposals);
                 new_accepted_idx = self
                     .internal_storage
-                    .append_entries_without_batching(pending_entries)
+                    .append_entries_without_batching(entries)
                     .expect(WRITE_ERROR_MSG);
             }
-            if let Some(ss) = self.pending_stopsign.take() {
+            if let Some(ss) = self.buffered_stopsign.take() {
                 self.internal_storage
                     .append_stopsign(ss)
                     .expect(WRITE_ERROR_MSG);
                 new_accepted_idx = self.internal_storage.get_accepted_idx();
             }
         }
-
         self.state = (Role::Leader, Phase::Accept);
         self.leader_state
             .set_accepted_idx(self.pid, new_accepted_idx);
@@ -369,8 +336,7 @@ where
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
-            let old_decided_idx = self.internal_storage.get_decided_idx();
-            if accepted.accepted_idx > old_decided_idx
+            if accepted.accepted_idx > self.internal_storage.get_decided_idx()
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
