@@ -18,18 +18,16 @@ fn batching_test() {
     let (kprom, kfuture) = promise::<Ballot>();
     first_node.on_definition(|x| x.election_futures.push(Ask::new(kprom, ())));
     sys.start_all_nodes();
-    // TODO: this can still happen, need to fix
     // Wait for initial leader to become elected. Note: needed so that initial propsals don't get
     // bunched and throw off alignment with cfg.num_proposals.
-    let leader = kfuture
+    let _leader_id = kfuture
         .wait_timeout(cfg.wait_timeout)
         .expect("No leader has been elected in the allocated time!")
         .pid;
-    println!("LEADER = {leader}");
 
     let mut futures = vec![];
     let mut last_decided_idx = 0;
-    let proposals = utils::create_proposals(leader, cfg.num_proposals);
+    let proposals = utils::create_proposals(1, cfg.num_proposals);
     for v in proposals {
         let (kprom, kfuture) = promise::<()>();
         first_node.on_definition(|x| {
