@@ -1,13 +1,13 @@
 use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::*,
-    storage::{Entry, StopSign, Storage},
     util::LeaderState,
 };
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    storage::{InternalStorage, InternalStorageConfig, Snapshot},
+    storage::{Entry, StopSign, Storage, Snapshot},
+    internal_storage::{InternalStorage, InternalStorageConfig},
     util::{
         FlexibleQuorum, LogSync, NodeId, Quorum, SequenceNumber, READ_ERROR_MSG, WRITE_ERROR_MSG,
     },
