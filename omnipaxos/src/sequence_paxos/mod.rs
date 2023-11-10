@@ -383,11 +383,9 @@ where
             self.buffered_stopsign = Some(ss);
         }
     }
-
-    /// Creates a log sync, which can be used by other replicas to synchronize their logs with the
-    /// current state of this replica's log. To avoid sending the entire log to the other replica,
-    /// the log sync is created by specifying the index where the other replica's entries diverge
-    /// from this replica's; the [`common_prefix_idx`].
+    /// Returns `LogSync`, a struct to help other servers synchronize their log to correspond to the
+    /// current state of our own log. The `common_prefix_idx` marks where in the log the other server
+    /// needs to be sync from.
     fn create_log_sync(
         &self,
         common_prefix_idx: usize,
@@ -397,7 +395,7 @@ where
         let (decided_snapshot, suffix, sync_idx) =
             if T::Snapshot::use_snapshots() && decided_idx > common_prefix_idx {
                 // Note: We snapshot from the other log's decided index and not the common prefix because
-                // snapshots currently can't handle merging onto accepted entries.
+                // snapshots currently only work on decided entries.
                 let (delta_snapshot, compacted_idx) = self
                     .internal_storage
                     .create_diff_snapshot(other_logs_decided_idx)

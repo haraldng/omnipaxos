@@ -14,6 +14,7 @@ where
         let old_promise = self.internal_storage.get_promise();
         if old_promise < prep.n || (old_promise == prep.n && self.state.1 == Phase::Recover) {
             // Flush any pending writes
+            // Don't have to handle flushed entries here because we will sync with followers
             let _ = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
             self.internal_storage
                 .set_promise(prep.n)
@@ -96,16 +97,9 @@ where
                 .internal_storage
                 .append_entries_and_get_accepted_idx(entries)
                 .expect(WRITE_ERROR_MSG);
-            let mut new_decided_idx = acc_dec.decided_idx;
-            if new_decided_idx > self.internal_storage.get_decided_idx() {
-                if new_decided_idx > self.internal_storage.get_accepted_idx() {
-                    new_accepted_idx =
-                        Some(self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG));
-                    new_decided_idx = new_decided_idx.min(new_accepted_idx.unwrap());
-                }
-                self.internal_storage
-                    .set_decided_idx(new_decided_idx)
-                    .expect(WRITE_ERROR_MSG);
+            let flushed_after_decide = self.update_decided_idx_and_get_accepted_idx(acc_dec.decided_idx);    
+            if flushed_after_decide.is_some() {
+                new_accepted_idx = flushed_after_decide;
             }
             if let Some(idx) = new_accepted_idx {
                 self.reply_accepted(acc_dec.n, idx);
@@ -118,6 +112,8 @@ where
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
+            // Don't have to handle flushed entries here because we will send Accepted after
+            // appending stopsign.
             let _ = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
             let new_accepted_idx = self
                 .internal_storage
@@ -132,18 +128,30 @@ where
             && self.state.1 == Phase::Accept
             && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
-            let mut new_decided_idx = dec.decided_idx;
-            if new_decided_idx > self.internal_storage.get_decided_idx() {
-                if new_decided_idx > self.internal_storage.get_accepted_idx() {
-                    let new_accepted_idx =
-                        self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
-                    new_decided_idx = new_decided_idx.min(new_accepted_idx);
-                    self.reply_accepted(dec.n, new_accepted_idx);
-                }
-                self.internal_storage
-                    .set_decided_idx(new_decided_idx)
-                    .expect(WRITE_ERROR_MSG);
+            let new_accepted_idx = self.update_decided_idx_and_get_accepted_idx(dec.decided_idx);
+            if let Some(idx) = new_accepted_idx {
+                self.reply_accepted(dec.n, idx);
             }
+        }
+    }
+
+    /// To maintain decided index <= accepted index, batched entries may be flushed.
+    /// Returns `Some(new_accepted_idx)` if entries are flushed, otherwise `None`.
+    fn update_decided_idx_and_get_accepted_idx(&mut self, new_decided_idx: usize) -> Option<usize> {
+        if new_decided_idx <= self.internal_storage.get_decided_idx() {
+            return None;
+        }
+        if new_decided_idx > self.internal_storage.get_accepted_idx() {
+            let new_accepted_idx = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
+            self.internal_storage
+                .set_decided_idx(new_decided_idx.min(new_accepted_idx))
+                .expect(WRITE_ERROR_MSG);
+            Some(new_accepted_idx)
+        } else {
+            self.internal_storage
+                .set_decided_idx(new_decided_idx)
+                .expect(WRITE_ERROR_MSG);
+            None
         }
     }
 

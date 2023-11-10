@@ -7,7 +7,7 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
-/// An update that a replica applies to its log in order to sync with another replica's log.
+/// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogSync<T>

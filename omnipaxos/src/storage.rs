@@ -133,8 +133,11 @@ pub trait Storage<T>
 where
     T: Entry,
 {
-    /// Atomically perform and persist all storage operations in order.
-    /// Returns an Error if the transaction was not committed (so it was rolled back).
+    /// **Atomically** perform all storage operations in order.
+    /// For correctness, the operations must be atomic i.e., either all operations are performed
+    /// successfully or all get rolled back. If the `StorageResult` returns as `Err`, the
+    /// operations are assumed to have been rolled back to the previous state before this function
+    /// call.
     fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()>;
 
     /// Appends an entry to the end of the log.
@@ -733,10 +736,11 @@ where
                     self.state_cache.accepted_idx += 1;
                     sync_txn.push(StorageOp::SetStopsign(Some(ss)));
                 }
-                None => {
+                None if self.state_cache.stopsign.is_some() => {
                     self.state_cache.stopsign = None;
                     sync_txn.push(StorageOp::SetStopsign(None));
                 }
+                None => ()
             }
         }
         self.storage.perform_ops_atomically(sync_txn)?;
