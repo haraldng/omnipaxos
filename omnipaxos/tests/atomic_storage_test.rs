@@ -17,11 +17,13 @@ use crate::utils::StorageType;
 use omnipaxos::storage::Entry;
 #[cfg(feature = "unicache")]
 use omnipaxos::unicache::UniCache;
+#[cfg(not(feature = "unicache"))]
+use omnipaxos::messages::sequence_paxos::{AcceptDecide, Compaction};
 use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
         sequence_paxos::{
-            AcceptDecide, AcceptSync, Compaction, PaxosMessage, PaxosMsg, Prepare, Promise,
+            AcceptSync, PaxosMessage, PaxosMsg, Prepare, Promise,
         },
         Message,
     },
@@ -265,6 +267,7 @@ fn atomic_storage_acceptsync_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_trim_test() {
@@ -328,6 +331,7 @@ fn atomic_storage_trim_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_snapshot_test() {
@@ -397,6 +401,7 @@ fn atomic_storage_snapshot_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_accept_decide_test() {

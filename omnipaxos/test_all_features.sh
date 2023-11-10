@@ -4,7 +4,7 @@
 # Usage: ./test_all_features.sh [-c], -c runs cargo check instead of cargo test
 
 # Define an array of feature names
-features=("batch_accept" "macros" "logging" "toml_config" "unicache")
+features=("macros" "logging" "toml_config" "unicache")
 
 # Initialize a variable to track whether to run the tests or not
 check_only=false
