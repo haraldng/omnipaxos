@@ -137,31 +137,10 @@ mod docs_integration_test {
         persist_conf.set_path(my_path.to_string()); // set the path of the persistent storage
 
         // Re-create storage with previous state, then create `OmniPaxos`
-        let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf); 
+        let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
         let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
         // END_CODE_EXAMPLE
     }
-
-    // NOTE: We can't import rocksdb options here.
-    // // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/storage.md#persistentstorage
-    // fn peristent_storage() {
-    //     // CODE_EXAMPLE
-    //
-    //     // user-defined configuration
-    //     let my_path = "my_storage";
-    //     let log_store_options = rocksdb::Options::default();
-    //     let state_store_options = rocksdb::Options::default();
-    //     // these are required
-    //     state_store_options.create_missing_column_families(true);
-    //     state_store_options.create_if_missing(true);
-    //
-    //     // generate default configuration and set user-defined options
-    //     let mut my_config = PersistentStorageConfig::default();
-    //     my_config.set_path(my_path.to_string());
-    //     my_config.set_database_options(state_store_options);
-    //     my_config.set_log_options(log_store_options);
-    //     // END_CODE_EXAMPLE
-    // }
 
     // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/storage.md#batching
     fn batch_config() {

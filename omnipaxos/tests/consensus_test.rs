@@ -63,7 +63,7 @@ fn consensus_test() {
 fn read_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
+    let log: Vec<Value> = [1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value::with_id(*v as u64))
         .collect();
@@ -153,7 +153,7 @@ fn read_test() {
 fn read_entries_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
+    let log: Vec<Value> = [1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value::with_id(*v as u64))
         .collect();

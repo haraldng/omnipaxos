@@ -27,12 +27,8 @@ pub struct KeyValue {
 ## Creating a Node
 With the structs for log entry and storage defined, we can now go ahead and create our `OmniPaxos` replica instance. Let's assume we want our KV-store to be replicated on three servers. On, say node 2, we would do the following:
 ```rust
-use omnipaxos::{
-   {OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig},
-};
-use omnipaxos_storage::{
-    memory_storage::MemoryStorage,
-};
+use omnipaxos::{OmniPaxos, OmniPaxosConfig, ServerConfig, ClusterConfig};
+use omnipaxos_storage::memory_storage::MemoryStorage;
 
 // configuration with id 1 and a cluster with 3 nodes
 let cluster_config = ClusterConfig {
@@ -80,13 +76,10 @@ To support Fail-recovery, we must ensure that our storage implementation can per
 
 // Configuration from previous storage
 let my_path = "/my_path_before_crash/";
-let my_log_opts = LogOptions::new(my_path);
-let persist_conf = PersistentStorageConfig::default();
-
-persist_conf.set_path(my_path); // set the path to the persistent storage
-persist_conf.set_commitlog_options(my_log_opts);
+let mut persist_conf = PersistentStorageConfig::default();
+persist_conf.set_path(my_path.to_string()); // set the path of the persistent storage
 
 // Re-create storage with previous state, then create `OmniPaxos`
-let recovered_storage = PersistentStorage::open(persist_conf); 
+let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
 let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
 ```

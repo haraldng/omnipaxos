@@ -1,142 +1,24 @@
-use super::ballot_leader_election::Ballot;
+use super::state_cache::StateCache;
+use crate::{
+    ballot_leader_election::Ballot,
+    storage::{Entry, Snapshot, SnapshotType, StopSign, Storage, StorageOp, StorageResult},
+    util::{AcceptedMetaData, IndexEntry, LogEntry, LogSync, SnapshottedEntry},
+    CompactionErr,
+};
 #[cfg(feature = "unicache")]
 use crate::{unicache::*, util::NodeId};
-use crate::{
-    util::{AcceptedMetaData, IndexEntry, LogEntry, LogSync, SnapshottedEntry},
-    CompactionErr, storage::{Entry, StopSign, StorageResult, StorageOp, SnapshotType, Storage, Snapshot},
-};
 use std::{
     cmp::Ordering,
     marker::PhantomData,
     ops::{Bound, RangeBounds},
 };
 
-/// A simple in-memory storage for simple state values of OmniPaxos.
-struct StateCache<T>
-where
-    T: Entry,
-{
-    #[cfg(feature = "unicache")]
-    /// Id of this node
-    pid: NodeId,
-    /// The maximum number of entries to batch.
-    batch_size: usize,
-    /// Vector which contains all the logged entries in-memory.
-    batched_entries: Vec<T>,
-    /// Last promised round.
-    promise: Ballot,
-    /// Last accepted round.
-    accepted_round: Ballot,
-    /// Length of the decided log.
-    decided_idx: usize,
-    /// Length of the accepted log.
-    accepted_idx: usize,
-    /// Garbage collected index.
-    compacted_idx: usize,
-    /// Stopsign entry.
-    stopsign: Option<StopSign>,
-    #[cfg(feature = "unicache")]
-    /// Batch of entries that are processed (i.e., maybe encoded). Only used by the leader.
-    batched_processed_by_leader: Vec<T::EncodeResult>,
-    #[cfg(feature = "unicache")]
-    unicache: T::UniCache,
-}
-
-impl<T> StateCache<T>
-where
-    T: Entry,
-{
-    pub fn new(config: InternalStorageConfig, #[cfg(feature = "unicache")] pid: NodeId) -> Self {
-        StateCache {
-            #[cfg(feature = "unicache")]
-            pid,
-            batch_size: config.batch_size,
-            batched_entries: Vec::with_capacity(config.batch_size),
-            promise: Ballot::default(),
-            accepted_round: Ballot::default(),
-            decided_idx: 0,
-            accepted_idx: 0,
-            compacted_idx: 0,
-            stopsign: None,
-            #[cfg(feature = "unicache")]
-            batched_processed_by_leader: Vec::with_capacity(config.batch_size),
-            #[cfg(feature = "unicache")]
-            unicache: T::UniCache::new(),
-        }
-    }
-
-    // Appends an entry to the end of the `batched_entries`. If the batch is full, the
-    // batch is flushed and return flushed entries. Else, return None.
-    fn append_entry(&mut self, entry: T) -> Option<Vec<T>> {
-        #[cfg(feature = "unicache")]
-        {
-            let processed = self.unicache.try_encode(&entry);
-            self.batched_processed_by_leader.push(processed);
-        }
-        self.batched_entries.push(entry);
-        self.take_entries_if_batch_is_full()
-    }
-
-    // Appends entries to the end of the `batched_entries`. If the batch is full, the
-    // batch is flushed and return flushed entries. Else, return None.
-    fn append_entries(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
-        #[cfg(feature = "unicache")]
-        {
-            if self.promise.pid == self.pid {
-                // only try encoding if we're the leader
-                for entry in &entries {
-                    let processed = self.unicache.try_encode(entry);
-                    self.batched_processed_by_leader.push(processed);
-                }
-            }
-        }
-        self.batched_entries.extend(entries);
-        self.take_entries_if_batch_is_full()
-    }
-
-    // Flushes batched entries and appends a stopsign to the log. Returns the flushed
-    // entries if there were any
-    fn append_stopsign(&mut self, ss: StopSign) -> Option<Vec<T>> {
-        self.stopsign = Some(ss);
-        if self.batched_entries.is_empty() {
-            None
-        } else {
-            Some(self.take_batched_entries())
-        }
-    }
-
-    // Return batched entries if the batch is full that need to be flushed in to storage.
-    fn take_entries_if_batch_is_full(&mut self) -> Option<Vec<T>> {
-        if self.batched_entries.len() >= self.batch_size {
-            Some(self.take_batched_entries())
-        } else {
-            None
-        }
-    }
-
-    // Clears the batched entries and returns the cleared entries. If the batch is empty,
-    // return an empty vector.
-    fn take_batched_entries(&mut self) -> Vec<T> {
-        std::mem::take(&mut self.batched_entries)
-    }
-
-    #[cfg(feature = "unicache")]
-    fn take_batched_processed(&mut self) -> Vec<T::EncodeResult> {
-        std::mem::take(&mut self.batched_processed_by_leader)
-    }
-
-    // Returns whether a stopsign is decided
-    fn stopsign_is_decided(&self) -> bool {
-        self.stopsign.is_some() && self.decided_idx == self.accepted_idx
-    }
-}
-
 pub(crate) struct InternalStorageConfig {
     pub(crate) batch_size: usize,
 }
 
-/// Internal representation of storage. Hides all complexities with the compacted index
-/// such that Sequence Paxos accesses the log with the uncompacted index.
+/// Internal representation of storage. Serves as the interface between Sequence Paxos and the
+/// storage back-end.
 pub(crate) struct InternalStorage<I, T>
 where
     I: Storage<T>,
@@ -152,10 +34,18 @@ where
     I: Storage<T>,
     T: Entry,
 {
-    pub(crate) fn with(storage: I, config: InternalStorageConfig, #[cfg(feature = "unicache")] pid: NodeId) -> Self {
+    pub(crate) fn with(
+        storage: I,
+        config: InternalStorageConfig,
+        #[cfg(feature = "unicache")] pid: NodeId,
+    ) -> Self {
         let mut internal_store = InternalStorage {
             storage,
-            state_cache: StateCache::new(config, #[cfg(feature = "unicache")] pid),
+            state_cache: StateCache::new(
+                config,
+                #[cfg(feature = "unicache")]
+                pid,
+            ),
             _t: Default::default(),
         };
         internal_store.load_cache();
@@ -451,10 +341,10 @@ where
                     self.state_cache.stopsign = None;
                     sync_txn.push(StorageOp::SetStopsign(None));
                 }
-                None => ()
+                None => (),
             }
         }
-        self.storage.perform_ops_atomically(sync_txn)?;
+        self.storage.write_atomically(sync_txn)?;
         Ok(self.state_cache.accepted_idx)
     }
 
@@ -519,7 +409,7 @@ where
             Ordering::Greater => Err(CompactionErr::UndecidedIndex(decided_idx))?,
         };
         if new_compacted_idx > self.get_compacted_idx() {
-            self.storage.perform_ops_atomically(vec![
+            self.storage.write_atomically(vec![
                 StorageOp::Trim(new_compacted_idx),
                 StorageOp::SetCompactedIdx(new_compacted_idx),
             ])?;
@@ -541,7 +431,7 @@ where
         };
         if new_compacted_idx > self.get_compacted_idx() {
             let snapshot = self.create_snapshot(new_compacted_idx)?;
-            self.storage.perform_ops_atomically(vec![
+            self.storage.write_atomically(vec![
                 StorageOp::Trim(new_compacted_idx),
                 StorageOp::SetCompactedIdx(new_compacted_idx),
                 StorageOp::SetSnapshot(Some(snapshot)),
@@ -616,7 +506,7 @@ where
     pub(crate) fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
         self.storage.get_snapshot()
     }
-    
+
     pub(crate) fn get_compacted_idx(&self) -> usize {
         self.state_cache.compacted_idx
     }

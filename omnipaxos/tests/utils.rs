@@ -237,17 +237,17 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn perform_ops_atomically(
+    fn write_atomically(
         &mut self,
-        batch: Vec<omnipaxos::storage::StorageOp<T>>,
+        ops: Vec<omnipaxos::storage::StorageOp<T>>,
     ) -> StorageResult<()> {
         match self {
-            StorageType::Persistent(persist_s) => persist_s.perform_ops_atomically(batch),
-            StorageType::Memory(mem_s) => mem_s.perform_ops_atomically(batch),
+            StorageType::Persistent(persist_s) => persist_s.write_atomically(ops),
+            StorageType::Memory(mem_s) => mem_s.write_atomically(ops),
             StorageType::Broken(mem_s, conf) => {
                 // NOTE: Can't properly test for atomicity since we can't tick between writes in batch.
                 conf.lock().unwrap().tick()?;
-                mem_s.lock().unwrap().perform_ops_atomically(batch)
+                mem_s.lock().unwrap().write_atomically(ops)
             }
         }
     }

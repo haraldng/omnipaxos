@@ -61,7 +61,7 @@ impl PersistentStorageConfig {
     /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and sled
     pub fn with(path: String, log_options: Options, rocksdb_options: Options) -> Self {
         Self {
-            path: path,
+            path,
             log_options,
             rocksdb_options,
         }
@@ -69,9 +69,14 @@ impl PersistentStorageConfig {
 
     /// Creates a configuration for `PersistentStorage` with the given path and default configs
     pub fn with_path(path: String) -> Self {
-        let mut config = Self::default();
-        config.path = path;
-        config
+        let mut rocksdb_options = Options::default();
+        rocksdb_options.create_missing_column_families(true);
+        rocksdb_options.create_if_missing(true);
+        Self {
+            path,
+            log_options: Options::default(),
+            rocksdb_options,
+        }
     }
 }
 
@@ -80,7 +85,6 @@ impl Default for PersistentStorageConfig {
         let mut rocksdb_options = Options::default();
         rocksdb_options.create_missing_column_families(true);
         rocksdb_options.create_if_missing(true);
-
         Self {
             path: DEFAULT.to_string(),
             log_options: Options::default(),
@@ -158,7 +162,7 @@ where
 
     /// Creates a new storage instance, panics if a RocksDB instance already exists in the given path
     pub fn new(storage_config: PersistentStorageConfig) -> Self {
-        std::fs::metadata(format!("{}", storage_config.path)).expect_err(&format!(
+        std::fs::metadata(storage_config.path.clone()).expect_err(&format!(
             "Cannot create new instance, database already exists in {}",
             storage_config.path
         ));
@@ -265,9 +269,8 @@ where
     T: Entry + Serialize + for<'a> Deserialize<'a>,
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
-    fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()> {
-        // TODO: Is it ok that next_log_key doesn't get rolled back on batch or serialization failure?
-        for op in batch {
+    fn write_atomically(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()> {
+        for op in ops {
             match op {
                 StorageOp::AppendEntry(entry) => self.batch_append_entry(entry)?,
                 StorageOp::AppendEntries(entries) => self.batch_append_entries(entries)?,
@@ -297,7 +300,6 @@ where
         Ok(())
     }
 
-    // TODO: if this fails self.next_log_key will be incorrect
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
         let mut batch = WriteBatchWithTransaction::<false>::default();
         for entry in entries {
@@ -344,12 +346,6 @@ where
         Ok(entries)
     }
 
-    // TODO: if compact_idx isn't set atomically then self.next_log_key could get out of
-    // sync on recovery
-    // TODO: What should this return? The only time this is used is to initially set the
-    // accepted_idx in the state_cache, where we immediately re-add the compacted_idx. This is part
-    // of a bigger problem which is that internal_storage.state_cache.accepted_idx and
-    // self.next_log_key keep track of the same thing in two different spots in memory.
     fn get_log_len(&self) -> StorageResult<usize> {
         Ok(self.next_log_key - self.get_compacted_idx()?)
     }

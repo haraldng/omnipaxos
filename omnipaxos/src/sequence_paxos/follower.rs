@@ -97,7 +97,8 @@ where
                 .internal_storage
                 .append_entries_and_get_accepted_idx(entries)
                 .expect(WRITE_ERROR_MSG);
-            let flushed_after_decide = self.update_decided_idx_and_get_accepted_idx(acc_dec.decided_idx);    
+            let flushed_after_decide =
+                self.update_decided_idx_and_get_accepted_idx(acc_dec.decided_idx);
             if flushed_after_decide.is_some() {
                 new_accepted_idx = flushed_after_decide;
             }
@@ -112,8 +113,8 @@ where
             && self.state == (Role::Follower, Phase::Accept)
             && self.handle_sequence_num(acc_ss.seq_num, acc_ss.n.pid) == MessageStatus::Expected
         {
-            // Don't have to handle flushed entries here because we will send Accepted after
-            // appending stopsign.
+            // Flush entries before appending stopsign. The accepted index is ignored here as
+            // it will be updated when appending stopsign.
             let _ = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
             let new_accepted_idx = self
                 .internal_storage

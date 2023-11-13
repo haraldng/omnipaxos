@@ -1,13 +1,13 @@
+pub(crate) mod internal_storage;
+mod state_cache;
+
 use super::ballot_leader_election::Ballot;
 #[cfg(feature = "unicache")]
 use crate::unicache::*;
 use crate::ClusterConfig;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{
-    error::Error,
-    fmt::Debug,
-};
+use std::{error::Error, fmt::Debug};
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {
@@ -132,7 +132,7 @@ where
     /// successfully or all get rolled back. If the `StorageResult` returns as `Err`, the
     /// operations are assumed to have been rolled back to the previous state before this function
     /// call.
-    fn perform_ops_atomically(&mut self, batch: Vec<StorageOp<T>>) -> StorageResult<()>;
+    fn write_atomically(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()>;
 
     /// Appends an entry to the end of the log.
     fn append_entry(&mut self, entry: T) -> StorageResult<()>;

@@ -109,10 +109,10 @@ fn double_trim_test() {
     elected_leader.on_definition(|x| {
         x.paxos
             .trim(Some(cfg.trim_idx))
-            .expect(format!("Failed to trim {}", cfg.trim_idx).as_str());
+            .unwrap_or_else(|_| panic!("Failed to trim {}", cfg.trim_idx));
         x.paxos
             .trim(Some(second_trim_idx))
-            .expect(format!("Failed to trim {}", second_trim_idx).as_str());
+            .unwrap_or_else(|_| panic!("Failed to trim {}", second_trim_idx));
     });
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes trim
