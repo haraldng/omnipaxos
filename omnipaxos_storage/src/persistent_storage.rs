@@ -104,7 +104,8 @@ where
     db: DB,
     /// Buffered, atomic write batch
     write_batch: WriteBatchWithTransaction<false>,
-    /// The index of the next log entry to be appended
+    /// The index of the next log entry to be appended. Will be used as the key of the entry in big
+    /// endian format.
     next_log_key: usize,
     /// A placeholder for the T: Entry
     t: PhantomData<T>,
@@ -127,10 +128,11 @@ where
             .cf_handle(LOG)
             .expect("Failed to create RocksDB log column family");
 
-        // Create next log key from the current max log key
+        // Create next log key from the state of the database
         let mut log_iter = db.raw_iterator_cf(log_handle);
         log_iter.seek_to_last();
         let next_log_key = if log_iter.valid() {
+            // There's a max key in the database. Next key is 1 greater.
             let key = log_iter.key().unwrap();
             assert_eq!(
                 key.len(),
@@ -141,6 +143,8 @@ where
                 key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7],
             ]) + 1
         } else {
+            // No max key in the database. Either there's no entry yet added or they have been
+            // trimmed away.
             match db
                 .get(TRIM)
                 .expect("Couldn't recover storage: Reading compacted_idx failed.")
@@ -173,7 +177,7 @@ where
     fn get_log_handle(&self) -> ColumnFamilyRef {
         self.db
             .cf_handle(LOG)
-            .expect("Failed to create RocksDB log column family")
+            .expect("Couldn't find RocksDB log column family")
     }
 
     fn batch_append_entry(&mut self, entry: T) -> StorageResult<()> {
@@ -199,8 +203,10 @@ where
     }
 
     fn batch_append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        if from_idx < self.next_log_key {
-            let from_key = from_idx.to_be_bytes();
+        // Don't need to delete entries will we overwrite.
+        let delete_idx = from_idx + entries.len();
+        if delete_idx < self.next_log_key {
+            let from_key = delete_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
             let log = self.db.cf_handle(LOG).unwrap();
             self.write_batch.delete_range_cf(log, from_key, to_key);
@@ -315,8 +321,10 @@ where
     }
 
     fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        if from_idx < self.next_log_key {
-            let from_key = from_idx.to_be_bytes();
+        // Don't need to delete entries will we overwrite.
+        let delete_idx = from_idx + entries.len();
+        if delete_idx < self.next_log_key {
+            let from_key = delete_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
             self.db
                 .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
@@ -325,7 +333,7 @@ where
         self.append_entries(entries)
     }
 
-    fn get_entries(&self, mut from: usize, to: usize) -> StorageResult<Vec<T>> {
+    fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
         // Check if the log has entries up to the requested endpoint.
         if to > self.next_log_key || from >= to {
             return Ok(vec![]); // Do an early return
@@ -334,13 +342,9 @@ where
         let mut iter = self.db.raw_iterator_cf(self.get_log_handle());
         let mut entries = Vec::with_capacity(to - from);
         iter.seek(from.to_be_bytes());
-        loop {
+        for _ in from..to {
             let entry_bytes = iter.value().ok_or(ErrHelper {})?;
             entries.push(bincode::deserialize(entry_bytes)?);
-            from += 1;
-            if from == to {
-                break;
-            }
             iter.next();
         }
         Ok(entries)
