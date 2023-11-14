@@ -40,11 +40,13 @@ fn trim_test() {
         });
     }
 
-    // wait until all nodes have decided last entry
+    // wait until nodes have decided last entry
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
+
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes decide
 
     elected_leader.on_definition(|x| {
         x.paxos.trim(Some(cfg.trim_idx)).expect("Failed to trim");
@@ -99,11 +101,13 @@ fn double_trim_test() {
         });
     }
 
-    // wait until all nodes have decided last entry
+    // wait until nodes have decided last entry
     match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
         Ok(_) => {}
         Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
     }
+
+    thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes decide
 
     let second_trim_idx = cfg.trim_idx + TRIM_INDEX_INCREMENT;
     elected_leader.on_definition(|x| {

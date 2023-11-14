@@ -1,6 +1,6 @@
 [package]
 name = "omnipaxos_storage"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Harald Ng <hng@kth.se>"]
 edition = "2021"
 description = "Storage implementations for OmniPaxos."
@@ -14,7 +14,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-omnipaxos = { version = "0.2.1", path = "../omnipaxos", features = ["serde"] }
+omnipaxos = { version = "0.2.2", path = "../omnipaxos", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3.3"
 zerocopy = "0.6.1"

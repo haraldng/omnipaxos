@@ -1,3 +1,5 @@
+> UniCache is a feature that enables skewed data to be replicated more efficiently in OmniPaxos. This page provides examples and describes how to use it. For more details on the design and benefits of UniCache, check out our [paper from EDBT2023](https://openproceedings.org/2023/conf/edbt/3-paper-117.pdf).
+
 UniCache is a feature that can reduce the amount of data sent between servers if the data is skewed and certain values reoccur often. **UniCache acts as a dictionary that maps popular data to smaller encodings**. Users annotate fields in the `Entry` that are cachable, and when such a value is encountered, it gets transmitted as an encoding instead. In this way, OmniPaxos can reduce the network I/O in skewed workloads by encoding frequently repeated data as smaller types.
 
 ![unicache](../images/unicache-example.png)
@@ -92,5 +94,3 @@ match read_second_customer {
 }
 ```
 > **Note:** The cached values only get encoded in the messages being sent in OmniPaxos. UniCache can therefore only compress the messages but not the storage.
- 
-For more details on the design and benefits of UniCache, check out our [paper](https://openproceedings.org/2023/conf/edbt/3-paper-117.pdf) from EDBT2023.

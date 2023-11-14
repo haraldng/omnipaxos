@@ -820,9 +820,6 @@ pub mod omnireplica {
             let outgoing = self.paxos.outgoing_messages();
             for out in outgoing {
                 if self.is_connected_to(&out.get_receiver()) {
-                    if let Message::SequencePaxos(m) = &out {
-                        println!("{m:?}");
-                    }
                     match self.peers.get(&out.get_receiver()) {
                         Some(receiver) => receiver.tell(out),
                         None => warn!(
