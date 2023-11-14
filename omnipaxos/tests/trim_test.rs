@@ -7,7 +7,7 @@ use serial_test::serial;
 use std::{sync::Arc, thread};
 use utils::{TestConfig, TestSystem, Value};
 
-const TRIM_INDEX_INCREMENT: u64 = 10;
+const TRIM_INDEX_INCREMENT: usize = 10;
 
 /// Test trimming the log.
 /// At the end the log is retrieved from each replica and verified
@@ -75,7 +75,7 @@ fn double_trim_test() {
     let cfg = TestConfig::load("trim_test").expect("Test config loaded");
     assert_ne!(cfg.trim_idx, 0, "trim_idx must be greater than 0");
     assert!(
-        cfg.num_proposals >= cfg.trim_idx + TRIM_INDEX_INCREMENT,
+        cfg.num_proposals as usize >= cfg.trim_idx + TRIM_INDEX_INCREMENT,
         "Not enough proposals to test double trim"
     );
     let mut sys = TestSystem::with(cfg);
@@ -113,10 +113,10 @@ fn double_trim_test() {
     elected_leader.on_definition(|x| {
         x.paxos
             .trim(Some(cfg.trim_idx))
-            .expect(format!("Failed to trim {}", cfg.trim_idx).as_str());
+            .unwrap_or_else(|_| panic!("Failed to trim {}", cfg.trim_idx));
         x.paxos
             .trim(Some(second_trim_idx))
-            .expect(format!("Failed to trim {}", second_trim_idx).as_str());
+            .unwrap_or_else(|_| panic!("Failed to trim {}", second_trim_idx));
     });
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes trim
@@ -133,7 +133,11 @@ fn double_trim_test() {
     };
 }
 
-fn check_trim(vec_proposals: &Vec<Value>, trim_idx: u64, node: Arc<Component<OmniPaxosComponent>>) {
+fn check_trim(
+    vec_proposals: &Vec<Value>,
+    trim_idx: usize,
+    node: Arc<Component<OmniPaxosComponent>>,
+) {
     let num_proposals = vec_proposals.len();
     node.on_definition(|x| {
         let op = &x.paxos;
@@ -146,9 +150,9 @@ fn check_trim(vec_proposals: &Vec<Value>, trim_idx: u64, node: Arc<Component<Omn
                 ),
             }
         }
-        for idx in trim_idx as usize..num_proposals {
+        for idx in trim_idx..num_proposals {
             let expected_value = vec_proposals.get(idx).unwrap();
-            match op.read(idx as u64).unwrap() {
+            match op.read(idx).unwrap() {
                 LogEntry::Decided(v) if &v == expected_value => {}
                 e => panic!(
                     "Entry must be decided with {:?} at idx {}, but was {:?}",
@@ -157,6 +161,6 @@ fn check_trim(vec_proposals: &Vec<Value>, trim_idx: u64, node: Arc<Component<Omn
             }
         }
         let decided_sfx = op.read_decided_suffix(0).unwrap();
-        assert_eq!(decided_sfx.len(), num_proposals - trim_idx as usize + 1); // +1 as all trimmed entries are represented by LogEntry::Trimmed
+        assert_eq!(decided_sfx.len(), num_proposals - trim_idx + 1); // +1 as all trimmed entries are represented by LogEntry::Trimmed
     });
 }

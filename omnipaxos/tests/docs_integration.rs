@@ -10,7 +10,6 @@ mod docs_integration_test {
     #![cfg(feature = "macros")]
     #![cfg(feature = "toml_config")]
 
-    use commitlog::LogOptions;
     use omnipaxos::{
         messages::Message, storage::Snapshot, util::LogEntry, ClusterConfig, OmniPaxos,
         OmniPaxosConfig, ServerConfig,
@@ -134,11 +133,8 @@ mod docs_integration_test {
         // Use case of creating a node from fail-recovery
         // Configuration from previous storage
         let my_path = "tests/config/storage/node1";
-        let my_log_opts = LogOptions::new(my_path);
         let mut persist_conf = PersistentStorageConfig::default();
-
-        persist_conf.set_path(my_path.to_string()); // set the path to the persistent storage
-        persist_conf.set_commitlog_options(my_log_opts);
+        persist_conf.set_path(my_path.to_string()); // set the path of the persistent storage
 
         // Re-create storage with previous state, then create `OmniPaxos`
         let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
@@ -320,7 +316,7 @@ mod docs_integration_test {
         };
         let my_pid = current_config.pid;
 
-        let idx: u64 = 2; // some index we last read from
+        let idx: usize = 2; // some index we last read from
         let decided_entries: Option<Vec<LogEntry<KeyValue>>> = omni_paxos.read_decided_suffix(idx);
 
         if let Some(de) = decided_entries {

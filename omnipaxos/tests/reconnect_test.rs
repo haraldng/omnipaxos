@@ -5,7 +5,7 @@ use kompact::prelude::{promise, Ask};
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::StopSign,
-    util::{LogEntry, SequenceNumber},
+    util::{LogEntry, NodeId, SequenceNumber},
     ClusterConfig,
 };
 use serial_test::serial;
@@ -46,7 +46,7 @@ fn increasing_accept_seq_num_test() {
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
 
@@ -69,8 +69,6 @@ fn increasing_accept_seq_num_test() {
                 PaxosMsg::AcceptSync(m) => Some(m.seq_num),
                 PaxosMsg::AcceptDecide(m) => Some(m.seq_num),
                 PaxosMsg::Decide(m) => Some(m.seq_num),
-                #[cfg(feature = "unicache")]
-                PaxosMsg::EncodedAcceptDecide(e) => Some(e.seq_num),
                 _ => None,
             });
         accept_seq_nums.extend(seq_nums);
@@ -113,7 +111,7 @@ fn reconnect_after_dropped_accepts_test() {
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -168,7 +166,7 @@ fn reconnect_after_dropped_prepare_test() {
     // Propose some values so that a leader is elected
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -244,7 +242,7 @@ fn reconnect_after_dropped_promise_test() {
     // Propose some values so that a leader is elected
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -331,7 +329,7 @@ fn reconnect_after_dropped_preparereq_test() {
     sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -383,7 +381,7 @@ fn resync_after_dropped_acceptstopsign_test() {
 
     let leader_id = sys.get_elected_leader(2, cfg.wait_timeout);
     let leader = sys.nodes.get(&leader_id).unwrap();
-    let follower_id = (1..=cfg.num_nodes as u64)
+    let follower_id = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader_id)
         .expect("No followers found!");
     let follower = sys.nodes.get(&follower_id).unwrap();
@@ -441,7 +439,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
-    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as NodeId).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
 
     let write_quorum_size = match cfg.flexible_quorum {
@@ -509,7 +507,7 @@ fn reconnect_after_dropped_decidestopsign_test() {
     sys.start_all_nodes();
 
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
-    let mut followers = (1..=cfg.num_nodes as u64).filter(|x| *x != leader_id);
+    let mut followers = (1..=cfg.num_nodes as NodeId).filter(|x| *x != leader_id);
     let follower_id = followers.next().expect("Couldn't find follower");
     let leader = sys.nodes.get(&leader_id).unwrap();
 

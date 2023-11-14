@@ -13,6 +13,8 @@
 pub mod utils;
 
 use crate::utils::StorageType;
+#[cfg(not(feature = "unicache"))]
+use omnipaxos::messages::sequence_paxos::{AcceptDecide, Compaction};
 #[cfg(feature = "unicache")]
 use omnipaxos::storage::Entry;
 #[cfg(feature = "unicache")]
@@ -20,13 +22,11 @@ use omnipaxos::unicache::UniCache;
 use omnipaxos::{
     messages::{
         ballot_leader_election::{BLEMessage, HeartbeatMsg, HeartbeatReply},
-        sequence_paxos::{
-            AcceptDecide, AcceptSync, Compaction, PaxosMessage, PaxosMsg, Prepare, Promise,
-        },
+        sequence_paxos::{AcceptSync, PaxosMessage, PaxosMsg, Prepare, Promise},
         Message,
     },
     storage::{Snapshot, SnapshotType, Storage},
-    util::{NodeId, SequenceNumber},
+    util::{LogSync, NodeId, SequenceNumber},
     OmniPaxos, OmniPaxosConfig,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
@@ -124,12 +124,10 @@ fn _setup_leader() -> (
         to: 1,
         msg: PaxosMsg::Promise(Promise {
             n,
-            suffix: vec![],
             decided_idx: 0,
             accepted_idx: 0,
             n_accepted: n_old,
-            decided_snapshot: None,
-            stopsign: None,
+            log_sync: None,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -165,7 +163,7 @@ fn setup_follower() -> (
                 .unwrap()
                 .get_accepted_round()
                 .unwrap()
-                .unwrap(),
+                .unwrap_or_default(),
             n,
         }),
     });
@@ -181,11 +179,13 @@ fn setup_follower() -> (
         msg: PaxosMsg::AcceptSync(AcceptSync {
             n,
             seq_num: seq,
-            decided_snapshot: None,
-            suffix: vec![],
-            sync_idx: 0,
             decided_idx: 0,
-            stopsign: None,
+            log_sync: LogSync {
+                decided_snapshot: None,
+                suffix: vec![],
+                sync_idx: 0,
+                stopsign: None,
+            },
             #[cfg(feature = "unicache")]
             unicache: <Value as Entry>::UniCache::new(),
         }),
@@ -236,11 +236,13 @@ fn atomic_storage_acceptsync_test() {
             msg: PaxosMsg::AcceptSync(AcceptSync {
                 n,
                 seq_num: seq,
-                decided_snapshot: None,
-                suffix: vec![Value::with_id(1), Value::with_id(2), Value::with_id(3)],
-                sync_idx: 0,
                 decided_idx: 1,
-                stopsign: None,
+                log_sync: LogSync {
+                    decided_snapshot: None,
+                    suffix: vec![Value::with_id(1), Value::with_id(2), Value::with_id(3)],
+                    sync_idx: 0,
+                    stopsign: None,
+                },
                 #[cfg(feature = "unicache")]
                 unicache: <Value as Entry>::UniCache::new(),
             }),
@@ -263,6 +265,7 @@ fn atomic_storage_acceptsync_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_trim_test() {
@@ -326,6 +329,7 @@ fn atomic_storage_trim_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_snapshot_test() {
@@ -395,13 +399,13 @@ fn atomic_storage_snapshot_test() {
     }
 }
 
+#[cfg(not(feature = "unicache"))]
 #[test]
 #[serial]
 fn atomic_storage_accept_decide_test() {
     fn run_single_test(fail_after_n_ops: usize) {
         let (mem_storage, storage_conf, mut op) = setup_follower();
 
-        let old_accepted_round = mem_storage.lock().unwrap().get_accepted_round().unwrap();
         let old_log_len = mem_storage.lock().unwrap().get_log_len().unwrap();
         let old_decided_idx = mem_storage.lock().unwrap().get_decided_idx().unwrap();
         storage_conf
@@ -434,18 +438,14 @@ fn atomic_storage_accept_decide_test() {
 
         // check consistency
         let s = mem_storage.lock().unwrap();
-        let new_accepted_round = s.get_accepted_round().unwrap();
         let new_log_len = s.get_log_len().unwrap();
         let new_decided_idx = s.get_decided_idx().unwrap();
-        assert!(
-            (new_log_len == old_log_len
-                && new_decided_idx == old_decided_idx
-                && new_accepted_round == old_accepted_round)
-                || (new_log_len > old_log_len
-                    && new_decided_idx > old_decided_idx
-                    && new_accepted_round >= old_accepted_round),
-            "acceptdecide was not done atomically"
-        );
+        if new_decided_idx > old_decided_idx {
+            assert!(
+                new_log_len > old_log_len,
+                "AcceptDecide operation order didn't ensure safety."
+            );
+        }
     }
     // run the test with injected failures at different points in time
     for i in 1..10 {
@@ -527,7 +527,7 @@ fn atomic_storage_majority_promises_test() {
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {
                 if let PaxosMsg::Prepare(prep) = px_msg.msg {
-                    n = prep.n;
+                    n = prep.n_accepted;
                 }
             }
         }
@@ -546,15 +546,18 @@ fn atomic_storage_majority_promises_test() {
             to: 1,
             msg: PaxosMsg::Promise(Promise {
                 n,
-                suffix: vec![Value::with_id(3)],
                 decided_idx: 2,
                 accepted_idx: 3,
                 n_accepted: n_old,
-                decided_snapshot: Some(SnapshotType::Complete(ValueSnapshot::create(&[
-                    Value::with_id(1),
-                    Value::with_id(2),
-                ]))),
-                stopsign: None,
+                log_sync: Some(LogSync {
+                    decided_snapshot: Some(SnapshotType::Complete(ValueSnapshot::create(&[
+                        Value::with_id(1),
+                        Value::with_id(2),
+                    ]))),
+                    suffix: vec![Value::with_id(3)],
+                    sync_idx: 2,
+                    stopsign: None,
+                }),
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));

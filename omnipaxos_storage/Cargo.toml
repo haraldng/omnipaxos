@@ -15,11 +15,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 omnipaxos = { version = "0.2.2", path = "../omnipaxos", features = ["serde"] }
-sled = { version = "0.34.7" }
 serde = { version = "1.0", features = ["derive"] }
-commitlog = "0.2.0"
 bincode = "1.3.3"
 zerocopy = "0.6.1"
-
+rocksdb = "0.21.0"
 [profile.release]
 lto = true

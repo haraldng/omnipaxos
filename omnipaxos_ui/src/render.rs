@@ -159,12 +159,12 @@ fn draw_chart(app: &App, window_width: usize) -> BarChart {
         .take(window_width / (UI_BARCHART_WIDTH + UI_BARCHART_GAP) as usize)
         .map(|(s, num)| {
             if *num > 0 {
-                (s.as_str(), *num)
+                (s.as_str(), *num as u64)
             } else {
                 ("", 0)
             }
         })
-        .collect::<Vec<(&str, u64)>>();
+        .collect();
     let title = Title::from(Line::from(vec![
         Span::styled(
             format!("{}: {} req/s", UI_THROUGHPUT_TITLE, app.dps as u64),

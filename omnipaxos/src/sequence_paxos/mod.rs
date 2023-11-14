@@ -1,14 +1,14 @@
-use super::{
-    ballot_leader_election::Ballot,
-    messages::sequence_paxos::*,
-    storage::{Entry, StopSign, Storage},
-    util::LeaderState,
-};
+use super::{ballot_leader_election::Ballot, messages::sequence_paxos::*, util::LeaderState};
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    storage::{InternalStorage, InternalStorageConfig},
-    util::{AcceptedMetaData, FlexibleQuorum, NodeId, Quorum, SequenceNumber},
+    storage::{
+        internal_storage::{InternalStorage, InternalStorageConfig},
+        Entry, Snapshot, StopSign, Storage,
+    },
+    util::{
+        FlexibleQuorum, LogSync, NodeId, Quorum, SequenceNumber, READ_ERROR_MSG, WRITE_ERROR_MSG,
+    },
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
 #[cfg(feature = "logging")]
@@ -30,8 +30,8 @@ where
     pid: NodeId,
     peers: Vec<NodeId>, // excluding self pid
     state: (Role, Phase),
-    pending_proposals: Vec<T>,
-    pending_stopsign: Option<StopSign>,
+    buffered_proposals: Vec<T>,
+    buffered_stopsign: Option<StopSign>,
     outgoing: Vec<PaxosMessage<T>>,
     leader_state: LeaderState<T>,
     latest_accepted_meta: Option<(Ballot, usize)>,
@@ -90,8 +90,8 @@ where
             pid,
             peers,
             state,
-            pending_proposals: vec![],
-            pending_stopsign: None,
+            buffered_proposals: vec![],
+            buffered_stopsign: None,
             outgoing,
             leader_state: LeaderState::<T>::with(leader, max_pid, quorum),
             latest_accepted_meta: None,
@@ -113,7 +113,7 @@ where
         paxos
             .internal_storage
             .set_promise(leader)
-            .expect("storage error while trying to write promise");
+            .expect(WRITE_ERROR_MSG);
         #[cfg(feature = "logging")]
         {
             info!(paxos.logger, "Paxos component pid: {} created!", pid);
@@ -139,7 +139,7 @@ where
     /// Initiates the trim process.
     /// # Arguments
     /// * `trim_idx` - Deletes all entries up to [`trim_idx`], if the [`trim_idx`] is `None` then the minimum index accepted by **ALL** servers will be used as the [`trim_idx`].
-    pub(crate) fn trim(&mut self, trim_idx: Option<u64>) -> Result<(), CompactionErr> {
+    pub(crate) fn trim(&mut self, trim_idx: Option<usize>) -> Result<(), CompactionErr> {
         match self.state {
             (Role::Leader, _) => {
                 let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
@@ -184,7 +184,7 @@ where
     /// `local_only` - If `true`, only this server snapshots the log. If `false` all servers performs the snapshot.
     pub(crate) fn snapshot(
         &mut self,
-        idx: Option<u64>,
+        idx: Option<usize>,
         local_only: bool,
     ) -> Result<(), CompactionErr> {
         let result = self.internal_storage.try_snapshot(idx);
@@ -206,12 +206,12 @@ where
     }
 
     /// Return the decided index.
-    pub(crate) fn get_decided_idx(&self) -> u64 {
+    pub(crate) fn get_decided_idx(&self) -> usize {
         self.internal_storage.get_decided_idx()
     }
 
     /// Return trim index from storage.
-    pub(crate) fn get_compacted_idx(&self) -> u64 {
+    pub(crate) fn get_compacted_idx(&self) -> usize {
         self.internal_storage.get_compacted_idx()
     }
 
@@ -231,72 +231,9 @@ where
     /// has been sent but not been received. If so resends them. Note: We can't detect if a
     /// StopSign's Decide message has been received so we always resend to be safe.
     pub(crate) fn resend_message_timeout(&mut self) {
-        match &self.state {
-            (Role::Leader, Phase::Prepare) => {
-                // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
-                for peer in preparable_peers {
-                    self.send_prepare(peer);
-                }
-            }
-            (Role::Leader, Phase::Accept) => {
-                // Resend AcceptStopSign or StopSign's decide
-                if let Some(ss) = self.internal_storage.get_stopsign() {
-                    let decided_idx = self.internal_storage.get_decided_idx();
-                    for follower in self.leader_state.get_promised_followers() {
-                        if self.internal_storage.stopsign_is_decided() {
-                            self.send_decide(follower, decided_idx, true);
-                        } else if self.leader_state.get_accepted_idx(follower)
-                            != self.internal_storage.get_accepted_idx()
-                        {
-                            self.send_accept_stopsign(follower, ss.clone(), true);
-                        }
-                    }
-                }
-                // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
-                for peer in preparable_peers {
-                    self.send_prepare(peer);
-                }
-            }
-            (Role::Follower, Phase::Prepare) => {
-                // Resend Promise
-                match &self.cached_promise_message {
-                    Some(promise) => {
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: promise.n.pid,
-                            msg: PaxosMsg::Promise(promise.clone()),
-                        });
-                    }
-                    None => {
-                        // Shouldn't be possible to be in prepare phase without having
-                        // cached the promise sent as a response to the prepare
-                        #[cfg(feature = "logging")]
-                        warn!(self.logger, "In Prepare phase without a cached promise!");
-                        self.state = (Role::Follower, Phase::Recover);
-                        self.send_preparereq_to_all_peers();
-                    }
-                }
-            }
-            (Role::Follower, Phase::Recover) => {
-                // Resend PrepareReq
-                self.send_preparereq_to_all_peers();
-            }
-            _ => (),
-        }
-    }
-
-    fn send_preparereq_to_all_peers(&mut self) {
-        let prepreq = PrepareReq {
-            n: self.get_promise(),
-        };
-        for peer in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *peer,
-                msg: PaxosMsg::PrepareReq(prepreq),
-            });
+        match self.state.0 {
+            Role::Leader => self.resend_messages_leader(),
+            Role::Follower => self.resend_messages_follower(),
         }
     }
 
@@ -304,10 +241,7 @@ where
     pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T>> {
         let mut outgoing = Vec::with_capacity(self.buffer_size);
         std::mem::swap(&mut self.outgoing, &mut outgoing);
-        #[cfg(feature = "batch_accept")]
-        {
-            self.leader_state.reset_batch_accept_meta();
-        }
+        self.leader_state.reset_batch_accept_meta();
         self.latest_accepted_meta = None;
         outgoing
     }
@@ -331,10 +265,6 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
-            #[cfg(feature = "unicache")]
-            PaxosMsg::EncodedAcceptDecide(e) => {
-                self.handle_encoded_acceptdecide(e);
-            }
         }
     }
 
@@ -347,13 +277,13 @@ where
     }
 
     /// Returns whether this Sequence Paxos instance is stopped, i.e. if it has been reconfigured.
-    fn pending_reconfiguration(&self) -> bool {
+    fn accepted_reconfiguration(&self) -> bool {
         self.internal_storage.get_stopsign().is_some()
     }
 
     /// Append an entry to the replicated log.
     pub(crate) fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
-        if self.pending_reconfiguration() {
+        if self.accepted_reconfiguration() {
             Err(ProposeErr::PendingReconfigEntry(entry))
         } else {
             self.propose_entry(entry);
@@ -369,70 +299,21 @@ where
         new_config: ClusterConfig,
         metadata: Option<Vec<u8>>,
     ) -> Result<(), ProposeErr<T>> {
-        if self.pending_reconfiguration() {
-            Err(ProposeErr::PendingReconfigConfig(new_config, metadata))
-        } else {
-            match self.state {
-                (Role::Leader, Phase::Prepare) => {
-                    if self.pending_stopsign.is_none() {
-                        let ss = StopSign::with(new_config, metadata);
-                        self.pending_stopsign = Some(ss);
-                    } else {
-                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
-                    }
-                }
-                (Role::Leader, Phase::Accept) => {
-                    if !self.pending_reconfiguration() {
-                        #[cfg(feature = "logging")]
-                        info!(
-                            self.logger,
-                            "Propose reconfiguration {:?} with {:?}",
-                            new_config.nodes,
-                            self.leader_state.n_leader
-                        );
-                        let ss = StopSign::with(new_config, metadata);
-                        self.accept_stopsign(ss.clone());
-                        for pid in self.leader_state.get_promised_followers() {
-                            self.send_accept_stopsign(pid, ss.clone(), false);
-                        }
-                    } else {
-                        return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
-                    }
-                }
-                _ => {
-                    let ss = StopSign::with(new_config, metadata);
-                    self.forward_stopsign(ss);
-                }
-            }
-            Ok(())
+        if self.accepted_reconfiguration() {
+            return Err(ProposeErr::PendingReconfigConfig(new_config, metadata));
         }
-    }
-
-    fn send_accept_stopsign(&mut self, to: NodeId, ss: StopSign, resend: bool) {
-        let seq_num = match resend {
-            true => self.leader_state.get_seq_num(to),
-            false => self.leader_state.next_seq_num(to),
-        };
-        let acc_ss = PaxosMsg::AcceptStopSign(AcceptStopSign {
-            seq_num,
-            n: self.leader_state.n_leader,
-            ss,
-        });
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: acc_ss,
-        });
-    }
-
-    fn accept_stopsign(&mut self, ss: StopSign) {
-        self.internal_storage
-            .set_stopsign(Some(ss))
-            .expect("storage error while trying to write stopsign");
-        if self.state.0 == Role::Leader {
-            let accepted_idx = self.internal_storage.get_accepted_idx();
-            self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        #[cfg(feature = "logging")]
+        info!(
+            self.logger,
+            "Accepting reconfiguration {:?}", new_config.nodes
+        );
+        let ss = StopSign::with(new_config, metadata);
+        match self.state {
+            (Role::Leader, Phase::Prepare) => self.buffered_stopsign = Some(ss),
+            (Role::Leader, Phase::Accept) => self.accept_stopsign_leader(ss),
+            _ => self.forward_stopsign(ss),
         }
+        Ok(())
     }
 
     fn get_current_leader(&self) -> NodeId {
@@ -459,8 +340,8 @@ where
 
     fn propose_entry(&mut self, entry: T) {
         match self.state {
-            (Role::Leader, Phase::Prepare) => self.pending_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => self.accept_entry(entry),
+            (Role::Leader, Phase::Prepare) => self.buffered_proposals.push(entry),
+            (Role::Leader, Phase::Accept) => self.accept_entry_leader(entry),
             _ => self.forward_proposals(vec![entry]),
         }
     }
@@ -480,7 +361,7 @@ where
             };
             self.outgoing.push(msg);
         } else {
-            self.pending_proposals.append(&mut entries);
+            self.buffered_proposals.append(&mut entries);
         }
     }
 
@@ -496,8 +377,44 @@ where
                 msg: fs,
             };
             self.outgoing.push(msg);
-        } else if self.pending_stopsign.as_mut().is_none() {
-            self.pending_stopsign = Some(ss);
+        } else if self.buffered_stopsign.as_mut().is_none() {
+            self.buffered_stopsign = Some(ss);
+        }
+    }
+    /// Returns `LogSync`, a struct to help other servers synchronize their log to correspond to the
+    /// current state of our own log. The `common_prefix_idx` marks where in the log the other server
+    /// needs to be sync from.
+    fn create_log_sync(
+        &self,
+        common_prefix_idx: usize,
+        other_logs_decided_idx: usize,
+    ) -> LogSync<T> {
+        let decided_idx = self.internal_storage.get_decided_idx();
+        let (decided_snapshot, suffix, sync_idx) =
+            if T::Snapshot::use_snapshots() && decided_idx > common_prefix_idx {
+                // Note: We snapshot from the other log's decided index and not the common prefix because
+                // snapshots currently only work on decided entries.
+                let (delta_snapshot, compacted_idx) = self
+                    .internal_storage
+                    .create_diff_snapshot(other_logs_decided_idx)
+                    .expect(READ_ERROR_MSG);
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(decided_idx)
+                    .expect(READ_ERROR_MSG);
+                (delta_snapshot, suffix, compacted_idx)
+            } else {
+                let suffix = self
+                    .internal_storage
+                    .get_suffix(common_prefix_idx)
+                    .expect(READ_ERROR_MSG);
+                (None, suffix, common_prefix_idx)
+            };
+        LogSync {
+            decided_snapshot,
+            suffix,
+            sync_idx,
+            stopsign: self.internal_storage.get_stopsign(),
         }
     }
 }

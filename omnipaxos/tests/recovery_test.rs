@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask, FutureCollection, KFuture};
-use omnipaxos::util::LogEntry;
+use omnipaxos::util::{LogEntry, NodeId};
 use serial_test::serial;
 use std::{thread, time::Duration};
 use utils::{verification::verify_log, StorageType, TestConfig, TestSystem, Value};
@@ -20,7 +20,7 @@ fn leader_fail_follower_propose_test() {
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
-    let follower = (1..=cfg.num_nodes as u64)
+    let follower = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -95,7 +95,7 @@ fn follower_fail_leader_propose_test() {
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
-    let follower = (1..=cfg.num_nodes as u64)
+    let follower = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -134,7 +134,7 @@ fn follower_fail_follower_propose_test() {
     let initial_proposals = proposals[0..(cfg.num_proposals / 2) as usize].to_vec();
     sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader = sys.get_elected_leader(1, cfg.wait_timeout);
-    let follower = (1..=cfg.num_nodes as u64)
+    let follower = (1..=cfg.num_nodes as NodeId)
         .find(|x| *x != leader)
         .expect("No followers found!");
 
@@ -163,7 +163,7 @@ fn follower_fail_follower_propose_test() {
 
 /// Propose and check that the last proposals are decided by the
 /// recovered node. The recovered node can also be the proposer
-fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &TestConfig) {
+fn check_last_proposals(proposer: NodeId, recover: NodeId, sys: &TestSystem, cfg: &TestConfig) {
     let proposer_px = sys
         .nodes
         .get(&proposer)
@@ -198,7 +198,7 @@ fn check_last_proposals(proposer: u64, recover: u64, sys: &TestSystem, cfg: &Tes
 }
 
 /// Kill and recover node given its 'pid' after some time.
-pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: u64) {
+pub fn kill_and_recover_node(sys: &mut TestSystem, cfg: &TestConfig, pid: NodeId) {
     sys.kill_node(pid);
     thread::sleep(SLEEP_TIMEOUT);
 

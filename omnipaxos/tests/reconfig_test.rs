@@ -2,7 +2,10 @@ pub mod utils;
 
 use crate::utils::STOPSIGN_ID;
 use kompact::prelude::{promise, Ask};
-use omnipaxos::{util::LogEntry, ClusterConfig};
+use omnipaxos::{
+    util::{LogEntry, NodeId},
+    ClusterConfig,
+};
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
 
@@ -22,7 +25,7 @@ fn reconfig_test() {
     );
 
     let new_config_id = 2;
-    let new_nodes: Vec<u64> = (cfg.num_nodes as u64..(cfg.num_nodes as u64 + 3)).collect();
+    let new_nodes: Vec<NodeId> = (cfg.num_nodes as NodeId..(cfg.num_nodes as NodeId + 3)).collect();
     let new_config = ClusterConfig {
         configuration_id: new_config_id,
         nodes: new_nodes,

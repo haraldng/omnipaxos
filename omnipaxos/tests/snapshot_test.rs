@@ -7,7 +7,7 @@ use serial_test::serial;
 use std::{sync::Arc, thread};
 use utils::{TestConfig, TestSystem, Value};
 
-const SNAPSHOT_INDEX_INCREMENT: u64 = 10;
+const SNAPSHOT_INDEX_INCREMENT: usize = 10;
 
 /// Test trimming the log.
 /// At the end the log is retrieved from each replica and verified
@@ -127,10 +127,10 @@ fn double_snapshot_test() {
 
 fn check_snapshot(
     vec_proposals: &Vec<Value>,
-    snapshot_idx: u64,
+    snapshot_idx: usize,
     node: Arc<Component<OmniPaxosComponent>>,
 ) {
-    let exp_snapshot = ValueSnapshot::create(&vec_proposals[0..snapshot_idx as usize]);
+    let exp_snapshot = ValueSnapshot::create(&vec_proposals[0..snapshot_idx]);
     let num_proposals = vec_proposals.len();
     node.on_definition(|x| {
         let op = &x.paxos;
@@ -144,9 +144,9 @@ fn check_snapshot(
                 ),
             }
         }
-        for idx in snapshot_idx as usize..num_proposals {
+        for idx in snapshot_idx..num_proposals {
             let expected_value = vec_proposals.get(idx).unwrap();
-            match op.read(idx as u64).unwrap() {
+            match op.read(idx).unwrap() {
                 LogEntry::Decided(v) if &v == expected_value => {}
                 e => panic!(
                     "Entry {} must be decided with {:?}, but was {:?}",
@@ -155,6 +155,6 @@ fn check_snapshot(
             }
         }
         let decided_sfx = op.read_decided_suffix(0).unwrap();
-        assert_eq!(decided_sfx.len(), num_proposals - snapshot_idx as usize + 1); // +1 as all snapshotted entries are represented by LogEntry::Snapshotted
+        assert_eq!(decided_sfx.len(), num_proposals - snapshot_idx + 1); // +1 as all snapshotted entries are represented by LogEntry::Snapshotted
     });
 }

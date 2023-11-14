@@ -63,13 +63,13 @@ fn consensus_test() {
 fn read_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
+    let log: Vec<Value> = [1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
-    let snapshotted_idx: u64 = 4;
-    let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
+    let snapshotted_idx = 4;
+    let (snapshotted, _suffix) = log.split_at(snapshotted_idx);
 
     let exp_snapshot = ValueSnapshot::create(snapshotted);
 
@@ -93,7 +93,7 @@ fn read_test() {
     let entries = omni_paxos
         .read_decided_suffix(0)
         .expect("No decided entries");
-    let expected_entries = log.get(0..decided_idx as usize).unwrap();
+    let expected_entries = log.get(0..decided_idx).unwrap();
     verify_entries(entries.as_slice(), expected_entries, 0, decided_idx);
 
     // create snapshot
@@ -104,7 +104,7 @@ fn read_test() {
     // read entry
     let idx = snapshotted_idx;
     let entry = omni_paxos.read(idx).expect("No entry");
-    let expected_entries = log.get(idx as usize..=idx as usize).unwrap();
+    let expected_entries = log.get(idx..=idx).unwrap();
     verify_entries(&[entry], expected_entries, snapshotted_idx, decided_idx);
 
     // read snapshot
@@ -112,7 +112,7 @@ fn read_test() {
     verify_snapshot(&[snapshot], snapshotted_idx, &exp_snapshot);
 
     // read none
-    let idx = log.len() as u64;
+    let idx = log.len();
     let entry = omni_paxos.read(idx);
     assert!(entry.is_none(), "Expected None, got: {:?}", entry);
 
@@ -126,7 +126,7 @@ fn read_test() {
         },
         None,
     );
-    let log_len = log.len() as u64;
+    let log_len = log.len();
     stopped_storage
         .append_entries(log.clone())
         .expect("Failed to append entries");
@@ -153,13 +153,13 @@ fn read_test() {
 fn read_entries_test() {
     let cfg = TestConfig::load("consensus_test").expect("Test config loaded");
 
-    let log: Vec<Value> = vec![1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
+    let log: Vec<Value> = [1, 3, 2, 7, 5, 10, 29, 100, 8, 12]
         .iter()
         .map(|v| Value::with_id(*v as u64))
         .collect();
     let decided_idx = 6;
-    let snapshotted_idx: u64 = 4;
-    let (snapshotted, _suffix) = log.split_at(snapshotted_idx as usize);
+    let snapshotted_idx = 4;
+    let (snapshotted, _suffix) = log.split_at(snapshotted_idx);
     let exp_snapshot = ValueSnapshot::create(snapshotted);
 
     let temp_dir = create_temp_dir();
@@ -185,7 +185,7 @@ fn read_entries_test() {
     let entries = omni_paxos
         .read_entries(from_idx..=decided_idx)
         .expect("No entries");
-    let expected_entries = log.get(from_idx as usize..=decided_idx as usize).unwrap();
+    let expected_entries = log.get(from_idx..=decided_idx).unwrap();
     verify_entries(entries.as_slice(), expected_entries, from_idx, decided_idx);
     // read snapshot only
     let entries = omni_paxos
@@ -200,13 +200,13 @@ fn read_entries_test() {
         .read_entries(from_idx..to_idx)
         .expect("No snapshot and entries");
     let (snapshot, suffix) = entries.split_at(1);
-    let expected_entries = log.get(snapshotted_idx as usize..to_idx as usize).unwrap();
+    let expected_entries = log.get(snapshotted_idx..to_idx).unwrap();
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
     verify_entries(suffix, expected_entries, snapshotted_idx, decided_idx);
 
     // read none
     let from_idx = 0;
-    let to_idx = log.len() as u64;
+    let to_idx = log.len();
     let entries = omni_paxos.read_entries(from_idx..=to_idx);
     assert!(entries.is_none(), "Expected None, got: {:?}", entries);
 
@@ -221,7 +221,7 @@ fn read_entries_test() {
         },
         None,
     );
-    let log_len = log.len() as u64;
+    let log_len = log.len();
     stopped_storage
         .append_entries(log.clone())
         .expect("Failed to append entries");
@@ -244,12 +244,7 @@ fn read_entries_test() {
         .read_entries(from_idx..)
         .expect("No StopSign and Entries");
     let (prefix, stopsign) = entries.split_at(entries.len() - 1);
-    verify_entries(
-        prefix,
-        log.get(from_idx as usize..).unwrap(),
-        from_idx,
-        log_len,
-    );
+    verify_entries(prefix, log.get(from_idx..).unwrap(), from_idx, log_len);
     verify_stopsign(stopsign, &ss);
 
     // read snapshot + entries + stopsign
@@ -262,7 +257,7 @@ fn read_entries_test() {
     verify_snapshot(snapshot, snapshotted_idx, &exp_snapshot);
     verify_entries(
         ents,
-        log.get(snapshotted_idx as usize..).unwrap(),
+        log.get(snapshotted_idx..).unwrap(),
         snapshotted_idx,
         log_len,
     );

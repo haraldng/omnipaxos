@@ -7,23 +7,30 @@ use super::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
-#[derive(Debug, Clone)]
-pub(crate) struct AcceptedMetaData<T: Entry> {
-    pub accepted_idx: u64,
-    #[cfg(not(feature = "unicache"))]
-    pub flushed_entries: Vec<T>,
-    #[cfg(feature = "unicache")]
-    pub flushed_processed: Vec<T::EncodeResult>,
+/// Struct used to help another server synchronize their log with the current state of our own log.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct LogSync<T>
+where
+    T: Entry,
+{
+    /// The decided snapshot.
+    pub decided_snapshot: Option<SnapshotType<T>>,
+    /// The log suffix.
+    pub suffix: Vec<T>,
+    /// The index of the log where the entries from `suffix` should be applied at (also the compacted idx of `decided_snapshot` if it exists).
+    pub sync_idx: usize,
+    /// The accepted StopSign.
+    pub stopsign: Option<StopSign>,
 }
 
 #[derive(Debug, Clone, Default)]
-/// Promise without the suffix
+/// Promise without the log update
 pub(crate) struct PromiseMetaData {
     pub n_accepted: Ballot,
-    pub accepted_idx: u64,
-    pub decided_idx: u64,
+    pub accepted_idx: usize,
+    pub decided_idx: usize,
     pub pid: NodeId,
-    pub stopsign: Option<StopSign>,
 }
 
 impl PartialOrd for PromiseMetaData {
@@ -52,13 +59,6 @@ impl PartialEq for PromiseMetaData {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-/// Actual data of a promise i.e., the decided snapshot and/or the suffix.
-pub(crate) struct PromiseData<T: Entry> {
-    pub decided_snapshot: Option<SnapshotType<T>>,
-    pub suffix: Vec<T>,
-}
-
 #[derive(Debug, Clone)]
 /// The promise state of a node.
 enum PromiseState {
@@ -79,10 +79,9 @@ where
     promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
-    pub accepted_indexes: Vec<u64>,
+    pub accepted_indexes: Vec<usize>,
     max_promise_meta: PromiseMetaData,
-    max_promise: Option<PromiseData<T>>,
-    #[cfg(feature = "batch_accept")]
+    max_promise_sync: Option<LogSync<T>>,
     batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
@@ -101,8 +100,7 @@ where
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
             accepted_indexes: vec![0; max_pid],
             max_promise_meta: PromiseMetaData::default(),
-            max_promise: None,
-            #[cfg(feature = "batch_accept")]
+            max_promise_sync: None,
             batch_accept_meta: vec![None; max_pid],
             max_pid,
             quorum,
@@ -130,20 +128,16 @@ where
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T>, from: u64, check_max_prom: bool) -> bool {
+    pub fn set_promise(&mut self, prom: Promise<T>, from: NodeId, check_max_prom: bool) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
             decided_idx: prom.decided_idx,
             pid: from,
-            stopsign: prom.stopsign,
         };
         if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
-            self.max_promise = Some(PromiseData {
-                decided_snapshot: prom.decided_snapshot,
-                suffix: prom.suffix,
-            })
+            self.max_promise_sync = prom.log_sync;
         }
         self.promises_meta[Self::pid_to_idx(from)] = PromiseState::Promised(promise_meta);
         let num_promised = self
@@ -163,15 +157,15 @@ where
         self.promises_meta[Self::pid_to_idx(pid)] = PromiseState::PromisedHigher;
     }
 
-    pub fn take_max_promise(&mut self) -> Option<PromiseData<T>> {
-        std::mem::take(&mut self.max_promise)
+    pub fn take_max_promise_sync(&mut self) -> Option<LogSync<T>> {
+        std::mem::take(&mut self.max_promise_sync)
     }
 
     pub fn get_max_promise_meta(&self) -> &PromiseMetaData {
         &self.max_promise_meta
     }
 
-    pub fn get_max_decided_idx(&self) -> Option<u64> {
+    pub fn get_max_decided_idx(&self) -> usize {
         self.promises_meta
             .iter()
             .filter_map(|p| match p {
@@ -179,6 +173,7 @@ where
                 _ => None,
             })
             .max()
+            .unwrap_or_default()
     }
 
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
@@ -188,14 +183,13 @@ where
         }
     }
 
-    pub fn get_min_all_accepted_idx(&self) -> &u64 {
+    pub fn get_min_all_accepted_idx(&self) -> &usize {
         self.accepted_indexes
             .iter()
             .min()
             .expect("Should be all initialised to 0!")
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn reset_batch_accept_meta(&mut self) {
         self.batch_accept_meta = vec![None; self.max_pid];
     }
@@ -225,17 +219,15 @@ where
             .collect()
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn set_batch_accept_meta(&mut self, pid: NodeId, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn set_accepted_idx(&mut self, pid: NodeId, idx: u64) {
+    pub fn set_accepted_idx(&mut self, pid: NodeId, idx: usize) {
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
-    #[cfg(feature = "batch_accept")]
     pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
             .get(Self::pid_to_idx(pid))
@@ -244,28 +236,24 @@ where
             .copied()
     }
 
-    pub fn get_decided_idx(&self, pid: NodeId) -> Option<u64> {
+    pub fn get_decided_idx(&self, pid: NodeId) -> Option<usize> {
         match self.promises_meta.get(Self::pid_to_idx(pid)).unwrap() {
             PromiseState::Promised(metadata) => Some(metadata.decided_idx),
             _ => None,
         }
     }
 
-    pub fn get_accepted_idx(&self, pid: NodeId) -> u64 {
+    pub fn get_accepted_idx(&self, pid: NodeId) -> usize {
         *self.accepted_indexes.get(Self::pid_to_idx(pid)).unwrap()
     }
 
-    pub fn is_chosen(&self, idx: u64) -> bool {
+    pub fn is_chosen(&self, idx: usize) -> bool {
         let num_accepted = self
             .accepted_indexes
             .iter()
             .filter(|la| **la >= idx)
             .count();
         self.quorum.is_accept_quorum(num_accepted)
-    }
-
-    pub fn take_max_promise_stopsign(&mut self) -> Option<StopSign> {
-        self.max_promise_meta.stopsign.take()
     }
 }
 
@@ -327,7 +315,7 @@ impl<T> SnapshottedEntry<T>
 where
     T: Entry,
 {
-    pub(crate) fn with(trimmed_idx: u64, snapshot: T::Snapshot) -> Self {
+    pub(crate) fn with(trimmed_idx: usize, snapshot: T::Snapshot) -> Self {
         Self {
             trimmed_idx,
             snapshot,
@@ -353,12 +341,17 @@ pub(crate) mod defaults {
 }
 
 #[allow(missing_docs)]
-pub type TrimmedIndex = u64;
+pub type TrimmedIndex = usize;
 
 /// ID for an OmniPaxos node
 pub type NodeId = u64;
 /// ID for an OmniPaxos configuration (i.e., the set of servers in an OmniPaxos cluster)
 pub type ConfigurationId = u32;
+
+/// Error message to display when there was an error reading to the storage implementation.
+pub const READ_ERROR_MSG: &str = "Error reading from storage.";
+/// Error message to display when there was an error writing to the storage implementation.
+pub const WRITE_ERROR_MSG: &str = "Error writing to storage.";
 
 /// Used for checking the ordering of message sequences in the accept phase
 #[derive(PartialEq, Eq)]
@@ -463,4 +456,13 @@ impl Quorum {
             Quorum::Flexible(flex_quorum) => num_nodes >= flex_quorum.write_quorum_size,
         }
     }
+}
+
+/// The entries flushed due to an append operation
+pub(crate) struct AcceptedMetaData<T: Entry> {
+    pub accepted_idx: usize,
+    #[cfg(not(feature = "unicache"))]
+    pub entries: Vec<T>,
+    #[cfg(feature = "unicache")]
+    pub entries: Vec<T::EncodeResult>,
 }

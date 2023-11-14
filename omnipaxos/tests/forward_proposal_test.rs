@@ -1,7 +1,7 @@
 pub mod utils;
 
 use kompact::prelude::{promise, Ask};
-use omnipaxos::ballot_leader_election::Ballot;
+use omnipaxos::{ballot_leader_election::Ballot, util::NodeId};
 use rand::Rng;
 use serial_test::serial;
 use utils::{TestConfig, TestSystem, Value};
@@ -25,9 +25,9 @@ fn forward_proposal_test() {
         .expect("No leader has been elected in the allocated time!");
     println!("elected: {:?}", elected_leader);
 
-    let mut proposal_node: u64;
+    let mut proposal_node: NodeId;
     loop {
-        proposal_node = rand::thread_rng().gen_range(1..=cfg.num_nodes as u64);
+        proposal_node = rand::thread_rng().gen_range(1..=cfg.num_nodes as NodeId);
 
         if proposal_node != elected_leader.pid {
             break;
