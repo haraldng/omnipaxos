@@ -265,11 +265,10 @@ where
 
     fn handle_majority_promises(&mut self) {
         let max_promise_sync = self.leader_state.take_max_promise_sync();
-        let max_promise_meta = self.leader_state.get_max_promise_meta();
         let decided_idx = self.leader_state.get_max_decided_idx();
         let mut new_accepted_idx = self
             .internal_storage
-            .sync_log(max_promise_meta.n_accepted, decided_idx, max_promise_sync)
+            .sync_log(self.leader_state.n_leader, decided_idx, max_promise_sync)
             .expect(WRITE_ERROR_MSG);
         if !self.accepted_reconfiguration() {
             if !self.buffered_proposals.is_empty() {
