@@ -203,15 +203,15 @@ where
     }
 
     fn batch_append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        // Don't need to delete entries will we overwrite.
+        // Don't need to delete entries that will be overwritten.
         let delete_idx = from_idx + entries.len();
         if delete_idx < self.next_log_key {
             let from_key = delete_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
             let log = self.db.cf_handle(LOG).unwrap();
             self.write_batch.delete_range_cf(log, from_key, to_key);
-            self.next_log_key = from_idx;
         }
+        self.next_log_key = from_idx;
         self.batch_append_entries(entries)
     }
 
@@ -321,15 +321,15 @@ where
     }
 
     fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        // Don't need to delete entries will we overwrite.
+        // Don't need to delete entries that will be overwritten.
         let delete_idx = from_idx + entries.len();
         if delete_idx < self.next_log_key {
             let from_key = delete_idx.to_be_bytes();
             let to_key = self.next_log_key.to_be_bytes();
             self.db
                 .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
-            self.next_log_key = from_idx;
         }
+        self.next_log_key = from_idx;
         self.append_entries(entries)
     }
 

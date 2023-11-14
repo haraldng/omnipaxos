@@ -140,7 +140,7 @@ where
     /// Appends the entries of `entries` to the end of the log.
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()>;
 
-    /// Appends the entries of `entries` to the prefix from index `from_index` in the log.
+    /// Appends the entries of `entries` to the prefix from index `from_index` (inclusive) in the log.
     fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()>;
 
     /// Sets the round that has been promised.
@@ -166,7 +166,8 @@ where
     /// Returns the current length of the log.
     fn get_log_len(&self) -> StorageResult<usize>;
 
-    /// Returns the suffix of entries in the log from index `from`.
+    /// Returns the suffix of entries in the log from index `from` (inclusive).
+    /// If entries **do not exist for the complete interval**, an empty Vector should be returned.
     fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>>;
 
     /// Returns the round that has been promised.
