@@ -397,4 +397,16 @@ where
             Phase::None => (),
         }
     }
+
+    pub(crate) fn flush_batch_leader(&mut self) {
+        let accepted_metadata = self
+            .internal_storage
+            .flush_batch_and_get_entries()
+            .expect(WRITE_ERROR_MSG);
+        if let Some(metadata) = accepted_metadata {
+            self.leader_state
+                .set_accepted_idx(self.pid, metadata.accepted_idx);
+            self.send_acceptdecide(metadata);
+        }
+    }
 }

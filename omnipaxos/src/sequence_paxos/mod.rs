@@ -237,6 +237,14 @@ where
         }
     }
 
+    /// Flushes any batched log entries and sends their corresponding Accept or Accepted messages.
+    pub(crate) fn flush_batch_timeout(&mut self) {
+        match self.state.0 {
+            Role::Leader => self.flush_batch_leader(),
+            Role::Follower => self.flush_batch_follower(),
+        }
+    }
+
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
     pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T>> {
         let mut outgoing = Vec::with_capacity(self.buffer_size);
