@@ -239,9 +239,10 @@ where
 
     /// Flushes any batched log entries and sends their corresponding Accept or Accepted messages.
     pub(crate) fn flush_batch_timeout(&mut self) {
-        match self.state.0 {
-            Role::Leader => self.flush_batch_leader(),
-            Role::Follower => self.flush_batch_follower(),
+        match self.state {
+            (Role::Leader, Phase::Accept) => self.flush_batch_leader(),
+            (Role::Follower, Phase::Accept) => self.flush_batch_follower(),
+            _ => (),
         }
     }
 
