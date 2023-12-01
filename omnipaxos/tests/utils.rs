@@ -82,6 +82,9 @@ pub struct TestConfig {
     #[serde(rename(deserialize = "resend_message_timeout_ms"))]
     #[serde(deserialize_with = "deserialize_duration_millis")]
     pub resend_message_timeout: Duration,
+    #[serde(rename(deserialize = "flush_batch_timeout_ms"))]
+    #[serde(deserialize_with = "deserialize_duration_millis")]
+    pub flush_batch_timeout: Duration,
     pub storage_type: StorageTypeSelector,
     pub num_proposals: u64,
     pub num_elections: u64,
@@ -119,8 +122,10 @@ impl TestConfig {
         let server_config = ServerConfig {
             pid,
             election_tick_timeout: 1,
-            // Make tick timeouts reletive to election timeout
+            // Make tick timeouts relative to election timeout
             resend_message_tick_timeout: self.resend_message_timeout.as_millis() as u64
+                / self.election_timeout.as_millis() as u64,
+            flush_batch_tick_timeout: self.flush_batch_timeout.as_millis() as u64
                 / self.election_timeout.as_millis() as u64,
             batch_size: self.batch_size,
             ..Default::default()
@@ -140,6 +145,7 @@ impl Default for TestConfig {
             wait_timeout: Duration::from_millis(5000),
             election_timeout: Duration::from_millis(200),
             resend_message_timeout: Duration::from_millis(500),
+            flush_batch_timeout: Duration::from_millis(2000),
             storage_type: StorageTypeSelector::Memory,
             num_proposals: 100,
             num_elections: 0,

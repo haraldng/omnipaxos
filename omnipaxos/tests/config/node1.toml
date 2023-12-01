@@ -10,6 +10,8 @@ pid = 1
 election_tick_timeout = 10
 # If `tick()` is called every 10ms then dropped messages will be resent every 1000ms
 resend_message_tick_timeout = 100
+# If `tick()` is called every 10ms then batched entries will be flushed every 2000ms
+flush_batch_tick_timeout = 200
 buffer_size = 10000
 batch_size = 2
 logger_file_path = "logs/paxos_1.log"

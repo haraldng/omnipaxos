@@ -268,4 +268,12 @@ where
             });
         }
     }
+
+    pub(crate) fn flush_batch_follower(&mut self) {
+        let accepted_idx = self.internal_storage.get_accepted_idx();
+        let new_accepted_idx = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
+        if new_accepted_idx > accepted_idx {
+            self.reply_accepted(self.get_promise(), new_accepted_idx);
+        }
+    }
 }

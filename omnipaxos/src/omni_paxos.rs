@@ -5,7 +5,7 @@ use crate::{
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
     util::{
-        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
+        defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, FLUSH_BATCH_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
         ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
     },
     utils::{ui, ui::ClusterState},
@@ -74,6 +74,7 @@ impl OmniPaxosConfig {
             resend_message_clock: LogicalClock::with(
                 self.server_config.resend_message_tick_timeout,
             ),
+            flush_batch_clock: LogicalClock::with(self.server_config.flush_batch_tick_timeout),
             seq_paxos: SequencePaxos::with(self.into(), storage),
         })
     }
@@ -171,6 +172,8 @@ pub struct ServerConfig {
     pub buffer_size: usize,
     /// The size of the buffer for log batching. The default is 1, which means no batching.
     pub batch_size: usize,
+    /// The number of calls to `tick()` before the batched log entries are flushed.
+    pub flush_batch_tick_timeout: u64,
     /// Custom priority for this node to be elected as the leader.
     pub leader_priority: u32,
     /// The path where the default logger logs events.
@@ -208,6 +211,7 @@ impl Default for ServerConfig {
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
             batch_size: 1,
+            flush_batch_tick_timeout: FLUSH_BATCH_TIMEOUT,
             leader_priority: 0,
             #[cfg(feature = "logging")]
             logger_file_path: None,
@@ -228,6 +232,7 @@ where
     ble: BallotLeaderElection,
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
+    flush_batch_clock: LogicalClock,
 }
 
 impl<T, B> OmniPaxos<T, B>
@@ -369,14 +374,18 @@ where
         self.seq_paxos.reconnected(pid)
     }
 
-    /// Increments the internal logical clock. Will trigger leader changes and resend dropped messages (if required)
-    /// after every `election_tick_timeout` and `resend_message_tick_timeout` number of calls to this function (See how to set these in `ServerConfig`).
+    /// Increments the internal logical clock. This drives the processes for leader changes, resending dropped messages, and flushing batched log entries.
+    /// Each of these is triggered every `election_tick_timeout`, `resend_message_tick_timeout`, and `flush_batch_tick_timeout` number of calls to this function
+    /// (See how to configure these timeouts in `ServerConfig`).
     pub fn tick(&mut self) {
         if self.election_clock.tick_and_check_timeout() {
             self.election_timeout();
         }
         if self.resend_message_clock.tick_and_check_timeout() {
             self.seq_paxos.resend_message_timeout();
+        }
+        if self.flush_batch_clock.tick_and_check_timeout() {
+            self.seq_paxos.flush_batch_timeout();
         }
     }
 

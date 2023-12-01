@@ -288,6 +288,17 @@ where
         self.append_entries_without_batching(flushed_entries)
     }
 
+    pub(crate) fn flush_batch_and_get_entries(
+        &mut self,
+    ) -> StorageResult<Option<AcceptedMetaData<T>>> {
+        let flushed_entries = if !self.state_cache.batched_entries.is_empty() {
+            Some(self.state_cache.take_batched_entries())
+        } else {
+            None
+        };
+        self.flush_if_full_batch(flushed_entries)
+    }
+
     // Append entries without batching, return the accepted index
     pub(crate) fn append_entries_without_batching(
         &mut self,
