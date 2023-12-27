@@ -16,6 +16,7 @@ pub mod sequence_paxos {
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
+    use crate::util::ithaca::DataId;
 
     /// Message sent by a follower on crash-recovery or dropped messages to request its leader to re-prepare them.
     #[derive(Copy, Clone, Debug)]
@@ -57,6 +58,7 @@ pub mod sequence_paxos {
         /// The log update which the leader applies to its log in order to sync
         /// with this follower (if the follower is more up-to-date).
         pub log_sync: Option<LogSync<T>>,
+        pub replicated_data: Vec<DataId>,
     }
 
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
@@ -80,6 +82,30 @@ pub mod sequence_paxos {
         pub unicache: T::UniCache,
     }
 
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct Replicate<T> {
+        pub id: DataId,
+        pub data: T
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct ReplicateAck {
+        pub n: Ballot,
+        pub id: DataId,
+        pub proposed_log_idx: usize,
+    }
+
+    #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct AcceptOrder {
+        /// The current round.
+        pub n: Ballot,
+        pub log_idx: usize,
+        pub id: DataId,
+    }
+
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -91,6 +117,7 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The sequence number of this message in the leader-to-follower accept sequence
         pub seq_num: SequenceNumber,
+        // pub log_idx: usize,
         /// The decided index.
         pub decided_idx: usize,
         #[cfg(not(feature = "unicache"))]
@@ -176,6 +203,9 @@ pub mod sequence_paxos {
         Compaction(Compaction),
         AcceptStopSign(AcceptStopSign),
         ForwardStopSign(StopSign),
+        Replicate(Replicate<T>),
+        ReplicateAck(ReplicateAck),
+        AcceptOrder(AcceptOrder),
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.

@@ -6,6 +6,7 @@ use super::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use std::collections::HashMap;
 
 /// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
@@ -465,4 +466,86 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
     pub entries: Vec<T>,
     #[cfg(feature = "unicache")]
     pub entries: Vec<T::EncodeResult>,
+}
+
+
+pub(crate) mod ithaca {
+    use super::*;
+
+    pub type DataId = u32;
+
+    pub struct Votes(pub Vec<Vote>);
+
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    pub struct Vote {
+        pub n: Ballot,
+        pub log_idx: usize,
+    }
+
+    impl Votes {
+        pub fn is_chosen(&self, quorum_size: usize) -> bool {
+            self.0.len() >= quorum_size
+        }
+
+        pub fn add_vote(&mut self, vote: Vote) {
+            self.0.push(vote);
+        }
+
+        pub fn check_result(&self, quorum: usize, super_quorum: usize, mode: Mode) -> VotingResult {
+            match mode {
+                Mode::OmniPaxos => {
+                    unimplemented!()
+                },
+                Mode::PathPaxos => {
+                    unimplemented!()
+                },
+                _ => {
+                    match self.0.len() {
+                        q if q == quorum => {
+                            let all_same = self.0.iter().all(|&x| x == self.0[0]);
+                            if all_same {
+                                if mode == Mode::SPaxos {
+                                    VotingResult::Chosen
+                                } else {
+                                    VotingResult::Pending
+                                }
+                            } else {
+                                todo!("how to pick slow path value");
+                                VotingResult::SlowPath(self.0[0].log_idx)
+                            }
+                        },
+                        sq if sq == super_quorum => {
+                            let all_same = self.0.iter().all(|&x| x == self.0[0]);
+                            if all_same {
+                                VotingResult::FastPath(self.0[0])
+                            } else {
+                                todo!("how to pick slow path value");
+                                VotingResult::SlowPath(self.0[0].log_idx)
+                            }
+                        },
+                        _ => {
+                            VotingResult::Pending
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    pub enum Mode {
+        FastPaxos,
+        SPaxos,
+        OmniPaxos,
+        PathPaxos,
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    pub enum VotingResult {
+        Pending,
+        Chosen,
+        FastPath(Vote),
+        SlowPath(usize), // log idx that should be used for slow path
+    }
+
 }

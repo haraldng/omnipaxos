@@ -40,6 +40,7 @@ where
                 decided_idx: self.internal_storage.get_decided_idx(),
                 accepted_idx,
                 log_sync,
+                replicated_data: self.replicated_data.keys().cloned().collect()
             };
             self.cached_promise_message = Some(promise.clone());
             self.outgoing.push(PaxosMessage {

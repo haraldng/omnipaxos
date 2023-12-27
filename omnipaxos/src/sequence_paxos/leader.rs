@@ -36,6 +36,7 @@ where
                 decided_idx,
                 accepted_idx,
                 log_sync: None,
+                replicated_data: vec![]
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
@@ -246,7 +247,7 @@ where
         });
     }
 
-    pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: usize, resend: bool) {
+    pub(crate) fn send_decide_to(&mut self, to: NodeId, decided_idx: usize, resend: bool) {
         let seq_num = match resend {
             true => self.leader_state.get_seq_num(to),
             false => self.leader_state.next_seq_num(to),
@@ -261,6 +262,19 @@ where
             to,
             msg: PaxosMsg::Decide(d),
         });
+    }
+
+    pub(crate) fn send_decide_all(&mut self, decided_idx: usize, resend: bool) {
+        for pid in self.leader_state.get_promised_followers() {
+            self.send_decide_to(pid, decided_idx, resend);
+        }
+    }
+
+    pub(crate) fn send_to_all_promised_followers(&mut self, pm: PaxosMsg<T>) {
+        for pid in self.leader_state.get_promised_followers() {
+            let msg = PaxosMessage { from: self.pid, to: pid, msg: pm.clone() };
+            self.outgoing.push(msg);
+        }
     }
 
     fn handle_majority_promises(&mut self) {
@@ -351,7 +365,7 @@ where
                                 _ => panic!("Cached index is not an AcceptDecide!"),
                             }
                         }
-                        _ => self.send_decide(pid, decided_idx, false),
+                        _ => self.send_decide_to(pid, decided_idx, false),
                     };
                 }
             }
@@ -379,7 +393,7 @@ where
                     let decided_idx = self.internal_storage.get_decided_idx();
                     for follower in self.leader_state.get_promised_followers() {
                         if self.internal_storage.stopsign_is_decided() {
-                            self.send_decide(follower, decided_idx, true);
+                            self.send_decide_to(follower, decided_idx, true);
                         } else if self.leader_state.get_accepted_idx(follower)
                             != self.internal_storage.get_accepted_idx()
                         {

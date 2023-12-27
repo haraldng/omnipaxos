@@ -14,6 +14,8 @@ use crate::{
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
+use std::collections::HashMap;
+use crate::util::ithaca::*;
 
 pub mod follower;
 pub mod leader;
@@ -41,6 +43,12 @@ where
     buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
+    replicated_data: HashMap<DataId, T>,
+    data_status: HashMap<DataId, Votes>,
+    mode: Mode,
+    fastpaxos_next_log_idx: usize,
+    quorum_size: usize,
+    super_quorum_size: usize,
 }
 
 impl<T, B> SequencePaxos<T, B>
@@ -55,6 +63,11 @@ where
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
+        let quorum_size = match quorum {
+            Quorum::Majority(m) => m,
+            Quorum::Flexible(f) => unimplemented!(),
+        };
+        let super_quorum_size = quorum_size + 1;    // TODO calculate this with actual formula
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(config.buffer_size);
@@ -109,6 +122,12 @@ where
                     create_logger(s.as_str())
                 }
             },
+            replicated_data: HashMap::default(),
+            data_status: Default::default(),
+            mode: Mode::OmniPaxos,
+            fastpaxos_next_log_idx: 0,
+            quorum_size,
+            super_quorum_size,
         };
         paxos
             .internal_storage
@@ -265,6 +284,103 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
+            PaxosMsg::Replicate(r) => {
+                self.handle_replicate(r);
+            }
+            PaxosMsg::ReplicateAck(ra) => {
+                self.handle_replicate_ack(ra);
+            }
+            PaxosMsg::AcceptOrder(ao) => {}
+        }
+    }
+
+    pub fn handle_replicate(&mut self, r: Replicate<T>) {
+        let data_id = r.id;
+        match self.mode {
+            Mode::FastPaxos => {
+                let proposed_log_idx = self.fastpaxos_next_log_idx;
+                self.fastpaxos_next_log_idx += 1;
+                match self.state {
+                    (Role::Leader, Phase::Accept) => {
+                        let ra = ReplicateAck { n: self.leader_state.n_leader, id: r.id, proposed_log_idx };
+                        self.handle_replicate_ack(ra);
+                        if !self.replicated_data.contains_key(&data_id) {
+                            self.replicated_data.insert(r.id, r.data);
+                        }
+                    },
+                    (Role::Follower, Phase::Accept) => {
+                        let n = self.get_promise();
+                        let ra = ReplicateAck {
+                            n,
+                            id: r.id,
+                            proposed_log_idx,
+                        };
+                        let msg = PaxosMessage {
+                            from: self.pid,
+                            to: n.pid,
+                            msg: PaxosMsg::ReplicateAck(ra),
+                        };
+                        self.outgoing.push(msg);
+                    },
+                    _ => {
+                        todo!("what to do in prepare phase?");
+                        self.buffered_proposals.push(r.data);
+                    }
+                }
+            },
+            Mode::SPaxos => {
+                let n = Ballot::default();
+                let ra = ReplicateAck {
+                    n,
+                    id: r.id,
+                    proposed_log_idx: 0,
+                };
+                let msg = PaxosMessage {
+                    from: self.pid,
+                    to: n.pid,
+                    msg: PaxosMsg::ReplicateAck(ra),
+                };
+                self.outgoing.push(msg);
+            },
+            _ => unimplemented!("Mode not supported"),
+        }
+    }
+
+    pub fn handle_replicate_ack(&mut self, ra: ReplicateAck) {
+        let ReplicateAck { n, id, proposed_log_idx } = ra;
+        let vote = Vote { n, log_idx: proposed_log_idx };
+        match self.data_status.get_mut(&id) {
+            Some(votes) => {
+                votes.add_vote(vote);
+            },
+            None => {
+                let votes = Votes(vec![vote]);
+                self.data_status.insert(id, votes);
+            },
+        }
+        match self.data_status.get(&id).unwrap().check_result(self.quorum_size, self.super_quorum_size, self.mode) {
+            VotingResult::Pending => {},
+            VotingResult::FastPath(v) if v.n == self.leader_state.n_leader => {
+                self.send_decide_all(v.log_idx, false);
+            },
+            VotingResult::SlowPath(log_idx) => {
+                let ao = AcceptOrder { n: self.leader_state.n_leader, log_idx, id };
+                self.send_to_all_promised_followers(PaxosMsg::AcceptOrder(ao));
+            },
+            VotingResult::Chosen => {
+                let entry = self.replicated_data.get(&id).expect("data not found");
+                let accepted_metadata = self
+                    .internal_storage
+                    .append_entry_with_batching(entry.clone())
+                    .expect(WRITE_ERROR_MSG);
+                if let Some(metadata) = accepted_metadata {
+                    self.leader_state
+                        .set_accepted_idx(self.pid, metadata.accepted_idx);
+                    let ao = AcceptOrder { n: self.leader_state.n_leader, log_idx: metadata.accepted_idx, id };
+                    self.send_to_all_promised_followers(PaxosMsg::AcceptOrder(ao));
+                }
+            },
+            _ => unimplemented!()
         }
     }
 
