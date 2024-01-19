@@ -19,6 +19,7 @@ use crate::util::ithaca::*;
 
 pub mod follower;
 pub mod leader;
+mod leader_election;
 
 /// a Sequence Paxos replica. Maintains local state of the replicated log, handles incoming messages and produces outgoing messages that the user has to fetch periodically and send using a network implementation.
 /// User also has to periodically fetch the decided entries that are guaranteed to be strongly consistent and linearizable, and therefore also safe to be used in the higher level application.

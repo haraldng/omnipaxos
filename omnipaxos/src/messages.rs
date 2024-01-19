@@ -275,6 +275,51 @@ pub mod ballot_leader_election {
     }
 }
 
+pub mod leader_election {
+    use crate::{ballot_leader_election::Ballot, util::NodeId};
+    #[cfg(feature = "serde")]
+    use serde::{Deserialize, Serialize};
+
+    /// Requests a reply from all the other servers.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct HBRequest {
+        /// Number of the current round.
+        pub round: u32,
+    }
+
+    /// Replies
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct HBReply {
+        /// Number of the current heartbeat round.
+        pub round: u32,
+        /// Promised ballot
+        pub max_ballot: Ballot,
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct VoteRequest {
+        pub ballot: Ballot,
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct VoteReply {
+        pub ballot: Ballot,
+        pub sender: NodeId,
+        pub recent_progress: Option<Ballot>,
+        pub qc: bool
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct CancelElection {
+        pub b: Ballot,
+    }
+}
+
 #[allow(missing_docs)]
 /// Message in OmniPaxos. Can be either a `SequencePaxos` message (for log replication) or `BLE` message (for leader election)
 #[derive(Clone, Debug)]
