@@ -52,6 +52,7 @@ where
 
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
+            self.cached_promise_message = None;
             let new_accepted_idx = self
                 .internal_storage
                 .sync_log(accsync.n, accsync.decided_idx, Some(accsync.log_sync))
