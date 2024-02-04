@@ -34,25 +34,34 @@ where
                 // I'm equally or less up to date
                 None
             };
+            let pending_slots = if na >= prep.n_accepted {
+                self.slot_status.get_pending_slots()
+            } else {
+                vec![]
+            };
             let promise = Promise {
                 n: prep.n,
                 n_accepted: na,
                 decided_idx: self.internal_storage.get_decided_idx(),
                 accepted_idx,
                 log_sync,
-                replicated_data: self.replicated_data.keys().cloned().collect()
+                pending_slots,
+                from: self.pid,
             };
-            self.cached_promise_message = Some(promise.clone());
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Promise(promise),
             });
+            if prep.forward {
+                self.send_prepare(prep); // TODO don't need to send to leader (and could even just send to connected servers)
+            }
         }
     }
 
     pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
+            self.cached_promise_message = None;
             let new_accepted_idx = self
                 .internal_storage
                 .sync_log(accsync.n, accsync.decided_idx, Some(accsync.log_sync))
@@ -63,6 +72,7 @@ where
             let accepted = Accepted {
                 n: accsync.n,
                 accepted_idx: new_accepted_idx,
+                fifo: true,
             };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
@@ -104,7 +114,7 @@ where
                 new_accepted_idx = flushed_after_decide;
             }
             if let Some(idx) = new_accepted_idx {
-                self.reply_accepted(acc_dec.n, idx);
+                self.reply_accepted(acc_dec.n, idx, true);
             }
         }
     }
@@ -121,7 +131,7 @@ where
                 .internal_storage
                 .set_stopsign(Some(acc_ss.ss))
                 .expect(WRITE_ERROR_MSG);
-            self.reply_accepted(acc_ss.n, new_accepted_idx);
+            self.reply_accepted(acc_ss.n, new_accepted_idx, true);
         }
     }
 
@@ -132,7 +142,7 @@ where
         {
             let new_accepted_idx = self.update_decided_idx_and_get_accepted_idx(dec.decided_idx);
             if let Some(idx) = new_accepted_idx {
-                self.reply_accepted(dec.n, idx);
+                self.reply_accepted(dec.n, idx, true);
             }
         }
     }
@@ -157,7 +167,7 @@ where
         }
     }
 
-    fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
+    pub(crate) fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize, fifo: bool) {
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
                 let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
@@ -169,7 +179,11 @@ where
                 }
             }
             _ => {
-                let accepted = Accepted { n, accepted_idx };
+                let accepted = Accepted {
+                    n,
+                    accepted_idx,
+                    fifo,
+                };
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
                 self.outgoing.push(PaxosMessage {

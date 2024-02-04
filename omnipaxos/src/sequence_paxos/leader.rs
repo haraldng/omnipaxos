@@ -2,7 +2,10 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseMetaData},
 };
-use crate::util::{AcceptedMetaData, WRITE_ERROR_MSG};
+use crate::{
+    ithaca::leader_election::Elected,
+    util::{AcceptedMetaData, WRITE_ERROR_MSG},
+};
 
 use super::*;
 
@@ -13,7 +16,8 @@ where
 {
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
-    pub(crate) fn handle_leader(&mut self, n: Ballot) {
+    pub(crate) fn handle_leader(&mut self, e: Elected) {
+        let n = e.ballot;
         if n <= self.leader_state.n_leader || n <= self.internal_storage.get_promise() {
             return;
         }
@@ -36,7 +40,8 @@ where
                 decided_idx,
                 accepted_idx,
                 log_sync: None,
-                replicated_data: vec![]
+                pending_slots: vec![],
+                from: self.pid,
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
@@ -46,6 +51,7 @@ where
                 decided_idx,
                 n_accepted: na,
                 accepted_idx,
+                forward: false,
             };
             /* send prepare */
             for pid in &self.peers {
@@ -64,14 +70,28 @@ where
         self.state.0 = Role::Follower;
     }
 
+    pub(crate) fn send_prepare(&mut self, p: Prepare) {
+        let msg = PaxosMsg::Prepare(p);
+        for pid in &self.peers {
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: *pid,
+                msg: msg.clone(),
+            });
+        }
+    }
+
     pub(crate) fn handle_preparereq(&mut self, prepreq: PrepareReq, from: NodeId) {
+        todo!("Handle possibly indirect PrepareReq")
+        /*
         #[cfg(feature = "logging")]
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
             self.leader_state.reset_promise(from);
             self.leader_state.set_batch_accept_meta(from, None);
-            self.send_prepare(from);
+            self.send_prepare_to(from);
         }
+        */
     }
 
     pub(crate) fn handle_forwarded_proposal(&mut self, mut entries: Vec<T>) {
@@ -95,12 +115,13 @@ where
         }
     }
 
-    pub(crate) fn send_prepare(&mut self, to: NodeId) {
+    pub(crate) fn send_prepare_to(&mut self, to: NodeId, forward: bool) {
         let prep = Prepare {
             n: self.leader_state.n_leader,
             decided_idx: self.internal_storage.get_decided_idx(),
             n_accepted: self.internal_storage.get_accepted_round(),
             accepted_idx: self.internal_storage.get_accepted_idx(),
+            forward,
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
@@ -143,7 +164,7 @@ where
         }
         let accepted_idx = self.internal_storage.get_accepted_idx();
         self.leader_state.set_accepted_idx(self.pid, accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
+        for (pid, connected) in self.leader_state.get_promised_followers() {
             self.send_accept_stopsign(pid, ss.clone(), false);
         }
     }
@@ -193,7 +214,7 @@ where
 
     fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
-        for pid in self.leader_state.get_promised_followers() {
+        for (pid, connected) in self.leader_state.get_promised_followers() {
             let cached_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
                 Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
                     let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
@@ -248,31 +269,46 @@ where
     }
 
     pub(crate) fn send_decide_to(&mut self, to: NodeId, decided_idx: usize, resend: bool) {
-        let seq_num = match resend {
-            true => self.leader_state.get_seq_num(to),
-            false => self.leader_state.next_seq_num(to),
+        match self.leader_state.get_batch_accept_meta(to) {
+            Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
+                let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
+                match msg {
+                    PaxosMsg::AcceptDecide(acc) => acc.decided_idx = decided_idx,
+                    _ => panic!("Cached index is not an AcceptDecide!"),
+                }
+            }
+            _ => {
+                let seq_num = match resend {
+                    true => self.leader_state.get_seq_num(to),
+                    false => self.leader_state.next_seq_num(to),
+                };
+                let d = Decide {
+                    n: self.leader_state.n_leader,
+                    seq_num,
+                    decided_idx,
+                };
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to,
+                    msg: PaxosMsg::Decide(d),
+                });
+            }
         };
-        let d = Decide {
-            n: self.leader_state.n_leader,
-            seq_num,
-            decided_idx,
-        };
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to,
-            msg: PaxosMsg::Decide(d),
-        });
     }
 
     pub(crate) fn send_decide_all(&mut self, decided_idx: usize, resend: bool) {
-        for pid in self.leader_state.get_promised_followers() {
+        for (pid, connected) in self.leader_state.get_promised_followers() {
             self.send_decide_to(pid, decided_idx, resend);
         }
     }
 
     pub(crate) fn send_to_all_promised_followers(&mut self, pm: PaxosMsg<T>) {
-        for pid in self.leader_state.get_promised_followers() {
-            let msg = PaxosMessage { from: self.pid, to: pid, msg: pm.clone() };
+        for (pid, connected) in self.leader_state.get_promised_followers() {
+            let msg = PaxosMessage {
+                from: self.pid,
+                to: pid,
+                msg: pm.clone(),
+            };
             self.outgoing.push(msg);
         }
     }
@@ -280,14 +316,38 @@ where
     fn handle_majority_promises(&mut self) {
         let max_promise_sync = self.leader_state.take_max_promise_sync();
         let decided_idx = self.leader_state.get_max_decided_idx();
-        let mut new_accepted_idx = self
+        let mut accepted_idx = self
             .internal_storage
             .sync_log(self.leader_state.n_leader, decided_idx, max_promise_sync)
             .expect(WRITE_ERROR_MSG);
+        let slots = self.leader_state.get_recovered_slots();
+        // insert slots to the log and fill gaps
+        let mut idx = accepted_idx + 1;
+        let mut entries = vec![];
+        for (slot_idx, data_id) in slots {
+            while idx < slot_idx {
+                let entry = self
+                    .buffered_proposals
+                    .pop()
+                    .expect("No buffered proposals to fill gaps");
+                entries.push(entry);
+                idx += 1;
+            }
+            let mut ents = std::mem::take(&mut entries);
+            let entry = self
+                .replicated_data
+                .remove_and_take_decided_data(&data_id)
+                .expect("Data not found");
+            ents.push(entry);
+            accepted_idx = self
+                .internal_storage
+                .append_entries_without_batching(ents)
+                .expect(WRITE_ERROR_MSG);
+        }
         if !self.accepted_reconfiguration() {
             if !self.buffered_proposals.is_empty() {
                 let entries = std::mem::take(&mut self.buffered_proposals);
-                new_accepted_idx = self
+                accepted_idx = self
                     .internal_storage
                     .append_entries_without_batching(entries)
                     .expect(WRITE_ERROR_MSG);
@@ -296,13 +356,12 @@ where
                 self.internal_storage
                     .append_stopsign(ss)
                     .expect(WRITE_ERROR_MSG);
-                new_accepted_idx = self.internal_storage.get_accepted_idx();
+                accepted_idx = self.internal_storage.get_accepted_idx();
             }
         }
         self.state = (Role::Leader, Phase::Accept);
-        self.leader_state
-            .set_accepted_idx(self.pid, new_accepted_idx);
-        for pid in self.leader_state.get_promised_followers() {
+        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        for (pid, connected) in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
     }
@@ -314,7 +373,9 @@ where
             "Handling promise from {} in Prepare phase", from
         );
         if prom.n == self.leader_state.n_leader {
-            let received_majority = self.leader_state.set_promise(prom, from, true);
+            let received_majority = self
+                .leader_state
+                .set_promise_check_majority(prom, from, true);
             if received_majority {
                 self.handle_majority_promises();
             }
@@ -356,18 +417,7 @@ where
                 self.internal_storage
                     .set_decided_idx(decided_idx)
                     .expect(WRITE_ERROR_MSG);
-                for pid in self.leader_state.get_promised_followers() {
-                    match self.leader_state.get_batch_accept_meta(pid) {
-                        Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
-                            let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
-                            match msg {
-                                PaxosMsg::AcceptDecide(acc) => acc.decided_idx = decided_idx,
-                                _ => panic!("Cached index is not an AcceptDecide!"),
-                            }
-                        }
-                        _ => self.send_decide_to(pid, decided_idx, false),
-                    };
-                }
+                self.send_decide_all(decided_idx, false);
             }
         }
     }
@@ -384,14 +434,15 @@ where
                 // Resend Prepare
                 let preparable_peers = self.leader_state.get_preparable_peers();
                 for peer in preparable_peers {
-                    self.send_prepare(peer);
+                    todo!("Resend prepare to {:?}", peer);
+                    // self.send_prepare_to(peer, );
                 }
             }
             Phase::Accept => {
                 // Resend AcceptStopSign or StopSign's decide
                 if let Some(ss) = self.internal_storage.get_stopsign() {
                     let decided_idx = self.internal_storage.get_decided_idx();
-                    for follower in self.leader_state.get_promised_followers() {
+                    for (follower, connected) in self.leader_state.get_promised_followers() {
                         if self.internal_storage.stopsign_is_decided() {
                             self.send_decide_to(follower, decided_idx, true);
                         } else if self.leader_state.get_accepted_idx(follower)
@@ -404,7 +455,7 @@ where
                 // Resend Prepare
                 let preparable_peers = self.leader_state.get_preparable_peers();
                 for peer in preparable_peers {
-                    self.send_prepare(peer);
+                    self.send_prepare_to(peer, false);
                 }
             }
             Phase::Recover => (),

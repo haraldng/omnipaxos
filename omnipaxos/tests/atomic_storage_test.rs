@@ -128,6 +128,8 @@ fn _setup_leader() -> (
             accepted_idx: 0,
             n_accepted: n_old,
             log_sync: None,
+            pending_slots: vec![],
+            from: 2,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -165,6 +167,7 @@ fn setup_follower() -> (
                 .unwrap()
                 .unwrap_or_default(),
             n,
+            forward: false,
         }),
     });
     op.handle_incoming(setup_msg);
@@ -215,6 +218,7 @@ fn atomic_storage_acceptsync_test() {
                 accepted_idx: 0,
                 n_accepted: mem_storage.lock().unwrap().get_promise().unwrap().unwrap(),
                 n,
+                forward: false,
             }),
         });
         op.handle_incoming(setup_msg);
@@ -558,6 +562,8 @@ fn atomic_storage_majority_promises_test() {
                     sync_idx: 2,
                     stopsign: None,
                 }),
+                pending_slots: vec![],
+                from: 2,
             }),
         });
         let _res = catch_unwind(AssertUnwindSafe(|| op.handle_incoming(msg.clone())));

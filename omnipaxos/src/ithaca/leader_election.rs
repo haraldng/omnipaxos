@@ -1,12 +1,15 @@
-use crate::util::{ConfigurationId, LogicalClock};
 use super::*;
-use crate::messages::leader_election::*;
+use crate::{
+    ballot_leader_election::Ballot,
+    messages::leader_election::*,
+    util::{ConfigurationId, LogicalClock, NodeId, Quorum},
+};
 
 struct QCChecker {
     hb_round: u32,
     hb_replies: usize,
     status: bool,
-    quorum: Quorum
+    quorum: Quorum,
 }
 
 impl QCChecker {
@@ -21,12 +24,42 @@ impl QCChecker {
     }
 }
 
-struct Vote {
+#[derive(Debug, Clone, Copy)]
+pub struct Vote {
     pid: NodeId,
     qc: bool,
     forwarded: bool,
 }
 
+pub struct Elected {
+    pub ballot: Ballot,
+    pub votes: Vec<Vote>,
+}
+
+impl From<CandidateState> for Elected {
+    fn from(value: CandidateState) -> Self {
+        Self {
+            ballot: value.ballot,
+            votes: value.votes,
+        }
+    }
+}
+
+impl Elected {
+    pub fn get_direct_connections(&self) -> Vec<NodeId> {
+        self.votes
+            .iter()
+            .filter(|v| !v.forwarded)
+            .map(|v| v.pid)
+            .collect()
+    }
+
+    pub fn get_num_qc(&self) -> usize {
+        self.votes.iter().filter(|v| v.qc).count()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 struct CandidateState {
     ballot: Ballot,
     votes: Vec<Vote>,
@@ -41,14 +74,14 @@ impl CandidateState {
 
 struct ProgressTimer {
     ballot: Ballot,
-    timer: LogicalClock
+    timer: LogicalClock,
 }
 
 impl ProgressTimer {
     fn new(ballot: Ballot) -> Self {
         Self {
             ballot,
-            timer: LogicalClock::with(100)
+            timer: LogicalClock::with(100),
         }
     }
 
@@ -85,13 +118,22 @@ impl LeaderElection {
         if self.rp.timer.tick_and_check_timeout() {
             let candidate_n = self.max_ballot.n + 1;
             let candidate_ballot = Ballot::with(self.configuration_id, candidate_n, 0, self.pid);
-            self.candidate_state = CandidateState { ballot: candidate_ballot, votes: vec![Vote { pid: self.pid, qc: self.qc.is_qc(), forwarded: false }]};
+            self.candidate_state = CandidateState {
+                ballot: candidate_ballot,
+                votes: vec![Vote {
+                    pid: self.pid,
+                    qc: self.qc.is_qc(),
+                    forwarded: false,
+                }],
+            };
             self.rp = ProgressTimer::new(candidate_ballot);
             todo!("Send RequestVote to everybody")
         }
         if self.pre_promise.ballot != Ballot::default() {
             if self.pre_promise.timer.tick_and_check_timeout() {
-                let req = VoteRequest { ballot: self.pre_promise.ballot };
+                let req = VoteRequest {
+                    ballot: self.pre_promise.ballot,
+                };
                 todo!("Broadcast voterequest");
             }
         }
@@ -102,13 +144,27 @@ impl LeaderElection {
         if self.pre_promise.ballot == promise {
             self.pre_promise.clear();
         }
+        if promise > self.candidate_state.ballot {
+            self.cancel_election();
+        }
         if promise > self.max_ballot {
             self.max_ballot = promise;
         }
     }
 
+    fn cancel_election(&mut self) {
+        let c = CancelElection {
+            b: self.candidate_state.ballot,
+        };
+        self.candidate_state.clear();
+        todo!("broadcast cancel");
+    }
+
     fn handle_vote_request(&mut self, req: VoteRequest) {
-        let rp = if req.ballot > self.pre_promise.ballot && req.ballot > self.rp.ballot && self.rp.timer.check_timeout() {
+        let rp = if req.ballot > self.pre_promise.ballot
+            && req.ballot > self.rp.ballot
+            && self.rp.timer.check_timeout()
+        {
             self.pre_promise = ProgressTimer::new(req.ballot);
             None
         } else {
@@ -123,17 +179,15 @@ impl LeaderElection {
         todo!("Reply or broadcast vote")
     }
 
-    fn handle_vote_reply(&mut self, rep: VoteReply, from: NodeId) {
+    fn handle_vote_reply(&mut self, rep: VoteReply, from: NodeId) -> Option<Elected> {
         if rep.ballot == self.candidate_state.ballot {
             // reply for me
             match rep.recent_progress {
                 Some(max_ballot) => {
                     // they've made progress recently, so my take over failed
                     self.max_ballot = std::cmp::max(max_ballot, self.max_ballot);
-                    let c = CancelElection { b: self.candidate_state.ballot };
-                    self.candidate_state.clear();
-                    todo!("broadcast cancel");
-                },
+                    self.cancel_election();
+                }
                 None => {
                     // got the vote
                     let v = Vote {
@@ -142,12 +196,17 @@ impl LeaderElection {
                         forwarded: rep.sender != from,
                     };
                     self.candidate_state.votes.push(v);
-                    if self.quorum.is_prepare_quorum(self.candidate_state.votes.len()) {
-                        todo!("Output leader so that we send prepare")
+                    if self
+                        .quorum
+                        .is_prepare_quorum(self.candidate_state.votes.len())
+                    {
+                        let cs = std::mem::take(&mut self.candidate_state);
+                        return Some(cs.into());
                     }
                 }
             }
         }
+        None
     }
 
     fn handle_cancel_election(&mut self, c: CancelElection) {
@@ -157,7 +216,10 @@ impl LeaderElection {
     }
 
     fn handle_hb_request(&self, hb_req: HBRequest) {
-        let hb_reply = HBReply { round: hb_req.round, max_ballot: self.max_ballot };
+        let hb_reply = HBReply {
+            round: hb_req.round,
+            max_ballot: self.max_ballot,
+        };
         todo!("reply")
     }
 

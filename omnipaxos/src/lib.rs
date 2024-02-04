@@ -27,6 +27,7 @@ pub(crate) mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
 
+pub(crate) mod ithaca;
 #[cfg(feature = "unicache")]
 /// Traits, structs, and types related to the unicache.
 pub mod unicache;

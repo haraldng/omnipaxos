@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
+        ithaca::util::{DataId, PendingSlot, Proposal},
         storage::{Entry, StopSign},
         util::{LogSync, NodeId, SequenceNumber},
     };
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
-    use crate::util::ithaca::DataId;
 
     /// Message sent by a follower on crash-recovery or dropped messages to request its leader to re-prepare them.
     #[derive(Copy, Clone, Debug)]
@@ -38,6 +38,7 @@ pub mod sequence_paxos {
         pub n_accepted: Ballot,
         /// The log length of this leader.
         pub accepted_idx: usize,
+        pub forward: bool,
     }
 
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
@@ -58,7 +59,10 @@ pub mod sequence_paxos {
         /// The log update which the leader applies to its log in order to sync
         /// with this follower (if the follower is more up-to-date).
         pub log_sync: Option<LogSync<T>>,
-        pub replicated_data: Vec<DataId>,
+        pub pending_slots: Vec<PendingSlot>,
+        // pub replicated_data: Vec<DataId>,
+        /// Which server this Promise is sent by (to detect forwarded promises)
+        pub from: NodeId,
     }
 
     /// AcceptSync message sent by the leader to synchronize the logs of all replicas in the prepare phase.
@@ -85,25 +89,31 @@ pub mod sequence_paxos {
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct Replicate<T> {
-        pub id: DataId,
-        pub data: T
-    }
-
-    #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct ReplicateAck {
-        pub n: Ballot,
-        pub id: DataId,
-        pub proposed_log_idx: usize,
+        pub data_id: DataId,
+        pub data: T,
     }
 
     #[derive(Copy, Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct AcceptOrder {
         /// The current round.
-        pub n: Ballot,
-        pub log_idx: usize,
-        pub id: DataId,
+        pub proposal: Proposal,
+        pub slot_idx: usize,
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct ReplicateAck {
+        pub proposal: Proposal,
+        pub proposed_slot_idx: Option<usize>, // None in SPaxos
+    }
+
+    #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct DecidedSlot {
+        /// The current round.
+        pub data_id: DataId,
+        pub slot_idx: usize,
     }
 
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
@@ -136,6 +146,7 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The accepted index.
         pub accepted_idx: usize,
+        pub fifo: bool,
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.
@@ -206,6 +217,7 @@ pub mod sequence_paxos {
         Replicate(Replicate<T>),
         ReplicateAck(ReplicateAck),
         AcceptOrder(AcceptOrder),
+        DecidedSlot(DecidedSlot),
     }
 
     /// A struct for a Paxos message that also includes sender and receiver.
@@ -310,7 +322,7 @@ pub mod leader_election {
         pub ballot: Ballot,
         pub sender: NodeId,
         pub recent_progress: Option<Ballot>,
-        pub qc: bool
+        pub qc: bool,
     }
 
     #[derive(Clone, Debug)]

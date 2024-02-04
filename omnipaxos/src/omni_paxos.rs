@@ -1,6 +1,7 @@
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
+    ithaca::leader_election::Elected,
     messages::Message,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
@@ -395,7 +396,11 @@ where
             .ble
             .hb_timeout(self.seq_paxos.get_state(), self.seq_paxos.get_promise())
         {
-            self.seq_paxos.handle_leader(new_leader);
+            let e = Elected {
+                ballot: new_leader,
+                votes: vec![],
+            };
+            self.seq_paxos.handle_leader(e);
         }
     }
 

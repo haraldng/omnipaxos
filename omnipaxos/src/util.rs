@@ -3,10 +3,10 @@ use super::{
     messages::sequence_paxos::Promise,
     storage::{Entry, SnapshotType, StopSign},
 };
+use crate::ithaca::util::{DataId, PendingSlot, Proposal, Proposals, SlotStatus, Slots};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap, fmt::Debug, marker::PhantomData};
 
 /// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
@@ -25,6 +25,8 @@ where
     pub stopsign: Option<StopSign>,
 }
 
+type Connected = bool;
+
 #[derive(Debug, Clone, Default)]
 /// Promise without the log update
 pub(crate) struct PromiseMetaData {
@@ -32,6 +34,8 @@ pub(crate) struct PromiseMetaData {
     pub accepted_idx: usize,
     pub decided_idx: usize,
     pub pid: NodeId,
+    pub pending_slots: Vec<PendingSlot>,
+    pub connected: Connected,
 }
 
 impl PartialOrd for PromiseMetaData {
@@ -65,8 +69,10 @@ impl PartialEq for PromiseMetaData {
 enum PromiseState {
     /// Not promised to any leader
     NotPromised,
-    /// Promised to my ballot
-    Promised(PromiseMetaData),
+    /// Promised to my ballot. Used while in Prepare phase
+    PreparePromised(PromiseMetaData),
+    /// Promised to my ballot. Used while in Accept phase.
+    AcceptPromised(Connected),
     /// Promised to a leader who's ballot is greater than mine
     PromisedHigher,
 }
@@ -105,11 +111,25 @@ where
             batch_accept_meta: vec![None; max_pid],
             max_pid,
             quorum,
+            // connections: e.votes
         }
     }
 
     fn pid_to_idx(pid: NodeId) -> usize {
         (pid - 1) as usize
+    }
+
+    fn idx_to_pid(idx: usize) -> NodeId {
+        (idx + 1) as NodeId
+    }
+
+    pub fn use_accept_promises(&mut self) {
+        self.promises_meta.iter_mut().for_each(|p| match p {
+            PromiseState::PreparePromised(m) => {
+                *p = PromiseState::AcceptPromised(m.connected);
+            }
+            _ => {}
+        });
     }
 
     // Resets `pid`'s accept sequence to indicate they are in the next session of accepts
@@ -129,24 +149,90 @@ where
         self.follower_seq_nums[Self::pid_to_idx(pid)]
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T>, from: NodeId, check_max_prom: bool) -> bool {
+    fn set_promise_maybe_check_majority(
+        &mut self,
+        prom: Promise<T>,
+        pid: NodeId,
+        connected: bool,
+        check_max_prom: bool,
+    ) -> bool {
         let promise_meta = PromiseMetaData {
             n_accepted: prom.n_accepted,
             accepted_idx: prom.accepted_idx,
             decided_idx: prom.decided_idx,
-            pid: from,
+            pid,
+            pending_slots: prom.pending_slots,
+            connected,
         };
         if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
             self.max_promise_sync = prom.log_sync;
         }
-        self.promises_meta[Self::pid_to_idx(from)] = PromiseState::Promised(promise_meta);
+        self.promises_meta[Self::pid_to_idx(pid)] = PromiseState::PreparePromised(promise_meta);
         let num_promised = self
             .promises_meta
             .iter()
-            .filter(|p| matches!(p, PromiseState::Promised(_)))
+            .filter(|p| matches!(p, PromiseState::PreparePromised(_)))
             .count();
         self.quorum.is_prepare_quorum(num_promised)
+    }
+
+    /// Returns the slots that need to be appended to the log
+    pub fn get_recovered_slots(&mut self) -> Vec<(usize, DataId)> {
+        let mut slots = HashMap::new();
+        for ps in self.promises_meta.iter_mut() {
+            match ps {
+                PromiseState::PreparePromised(p) => {
+                    let pending_slots = std::mem::take(&mut p.pending_slots);
+                    for p in pending_slots {
+                        if p.decided {
+                            slots.insert(p.idx, SlotStatus::Decided(p.proposal.data_id));
+                        } else {
+                            match slots.get_mut(&p.idx) {
+                                Some(SlotStatus::Recovery(ps)) => {
+                                    ps.add_proposal(p.proposal);
+                                }
+                                Some(SlotStatus::Decided(_)) => {}
+                                None => {
+                                    let mut proposals = Vec::with_capacity(self.max_pid);
+                                    proposals.push(p.proposal);
+                                    let votes = Proposals(proposals);
+                                    slots.insert(p.idx, SlotStatus::Recovery(votes));
+                                }
+                                _ => {
+                                    unimplemented!()
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        slots
+            .iter()
+            .map(|(idx, s)| {
+                let data_id: DataId = match s {
+                    SlotStatus::Decided(data_id) => *data_id,
+                    SlotStatus::Recovery(proposals) => proposals.get_recovery_result(),
+                    _ => unimplemented!(),
+                };
+                (*idx, data_id)
+            })
+            .collect()
+    }
+
+    pub fn set_promise_check_majority(
+        &mut self,
+        prom: Promise<T>,
+        pid: NodeId,
+        connected: bool,
+    ) -> bool {
+        self.set_promise_maybe_check_majority(prom, pid, connected, true)
+    }
+
+    pub fn set_promise(&mut self, prom: Promise<T>, pid: NodeId, connected: bool) {
+        let _ = self.set_promise_maybe_check_majority(prom, pid, connected, false);
     }
 
     pub fn reset_promise(&mut self, pid: NodeId) {
@@ -166,11 +252,42 @@ where
         &self.max_promise_meta
     }
 
+    pub fn get_chosen_data(&self) -> Vec<DataId> {
+        let mut data: HashMap<DataId, usize> = HashMap::new();
+        for pm in &self.promises_meta {
+            match pm {
+                PromiseState::PreparePromised(p) => {
+                    for ps in &p.pending_slots {
+                        let data_id = ps.proposal.data_id;
+                        match data.get_mut(&data_id) {
+                            Some(mut count) => {
+                                *count += 1;
+                            }
+                            None => {
+                                data.insert(data_id, 1);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        data.iter()
+            .filter_map(|(data_id, count)| {
+                if self.quorum.is_accept_quorum(*count) {
+                    Some(*data_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub fn get_max_decided_idx(&self) -> usize {
         self.promises_meta
             .iter()
             .filter_map(|p| match p {
-                PromiseState::Promised(m) => Some(m.decided_idx),
+                PromiseState::PreparePromised(m) => Some(m.decided_idx),
                 _ => None,
             })
             .max()
@@ -179,7 +296,7 @@ where
 
     pub fn get_promise_meta(&self, pid: NodeId) -> &PromiseMetaData {
         match &self.promises_meta[Self::pid_to_idx(pid)] {
-            PromiseState::Promised(metadata) => metadata,
+            PromiseState::PreparePromised(metadata) => metadata,
             _ => panic!("No Metadata found for promised follower"),
         }
     }
@@ -195,13 +312,18 @@ where
         self.batch_accept_meta = vec![None; self.max_pid];
     }
 
-    pub fn get_promised_followers(&self) -> Vec<NodeId> {
+    pub fn get_promised_followers(&self) -> Vec<(NodeId, Connected)> {
         self.promises_meta
             .iter()
             .enumerate()
             .filter_map(|(idx, x)| match x {
-                PromiseState::Promised(_) if idx != Self::pid_to_idx(self.n_leader.pid) => {
-                    Some((idx + 1) as NodeId)
+                PromiseState::AcceptPromised(connected)
+                    if idx != Self::pid_to_idx(self.n_leader.pid) =>
+                {
+                    Some((Self::idx_to_pid(idx), *connected))
+                }
+                PromiseState::PreparePromised(p) if idx != Self::pid_to_idx(self.n_leader.pid) => {
+                    Some((Self::idx_to_pid(idx), p.connected))
                 }
                 _ => None,
             })
@@ -239,7 +361,7 @@ where
 
     pub fn get_decided_idx(&self, pid: NodeId) -> Option<usize> {
         match self.promises_meta.get(Self::pid_to_idx(pid)).unwrap() {
-            PromiseState::Promised(metadata) => Some(metadata.decided_idx),
+            PromiseState::PreparePromised(metadata) => Some(metadata.decided_idx),
             _ => None,
         }
     }
@@ -407,6 +529,14 @@ impl LogicalClock {
             false
         }
     }
+
+    pub fn check_timeout(&self) -> bool {
+        self.timeout == 0
+    }
+
+    pub fn reset(&mut self) {
+        self.time = 0;
+    }
 }
 
 /// Flexible quorums can be used to increase/decrease the read and write quorum sizes,
@@ -466,86 +596,4 @@ pub(crate) struct AcceptedMetaData<T: Entry> {
     pub entries: Vec<T>,
     #[cfg(feature = "unicache")]
     pub entries: Vec<T::EncodeResult>,
-}
-
-
-pub(crate) mod ithaca {
-    use super::*;
-
-    pub type DataId = u32;
-
-    pub struct Votes(pub Vec<Vote>);
-
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub struct Vote {
-        pub n: Ballot,
-        pub log_idx: usize,
-    }
-
-    impl Votes {
-        pub fn is_chosen(&self, quorum_size: usize) -> bool {
-            self.0.len() >= quorum_size
-        }
-
-        pub fn add_vote(&mut self, vote: Vote) {
-            self.0.push(vote);
-        }
-
-        pub fn check_result(&self, quorum: usize, super_quorum: usize, mode: Mode) -> VotingResult {
-            match mode {
-                Mode::OmniPaxos => {
-                    unimplemented!()
-                },
-                Mode::PathPaxos => {
-                    unimplemented!()
-                },
-                _ => {
-                    match self.0.len() {
-                        q if q == quorum => {
-                            let all_same = self.0.iter().all(|&x| x == self.0[0]);
-                            if all_same {
-                                if mode == Mode::SPaxos {
-                                    VotingResult::Chosen
-                                } else {
-                                    VotingResult::Pending
-                                }
-                            } else {
-                                todo!("how to pick slow path value");
-                                VotingResult::SlowPath(self.0[0].log_idx)
-                            }
-                        },
-                        sq if sq == super_quorum => {
-                            let all_same = self.0.iter().all(|&x| x == self.0[0]);
-                            if all_same {
-                                VotingResult::FastPath(self.0[0])
-                            } else {
-                                todo!("how to pick slow path value");
-                                VotingResult::SlowPath(self.0[0].log_idx)
-                            }
-                        },
-                        _ => {
-                            VotingResult::Pending
-                        },
-                    }
-                }
-            }
-        }
-    }
-
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub enum Mode {
-        FastPaxos,
-        SPaxos,
-        OmniPaxos,
-        PathPaxos,
-    }
-
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub enum VotingResult {
-        Pending,
-        Chosen,
-        FastPath(Vote),
-        SlowPath(usize), // log idx that should be used for slow path
-    }
-
 }
