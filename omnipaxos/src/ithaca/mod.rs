@@ -1,12 +1,13 @@
 use crate::{
     ithaca::util::*,
     messages::sequence_paxos::*,
-    sequence_paxos::*,
+    sequence_paxos::{
+        leader::state::{LeaderState, PromiseState},
+        *,
+    },
     storage::{Entry, Storage},
-    util::{LeaderState, PromiseState, WRITE_ERROR_MSG},
+    util::WRITE_ERROR_MSG,
 };
-#[cfg(feature = "logging")]
-use slog::info;
 use std::collections::HashMap;
 
 pub(crate) mod leader_election;

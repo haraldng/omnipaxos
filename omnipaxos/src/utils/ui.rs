@@ -1,8 +1,6 @@
 use crate::{
-    ballot_leader_election::Ballot,
-    messages::ballot_leader_election::HeartbeatReply,
-    storage::Entry,
-    util::{LeaderState, NodeId},
+    ballot_leader_election::Ballot, messages::ballot_leader_election::HeartbeatReply,
+    sequence_paxos::leader::state::LeaderState, storage::Entry, util::NodeId,
 };
 
 /// The states of all the nodes in the cluster.

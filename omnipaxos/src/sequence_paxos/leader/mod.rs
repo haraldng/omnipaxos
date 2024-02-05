@@ -1,11 +1,10 @@
-use super::super::{
-    ballot_leader_election::Ballot,
-    util::{LeaderState, PromiseMetaData},
-};
+pub(crate) mod state;
+
 use crate::{
     ithaca::leader_election::Elected,
     util::{AcceptedMetaData, WRITE_ERROR_MSG},
 };
+use state::{LeaderState, PromiseMetaData};
 
 use super::*;
 
@@ -54,14 +53,7 @@ where
                 accepted_idx,
                 forward: false,
             };
-            /* send prepare */
-            for pid in &self.peers {
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: *pid,
-                    msg: PaxosMsg::Prepare(prep),
-                });
-            }
+            self.send_prepare(prep);
         } else {
             self.become_follower();
         }

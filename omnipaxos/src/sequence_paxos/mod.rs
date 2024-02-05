@@ -1,10 +1,8 @@
-use super::{ballot_leader_election::Ballot, messages::sequence_paxos::*, util::LeaderState};
+use super::{ballot_leader_election::Ballot, messages::sequence_paxos::*};
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
-    ithaca::util::{
-        DataId, Mode, Proposal, ProposalResult, Proposals, ReplicatedData, SlotStatus, Slots,
-    },
+    ithaca::util::{DataId, Mode, ReplicatedData, Slots},
     storage::{
         internal_storage::{InternalStorage, InternalStorageConfig},
         Entry, Snapshot, StopSign, Storage,
@@ -14,9 +12,10 @@ use crate::{
     },
     ClusterConfig, CompactionErr, OmniPaxosConfig, ProposeErr,
 };
+use leader::state::LeaderState;
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
-use std::{collections::HashMap, fmt::Debug, vec};
+use std::{fmt::Debug, vec};
 
 pub mod follower;
 pub mod leader;
