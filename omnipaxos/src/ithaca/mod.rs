@@ -3,10 +3,12 @@ use crate::{
     messages::sequence_paxos::*,
     sequence_paxos::*,
     storage::{Entry, Storage},
-    util::WRITE_ERROR_MSG,
+    util::{LeaderState, PromiseState, WRITE_ERROR_MSG},
 };
 #[cfg(feature = "logging")]
 use slog::info;
+use std::collections::HashMap;
+
 pub(crate) mod leader_election;
 pub mod util;
 
@@ -137,28 +139,21 @@ where
                         let votes = Proposals(proposals);
                         self.slot_status
                             .insert(slot_idx, SlotStatus::FastVotes(votes));
+                        return;
                     }
                     Some(SlotStatus::FastVotes(votes)) => {
                         votes.add_proposal(proposal);
+                        let pr = votes.check_result(self.quorum_size, self.super_quorum_size);
+                        self.handle_votes_result(slot_idx, pr);
                     }
                     Some(SlotStatus::SlowAcks(p, acks)) => {
                         if p == &proposal {
                             *acks += 1;
                             if &acks == &&self.quorum_size {
-                                let data_id = p.data_id;
-                                let is_replicated =
-                                    self.replicated_data.set_decided_slot(&data_id, slot_idx);
-                                let slot_status = if is_replicated {
-                                    // #[cfg(feature = "logging")]
-                                    // info!(self.logger, "Node {}: COMPLETED slot: {}", self.pid, slot_idx);
-                                    SlotStatus::Completed(data_id)
-                                } else {
-                                    // #[cfg(feature = "logging")]
-                                    // info!(self.logger, "Decided but not completed slot: {}", slot_idx);
-                                    SlotStatus::Decided(data_id)
+                                let ds = DecidedSlot {
+                                    slot_idx,
+                                    data_id: p.data_id,
                                 };
-                                self.slot_status.insert(slot_idx, slot_status);
-                                let ds = DecidedSlot { slot_idx, data_id };
                                 self.handle_decidedslot(ds);
                                 self.send_to_all_promised_followers(PaxosMsg::DecidedSlot(ds));
                                 return;
@@ -183,23 +178,12 @@ where
                         )
                     }
                 }
-                self.handle_votes_result(slot_idx);
             }
         }
     }
 
-    fn handle_votes_result(&mut self, slot_idx: usize) {
-        let votes = {
-            match self
-                .slot_status
-                .get(&slot_idx)
-                .expect("Slot status not found")
-            {
-                SlotStatus::FastVotes(votes) => votes,
-                _ => unimplemented!("Slot status not FastVotes"),
-            }
-        };
-        match votes.check_result(self.quorum_size, self.super_quorum_size) {
+    fn handle_votes_result(&mut self, slot_idx: usize, pr: ProposalResult) {
+        match pr {
             ProposalResult::FastPath(p) if p.n == self.leader_state.n_leader => {
                 let _ = self.replicated_data.set_decided_slot(&p.data_id, slot_idx);
                 let ds = DecidedSlot {
@@ -277,10 +261,14 @@ where
         };
         self.slot_status.insert(slot_idx, status);
         self.replicated_data.set_decided_slot(&data_id, slot_idx);
+        self.take_and_append_completed_slots();
+    }
+
+    pub fn take_and_append_completed_slots(&mut self) {
         let decided_idx = self.get_decided_idx();
         let se = self
             .slot_status
-            .get_completed_and_decided_idx(decided_idx, &mut self.replicated_data);
+            .get_completed_idx_and_entries(decided_idx, &mut self.replicated_data);
         // #[cfg(feature = "logging")]
         // info!(self.logger, "Node {}: Decided slot {}, se: {:?}, slots: {:?}, rd: {:?}\n", self.pid, slot_idx, se, self.slot_status, self.replicated_data);
         if se.completed_idx > decided_idx {
@@ -291,5 +279,52 @@ where
                 .set_decided_idx(se.completed_idx)
                 .expect(WRITE_ERROR_MSG);
         }
+    }
+}
+
+impl<T: Entry> LeaderState<T> {
+    /// Returns the slots that need to be appended to the log
+    pub fn get_recovered_slots(&mut self) -> HashMap<usize, DataId> {
+        let mut slots = HashMap::with_capacity(self.promises_meta.len());
+        for ps in self.promises_meta.iter_mut() {
+            match ps {
+                PromiseState::PreparePromised(p) => {
+                    let pending_slots = std::mem::take(&mut p.pending_slots);
+                    for p in pending_slots {
+                        if p.decided {
+                            slots.insert(p.idx, SlotStatus::Decided(p.proposal.data_id));
+                        } else {
+                            match slots.get_mut(&p.idx) {
+                                Some(SlotStatus::Recovery(ps)) => {
+                                    ps.add_proposal(p.proposal);
+                                }
+                                Some(SlotStatus::Decided(_)) => {}
+                                None => {
+                                    let mut proposals = Vec::with_capacity(self.max_pid);
+                                    proposals.push(p.proposal);
+                                    let votes = Proposals(proposals);
+                                    slots.insert(p.idx, SlotStatus::Recovery(votes));
+                                }
+                                _ => {
+                                    unimplemented!()
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        slots
+            .into_iter()
+            .map(|(idx, s)| {
+                let data_id: DataId = match s {
+                    SlotStatus::Decided(data_id) => data_id,
+                    SlotStatus::Recovery(proposals) => proposals.get_recovery_result(),
+                    _ => unimplemented!(),
+                };
+                (idx, data_id)
+            })
+            .collect()
     }
 }

@@ -59,7 +59,7 @@ pub mod sequence_paxos {
         /// The log update which the leader applies to its log in order to sync
         /// with this follower (if the follower is more up-to-date).
         pub log_sync: Option<LogSync<T>>,
-        pub pending_slots: Vec<PendingSlot>,
+        pub slots: Vec<PendingSlot>,
         // pub replicated_data: Vec<DataId>,
         /// Which server this Promise is sent by (to detect forwarded promises)
         pub from: NodeId,

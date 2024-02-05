@@ -16,6 +16,7 @@ where
             // Flush any pending writes
             // Don't have to handle flushed entries here because we will sync with followers
             let _ = self.internal_storage.flush_batch().expect(WRITE_ERROR_MSG);
+            self.take_and_append_completed_slots();
             self.internal_storage
                 .set_promise(prep.n)
                 .expect(WRITE_ERROR_MSG);
@@ -34,8 +35,8 @@ where
                 // I'm equally or less up to date
                 None
             };
-            let pending_slots = if na >= prep.n_accepted {
-                self.slot_status.get_pending_slots()
+            let slots = if log_sync.is_some() {
+                Slots::get_pending_slots(self.slot_status.clone())
             } else {
                 vec![]
             };
@@ -45,7 +46,7 @@ where
                 decided_idx: self.internal_storage.get_decided_idx(),
                 accepted_idx,
                 log_sync,
-                pending_slots,
+                slots,
                 from: self.pid,
             };
             self.outgoing.push(PaxosMessage {
@@ -66,6 +67,7 @@ where
                 .internal_storage
                 .sync_log(accsync.n, accsync.decided_idx, Some(accsync.log_sync))
                 .expect(WRITE_ERROR_MSG);
+            self.slot_status.clear(); // Slots should be incorporated to the log so they can be cleared
             if self.internal_storage.get_stopsign().is_none() {
                 self.forward_buffered_proposals();
             }

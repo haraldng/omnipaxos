@@ -69,7 +69,10 @@ where
             Quorum::Majority(m) => m,
             Quorum::Flexible(f) => unimplemented!(),
         };
-        let super_quorum_size = quorum_size + 1; // TODO calculate this with actual formula
+        let super_quorum_size = {
+            let f = quorum_size - 1;
+            3 * f / 2 + 1
+        };
         let max_peer_pid = peers.iter().max().unwrap();
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(config.buffer_size);
@@ -94,6 +97,13 @@ where
         };
         let internal_storage_config = InternalStorageConfig {
             batch_size: config.batch_size,
+        };
+        let mode = if cfg!(feature = "fastpaxos") {
+            Mode::FastPaxos
+        } else if cfg!(feature = "spaxos") {
+            Mode::SPaxos
+        } else {
+            Mode::OmniPaxos
         };
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(
@@ -126,7 +136,7 @@ where
             },
             replicated_data: ReplicatedData::with_capacity(1000), // TODO size
             slot_status: Default::default(),
-            mode: Mode::FastPaxos,
+            mode,
             fastpaxos_next_log_idx: 0,
             quorum_size,
             super_quorum_size,

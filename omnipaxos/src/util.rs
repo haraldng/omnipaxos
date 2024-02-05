@@ -66,7 +66,7 @@ impl PartialEq for PromiseMetaData {
 
 #[derive(Debug, Clone)]
 /// The promise state of a node.
-enum PromiseState {
+pub(crate) enum PromiseState {
     /// Not promised to any leader
     NotPromised,
     /// Promised to my ballot. Used while in Prepare phase
@@ -83,7 +83,7 @@ where
     T: Entry,
 {
     pub n_leader: Ballot,
-    promises_meta: Vec<PromiseState>,
+    pub(crate) promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
     pub accepted_indexes: Vec<usize>,
@@ -161,7 +161,7 @@ where
             accepted_idx: prom.accepted_idx,
             decided_idx: prom.decided_idx,
             pid,
-            pending_slots: prom.pending_slots,
+            pending_slots: prom.slots,
             connected,
         };
         if check_max_prom && promise_meta > self.max_promise_meta {
@@ -175,51 +175,6 @@ where
             .filter(|p| matches!(p, PromiseState::PreparePromised(_)))
             .count();
         self.quorum.is_prepare_quorum(num_promised)
-    }
-
-    /// Returns the slots that need to be appended to the log
-    pub fn get_recovered_slots(&mut self) -> Vec<(usize, DataId)> {
-        let mut slots = HashMap::new();
-        for ps in self.promises_meta.iter_mut() {
-            match ps {
-                PromiseState::PreparePromised(p) => {
-                    let pending_slots = std::mem::take(&mut p.pending_slots);
-                    for p in pending_slots {
-                        if p.decided {
-                            slots.insert(p.idx, SlotStatus::Decided(p.proposal.data_id));
-                        } else {
-                            match slots.get_mut(&p.idx) {
-                                Some(SlotStatus::Recovery(ps)) => {
-                                    ps.add_proposal(p.proposal);
-                                }
-                                Some(SlotStatus::Decided(_)) => {}
-                                None => {
-                                    let mut proposals = Vec::with_capacity(self.max_pid);
-                                    proposals.push(p.proposal);
-                                    let votes = Proposals(proposals);
-                                    slots.insert(p.idx, SlotStatus::Recovery(votes));
-                                }
-                                _ => {
-                                    unimplemented!()
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        slots
-            .iter()
-            .map(|(idx, s)| {
-                let data_id: DataId = match s {
-                    SlotStatus::Decided(data_id) => *data_id,
-                    SlotStatus::Recovery(proposals) => proposals.get_recovery_result(),
-                    _ => unimplemented!(),
-                };
-                (*idx, data_id)
-            })
-            .collect()
     }
 
     pub fn set_promise_check_majority(

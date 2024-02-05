@@ -104,6 +104,10 @@ pub(crate) struct Slots {
 }
 
 impl Slots {
+    pub fn clear(&mut self) {
+        self.slots.clear();
+    }
+
     pub fn insert(&mut self, idx: usize, status: SlotStatus) {
         self.slots.insert(idx, status);
     }
@@ -131,17 +135,16 @@ impl Slots {
             .unwrap_or(0)
     }
 
-    pub fn get_completed_and_decided_idx<T: Entry>(
+    pub fn get_completed_idx_and_entries<T: Entry>(
         &self,
         old_decided_idx: usize,
         replicated_data: &mut ReplicatedData<T>,
     ) -> SlotEntries<T> {
-        let mut i = old_decided_idx;
         let mut completed_idx = old_decided_idx;
         let mut completed_entries = vec![];
         let mut in_completed_sequence = true;
         loop {
-            match self.get(&i) {
+            match self.get(&completed_idx) {
                 Some(SlotStatus::Completed(data_id)) if in_completed_sequence => {
                     let data = replicated_data
                         .remove_and_take_decided_data(data_id)
@@ -152,12 +155,7 @@ impl Slots {
                             )
                         });
                     completed_entries.push(data);
-                    i += 1;
-                    completed_idx = i; //
-                }
-                Some(SlotStatus::Decided(_)) => {
-                    in_completed_sequence = false;
-                    i += 1;
+                    completed_idx += 1;
                 }
                 _ => {
                     break;
@@ -167,12 +165,11 @@ impl Slots {
         SlotEntries {
             completed_entries,
             completed_idx,
-            decided_idx: i,
         }
     }
 
-    pub fn get_pending_slots(&self) -> Vec<PendingSlot> {
-        self.slots
+    pub fn get_pending_slots(s: Self) -> Vec<PendingSlot> {
+        s.slots
             .iter()
             .filter_map(|(idx, s)| match s {
                 SlotStatus::SlowAcks(p, _) => Some(PendingSlot {
@@ -205,7 +202,12 @@ impl Slots {
                         decided: true,
                     })
                 }
-                _ => None,
+                SlotStatus::Completed(_) => {
+                    unimplemented!("Completed slots should be appended to the log")
+                }
+                SlotStatus::Recovery(_) => {
+                    unimplemented!("Recovery should only be used locally during prepare phase")
+                }
             })
             .collect()
     }
@@ -301,7 +303,6 @@ impl Proposals {
 pub struct SlotEntries<T> {
     pub(crate) completed_entries: Vec<T>,
     pub(crate) completed_idx: usize,
-    pub(crate) decided_idx: usize,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]

@@ -34,13 +34,14 @@ where
             let na = self.internal_storage.get_accepted_round();
             let decided_idx = self.get_decided_idx();
             let accepted_idx = self.internal_storage.get_accepted_idx();
+            let slots = Slots::get_pending_slots(std::mem::take(&mut self.slot_status));
             let my_promise = Promise {
                 n,
                 n_accepted: na,
                 decided_idx,
                 accepted_idx,
                 log_sync: None,
-                pending_slots: vec![],
+                slots,
                 from: self.pid,
             };
             self.leader_state.set_promise(my_promise, self.pid, true);
@@ -320,30 +321,26 @@ where
             .internal_storage
             .sync_log(self.leader_state.n_leader, decided_idx, max_promise_sync)
             .expect(WRITE_ERROR_MSG);
-        let slots = self.leader_state.get_recovered_slots();
-        // insert slots to the log and fill gaps
-        let mut idx = accepted_idx + 1;
-        let mut entries = vec![];
-        for (slot_idx, data_id) in slots {
-            while idx < slot_idx {
-                let entry = self
+        let mut slots = self.leader_state.get_recovered_slots();
+        let mut entries = Vec::with_capacity(slots.len());
+        while !slots.is_empty() {
+            let entry = match slots.remove(&accepted_idx) {
+                Some(data_id) => self
+                    .replicated_data
+                    .remove_and_take_decided_data(&data_id)
+                    .expect("Data not found"),
+                None => self
                     .buffered_proposals
                     .pop()
-                    .expect("No buffered proposals to fill gaps");
-                entries.push(entry);
-                idx += 1;
-            }
-            let mut ents = std::mem::take(&mut entries);
-            let entry = self
-                .replicated_data
-                .remove_and_take_decided_data(&data_id)
-                .expect("Data not found");
-            ents.push(entry);
-            accepted_idx = self
-                .internal_storage
-                .append_entries_without_batching(ents)
-                .expect(WRITE_ERROR_MSG);
+                    .expect("No buffered proposals to fill gaps"),
+            };
+            entries.push(entry);
+            accepted_idx += 1;
         }
+        accepted_idx = self
+            .internal_storage
+            .append_entries_without_batching(entries)
+            .expect(WRITE_ERROR_MSG);
         if !self.accepted_reconfiguration() {
             if !self.buffered_proposals.is_empty() {
                 let entries = std::mem::take(&mut self.buffered_proposals);
@@ -434,8 +431,7 @@ where
                 // Resend Prepare
                 let preparable_peers = self.leader_state.get_preparable_peers();
                 for peer in preparable_peers {
-                    todo!("Resend prepare to {:?}", peer);
-                    // self.send_prepare_to(peer, );
+                    self.send_prepare_to(peer, false); // TODO check if forward should be true
                 }
             }
             Phase::Accept => {

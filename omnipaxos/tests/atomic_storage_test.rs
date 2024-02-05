@@ -128,7 +128,7 @@ fn _setup_leader() -> (
             accepted_idx: 0,
             n_accepted: n_old,
             log_sync: None,
-            pending_slots: vec![],
+            slots: vec![],
             from: 2,
         }),
     });
@@ -562,7 +562,7 @@ fn atomic_storage_majority_promises_test() {
                     sync_idx: 2,
                     stopsign: None,
                 }),
-                pending_slots: vec![],
+                slots: vec![],
                 from: 2,
             }),
         });
