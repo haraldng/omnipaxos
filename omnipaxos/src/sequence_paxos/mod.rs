@@ -382,14 +382,14 @@ where
     fn propose_entry(&mut self, entry: T) {
         match self.state {
             (Role::Leader, Phase::Prepare) => self.buffered_proposals.push(entry),
-            (Role::Leader, Phase::Accept) => match self.mode {
-                Mode::FastPaxos | Mode::SPaxos => self.send_and_handle_replicate(entry),
-                _ => self.accept_entry_leader(entry),
-            },
-            (Role::Follower, Phase::Accept) => match self.mode {
-                Mode::FastPaxos | Mode::SPaxos => self.send_and_handle_replicate(entry),
-                _ => self.forward_proposals(vec![entry]),
-            },
+            (_, Phase::Accept) => {
+                let data_id = self.next_data_id();
+                let r = Replicate {
+                    data_id,
+                    data: entry,
+                };
+                self.handle_replicate(r);
+            }
             _ => self.forward_proposals(vec![entry]),
         }
     }
@@ -397,23 +397,6 @@ where
     fn next_data_id(&mut self) -> DataId {
         self.data_id += 1;
         (self.pid, self.data_id)
-    }
-
-    fn send_and_handle_replicate(&mut self, entry: T) {
-        let data_id = self.next_data_id();
-        let r = Replicate {
-            data_id,
-            data: entry,
-        };
-        for pid in &self.peers {
-            let msg = PaxosMessage {
-                from: self.pid,
-                to: *pid,
-                msg: PaxosMsg::Replicate(r.clone()),
-            };
-            self.outgoing.push(msg);
-        }
-        self.handle_replicate(r);
     }
 
     pub(crate) fn get_leader_state(&self) -> &LeaderState<T> {

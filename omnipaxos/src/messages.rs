@@ -95,10 +95,11 @@ pub mod sequence_paxos {
 
     #[derive(Copy, Clone, Debug)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-    pub struct AcceptOrder {
+    pub struct AcceptOrder<T> {
         /// The current round.
         pub proposal: Proposal,
         pub slot_idx: usize,
+        pub data: Option<T>,
     }
 
     #[derive(Clone, Debug)]
@@ -216,7 +217,7 @@ pub mod sequence_paxos {
         ForwardStopSign(StopSign),
         Replicate(Replicate<T>),
         ReplicateAck(ReplicateAck),
-        AcceptOrder(AcceptOrder),
+        AcceptOrder(AcceptOrder<T>),
         DecidedSlot(DecidedSlot),
     }
 

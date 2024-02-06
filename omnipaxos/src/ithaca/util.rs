@@ -12,6 +12,7 @@ pub struct Data<T: Entry> {
 
 #[derive(Debug, Clone)]
 pub enum DataStatus {
+    Acked,
     ReplicateAcks(usize),
     DecidedWithSlot(usize),
 }
