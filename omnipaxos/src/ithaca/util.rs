@@ -1,8 +1,13 @@
-use crate::{ballot_leader_election::Ballot, storage::Entry, util::NodeId};
+use crate::{
+    ballot_leader_election::Ballot,
+    storage::Entry,
+    util::{NodeId, Quorum},
+};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap};
 
 pub type DataId = (NodeId, usize);
+pub type SlotIdx = usize;
 
 #[derive(Debug, Clone)]
 pub struct Data<T: Entry> {
@@ -13,7 +18,7 @@ pub struct Data<T: Entry> {
 #[derive(Debug, Clone)]
 pub enum DataStatus {
     Acked,
-    ReplicateAcks(usize),
+    ReplicateAcks(usize, Option<SlotIdx>),
     DecidedWithSlot(usize),
 }
 
@@ -57,12 +62,20 @@ impl<T: Entry> ReplicatedData<T> {
         self.0.contains_key(data_id)
     }
 
-    pub fn increment_replicate_acks(&mut self, data_id: &DataId) -> usize {
+    pub fn increment_replicate_acks(&mut self, data_id: &DataId, slot_idx: SlotIdx) -> usize {
         match self.0.get_mut(data_id) {
             Some(Data {
-                status: DataStatus::ReplicateAcks(count),
+                status: DataStatus::ReplicateAcks(count, test_slot_idx),
                 ..
             }) => {
+                match test_slot_idx {
+                    Some(idx) => {
+                        if idx != &slot_idx {
+                            *test_slot_idx = None;
+                        }
+                    }
+                    _ => {}
+                }
                 *count += 1;
                 *count
             }
@@ -71,7 +84,7 @@ impl<T: Entry> ReplicatedData<T> {
                     *data_id,
                     Data {
                         data: None,
-                        status: DataStatus::ReplicateAcks(1),
+                        status: DataStatus::ReplicateAcks(1, Some(slot_idx)),
                     },
                 );
                 1
@@ -97,11 +110,15 @@ impl<T: Entry> ReplicatedData<T> {
     pub fn insert(&mut self, data_id: DataId, data: Data<T>) {
         self.0.insert(data_id, data);
     }
+
+    pub fn remove(&mut self, data_id: &DataId) -> Option<Data<T>> {
+        self.0.remove(data_id)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Slots {
-    pub slots: HashMap<usize, SlotStatus>,
+    pub slots: HashMap<SlotIdx, SlotStatus>,
 }
 
 impl Slots {
@@ -109,23 +126,23 @@ impl Slots {
         self.slots.clear();
     }
 
-    pub fn insert(&mut self, idx: usize, status: SlotStatus) {
+    pub fn insert(&mut self, idx: SlotIdx, status: SlotStatus) {
         self.slots.insert(idx, status);
     }
 
-    pub fn get(&self, idx: &usize) -> Option<&SlotStatus> {
+    pub fn get(&self, idx: &SlotIdx) -> Option<&SlotStatus> {
         self.slots.get(idx)
     }
 
-    pub fn remove(&mut self, idx: &usize) -> Option<SlotStatus> {
+    pub fn remove(&mut self, idx: &SlotIdx) -> Option<SlotStatus> {
         self.slots.remove(idx)
     }
 
-    pub fn get_mut(&mut self, idx: &usize) -> Option<&mut SlotStatus> {
+    pub fn get_mut(&mut self, idx: &SlotIdx) -> Option<&mut SlotStatus> {
         self.slots.get_mut(idx)
     }
 
-    pub fn get_max_decided_slot(&self) -> usize {
+    pub fn get_max_decided_slot(&self) -> SlotIdx {
         self.slots
             .iter()
             .filter_map(|(slot_idx, x)| match x {
@@ -227,7 +244,7 @@ pub enum SlotStatus {
 #[derive(Copy, Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PendingSlot {
-    pub idx: usize,
+    pub idx: SlotIdx,
     pub proposal: Proposal,
     pub decided: bool,
 }
@@ -319,4 +336,135 @@ pub enum ProposalResult {
     Pending,
     FastPath(Proposal),
     SlowPath(DataId, usize), // DataId and version
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Connectivity {
+    pub directly_connected: bool,
+    pub qc: bool,
+}
+
+impl Connectivity {
+    pub fn with(directly_connected: bool, qc: bool) -> Self {
+        Self {
+            directly_connected,
+            qc,
+        }
+    }
+}
+
+pub(crate) struct PeerConnectivity {
+    connectivity: Vec<Connectivity>,
+    quorum: Quorum,
+}
+impl PeerConnectivity {
+    pub fn new(max_pid: NodeId, quorum: Quorum) -> Self {
+        let size = max_pid as usize;
+        Self {
+            connectivity: vec![Connectivity::with(false, false); size],
+            quorum,
+        }
+    }
+
+    pub fn get(&self, pid: NodeId) -> &Connectivity {
+        &self.connectivity[Self::pid_to_idx(pid)]
+    }
+
+    pub fn get_mut(&mut self, pid: NodeId) -> &mut Connectivity {
+        &mut self.connectivity[Self::pid_to_idx(pid)]
+    }
+
+    pub fn set_connectivity(&mut self, pid: NodeId, connectivity: Connectivity) {
+        self.connectivity[Self::pid_to_idx(pid)] = connectivity;
+    }
+
+    pub fn is_qc(&self) -> bool {
+        let num_connected = self
+            .connectivity
+            .iter()
+            .filter(|c| c.directly_connected)
+            .count();
+        self.quorum.is_prepare_quorum(num_connected)
+    }
+
+    pub fn get_num_qc(&self) -> usize {
+        let qc_peers = self.connectivity.iter().filter(|c| c.qc).count();
+        if self.is_qc() {
+            qc_peers + 1
+        } else {
+            qc_peers
+        }
+    }
+
+    pub fn is_connected_to(&self, pid: NodeId) -> bool {
+        self.connectivity[Self::pid_to_idx(pid)].directly_connected
+    }
+
+    pub fn get_direct_connections(&self) -> Vec<NodeId> {
+        self.connectivity
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, c)| {
+                if c.directly_connected {
+                    Some(idx as NodeId + 1)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn pid_to_idx(pid: NodeId) -> usize {
+        pid as usize - 1
+    }
+}
+
+pub(crate) struct ModeChanger {
+    pub current_mode: Mode,
+    pub slow_paths: usize,
+    pub fast_paths: usize,
+    pub peer_connectivity: PeerConnectivity,
+}
+
+impl ModeChanger {
+    pub fn update_mode(&mut self) {
+        let im_qc = self.peer_connectivity.is_qc();
+        let num_qc = self.peer_connectivity.get_num_qc();
+        if num_qc == 0 {
+            self.current_mode = Mode::PathPaxos;
+            return;
+        } else if num_qc == 1 && im_qc {
+            self.current_mode = Mode::OmniPaxos;
+            return;
+        }
+        self.current_mode = match self.current_mode {
+            Mode::FastPaxos if self.slow_paths > self.fast_paths => Mode::SPaxos,
+            Mode::SPaxos if self.fast_paths > self.slow_paths => Mode::FastPaxos,
+            Mode::OmniPaxos if num_qc > 1 => Mode::SPaxos,
+            _ => return,
+        };
+    }
+
+    pub fn increment_fast_paths(&mut self) {
+        self.fast_paths += 1;
+    }
+
+    pub fn increment_slow_paths(&mut self) {
+        self.slow_paths += 1;
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SlotVote {
+    Real(SlotIdx),
+    Test(SlotIdx),
+}
+
+impl Into<SlotIdx> for SlotVote {
+    fn into(self) -> SlotIdx {
+        match self {
+            SlotVote::Real(idx) | SlotVote::Test(idx) => idx,
+        }
+    }
 }

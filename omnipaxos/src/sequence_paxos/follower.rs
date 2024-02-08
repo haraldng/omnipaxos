@@ -49,18 +49,11 @@ where
                 slots,
                 from: self.pid,
             };
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: from,
-                msg: PaxosMsg::Promise(promise),
-            });
-            if prep.forward {
-                self.send_prepare(prep); // TODO don't need to send to leader (and could even just send to connected servers)
-            }
+            self.send_msg_to(from, PaxosMsg::Promise(promise));
         }
     }
 
-    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>, from: NodeId) {
+    pub(crate) fn handle_acceptsync(&mut self, accsync: AcceptSync<T>) {
         if self.check_valid_ballot(accsync.n) && self.state == (Role::Follower, Phase::Prepare) {
             self.cached_promise_message = None;
             let new_accepted_idx = self
@@ -80,11 +73,7 @@ where
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: from,
-                msg: PaxosMsg::Accepted(accepted),
-            });
+            self.send_msg_to(accsync.n.pid, PaxosMsg::Accepted(accepted));
             #[cfg(feature = "unicache")]
             self.internal_storage.set_unicache(accsync.unicache);
         }
@@ -188,11 +177,7 @@ where
                 };
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: n.pid,
-                    msg: PaxosMsg::Accepted(accepted),
-                });
+                self.send_msg_to(n.pid, PaxosMsg::Accepted(accepted));
             }
         };
     }
@@ -211,11 +196,7 @@ where
                     my_promise,
                     message_ballot
                 );
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: message_ballot.pid,
-                    msg: PaxosMsg::NotAccepted(not_acc),
-                });
+                self.send_msg_to(message_ballot.pid, PaxosMsg::NotAccepted(not_acc));
                 false
             }
             std::cmp::Ordering::Less => {
@@ -248,11 +229,7 @@ where
                 // Resend Promise
                 match &self.cached_promise_message {
                     Some(promise) => {
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: promise.n.pid,
-                            msg: PaxosMsg::Promise(promise.clone()),
-                        });
+                        self.send_msg_to(promise.n.pid, PaxosMsg::Promise(promise.clone()));
                     }
                     None => {
                         // Shouldn't be possible to be in prepare phase without having
@@ -277,12 +254,6 @@ where
         let prepreq = PrepareReq {
             n: self.get_promise(),
         };
-        for peer in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *peer,
-                msg: PaxosMsg::PrepareReq(prepreq),
-            });
-        }
+        self.send_to_all_peers(PaxosMsg::PrepareReq(prepreq));
     }
 }

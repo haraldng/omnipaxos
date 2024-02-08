@@ -18,7 +18,7 @@ where
     T: Entry,
     B: Storage<T>,
 {
-    pub(crate) fn replicate_data(&mut self, data_id: DataId, entry: T) {
+    pub(crate) fn replicate_data(&mut self, data_id: DataId, entry: T, slot_vote: SlotVote) {
         match self.replicated_data.get_mut(&data_id) {
             Some(d) => {
                 let Data { data, status } = d;
@@ -40,42 +40,54 @@ where
                 }
             }
             None => {
+                let status = match self.state.0 {
+                    Role::Leader => DataStatus::ReplicateAcks(0, Some(slot_vote.into())),
+                    Role::Follower => DataStatus::Acked,
+                };
                 self.replicated_data.insert(
                     data_id,
                     Data {
                         data: Some(entry),
-                        status: DataStatus::ReplicateAcks(0),
+                        status,
                     },
                 );
             }
         }
     }
 
-    fn send_to_all_peers(&mut self, pm: PaxosMsg<T>) {
-        for pid in &self.peers {
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: *pid,
-                msg: pm.clone(),
-            });
-        }
-    }
-
-    fn get_next_slot_idx(&mut self) -> usize {
+    fn get_next_slot_idx(&mut self) -> SlotIdx {
         let idx = self.fastpaxos_next_log_idx;
         self.fastpaxos_next_log_idx += 1;
         idx
     }
 
+    fn get_next_test_slot_idx(&mut self) -> SlotIdx {
+        let idx = self.testvoter_next_log_idx;
+        self.testvoter_next_log_idx += 1;
+        idx
+    }
+
+    fn create_slot_vote(&mut self) -> SlotVote {
+        match self.mode {
+            Mode::SPaxos => SlotVote::Test(self.get_next_test_slot_idx()),
+            _ => SlotVote::Real(self.get_next_slot_idx()),
+        }
+    }
+
     pub fn handle_replicate(&mut self, r: Replicate<T>) {
-        let proposed_slot_idx = match self.mode {
+        let slot_vote = match self.mode {
             Mode::FastPaxos => {
                 let pm = PaxosMsg::Replicate(r.clone());
                 self.send_to_all_peers(pm);
-                Some(self.get_next_slot_idx())
+                self.create_slot_vote()
+            }
+            Mode::SPaxos => {
+                let pm = PaxosMsg::Replicate(r.clone());
+                self.send_to_all_peers(pm);
+                self.create_slot_vote()
             }
             Mode::OmniPaxos | Mode::PathPaxos => match self.state {
-                (Role::Leader, Phase::Accept) => Some(self.get_next_slot_idx()),
+                (Role::Leader, Phase::Accept) => self.create_slot_vote(),
                 (Role::Follower, Phase::Accept) => {
                     self.forward_proposals(vec![r.data]);
                     return;
@@ -85,14 +97,9 @@ where
                     return;
                 }
             },
-            Mode::SPaxos => {
-                let pm = PaxosMsg::Replicate(r.clone());
-                self.send_to_all_peers(pm);
-                None
-            }
         };
         let Replicate { data_id, data } = r;
-        self.replicate_data(data_id, data);
+        self.replicate_data(data_id, data, slot_vote);
         let n = self.get_promise();
         let proposal = Proposal {
             n,
@@ -101,36 +108,42 @@ where
         };
         let ra = ReplicateAck {
             proposal,
-            proposed_slot_idx,
+            slot_vote,
         };
-        match self.state {
-            (Role::Leader, Phase::Accept) => {
-                self.handle_replicate_ack(ra);
-            }
-            (Role::Follower, Phase::Accept) => {
-                let msg = PaxosMessage {
-                    from: self.pid,
-                    to: n.pid,
-                    msg: PaxosMsg::ReplicateAck(ra),
-                };
-                self.outgoing.push(msg);
-            }
-            _ => {
-                // self.buffered_proposals.push(r.data);
-            }
+        if self.pid == n.pid {
+            self.handle_replicate_ack(ra);
+        } else {
+            self.send_msg_to(n.pid, PaxosMsg::ReplicateAck(ra));
         }
+    }
+
+    fn perform_slow_path(
+        &mut self,
+        proposal: Proposal,
+        data: Option<T>,
+        slot_idx: Option<SlotIdx>,
+    ) {
+        let slot_idx = slot_idx.unwrap_or(self.get_next_slot_idx());
+        self.slot_status
+            .insert(slot_idx, SlotStatus::SlowAcks(proposal, 1));
+        let ao = AcceptOrder {
+            proposal,
+            slot_idx,
+            data,
+        };
+        self.send_to_all_promised_followers(PaxosMsg::AcceptOrder(ao));
     }
 
     pub fn handle_replicate_ack(&mut self, ra: ReplicateAck) {
         let ReplicateAck {
             proposal,
-            proposed_slot_idx,
+            slot_vote,
         } = ra;
-        if proposal.n != self.leader_state.n_leader {
+        if proposal.n != self.get_promise() {
             return;
         }
-        match proposed_slot_idx {
-            None => {
+        match slot_vote {
+            SlotVote::Test(slot_idx) => {
                 // s-paxos
                 match self.state {
                     (Role::Leader, Phase::Accept) => {
@@ -139,23 +152,31 @@ where
                                 proposal.data_id,
                                 Data {
                                     data: None,
-                                    status: DataStatus::ReplicateAcks(0),
+                                    status: DataStatus::ReplicateAcks(1, Some(slot_idx)),
                                 },
                             );
+                            return;
                         }
                         let acks = self
                             .replicated_data
-                            .increment_replicate_acks(&proposal.data_id);
+                            .increment_replicate_acks(&proposal.data_id, slot_idx);
                         if acks == self.quorum_size {
-                            let slot_idx = self.get_next_slot_idx();
-                            self.slot_status
-                                .insert(slot_idx, SlotStatus::SlowAcks(proposal, 1));
-                            let ao = AcceptOrder {
-                                proposal,
-                                slot_idx,
-                                data: None,
-                            };
-                            self.send_to_all_promised_followers(PaxosMsg::AcceptOrder(ao));
+                            self.perform_slow_path(proposal, None, None);
+                        } else if acks == self.super_quorum_size {
+                            match self
+                                .replicated_data
+                                .remove(&proposal.data_id)
+                                .unwrap()
+                                .status
+                            {
+                                DataStatus::ReplicateAcks(_, Some(_)) => {
+                                    self.mode_changer.increment_fast_paths()
+                                }
+                                DataStatus::ReplicateAcks(_, None) => {
+                                    self.mode_changer.increment_slow_paths()
+                                }
+                                _ => {}
+                            }
                         }
                     }
                     _ => unimplemented!(
@@ -164,7 +185,7 @@ where
                     ),
                 }
             }
-            Some(slot_idx) => {
+            SlotVote::Real(slot_idx) => {
                 match self.slot_status.get_mut(&slot_idx) {
                     None => {
                         let slot_status = match self.mode {
@@ -180,14 +201,7 @@ where
                                     .get(&proposal.data_id)
                                     .map(|d| d.data.clone().unwrap())
                                     .unwrap();
-                                let ao = AcceptOrder {
-                                    proposal,
-                                    slot_idx,
-                                    data: Some(data),
-                                };
-                                self.slot_status
-                                    .insert(slot_idx, SlotStatus::SlowAcks(proposal, 1));
-                                self.send_to_all_promised_followers(PaxosMsg::AcceptOrder(ao));
+                                self.perform_slow_path(proposal, Some(data), Some(slot_idx));
                                 SlotStatus::SlowAcks(proposal, 1)
                             }
                             Mode::SPaxos => unimplemented!(
@@ -240,7 +254,8 @@ where
 
     fn handle_votes_result(&mut self, slot_idx: usize, pr: ProposalResult) {
         match pr {
-            ProposalResult::FastPath(p) if p.n == self.leader_state.n_leader => {
+            ProposalResult::FastPath(p) if p.n == self.get_promise() => {
+                self.mode_changer.increment_fast_paths();
                 let _ = self.replicated_data.set_decided_slot(&p.data_id, slot_idx);
                 let ds = DecidedSlot {
                     slot_idx,
@@ -250,8 +265,9 @@ where
                 self.send_to_all_promised_followers(PaxosMsg::DecidedSlot(ds));
             }
             ProposalResult::SlowPath(data_id, v) => {
+                self.mode_changer.increment_slow_paths();
                 let proposal = Proposal {
-                    n: self.leader_state.n_leader,
+                    n: self.get_promise(),
                     data_id,
                     version: v + 1,
                 };
@@ -271,20 +287,21 @@ where
     pub fn handle_acceptorder(&mut self, ao: AcceptOrder<T>) {
         let AcceptOrder {
             proposal,
-            slot_idx: log_idx,
+            slot_idx,
             data,
+            ..
         } = ao;
-        if proposal.n != self.leader_state.n_leader {
+        if proposal.n != self.get_promise() {
             return;
         }
-        match self.slot_status.get(&log_idx) {
+        match self.slot_status.get(&slot_idx) {
             None => {
                 // first time voting
                 self.slot_status
-                    .insert(log_idx, SlotStatus::Voted(proposal));
+                    .insert(slot_idx, SlotStatus::Voted(proposal));
                 let ra = ReplicateAck {
                     proposal,
-                    proposed_slot_idx: Some(log_idx),
+                    slot_vote: SlotVote::Real(slot_idx),
                 };
                 if !self.replicated_data.contains_key(&proposal.data_id) {
                     self.replicated_data.insert(
@@ -295,11 +312,7 @@ where
                         },
                     );
                 }
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: proposal.n.pid,
-                    msg: PaxosMsg::ReplicateAck(ra),
-                });
+                self.send_msg_to(proposal.n.pid, PaxosMsg::ReplicateAck(ra));
             }
             Some(SlotStatus::Voted(p)) if p < &proposal => {
                 match self.replicated_data.get_mut(&proposal.data_id) {
@@ -318,24 +331,20 @@ where
                         );
                     }
                 }
-                self.vote_slowpath(proposal, log_idx);
+                self.vote_slowpath(proposal, slot_idx);
             }
             _ => {} // ignore
         }
     }
 
-    fn vote_slowpath(&mut self, proposal: Proposal, log_idx: usize) {
+    fn vote_slowpath(&mut self, proposal: Proposal, slot_idx: SlotIdx) {
         self.slot_status
-            .insert(log_idx, SlotStatus::Voted(proposal));
+            .insert(slot_idx, SlotStatus::Voted(proposal));
         let ra = ReplicateAck {
             proposal,
-            proposed_slot_idx: Some(log_idx),
+            slot_vote: SlotVote::Real(slot_idx),
         };
-        self.outgoing.push(PaxosMessage {
-            from: self.pid,
-            to: proposal.n.pid,
-            msg: PaxosMsg::ReplicateAck(ra),
-        });
+        self.send_msg_to(proposal.n.pid, PaxosMsg::ReplicateAck(ra));
     }
 
     pub fn handle_decidedslot(&mut self, ds: DecidedSlot) {

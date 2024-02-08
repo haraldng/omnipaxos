@@ -6,7 +6,7 @@ use crate::{
 };
 
 struct QCChecker {
-    hb_round: u32,
+    hb_round: usize,
     hb_replies: usize,
     status: bool,
     quorum: Quorum,
@@ -28,7 +28,7 @@ impl QCChecker {
 pub struct Vote {
     pid: NodeId,
     qc: bool,
-    forwarded: bool,
+    pub(crate) forwarded: bool,
 }
 
 pub struct Elected {
@@ -219,6 +219,7 @@ impl LeaderElection {
         let hb_reply = HBReply {
             round: hb_req.round,
             max_ballot: self.max_ballot,
+            qc: self.qc.is_qc(),
         };
         todo!("reply")
     }

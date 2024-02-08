@@ -1,11 +1,15 @@
 use crate::{
     ballot_leader_election::Ballot,
-    ithaca::util::{DataId, PendingSlot},
+    ithaca::{
+        leader_election::Elected,
+        util::{DataId, PendingSlot},
+    },
     messages::sequence_paxos::Promise,
     storage::Entry,
     util::{LogSync, NodeId, Quorum, SequenceNumber},
 };
 use std::{cmp::Ordering, collections::HashMap};
+
 type Connected = bool;
 
 #[derive(Debug, Clone, Default)]
@@ -16,7 +20,6 @@ pub(crate) struct PromiseMetaData {
     pub decided_idx: usize,
     pub pid: NodeId,
     pub pending_slots: Vec<PendingSlot>,
-    pub connected: Connected,
 }
 
 impl PartialOrd for PromiseMetaData {
@@ -53,7 +56,7 @@ pub(crate) enum PromiseState {
     /// Promised to my ballot. Used while in Prepare phase
     PreparePromised(PromiseMetaData),
     /// Promised to my ballot. Used while in Accept phase.
-    AcceptPromised(Connected),
+    AcceptPromised,
     /// Promised to a leader who's ballot is greater than mine
     PromisedHigher,
 }
@@ -63,7 +66,7 @@ pub(crate) struct LeaderState<T>
 where
     T: Entry,
 {
-    pub n_leader: Ballot,
+    n_leader: Ballot,
     pub(crate) promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
@@ -75,6 +78,7 @@ where
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
     pub quorum: Quorum,
+    connections: Vec<bool>,
 }
 
 impl<T> LeaderState<T>
@@ -82,6 +86,8 @@ where
     T: Entry,
 {
     pub fn with(n_leader: Ballot, max_pid: usize, quorum: Quorum) -> Self {
+        todo!();
+        /*
         Self {
             n_leader,
             promises_meta: vec![PromiseState::NotPromised; max_pid],
@@ -94,6 +100,7 @@ where
             quorum,
             // connections: e.votes
         }
+        */
     }
 
     fn pid_to_idx(pid: NodeId) -> usize {
@@ -106,8 +113,8 @@ where
 
     pub fn use_accept_promises(&mut self) {
         self.promises_meta.iter_mut().for_each(|p| match p {
-            PromiseState::PreparePromised(m) => {
-                *p = PromiseState::AcceptPromised(m.connected);
+            PromiseState::PreparePromised(_) => {
+                *p = PromiseState::AcceptPromised;
             }
             _ => {}
         });
@@ -134,7 +141,6 @@ where
         &mut self,
         prom: Promise<T>,
         pid: NodeId,
-        connected: bool,
         check_max_prom: bool,
     ) -> bool {
         let promise_meta = PromiseMetaData {
@@ -143,7 +149,6 @@ where
             decided_idx: prom.decided_idx,
             pid,
             pending_slots: prom.slots,
-            connected,
         };
         if check_max_prom && promise_meta > self.max_promise_meta {
             self.max_promise_meta = promise_meta.clone();
@@ -158,17 +163,12 @@ where
         self.quorum.is_prepare_quorum(num_promised)
     }
 
-    pub fn set_promise_check_majority(
-        &mut self,
-        prom: Promise<T>,
-        pid: NodeId,
-        connected: bool,
-    ) -> bool {
-        self.set_promise_maybe_check_majority(prom, pid, connected, true)
+    pub fn set_promise_check_majority(&mut self, prom: Promise<T>, pid: NodeId) -> bool {
+        self.set_promise_maybe_check_majority(prom, pid, true)
     }
 
-    pub fn set_promise(&mut self, prom: Promise<T>, pid: NodeId, connected: bool) {
-        let _ = self.set_promise_maybe_check_majority(prom, pid, connected, false);
+    pub fn set_promise(&mut self, prom: Promise<T>, pid: NodeId) {
+        let _ = self.set_promise_maybe_check_majority(prom, pid, false);
     }
 
     pub fn reset_promise(&mut self, pid: NodeId) {
@@ -248,18 +248,16 @@ where
         self.batch_accept_meta = vec![None; self.max_pid];
     }
 
-    pub fn get_promised_followers(&self) -> Vec<(NodeId, Connected)> {
+    pub fn get_promised_followers(&self) -> Vec<NodeId> {
         self.promises_meta
             .iter()
             .enumerate()
             .filter_map(|(idx, x)| match x {
-                PromiseState::AcceptPromised(connected)
-                    if idx != Self::pid_to_idx(self.n_leader.pid) =>
-                {
-                    Some((Self::idx_to_pid(idx), *connected))
+                PromiseState::AcceptPromised if idx != Self::pid_to_idx(self.n_leader.pid) => {
+                    Some(Self::idx_to_pid(idx))
                 }
                 PromiseState::PreparePromised(p) if idx != Self::pid_to_idx(self.n_leader.pid) => {
-                    Some((Self::idx_to_pid(idx), p.connected))
+                    Some(Self::idx_to_pid(idx))
                 }
                 _ => None,
             })

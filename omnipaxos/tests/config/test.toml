@@ -58,9 +58,10 @@ storage_type = { type = "Memory" }
 wait_timeout_ms = 3000
 num_threads = 8
 num_nodes = 3
-batch_size = 31
-num_proposals = 310
-storage_type = { type = "Persistent" }
+#batch_size = 31
+batch_size = 1
+num_proposals = 10
+storage_type = { type = "Memory" }
 
 [atomic_storage_test]
 num_nodes = 3

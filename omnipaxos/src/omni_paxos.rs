@@ -2,7 +2,7 @@ use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
     ithaca::leader_election::Elected,
-    messages::Message,
+    messages::{sequence_paxos::MessageAction, Message},
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
     util::{

@@ -10,13 +10,21 @@ use serde::{Deserialize, Serialize};
 pub mod sequence_paxos {
     use crate::{
         ballot_leader_election::Ballot,
-        ithaca::util::{DataId, PendingSlot, Proposal},
+        ithaca::util::{DataId, PendingSlot, Proposal, SlotIdx, SlotVote},
         storage::{Entry, StopSign},
         util::{LogSync, NodeId, SequenceNumber},
     };
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
+
+    #[derive(Copy, Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub enum MessageAction {
+        Handle,
+        Forward(NodeId),
+        HandleAndForward(NodeId),
+    }
 
     /// Message sent by a follower on crash-recovery or dropped messages to request its leader to re-prepare them.
     #[derive(Copy, Clone, Debug)]
@@ -38,7 +46,6 @@ pub mod sequence_paxos {
         pub n_accepted: Ballot,
         /// The log length of this leader.
         pub accepted_idx: usize,
-        pub forward: bool,
     }
 
     /// Promise message sent by a follower in response to a [`Prepare`] sent by the leader.
@@ -98,7 +105,7 @@ pub mod sequence_paxos {
     pub struct AcceptOrder<T> {
         /// The current round.
         pub proposal: Proposal,
-        pub slot_idx: usize,
+        pub slot_idx: SlotIdx,
         pub data: Option<T>,
     }
 
@@ -106,7 +113,7 @@ pub mod sequence_paxos {
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct ReplicateAck {
         pub proposal: Proposal,
-        pub proposed_slot_idx: Option<usize>, // None in SPaxos
+        pub slot_vote: SlotVote,
     }
 
     #[derive(Copy, Clone, Debug)]
@@ -114,7 +121,7 @@ pub mod sequence_paxos {
     pub struct DecidedSlot {
         /// The current round.
         pub data_id: DataId,
-        pub slot_idx: usize,
+        pub slot_idx: SlotIdx,
     }
 
     /// Message with entries to be replicated and the latest decided index sent by the leader in the accept phase.
@@ -232,6 +239,7 @@ pub mod sequence_paxos {
         pub from: NodeId,
         /// Receiver of `msg`.
         pub to: NodeId,
+        pub action: MessageAction,
         /// The message content.
         pub msg: PaxosMsg<T>,
     }
@@ -298,7 +306,7 @@ pub mod leader_election {
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HBRequest {
         /// Number of the current round.
-        pub round: u32,
+        pub round: usize,
     }
 
     /// Replies
@@ -306,9 +314,10 @@ pub mod leader_election {
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
     pub struct HBReply {
         /// Number of the current heartbeat round.
-        pub round: u32,
+        pub round: usize,
         /// Promised ballot
         pub max_ballot: Ballot,
+        pub qc: bool,
     }
 
     #[derive(Clone, Debug)]
