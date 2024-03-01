@@ -259,7 +259,7 @@ where
         self.seq_paxos.snapshot(compact_idx, local_only)
     }
 
-    /// Return the decided index.
+    /// Return the decided index. 0 means that no entry has been decided.
     pub fn get_decided_idx(&self) -> usize {
         self.seq_paxos.get_decided_idx()
     }
@@ -323,7 +323,7 @@ where
             .expect("storage error while trying to read log entries")
     }
 
-    /// Read all decided entries from `from_idx` in the log. Returns `None` if `from_idx` is out of bounds.
+    /// Read all decided entries starting at `from_idx` (inclusive) in the log. Returns `None` if `from_idx` is out of bounds.
     pub fn read_decided_suffix(&self, from_idx: usize) -> Option<Vec<LogEntry<T>>> {
         self.seq_paxos
             .internal_storage
