@@ -1,15 +1,4 @@
 #[test]
-fn derive_entry_test() {
-    use omnipaxos::macros::Entry;
-
-    #[derive(Clone, Debug, Entry)]
-    struct TestEntry {
-        pub _field1: u64,
-        pub _field2: String,
-    }
-}
-
-#[test]
 fn build_op_test() {
     use omnipaxos::{macros::Entry, ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
     use omnipaxos_storage::memory_storage::MemoryStorage;

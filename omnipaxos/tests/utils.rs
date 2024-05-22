@@ -852,7 +852,7 @@ pub mod omnireplica {
         }
 
         pub fn is_connected_to(&self, pid: &NodeId) -> bool {
-            self.peer_disconnections.get(pid).is_none()
+            !self.peer_disconnections.contains(pid)
         }
 
         fn answer_election_future(&mut self, l: Ballot) {

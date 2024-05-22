@@ -500,7 +500,7 @@ where
         } else if ss.is_none() && self.state_cache.stopsign.is_some() {
             self.state_cache.accepted_idx -= 1;
         }
-        self.state_cache.stopsign = ss.clone();
+        self.state_cache.stopsign.clone_from(&ss);
         self.storage.set_stopsign(ss)?;
         Ok(self.state_cache.accepted_idx)
     }

@@ -247,15 +247,15 @@ where
         Ok(())
     }
 
-    fn batch_set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
-        let stopsign = bincode::serialize(&s)?;
+    fn batch_set_stopsign(&mut self, ss: Option<StopSign>) -> StorageResult<()> {
+        let stopsign = bincode::serialize(&ss)?;
         self.write_batch.put(STOPSIGN, stopsign);
         Ok(())
     }
 
     fn batch_set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
-        let stopsign = bincode::serialize(&snapshot)?;
-        self.write_batch.put(SNAPSHOT, stopsign);
+        let s = bincode::serialize(&snapshot)?;
+        self.write_batch.put(SNAPSHOT, s);
         Ok(())
     }
 }
@@ -441,8 +441,8 @@ where
     }
 
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
-        let stopsign = bincode::serialize(&snapshot)?;
-        self.db.put(SNAPSHOT, stopsign)?;
+        let s = bincode::serialize(&snapshot)?;
+        self.db.put(SNAPSHOT, s)?;
         Ok(())
     }
 

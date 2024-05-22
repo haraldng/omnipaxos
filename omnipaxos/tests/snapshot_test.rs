@@ -126,7 +126,7 @@ fn double_snapshot_test() {
 }
 
 fn check_snapshot(
-    vec_proposals: &Vec<Value>,
+    vec_proposals: &[Value],
     snapshot_idx: usize,
     node: Arc<Component<OmniPaxosComponent>>,
 ) {

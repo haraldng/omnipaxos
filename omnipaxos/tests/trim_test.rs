@@ -133,11 +133,7 @@ fn double_trim_test() {
     };
 }
 
-fn check_trim(
-    vec_proposals: &Vec<Value>,
-    trim_idx: usize,
-    node: Arc<Component<OmniPaxosComponent>>,
-) {
+fn check_trim(vec_proposals: &[Value], trim_idx: usize, node: Arc<Component<OmniPaxosComponent>>) {
     let num_proposals = vec_proposals.len();
     node.on_definition(|x| {
         let op = &x.paxos;
