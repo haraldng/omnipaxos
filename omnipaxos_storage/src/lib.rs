@@ -7,3 +7,5 @@ pub mod memory_storage;
 
 /// an on-disk storage implementation with persistence for the replica state and the log.
 pub mod persistent_storage;
+/// an in-memory storage implementation that can be set with a Duration to simulate disk I/O.
+pub mod duration_storage;
