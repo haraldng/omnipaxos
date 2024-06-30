@@ -2,6 +2,7 @@ use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
     messages::Message,
+    proxy_leader::ProxyLeader,
     sequence_paxos::SequencePaxos,
     storage::{Entry, StopSign, Storage},
     util::{
@@ -49,6 +50,13 @@ impl OmniPaxosConfig {
         Ok(())
     }
 
+    /// Checks that all the fields of the cluster config are valid
+    /// for instantiating a proxy leader.
+    pub fn validate_proxy_leader(&self) -> Result<(), ConfigError> {
+        self.compartmentalization_config.validate()?;
+        Ok(())
+    }
+
     /// Creates a new `OmniPaxosConfig` from a `toml` file.
     #[cfg(feature = "toml_config")]
     pub fn with_toml(file_path: &str) -> Result<Self, ConfigError> {
@@ -78,6 +86,15 @@ impl OmniPaxosConfig {
             flush_batch_clock: LogicalClock::with(self.server_config.flush_batch_tick_timeout),
             seq_paxos: SequencePaxos::with(self.into(), storage),
         })
+    }
+
+    /// Checks all configuration fields for instantiating a proxy leader,
+    /// returning an Omni-paxos proxy leader instance if successful.
+    pub fn build_proxy_leader(self) -> Result<ProxyLeader, ConfigError> {
+        self.validate_proxy_leader()?;
+        // TODO: return slimmed down instance of omni-paxos, which only
+        // forwards messages to followers and sends messages back to leader
+        Ok(ProxyLeader { })
     }
 }
 
@@ -224,7 +241,6 @@ impl Default for ServerConfig {
     }
 }
 
-
 /// Configuration for a singular `OmniPaxos` instance in a cluster.
 /// # Fields
 /// * `proxy_leaders`: Toggle for utilizing Proxy Leaders.
@@ -235,7 +251,7 @@ pub struct CompartmentalizationConfig {
 }
 
 impl CompartmentalizationConfig {
-    /// Checks that all the fields of the server config are valid.
+    /// Checks that all the fields of the compartmentalization config are valid.
     pub fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
     }
