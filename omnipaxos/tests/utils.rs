@@ -1,12 +1,7 @@
 use self::omnireplica::OmniPaxosComponent;
 use kompact::{config_keys::system, executors::crossbeam_workstealing_pool, prelude::*};
 use omnipaxos::{
-    ballot_leader_election::Ballot,
-    macros::*,
-    messages::Message,
-    storage::{Entry, Snapshot, Storage, StorageResult},
-    util::{FlexibleQuorum, NodeId},
-    ClusterConfig, OmniPaxosConfig, ServerConfig,
+    ballot_leader_election::Ballot, macros::*, messages::Message, storage::{Entry, Snapshot, Storage, StorageResult}, util::{FlexibleQuorum, NodeId}, ClusterConfig, CompartmentalizationConfig, OmniPaxosConfig, ServerConfig
 };
 use omnipaxos_storage::{
     memory_storage::MemoryStorage,
@@ -130,9 +125,13 @@ impl TestConfig {
             batch_size: self.batch_size,
             ..Default::default()
         };
+        let compartmentalization_config = CompartmentalizationConfig {
+            proxy_leaders: false
+        };
         OmniPaxosConfig {
             cluster_config,
             server_config,
+            compartmentalization_config
         }
     }
 }

@@ -34,6 +34,7 @@ use toml;
 pub struct OmniPaxosConfig {
     pub cluster_config: ClusterConfig,
     pub server_config: ServerConfig,
+    pub compartmentalization_config: CompartmentalizationConfig,
 }
 
 impl OmniPaxosConfig {
@@ -132,6 +133,7 @@ impl ClusterConfig {
 
     /// Checks all configuration fields and builds a local OmniPaxos node with settings for this
     /// node defined in `server_config` and using storage `with_storage`.
+    /// This will set the `compartmentalization_config` to the default implementation.
     pub fn build_for_server<T, B>(
         self,
         server_config: ServerConfig,
@@ -141,9 +143,10 @@ impl ClusterConfig {
         T: Entry,
         B: Storage<T>,
     {
-        let op_config = OmniPaxosConfig {
+        let compartmentalization_config = CompartmentalizationConfig::default();        let op_config = OmniPaxosConfig {
             cluster_config: self,
             server_config,
+            compartmentalization_config
         };
         op_config.build(with_storage)
     }
@@ -217,6 +220,31 @@ impl Default for ServerConfig {
             logger_file_path: None,
             #[cfg(feature = "logging")]
             custom_logger: None,
+        }
+    }
+}
+
+
+/// Configuration for a singular `OmniPaxos` instance in a cluster.
+/// # Fields
+/// * `proxy_leaders`: Toggle for utilizing Proxy Leaders.
+#[derive(Clone, Debug)]
+pub struct CompartmentalizationConfig {
+    /// Toggle if Proxy Leaders should be utilized in the cluster.
+    pub proxy_leaders: bool,
+}
+
+impl CompartmentalizationConfig {
+    /// Checks that all the fields of the server config are valid.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        Ok(())
+    }
+}
+
+impl Default for CompartmentalizationConfig {
+    fn default() -> Self {
+        Self {
+            proxy_leaders: false
         }
     }
 }
