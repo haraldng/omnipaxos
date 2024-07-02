@@ -1,3 +1,5 @@
+use omnipaxos::CompartmentalizationConfig;
+
 #[test]
 fn build_op_test() {
     use omnipaxos::{macros::Entry, ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
@@ -18,9 +20,13 @@ fn build_op_test() {
         pid: 1,
         ..Default::default()
     };
+    let compartmentalization_config = CompartmentalizationConfig {
+        proxy_leaders: false
+    };
     let config = OmniPaxosConfig {
         cluster_config,
         server_config,
+        compartmentalization_config
     };
 
     let _omnipaxos: OmniPaxos<TestEntry, MemoryStorage<TestEntry>> =

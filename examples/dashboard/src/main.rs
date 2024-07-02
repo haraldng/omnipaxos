@@ -1,5 +1,5 @@
 use crate::{entry::LogEntry, server::OmniPaxosServer, util::*};
-use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
+use omnipaxos::{ClusterConfig, CompartmentalizationConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use omnipaxos_ui::OmniPaxosUI;
 use std::{
@@ -43,9 +43,13 @@ fn main() {
             nodes: servers.clone(),
             ..Default::default()
         };
+        let compartmentalization_config = CompartmentalizationConfig {
+            proxy_leaders: false
+        };
         let op_config = OmniPaxosConfig {
             server_config,
             cluster_config,
+            compartmentalization_config
         };
         // set up the ui with the same configration as for the OmniPaxos
         let mut omni_paxos_ui = OmniPaxosUI::with(op_config.clone().into());

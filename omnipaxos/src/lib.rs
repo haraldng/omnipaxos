@@ -22,6 +22,9 @@ pub mod messages;
 mod omni_paxos;
 pub use omni_paxos::*;
 
+/// Proxy leader implementation of OmniPaxos.
+pub(crate) mod proxy_leader;
+
 /// The core replication algorithm of OmniPaxos.
 pub(crate) mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.

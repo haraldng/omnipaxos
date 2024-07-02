@@ -57,9 +57,13 @@ fn main() {
             nodes: SERVERS.into(),
             ..Default::default()
         };
+        let compartmentalization_config = CompartmentalizationConfig {
+            proxy_leaders: false
+        };
         let op_config = OmniPaxosConfig {
             server_config,
             cluster_config,
+            compartmentalization_config
         };
         let omni_paxos: Arc<Mutex<OmniPaxosKV>> = Arc::new(Mutex::new(
             op_config.build(MemoryStorage::default()).unwrap(),
