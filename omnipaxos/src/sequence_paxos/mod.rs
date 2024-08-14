@@ -14,6 +14,7 @@ use crate::{
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
+use crate::storage::metronome::Metronome;
 
 pub mod follower;
 pub mod leader;
@@ -39,6 +40,7 @@ where
     current_seq_num: SequenceNumber,
     cached_promise_message: Option<Promise<T>>,
     buffer_size: usize,
+    metronome: Metronome,
     #[cfg(feature = "logging")]
     logger: Logger,
 }

@@ -3,6 +3,7 @@ use super::super::ballot_leader_election::Ballot;
 use super::*;
 
 use crate::util::{MessageStatus, WRITE_ERROR_MSG};
+use crate::storage::metronome::*;
 
 impl<T, B> SequencePaxos<T, B>
 where
@@ -94,6 +95,35 @@ where
             let entries = acc_dec.entries;
             #[cfg(feature = "unicache")]
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
+
+            // metronome changes
+            let ordering = self.metronome.ordering;
+            if BATCH_ACCEPTED {
+                let (critical_batch, rest_batch) = {
+                    todo!("Split entries into critical and rest batch based on ordering");
+                };
+                let new_accepted_idx = self.internal_storage
+                    .append_entries_without_batching(critical_batch)
+                    .expect(WRITE_ERROR_MSG);
+                self.reply_accepted(acc_dec.n, new_accepted_idx);
+                // do rest batch
+                let new_accepted_idx = self.internal_storage
+                    .append_entries_without_batching(rest_batch)
+                    .expect(WRITE_ERROR_MSG);
+                self.reply_accepted(acc_dec.n, new_accepted_idx);
+            } else {
+                // TODO: Must append all entries in the batch i.e., handle the case where len of ordering is less than batch size
+                for index in ordering {
+                    let entry = entries[index];
+                    let new_accepted_idx = self.internal_storage
+                        .append_entry_no_batching(entry)
+                        .expect(WRITE_ERROR_MSG);
+                    self.reply_accepted(acc_dec.n, new_accepted_idx);
+                }
+            }
+            self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);
+
+            /*
             let mut new_accepted_idx = self
                 .internal_storage
                 .append_entries_and_get_accepted_idx(entries)
@@ -106,6 +136,7 @@ where
             if let Some(idx) = new_accepted_idx {
                 self.reply_accepted(acc_dec.n, idx);
             }
+            */
         }
     }
 

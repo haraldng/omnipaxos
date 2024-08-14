@@ -205,14 +205,15 @@ where
             };
             match cached_acceptdecide {
                 // Modify existing AcceptDecide message to follower
-                Some(acc) => {
-                    acc.entries.append(accepted.entries.clone().as_mut());
-                    acc.decided_idx = decided_idx;
+                Some(_acc) => {
+                    unimplemented!("Don't reuse AcceptDecide msgs in Metronome!")
+                    // acc.entries.append(accepted.entries.clone().as_mut());
+                    // acc.decided_idx = decided_idx;
                 }
                 // Add new AcceptDecide message to follower
                 None => {
-                    self.leader_state
-                        .set_batch_accept_meta(pid, Some(self.outgoing.len()));
+                    // self.leader_state
+                    //     .set_batch_accept_meta(pid, Some(self.outgoing.len()));
                     let acc = AcceptDecide {
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),

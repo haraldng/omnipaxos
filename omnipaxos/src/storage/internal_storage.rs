@@ -259,8 +259,8 @@ where
         entries: Vec<T>,
     ) -> StorageResult<Option<usize>> {
         let append_res = self.state_cache.append_entries(entries);
-        if let Some(flushed_entries) = append_res {
-            let accepted_idx = self.append_entries_without_batching(flushed_entries)?;
+        if let Some(entries_to_flush) = append_res {
+            let accepted_idx = self.append_entries_without_batching(entries_to_flush)?;
             Ok(Some(accepted_idx))
         } else {
             Ok(None)
@@ -307,6 +307,15 @@ where
         let num_new_entries = entries.len();
         self.storage.append_entries(entries)?;
         self.state_cache.accepted_idx += num_new_entries;
+        Ok(self.state_cache.accepted_idx)
+    }
+
+    pub(crate) fn append_entry_no_batching(
+        &mut self,
+        entry: T,
+    ) -> StorageResult<usize> {
+        self.storage.append_entry(entry)?;
+        self.state_cache.accepted_idx += 1;
         Ok(self.state_cache.accepted_idx)
     }
 
