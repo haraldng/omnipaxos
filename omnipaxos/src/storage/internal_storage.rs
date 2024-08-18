@@ -221,6 +221,24 @@ where
         self.flush_if_full_batch(append_res)
     }
 
+    // Append entry, if the batch size is reached, flush the batch and return the actual
+    // accepted index (not including the batched entries)
+    pub(crate) fn batch_and_return_if_full(
+        &mut self,
+        entry: T,
+    ) -> Option<Vec<T>> {
+        self.state_cache.append_entry(entry)
+    }
+
+    // Append entry, if the batch size is reached, flush the batch and return the actual
+    // accepted index (not including the batched entries)
+    pub(crate) fn batch_entries_and_return_if_full(
+        &mut self,
+        entries: Vec<T>,
+    ) -> Option<Vec<T>> {
+        self.state_cache.append_entries(entries)
+    }
+
     // Flushes batched entries and appends a stopsign to the log. Returns the AcceptedMetaData
     // associated with any flushed entries if there were any.
     pub(crate) fn append_stopsign(

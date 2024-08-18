@@ -14,7 +14,7 @@ use crate::{
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
 use std::{fmt::Debug, vec};
-use crate::storage::metronome::Metronome;
+use crate::storage::metronome::{BATCH_ACCEPTED, Metronome};
 
 pub mod follower;
 pub mod leader;
@@ -100,6 +100,7 @@ where
             current_seq_num: SequenceNumber::default(),
             cached_promise_message: None,
             buffer_size: config.buffer_size,
+            metronome: Metronome::with(pid, num_nodes, quorum.get_write_quorum_size()),
             #[cfg(feature = "logging")]
             logger: {
                 if let Some(logger) = config.custom_logger {
@@ -276,6 +277,51 @@ where
             PaxosMsg::Compaction(c) => self.handle_compaction(c),
             PaxosMsg::AcceptStopSign(acc_ss) => self.handle_accept_stopsign(acc_ss),
             PaxosMsg::ForwardStopSign(f_ss) => self.handle_forwarded_stopsign(f_ss),
+        }
+    }
+
+    pub(crate) fn metronome_accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>) -> usize {
+        // metronome changes
+        if BATCH_ACCEPTED {
+            let (critical_batch, rest_batch) = {
+                todo!("Split entries into critical and rest batch based on ordering");
+            };
+            let new_accepted_idx = self.internal_storage
+                .append_entries_without_batching(critical_batch)
+                .expect(WRITE_ERROR_MSG);
+            if let Some(n) = reply_accepted_with {
+                self.reply_accepted(n, new_accepted_idx);
+            }            // do rest batch
+            let new_accepted_idx = self.internal_storage
+                .append_entries_without_batching(rest_batch)
+                .expect(WRITE_ERROR_MSG);
+            if let Some(n) = reply_accepted_with {
+                self.reply_accepted(n, new_accepted_idx);
+            }
+            0
+        } else {
+            let mut num_remaining = entries.len();
+            let my_ordering = self.metronome.my_ordering.clone(); // TODO avoid clone here
+            let ordering_len = my_ordering.len();
+            let mut num_iterations = 0;
+            while num_remaining > 0 {
+                for idx in &my_ordering {
+                    let index = num_iterations * ordering_len + idx;
+                    let entry = entries[index].clone();
+                    let new_accepted_idx = self.internal_storage
+                        .append_entry_no_batching(entry)
+                        .expect(WRITE_ERROR_MSG);
+                    if let Some(n) = reply_accepted_with {
+                        self.reply_accepted(n, new_accepted_idx);
+                    }
+                    num_remaining -= 1;
+                    if num_remaining == 0 {
+                        break;
+                    }
+                }
+                num_iterations += 1;
+            }
+            self.internal_storage.get_accepted_idx()
         }
     }
 

@@ -3,12 +3,14 @@ use crate::util::NodeId;
 use itertools::Itertools;
 use std::collections::HashSet;
 
-pub(crate) const BATCH_ACCEPTED: bool = true;
+pub(crate) const BATCH_ACCEPTED: bool = false;
 
 pub(crate) struct Metronome {
     /// Id of this node
     pub pid: NodeId,
-    pub ordering: Vec<usize>
+    pub my_ordering: Vec<usize>,
+    pub all_orderings: Vec<Vec<usize>>,
+    pub critical_len: usize,
 }
 
 type QuorumTuple = Vec<NodeId>;
@@ -75,34 +77,72 @@ impl Metronome {
         Self::maximize_distance_ordering(&mut quorum_combos)
     }
 
-    fn get_my_ordering(my_pid: NodeId, ordered_quorums: &Vec<QuorumTuple>) -> Vec<usize> {
+    fn get_my_ordering_and_critical_len(my_pid: NodeId, ordered_quorums: &Vec<QuorumTuple>) -> (Vec<usize>, usize) {
         let mut ordering = Vec::with_capacity(ordered_quorums.len());
         let mut rest = Vec::with_capacity(ordered_quorums.len()/2);
+        let mut critical_len = 0;
         for (qid, q) in ordered_quorums.iter().enumerate() {
             if q.contains(&my_pid) {
                 ordering.push(qid);
             } else {
                 rest.push(qid);
             }
+            if critical_len == 0 && qid == ordered_quorums.len()-1 {
+                critical_len = ordering.len();
+            }
         }
         ordering.append(&mut rest);
-        ordering
+        (ordering, critical_len)
+    }
+
+    fn get_all_orderings(ordered_quorums: &Vec<QuorumTuple>) -> Vec<Vec<usize>> {
+        todo!()
     }
 
 
-    fn new(pid: NodeId, num_nodes: usize, quorum_size: usize, batch_size: usize) -> Self {
+    pub(crate) fn with(pid: NodeId, num_nodes: usize, quorum_size: usize) -> Self {
         let ordered_quorums = Self::create_ordered_quorums(num_nodes, quorum_size);
-        let ordering = Self::get_my_ordering(pid, &ordered_quorums);
+        let (ordering, critical_len) = Self::get_my_ordering_and_critical_len(pid, &ordered_quorums);
         Metronome {
             pid,
-            ordering
+            my_ordering: ordering,
+            all_orderings: vec![],
+            critical_len
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use super::*;
+
+    fn check_critical_len(all_metronomes: &Vec<Metronome>) {
+        let critical_len = all_metronomes[0].critical_len;
+        let all_same_critical_len = all_metronomes.iter().all(|m| m.critical_len == critical_len);
+        assert!(all_same_critical_len);
+        let num_nodes = all_metronomes.len();
+        let all_orderings: Vec<&Vec<usize>> = all_metronomes.iter().map(|m| &m.my_ordering).collect();
+        let quorum_size = num_nodes / 2 + 1;
+        let num_ops = all_orderings[0].len();
+        let mut h: HashMap<usize, usize> = HashMap::from_iter((0..num_ops).map(|x| (x, 0)));
+        for column in 0..num_ops {
+            for ordering in &all_orderings { // row
+                let op_id = ordering[column];
+                h.insert(op_id, h[&op_id] + 1);
+            }
+            if column == critical_len - 1 {
+                for (_, count) in h.iter() {
+                    // at critical length, all ops should have been assigned quorum_size times
+                    assert_eq!(*count, quorum_size);
+                }
+            }
+        }
+        // check all ops where indeed assigned
+        for (_, count) in h.iter() {
+            assert_eq!(*count, num_nodes);
+        }
+    }
 
     #[test]
     fn test_distance() {
@@ -132,16 +172,16 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let num_nodes = 5;
-        let quorum_size = num_nodes / 2 + 1;
-
-        let mut orderings = vec![vec![]; num_nodes];
-        for pid in (1..=num_nodes as NodeId) {
-            let m = Metronome::new(pid, num_nodes, quorum_size, 10);
-            orderings[pid as usize - 1] = m.ordering;
-        }
-        for o in &orderings {
-            println!("{:?}", o);
+        let n = vec![3, 5, 7, 9, 11];
+        for num_nodes in n {
+            let quorum_size = num_nodes / 2 + 1;
+            let mut all_metronomes = Vec::with_capacity(num_nodes);
+            for pid in 1..=num_nodes as NodeId {
+                let m = Metronome::with(pid, num_nodes, quorum_size);
+                // println!("critical len: {}", m.critical_len);
+                all_metronomes.push(m);
+            }
+            check_critical_len(&all_metronomes);
         }
     }
 }

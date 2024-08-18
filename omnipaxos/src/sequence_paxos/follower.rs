@@ -97,30 +97,7 @@ where
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
 
             // metronome changes
-            let ordering = self.metronome.ordering;
-            if BATCH_ACCEPTED {
-                let (critical_batch, rest_batch) = {
-                    todo!("Split entries into critical and rest batch based on ordering");
-                };
-                let new_accepted_idx = self.internal_storage
-                    .append_entries_without_batching(critical_batch)
-                    .expect(WRITE_ERROR_MSG);
-                self.reply_accepted(acc_dec.n, new_accepted_idx);
-                // do rest batch
-                let new_accepted_idx = self.internal_storage
-                    .append_entries_without_batching(rest_batch)
-                    .expect(WRITE_ERROR_MSG);
-                self.reply_accepted(acc_dec.n, new_accepted_idx);
-            } else {
-                // TODO: Must append all entries in the batch i.e., handle the case where len of ordering is less than batch size
-                for index in ordering {
-                    let entry = entries[index];
-                    let new_accepted_idx = self.internal_storage
-                        .append_entry_no_batching(entry)
-                        .expect(WRITE_ERROR_MSG);
-                    self.reply_accepted(acc_dec.n, new_accepted_idx);
-                }
-            }
+            self.metronome_accept(Some(acc_dec.n), entries);
             self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);
 
             /*
@@ -188,7 +165,7 @@ where
         }
     }
 
-    fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
+    pub(crate) fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
                 let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();

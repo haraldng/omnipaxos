@@ -109,27 +109,28 @@ where
     }
 
     pub(crate) fn accept_entry_leader(&mut self, entry: T) {
-        let accepted_metadata = self
-            .internal_storage
-            .append_entry_with_batching(entry)
-            .expect(WRITE_ERROR_MSG);
-        if let Some(metadata) = accepted_metadata {
-            self.leader_state
-                .set_accepted_idx(self.pid, metadata.accepted_idx);
-            self.send_acceptdecide(metadata);
+        let batch = self.internal_storage.batch_and_return_if_full(entry);
+        if let Some(entries) = batch {
+            self.leader_metronome_accept(entries);
         }
     }
 
     pub(crate) fn accept_entries_leader(&mut self, entries: Vec<T>) {
-        let accepted_metadata = self
-            .internal_storage
-            .append_entries_with_batching(entries)
-            .expect(WRITE_ERROR_MSG);
-        if let Some(metadata) = accepted_metadata {
-            self.leader_state
-                .set_accepted_idx(self.pid, metadata.accepted_idx);
-            self.send_acceptdecide(metadata);
+        let batch = self.internal_storage.batch_entries_and_return_if_full(entries);
+        if let Some(entries) = batch {
+            self.leader_metronome_accept(entries);
         }
+    }
+
+    fn leader_metronome_accept(&mut self, entries: Vec<T>) {
+        let accepted_idx = self.metronome_accept(None, entries.clone());    // TODO for benchmarks maybe leader shouldn't accept
+        self.leader_state
+            .set_accepted_idx(self.pid, accepted_idx);
+        let metadata = AcceptedMetaData {
+            entries,
+            accepted_idx,
+        };
+        self.send_acceptdecide(metadata);
     }
 
     pub(crate) fn accept_stopsign_leader(&mut self, ss: StopSign) {
@@ -193,6 +194,7 @@ where
     fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
+            /*
             let cached_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
                 Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
                     let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
@@ -227,6 +229,18 @@ where
                     });
                 }
             }
+            */
+            let acc = AcceptDecide {
+                n: self.leader_state.n_leader,
+                seq_num: self.leader_state.next_seq_num(pid),
+                decided_idx,
+                entries: accepted.entries.clone(),
+            };
+            self.outgoing.push(PaxosMessage {
+                from: self.pid,
+                to: pid,
+                msg: PaxosMsg::AcceptDecide(acc),
+            });
         }
     }
 
@@ -325,7 +339,7 @@ where
 
     pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: NodeId) {
         #[cfg(feature = "logging")]
-        trace!(
+        info!(
             self.logger,
             "Got Accepted from {}, idx: {}, chosen_idx: {}, accepted: {:?}",
             from,
@@ -336,10 +350,23 @@ where
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state
                 .set_accepted_idx(from, accepted.accepted_idx);
-            if accepted.accepted_idx > self.internal_storage.get_decided_idx()
+            let current_decided_idx = self.internal_storage.get_decided_idx();
+            if accepted.accepted_idx > current_decided_idx
                 && self.leader_state.is_chosen(accepted.accepted_idx)
             {
                 let decided_idx = accepted.accepted_idx;
+                /* TODO fix critical index
+                let a = accepted.accepted_idx;
+                let rest = a % self.metronome.critical_len;
+                let decided_idx = {
+                    a - rest
+                };
+                if decided_idx <= current_decided_idx {
+                    return;
+                }
+                 */
+                #[cfg(feature = "logging")]
+                info!(self.logger, "Deciding {decided_idx}");
                 self.internal_storage
                     .set_decided_idx(decided_idx)
                     .expect(WRITE_ERROR_MSG);
