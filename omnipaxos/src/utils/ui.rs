@@ -20,6 +20,8 @@ where
     T: Entry,
 {
     fn from(leader_state: &LeaderState<T>) -> Self {
+        unimplemented!()
+        /*
         let mut accepted_indexes = leader_state.accepted_indexes.clone();
         // Add one empty entry at the beginning to make the index of the vector sync with node id.
         accepted_indexes.insert(0, 0);
@@ -27,6 +29,7 @@ where
             accepted_indexes,
             heartbeats: vec![],
         }
+         */
     }
 }
 

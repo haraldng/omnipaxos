@@ -93,6 +93,8 @@ pub mod sequence_paxos {
         pub seq_num: SequenceNumber,
         /// The decided index.
         pub decided_idx: usize,
+        /// log index to append at.
+        pub start_idx: usize,
         #[cfg(not(feature = "unicache"))]
         /// Entries to be replicated.
         pub entries: Vec<T>,
@@ -108,7 +110,7 @@ pub mod sequence_paxos {
         /// The current round.
         pub n: Ballot,
         /// The accepted index.
-        pub accepted_idx: usize,
+        pub slot_idx: usize,
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.

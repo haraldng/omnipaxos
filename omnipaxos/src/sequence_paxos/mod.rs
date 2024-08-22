@@ -242,11 +242,14 @@ where
 
     /// Flushes any batched log entries and sends their corresponding Accept or Accepted messages.
     pub(crate) fn flush_batch_timeout(&mut self) {
+        unimplemented!("Not used in Metronome")
+        /*
         match self.state {
             (Role::Leader, Phase::Accept) => self.flush_batch_leader(),
             (Role::Follower, Phase::Accept) => self.flush_batch_follower(),
             _ => (),
         }
+        */
     }
 
     /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
@@ -280,7 +283,7 @@ where
         }
     }
 
-    pub(crate) fn metronome_accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>) -> usize {
+    pub(crate) fn metronome_accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>, start_idx: usize) -> usize {
         // metronome changes
         if BATCH_ACCEPTED {
             let (critical_batch, rest_batch) = {
@@ -308,11 +311,21 @@ where
                 for idx in &my_ordering {
                     let index = num_iterations * ordering_len + idx;
                     let entry = entries[index].clone();
-                    let new_accepted_idx = self.internal_storage
+                    let _ = self.internal_storage
                         .append_entry_no_batching(entry)
                         .expect(WRITE_ERROR_MSG);
+                    let slot_idx = start_idx + index;
                     if let Some(n) = reply_accepted_with {
-                        self.reply_accepted(n, new_accepted_idx);
+                        /*
+                        #[cfg(feature = "logging")]
+                        if slot_idx % 200 == 0 {
+                            info!(self.logger, "Node: {} replying accepted for slot_idx: {}", self.pid, slot_idx);
+                        }
+                        */
+                        self.reply_accepted(n, slot_idx);
+                    } else {
+                        let new_num_accepted = self.leader_state.accepted_per_slot.get(&slot_idx).copied().unwrap_or_default() + 1;
+                        self.leader_state.accepted_per_slot.insert(slot_idx, new_num_accepted);
                     }
                     num_remaining -= 1;
                     if num_remaining == 0 {

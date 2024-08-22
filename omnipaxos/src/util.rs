@@ -6,6 +6,7 @@ use super::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use std::collections::HashMap;
 
 /// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
@@ -79,7 +80,7 @@ where
     promises_meta: Vec<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
     follower_seq_nums: Vec<SequenceNumber>,
-    pub accepted_indexes: Vec<usize>,
+    // pub accepted_indexes: Vec<usize>,
     max_promise_meta: PromiseMetaData,
     max_promise_sync: Option<LogSync<T>>,
     batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
@@ -87,6 +88,8 @@ where
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
     pub quorum: Quorum,
+    pub total_entries: usize,
+    pub accepted_per_slot: HashMap<usize, usize>
 }
 
 impl<T> LeaderState<T>
@@ -98,12 +101,14 @@ where
             n_leader,
             promises_meta: vec![PromiseState::NotPromised; max_pid],
             follower_seq_nums: vec![SequenceNumber::default(); max_pid],
-            accepted_indexes: vec![0; max_pid],
+            // accepted_indexes: vec![0; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise_sync: None,
             batch_accept_meta: vec![None; max_pid],
             max_pid,
             quorum,
+            total_entries: 0,
+            accepted_per_slot: HashMap::new()
         }
     }
 
@@ -184,10 +189,14 @@ where
     }
 
     pub fn get_min_all_accepted_idx(&self) -> &usize {
+        unimplemented!("Trim is not used in metronome")
+        /*
         self.accepted_indexes
             .iter()
             .min()
             .expect("Should be all initialised to 0!")
+
+         */
     }
 
     pub fn reset_batch_accept_meta(&mut self) {
@@ -224,9 +233,16 @@ where
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
+    pub fn increment_accepted_slot(&mut self, slot_idx: usize) {
+        let count = self.accepted_per_slot.entry(slot_idx).or_insert(0);
+        *count += 1;
+    }
+
+    /*
     pub fn set_accepted_idx(&mut self, pid: NodeId, idx: usize) {
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
     }
+    */
 
     pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
         self.batch_accept_meta
@@ -244,16 +260,19 @@ where
     }
 
     pub fn get_accepted_idx(&self, pid: NodeId) -> usize {
-        *self.accepted_indexes.get(Self::pid_to_idx(pid)).unwrap()
+        unimplemented!("Resend is not used in metronome")
+        // *self.accepted_indexes.get(Self::pid_to_idx(pid)).unwrap()
     }
 
-    pub fn is_chosen(&self, idx: usize) -> bool {
-        let num_accepted = self
-            .accepted_indexes
-            .iter()
-            .filter(|la| **la >= idx)
-            .count();
-        self.quorum.is_accept_quorum(num_accepted)
+    pub fn find_new_decided_idx_and_gc_slots(&mut self, old_decided_idx: usize) -> usize {
+        for i in old_decided_idx.. {
+            let num_accepted = self.accepted_per_slot.get(&i).unwrap_or(&0);
+            if !self.quorum.is_accept_quorum(*num_accepted) {
+                return i;
+            }
+            self.accepted_per_slot.remove(&i);
+        }
+        0
     }
 }
 

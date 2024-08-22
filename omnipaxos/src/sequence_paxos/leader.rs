@@ -123,17 +123,14 @@ where
     }
 
     fn leader_metronome_accept(&mut self, entries: Vec<T>) {
-        let accepted_idx = self.metronome_accept(None, entries.clone());    // TODO for benchmarks maybe leader shouldn't accept
-        self.leader_state
-            .set_accepted_idx(self.pid, accepted_idx);
-        let metadata = AcceptedMetaData {
-            entries,
-            accepted_idx,
-        };
-        self.send_acceptdecide(metadata);
+        let start_idx = self.leader_state.total_entries;
+        let _ = self.metronome_accept(None, entries.clone(), start_idx);    // TODO for benchmarks maybe leader shouldn't accept
+        self.send_acceptdecide(entries, start_idx);
     }
 
     pub(crate) fn accept_stopsign_leader(&mut self, ss: StopSign) {
+        unimplemented!("No reconfiguration in Metronome")
+        /*
         let accepted_metadata = self
             .internal_storage
             .append_stopsign(ss.clone())
@@ -146,6 +143,7 @@ where
         for pid in self.leader_state.get_promised_followers() {
             self.send_accept_stopsign(pid, ss.clone(), false);
         }
+        */
     }
 
     fn send_accsync(&mut self, to: NodeId) {
@@ -191,7 +189,7 @@ where
         self.outgoing.push(msg);
     }
 
-    fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
+    fn send_acceptdecide(&mut self, entries: Vec<T>, start_idx: usize) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
             /*
@@ -234,7 +232,8 @@ where
                 n: self.leader_state.n_leader,
                 seq_num: self.leader_state.next_seq_num(pid),
                 decided_idx,
-                entries: accepted.entries.clone(),
+                entries: entries.clone(),
+                start_idx
             };
             self.outgoing.push(PaxosMessage {
                 from: self.pid,
@@ -301,8 +300,9 @@ where
             }
         }
         self.state = (Role::Leader, Phase::Accept);
-        self.leader_state
-            .set_accepted_idx(self.pid, new_accepted_idx);
+        assert_eq!(new_accepted_idx, 0, "Unimplemented leader change in Metronome");
+        // self.leader_state
+        //     .set_accepted_idx(self.pid, new_accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
@@ -341,45 +341,33 @@ where
         #[cfg(feature = "logging")]
         info!(
             self.logger,
-            "Got Accepted from {}, idx: {}, chosen_idx: {}, accepted: {:?}",
+            "Got Accepted from {}, slot_idx: {}, decided_idx: {}",
             from,
-            accepted.accepted_idx,
+            accepted.slot_idx,
             self.internal_storage.get_decided_idx(),
-            self.leader_state.accepted_indexes
+            // self.leader_state.accepted_indexes
         );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
             self.leader_state
-                .set_accepted_idx(from, accepted.accepted_idx);
+                .increment_accepted_slot(accepted.slot_idx);
             let current_decided_idx = self.internal_storage.get_decided_idx();
-            if accepted.accepted_idx > current_decided_idx
-                && self.leader_state.is_chosen(accepted.accepted_idx)
-            {
-                let decided_idx = accepted.accepted_idx;
-                /* TODO fix critical index
-                let a = accepted.accepted_idx;
-                let rest = a % self.metronome.critical_len;
-                let decided_idx = {
-                    a - rest
-                };
-                if decided_idx <= current_decided_idx {
-                    return;
-                }
-                 */
-                #[cfg(feature = "logging")]
-                info!(self.logger, "Deciding {decided_idx}");
+            let new_decided_idx = self.leader_state.find_new_decided_idx_and_gc_slots(current_decided_idx);
+            if new_decided_idx > current_decided_idx {
+                // #[cfg(feature = "logging")]
+                // info!(self.logger, "Deciding {new_decided_idx}");
                 self.internal_storage
-                    .set_decided_idx(decided_idx)
+                    .set_decided_idx(new_decided_idx)
                     .expect(WRITE_ERROR_MSG);
                 for pid in self.leader_state.get_promised_followers() {
                     match self.leader_state.get_batch_accept_meta(pid) {
                         Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
                             let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
                             match msg {
-                                PaxosMsg::AcceptDecide(acc) => acc.decided_idx = decided_idx,
+                                PaxosMsg::AcceptDecide(acc) => acc.decided_idx = new_decided_idx,
                                 _ => panic!("Cached index is not an AcceptDecide!"),
                             }
                         }
-                        _ => self.send_decide(pid, decided_idx, false),
+                        _ => self.send_decide(pid, new_decided_idx, false),
                     };
                 }
             }
@@ -426,6 +414,7 @@ where
         }
     }
 
+    /*
     pub(crate) fn flush_batch_leader(&mut self) {
         let accepted_metadata = self
             .internal_storage
@@ -437,4 +426,5 @@ where
             self.send_acceptdecide(metadata);
         }
     }
+    */
 }

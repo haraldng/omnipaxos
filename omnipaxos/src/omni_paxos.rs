@@ -384,9 +384,11 @@ where
         if self.resend_message_clock.tick_and_check_timeout() {
             self.seq_paxos.resend_message_timeout();
         }
+        /* // Don't need this in Metronome
         if self.flush_batch_clock.tick_and_check_timeout() {
             self.seq_paxos.flush_batch_timeout();
         }
+         */
     }
 
     /*** BLE calls ***/

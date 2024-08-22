@@ -878,6 +878,9 @@ pub mod omnireplica {
                 for e in entries {
                     match e {
                         LogEntry::Decided(i) => {
+                            // if i.id % 2 == 0 && self.pid == 5 {
+                            //     info!(self.ctx.log(), "Node {} Decided entry: {:?}", self.pid, i);
+                            // }
                             self.try_answer_decided_future(i.id);
                         }
                         LogEntry::Snapshotted(s) => {
@@ -1145,6 +1148,10 @@ pub mod verification {
 
     /// Verifies logs do not diverge. **NOTE**: this check assumes normal execution within one round without any snapshots, trimming.
     pub fn check_consistent_log_prefixes(logs: &Vec<(NodeId, Vec<LogEntry<Value>>)>) {
+        for (pid, log) in logs {
+            println!("Log for node {pid}");
+            println!("{:?}", log.get(10..20));
+        }
         let (_, longest_log) = logs
             .iter()
             .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))

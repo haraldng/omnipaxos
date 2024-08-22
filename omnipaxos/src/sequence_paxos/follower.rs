@@ -63,7 +63,7 @@ where
             }
             let accepted = Accepted {
                 n: accsync.n,
-                accepted_idx: new_accepted_idx,
+                slot_idx: new_accepted_idx,
             };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
@@ -97,7 +97,7 @@ where
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
 
             // metronome changes
-            self.metronome_accept(Some(acc_dec.n), entries);
+            self.metronome_accept(Some(acc_dec.n), entries, acc_dec.start_idx);
             self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);
 
             /*
@@ -166,27 +166,30 @@ where
     }
 
     pub(crate) fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
+        /*
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
                 let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
                 match msg {
                     PaxosMsg::Accepted(a) => {
-                        a.accepted_idx = accepted_idx;
+                        a.slot_idx = accepted_idx;
                     }
                     _ => panic!("Cached idx is not an Accepted Message<T>!"),
                 }
             }
             _ => {
-                let accepted = Accepted { n, accepted_idx };
-                let cached_idx = self.outgoing.len();
-                self.latest_accepted_meta = Some((n, cached_idx));
-                self.outgoing.push(PaxosMessage {
-                    from: self.pid,
-                    to: n.pid,
-                    msg: PaxosMsg::Accepted(accepted),
-                });
+
             }
         };
+        */
+        let accepted = Accepted { n, slot_idx: accepted_idx };
+        let cached_idx = self.outgoing.len();
+        self.latest_accepted_meta = Some((n, cached_idx));
+        self.outgoing.push(PaxosMessage {
+            from: self.pid,
+            to: n.pid,
+            msg: PaxosMsg::Accepted(accepted),
+        });
     }
 
     /// Also returns whether the message's ballot was promised

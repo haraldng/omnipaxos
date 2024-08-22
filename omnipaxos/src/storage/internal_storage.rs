@@ -201,6 +201,7 @@ where
         })
     }
 
+    /*
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
     pub(crate) fn append_entry_with_batching(
@@ -220,6 +221,7 @@ where
         let append_res = self.state_cache.append_entries(entries);
         self.flush_if_full_batch(append_res)
     }
+    */
 
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
@@ -245,11 +247,14 @@ where
         &mut self,
         ss: StopSign,
     ) -> StorageResult<Option<AcceptedMetaData<T>>> {
+        unimplemented!("Not used in metronome")
+        /*
         let append_res = self.state_cache.append_stopsign(ss.clone());
         let accepted_entries_metadata = self.flush_if_full_batch(append_res)?;
         self.storage.set_stopsign(Some(ss))?;
         self.state_cache.accepted_idx += 1;
         Ok(accepted_entries_metadata)
+         */
     }
 
     fn flush_if_full_batch(
