@@ -13,7 +13,7 @@ use crate::{
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
-use std::{fmt::Debug, vec};
+use std::{cmp, fmt::Debug, vec};
 use crate::storage::metronome::{BATCH_ACCEPTED, Metronome};
 
 pub mod follower;
@@ -79,8 +79,11 @@ where
             }
             None => ((Role::Follower, Phase::None), Ballot::default()),
         };
+        let metronome = Metronome::with(pid, num_nodes, quorum.get_write_quorum_size());
+        // batch at least as large as metronome ordering size to prevent out of index for an entry.
+        let batch_size = cmp::max(metronome.my_ordering.len(), config.batch_size);
         let internal_storage_config = InternalStorageConfig {
-            batch_size: config.batch_size,
+            batch_size,
         };
         let mut paxos = SequencePaxos {
             internal_storage: InternalStorage::with(
@@ -100,7 +103,7 @@ where
             current_seq_num: SequenceNumber::default(),
             cached_promise_message: None,
             buffer_size: config.buffer_size,
-            metronome: Metronome::with(pid, num_nodes, quorum.get_write_quorum_size()),
+            metronome,
             #[cfg(feature = "logging")]
             logger: {
                 if let Some(logger) = config.custom_logger {

@@ -1,3 +1,4 @@
+use crate::sequence_paxos::leader::ACCEPTSYNC_MAGIC_SLOT;
 use super::super::ballot_leader_election::Ballot;
 
 use super::*;
@@ -63,7 +64,7 @@ where
             }
             let accepted = Accepted {
                 n: accsync.n,
-                slot_idx: new_accepted_idx,
+                slot_idx: ACCEPTSYNC_MAGIC_SLOT,
             };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
@@ -95,7 +96,6 @@ where
             let entries = acc_dec.entries;
             #[cfg(feature = "unicache")]
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
-
             // metronome changes
             self.metronome_accept(Some(acc_dec.n), entries, acc_dec.start_idx);
             self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);

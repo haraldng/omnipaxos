@@ -6,6 +6,8 @@ use crate::util::{AcceptedMetaData, WRITE_ERROR_MSG};
 
 use super::*;
 
+pub const ACCEPTSYNC_MAGIC_SLOT: usize = u64::MAX as usize;
+
 impl<T, B> SequencePaxos<T, B>
 where
     T: Entry,
@@ -125,6 +127,7 @@ where
     fn leader_metronome_accept(&mut self, entries: Vec<T>) {
         let start_idx = self.leader_state.total_entries;
         let _ = self.metronome_accept(None, entries.clone(), start_idx);    // TODO for benchmarks maybe leader shouldn't accept
+        self.leader_state.total_entries += entries.len();
         self.send_acceptdecide(entries, start_idx);
     }
 
@@ -312,7 +315,7 @@ where
         #[cfg(feature = "logging")]
         debug!(
             self.logger,
-            "Handling promise from {} in Prepare phase", from
+            "Node {}, Handling promise from {} in Prepare phase", self.pid, from
         );
         if prom.n == self.leader_state.n_leader {
             let received_majority = self.leader_state.set_promise(prom, from, true);
@@ -338,23 +341,27 @@ where
     }
 
     pub(crate) fn handle_accepted(&mut self, accepted: Accepted, from: NodeId) {
-        #[cfg(feature = "logging")]
-        info!(
-            self.logger,
-            "Got Accepted from {}, slot_idx: {}, decided_idx: {}",
-            from,
-            accepted.slot_idx,
-            self.internal_storage.get_decided_idx(),
-            // self.leader_state.accepted_indexes
-        );
         if accepted.n == self.leader_state.n_leader && self.state == (Role::Leader, Phase::Accept) {
+            if accepted.slot_idx == ACCEPTSYNC_MAGIC_SLOT {
+                return;
+            }
+            /*
+            #[cfg(feature = "logging")]
+            info!(
+                self.logger,
+                "Got Accepted from {}, slot_idx: {}, entry: {:?}, decided_idx: {}",
+                from,
+                accepted.slot_idx,
+                self.internal_storage.get_entries(accepted.slot_idx, accepted.slot_idx + 1),
+                self.internal_storage.get_decided_idx(),
+                // self.leader_state.accepted_indexes
+            );
+            */
             self.leader_state
                 .increment_accepted_slot(accepted.slot_idx);
             let current_decided_idx = self.internal_storage.get_decided_idx();
             let new_decided_idx = self.leader_state.find_new_decided_idx_and_gc_slots(current_decided_idx);
             if new_decided_idx > current_decided_idx {
-                // #[cfg(feature = "logging")]
-                // info!(self.logger, "Deciding {new_decided_idx}");
                 self.internal_storage
                     .set_decided_idx(new_decided_idx)
                     .expect(WRITE_ERROR_MSG);
