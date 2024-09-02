@@ -23,6 +23,7 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
+use crate::sequence_paxos::Phase;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -279,6 +280,11 @@ where
         }
     }
 
+    /// Get who is the current leader and what phase we're in
+    pub fn get_current_leader_state(&self) -> (NodeId, Phase) {
+        self.seq_paxos.get_current_leader_state()
+    }
+
     /// Returns the promised ballot of this node.
     pub fn get_promise(&self) -> Ballot {
         self.seq_paxos.get_promise()
@@ -347,6 +353,11 @@ where
     /// Append an entry to the replicated log.
     pub fn append(&mut self, entry: T) -> Result<(), ProposeErr<T>> {
         self.seq_paxos.append(entry)
+    }
+
+    /// become leader with the given ballot. Only used for metronome, assumes no leader election.
+    pub fn initialize_prepare_phase(&mut self, n: Ballot) {
+        self.seq_paxos.handle_leader(n);
     }
 
     /// Propose a cluster reconfiguration. Returns an error if the current configuration has already been stopped

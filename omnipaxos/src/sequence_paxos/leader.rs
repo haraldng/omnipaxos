@@ -313,13 +313,20 @@ where
 
     pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T>, from: NodeId) {
         #[cfg(feature = "logging")]
-        debug!(
+        info!(
             self.logger,
             "Node {}, Handling promise from {} in Prepare phase", self.pid, from
         );
         if prom.n == self.leader_state.n_leader {
             let received_majority = self.leader_state.set_promise(prom, from, true);
             if received_majority {
+                #[cfg(feature = "logging")]
+                info!(
+                    self.logger,
+                    "Node {} got majority promises in Prepare phase of round {}",
+                    self.pid,
+                    self.leader_state.n_leader.n
+                );
                 self.handle_majority_promises();
             }
         }

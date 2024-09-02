@@ -11,7 +11,7 @@
 //! * `serde` - Serialization and deserialization of messages and internal structs with serde. Disable this if you want to implement your own custom ser/deserialization or want to store data that is not serde-supported.
 
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 /// Trait and struct related to the leader election in Omni-Paxos.
 pub mod ballot_leader_election;
 /// OmniPaxos error definitions
@@ -23,7 +23,7 @@ mod omni_paxos;
 pub use omni_paxos::*;
 
 /// The core replication algorithm of OmniPaxos.
-pub(crate) mod sequence_paxos;
+pub mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
 

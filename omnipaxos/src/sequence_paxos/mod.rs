@@ -393,6 +393,10 @@ where
         self.get_promise().pid
     }
 
+    pub(crate) fn get_current_leader_state(&self) -> (NodeId, Phase) {
+        (self.get_current_leader(), self.state.1)
+    }
+
     /// Handles re-establishing a connection to a previously disconnected peer.
     /// This should only be called if the underlying network implementation indicates that a connection has been re-established.
     pub(crate) fn reconnected(&mut self, pid: NodeId) {
@@ -492,8 +496,8 @@ where
     }
 }
 
-#[derive(PartialEq, Debug)]
-pub(crate) enum Phase {
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub enum Phase {
     Prepare,
     Accept,
     Recover,
