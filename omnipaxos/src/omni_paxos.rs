@@ -98,6 +98,7 @@ pub struct ClusterConfig {
     pub nodes: Vec<NodeId>,
     /// Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
     pub flexible_quorum: Option<FlexibleQuorum>,
+    pub use_metronome: bool,
 }
 
 impl ClusterConfig {

@@ -41,6 +41,7 @@ where
     cached_promise_message: Option<Promise<T>>,
     buffer_size: usize,
     metronome: Metronome,
+    use_metronome: bool,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -81,7 +82,9 @@ where
         };
         let metronome = Metronome::with(pid, num_nodes, quorum.get_write_quorum_size());
         // batch at least as large as metronome ordering size to prevent out of index for an entry.
-        let batch_size = cmp::max(metronome.my_ordering.len(), config.batch_size);
+        let metronome_len = metronome.my_ordering.len();
+        let evenly_divided = config.batch_size/metronome_len;
+        let batch_size = cmp::max(metronome_len, evenly_divided * metronome_len);
         let internal_storage_config = InternalStorageConfig {
             batch_size,
         };
@@ -103,6 +106,7 @@ where
             current_seq_num: SequenceNumber::default(),
             cached_promise_message: None,
             buffer_size: config.buffer_size,
+            use_metronome: config.use_metronome,
             metronome,
             #[cfg(feature = "logging")]
             logger: {
@@ -122,7 +126,7 @@ where
             .expect(WRITE_ERROR_MSG);
         #[cfg(feature = "logging")]
         {
-            info!(paxos.logger, "Paxos component pid: {} created!", pid);
+            info!(paxos.logger, "Paxos component pid: {} created! batch size: {}", pid, batch_size);
             if let Quorum::Flexible(flex_quorum) = quorum {
                 if flex_quorum.read_quorum_size > num_nodes - flex_quorum.write_quorum_size + 1 {
                     warn!(
@@ -286,8 +290,32 @@ where
         }
     }
 
+    pub(crate) fn accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>, start_idx: usize) {
+        if self.use_metronome {
+            self.metronome_accept(reply_accepted_with, entries, start_idx);
+        } else {
+            self.normal_accept(reply_accepted_with, entries);
+        }
+    }
+
+    pub(crate) fn normal_accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>) -> usize {
+        for entry in entries {
+            let slot_idx = self.internal_storage
+                .append_entry_no_batching(entry)
+                .expect(WRITE_ERROR_MSG) - 1;
+            if let Some(n) = reply_accepted_with {
+                // #[cfg(feature = "logging")]
+                // info!(self.logger, "Node: {} replying accepted for slot_idx: {}", self.pid, slot_idx);
+                self.reply_accepted(n, slot_idx);
+            } else {
+                let new_num_accepted = self.leader_state.accepted_per_slot.get(&slot_idx).copied().unwrap_or_default() + 1;
+                self.leader_state.accepted_per_slot.insert(slot_idx, new_num_accepted);
+            }
+        }
+        self.internal_storage.get_accepted_idx()
+    }
+
     pub(crate) fn metronome_accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>, start_idx: usize) -> usize {
-        // metronome changes
         if BATCH_ACCEPTED {
             let (critical_batch, rest_batch) = {
                 todo!("Split entries into critical and rest batch based on ordering");
@@ -313,6 +341,7 @@ where
             while num_remaining > 0 {
                 for idx in &my_ordering {
                     let index = num_iterations * ordering_len + idx;
+                    assert!(index < entries.len(), "Metronome index out of bounds: {}, iteration: {}, ordering_len: {}, idx: {}, num_remaining: {}", index, num_iterations, ordering_len, idx, num_remaining);
                     let entry = entries[index].clone();
                     let _ = self.internal_storage
                         .append_entry_no_batching(entry)
@@ -523,6 +552,7 @@ pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<NodeId>,
     buffer_size: usize,
+    use_metronome: bool,
     pub(crate) batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
@@ -546,6 +576,7 @@ impl From<OmniPaxosConfig> for SequencePaxosConfig {
             flexible_quorum: config.cluster_config.flexible_quorum,
             buffer_size: config.server_config.buffer_size,
             batch_size: config.server_config.batch_size,
+            use_metronome: config.cluster_config.use_metronome,
             #[cfg(feature = "logging")]
             logger_file_path: config.server_config.logger_file_path,
             #[cfg(feature = "logging")]

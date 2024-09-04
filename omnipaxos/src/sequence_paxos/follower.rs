@@ -102,7 +102,7 @@ where
             #[cfg(feature = "unicache")]
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
             // metronome changes
-            self.metronome_accept(Some(acc_dec.n), entries, acc_dec.start_idx);
+            self.accept(Some(acc_dec.n), entries, acc_dec.start_idx);
             self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);
 
             /*

@@ -233,9 +233,10 @@ where
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn increment_accepted_slot(&mut self, slot_idx: usize) {
+    pub fn increment_accepted_slot(&mut self, slot_idx: usize) -> bool {
         let count = self.accepted_per_slot.entry(slot_idx).or_insert(0);
         *count += 1;
+        self.quorum.is_accept_quorum(*count)
     }
 
     /*
