@@ -188,8 +188,6 @@ where
         };
         */
         let accepted = Accepted { n, slot_idx: accepted_idx };
-        let cached_idx = self.outgoing.len();
-        self.latest_accepted_meta = Some((n, cached_idx));
         self.outgoing.push(PaxosMessage {
             from: self.pid,
             to: n.pid,

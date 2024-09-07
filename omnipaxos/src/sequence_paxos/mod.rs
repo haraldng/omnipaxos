@@ -81,6 +81,7 @@ where
             None => ((Role::Follower, Phase::None), Ballot::default()),
         };
         let metronome = Metronome::with(pid, num_nodes, quorum.get_write_quorum_size());
+        let my_ordering = metronome.my_ordering.clone();
         // batch at least as large as metronome ordering size to prevent out of index for an entry.
         let metronome_len = metronome.my_ordering.len();
         let evenly_divided = config.batch_size/metronome_len;
@@ -126,7 +127,7 @@ where
             .expect(WRITE_ERROR_MSG);
         #[cfg(feature = "logging")]
         {
-            info!(paxos.logger, "Paxos component pid: {} created! batch size: {}", pid, batch_size);
+            info!(paxos.logger, "Paxos component pid: {} created! batch size: {}, my ordering: {:?}", pid, batch_size, my_ordering);
             if let Quorum::Flexible(flex_quorum) = quorum {
                 if flex_quorum.read_quorum_size > num_nodes - flex_quorum.write_quorum_size + 1 {
                     warn!(

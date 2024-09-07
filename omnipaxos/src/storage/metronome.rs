@@ -13,6 +13,12 @@ pub(crate) struct Metronome {
     pub critical_len: usize,
 }
 
+impl Metronome {
+    pub(crate) fn get_critical_ordering(&self) -> Vec<usize> {
+        self.my_ordering.iter().take(self.critical_len).cloned().collect()
+    }
+}
+
 type QuorumTuple = Vec<NodeId>;
 
 impl Metronome {

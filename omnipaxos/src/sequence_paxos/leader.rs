@@ -356,10 +356,9 @@ where
             #[cfg(feature = "logging")]
             info!(
                 self.logger,
-                "Got Accepted from {}, slot_idx: {}, entry: {:?}, decided_idx: {}",
-                from,
+                "slot_idx: {} accepted by {}, decided_idx: {}",
                 accepted.slot_idx,
-                self.internal_storage.get_entries(accepted.slot_idx, accepted.slot_idx + 1),
+                from,
                 self.internal_storage.get_decided_idx(),
                 // self.leader_state.accepted_indexes
             );
@@ -368,7 +367,8 @@ where
                 .increment_accepted_slot(accepted.slot_idx);
             if slot_is_decided {
                 let current_decided_idx = self.internal_storage.get_decided_idx();
-                // info!(self.logger, "Slot {} is decided. Current decided_idx: {}", accepted.slot_idx, current_decided_idx);
+                // #[cfg(feature = "logging")]
+                // info!(self.logger, "------------- Slot {} is decided. Current decided_idx: {}", accepted.slot_idx, current_decided_idx);
                 let new_decided_idx = self.leader_state.find_new_decided_idx_and_gc_slots(current_decided_idx);
                 if new_decided_idx > current_decided_idx {
                     self.internal_storage
