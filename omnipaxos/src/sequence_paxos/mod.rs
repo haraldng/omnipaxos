@@ -16,6 +16,8 @@ use slog::{debug, info, trace, warn, Logger};
 use std::{cmp, fmt::Debug, vec};
 use crate::storage::metronome::{BATCH_ACCEPTED, Metronome};
 
+const METRONOME_WORKSTEALING: usize = 2;
+
 pub mod follower;
 pub mod leader;
 
@@ -41,7 +43,7 @@ where
     cached_promise_message: Option<Promise<T>>,
     buffer_size: usize,
     metronome: Metronome,
-    use_metronome: bool,
+    use_metronome: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -292,7 +294,7 @@ where
     }
 
     pub(crate) fn accept(&mut self, reply_accepted_with: Option<Ballot>, entries: Vec<T>, start_idx: usize) {
-        if self.use_metronome {
+        if self.use_metronome > 0 {
             self.metronome_accept(reply_accepted_with, entries, start_idx);
         } else {
             self.normal_accept(reply_accepted_with, entries);
@@ -340,7 +342,7 @@ where
             let ordering_len = my_ordering.len();
             let mut num_iterations = 0;
             while num_remaining > 0 {
-                for idx in &my_ordering {
+                for (x, idx) in my_ordering.iter().enumerate() {
                     let index = num_iterations * ordering_len + idx;
                     assert!(index < entries.len(), "Metronome index out of bounds: {}, iteration: {}, ordering_len: {}, idx: {}, num_remaining: {}", index, num_iterations, ordering_len, idx, num_remaining);
                     let entry = entries[index].clone();
@@ -349,9 +351,17 @@ where
                         .expect(WRITE_ERROR_MSG);
                     let slot_idx = start_idx + index;
                     if let Some(n) = reply_accepted_with {
+                        if self.use_metronome == METRONOME_WORKSTEALING && x >= self.metronome.critical_len {
+                            num_remaining -= 1;
+                            if num_remaining == 0 {
+                                break;
+                            } else {
+                                continue;
+                            }
+                        }
                         /*
                         #[cfg(feature = "logging")]
-                        if slot_idx % 200 == 0 {
+                        if slot_idx % 1 == 0 {
                             info!(self.logger, "Node: {} replying accepted for slot_idx: {}", self.pid, slot_idx);
                         }
                         */
@@ -553,7 +563,7 @@ pub(crate) struct SequencePaxosConfig {
     pid: NodeId,
     peers: Vec<NodeId>,
     buffer_size: usize,
-    use_metronome: bool,
+    use_metronome: usize,
     pub(crate) batch_size: usize,
     flexible_quorum: Option<FlexibleQuorum>,
     #[cfg(feature = "logging")]
