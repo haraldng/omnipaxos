@@ -128,7 +128,10 @@ mod tests {
         let all_same_critical_len = all_metronomes.iter().all(|m| m.critical_len == critical_len);
         assert!(all_same_critical_len);
         let num_nodes = all_metronomes.len();
-        let all_orderings: Vec<&Vec<usize>> = all_metronomes.iter().map(|m| &m.my_ordering).collect();
+        let mut all_orderings = Vec::with_capacity(num_nodes);
+        for m in all_metronomes {
+            all_orderings.push(m.my_ordering.clone());
+        }
         let quorum_size = num_nodes / 2 + 1;
         let num_ops = all_orderings[0].len();
         let mut h: HashMap<usize, usize> = HashMap::from_iter((0..num_ops).map(|x| (x, 0)));
@@ -184,7 +187,9 @@ mod tests {
             let mut all_metronomes = Vec::with_capacity(num_nodes);
             for pid in 1..=num_nodes as NodeId {
                 let m = Metronome::with(pid, num_nodes, quorum_size);
-                // println!("critical len: {}", m.critical_len);
+                if pid == 1 {
+                    println!("N={}: ordering len: {}, critical len: {}", num_nodes, m.my_ordering.len(), m.critical_len);
+                }
                 all_metronomes.push(m);
             }
             check_critical_len(&all_metronomes);

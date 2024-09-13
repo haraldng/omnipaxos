@@ -86,8 +86,7 @@ where
         let my_ordering = metronome.my_ordering.clone();
         // batch at least as large as metronome ordering size to prevent out of index for an entry.
         let metronome_len = metronome.my_ordering.len();
-        let evenly_divided = config.batch_size/metronome_len;
-        let batch_size = cmp::max(metronome_len, evenly_divided * metronome_len);
+        let batch_size = if config.batch_size == 0 { metronome_len } else { config.batch_size };
         let internal_storage_config = InternalStorageConfig {
             batch_size,
         };
@@ -338,7 +337,7 @@ where
             0
         } else {
             let mut num_remaining = entries.len();
-            let my_ordering = self.metronome.my_ordering.clone(); // TODO avoid clone here
+            let my_ordering = &self.metronome.my_ordering;
             let ordering_len = my_ordering.len();
             let mut num_iterations = 0;
             while num_remaining > 0 {
@@ -365,7 +364,13 @@ where
                             info!(self.logger, "Node: {} replying accepted for slot_idx: {}", self.pid, slot_idx);
                         }
                         */
-                        self.reply_accepted(n, slot_idx);
+                        // self.reply_accepted(n, slot_idx);
+                        let accepted = Accepted { n, slot_idx };
+                        self.outgoing.push(PaxosMessage {
+                            from: self.pid,
+                            to: n.pid,
+                            msg: PaxosMsg::Accepted(accepted),
+                        });
                     } else {
                         let new_num_accepted = self.leader_state.accepted_per_slot.get(&slot_idx).copied().unwrap_or_default() + 1;
                         self.leader_state.accepted_per_slot.insert(slot_idx, new_num_accepted);

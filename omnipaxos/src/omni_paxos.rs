@@ -192,7 +192,7 @@ impl ServerConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         valid_config!(self.pid != 0, "Server pid cannot be 0");
         valid_config!(self.buffer_size != 0, "Buffer size must be greater than 0");
-        valid_config!(self.batch_size != 0, "Batch size must be greater than 0");
+        // valid_config!(self.batch_size != 0, "Batch size must be greater than 0");
         valid_config!(
             self.election_tick_timeout != 0,
             "Election tick timeout must be greater than 0"
