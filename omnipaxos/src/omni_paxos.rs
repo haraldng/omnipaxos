@@ -212,7 +212,7 @@ impl Default for ServerConfig {
             election_tick_timeout: ELECTION_TIMEOUT,
             resend_message_tick_timeout: RESEND_MESSAGE_TIMEOUT,
             buffer_size: BUFFER_SIZE,
-            batch_size: 1,
+            batch_size: 0,
             flush_batch_tick_timeout: FLUSH_BATCH_TIMEOUT,
             leader_priority: 0,
             #[cfg(feature = "logging")]
