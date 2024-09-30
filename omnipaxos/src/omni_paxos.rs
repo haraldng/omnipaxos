@@ -1,3 +1,4 @@
+use crate::sequence_paxos::Phase;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
@@ -23,7 +24,6 @@ use std::{
 };
 #[cfg(feature = "toml_config")]
 use toml;
-use crate::sequence_paxos::Phase;
 
 /// Configuration for `OmniPaxos`.
 /// # Fields
@@ -99,6 +99,7 @@ pub struct ClusterConfig {
     /// Defines read and write quorum sizes. Can be used for different latency vs fault tolerance tradeoffs.
     pub flexible_quorum: Option<FlexibleQuorum>,
     pub use_metronome: usize,
+    pub metronome_quorum_size: Option<usize>,
 }
 
 impl ClusterConfig {
@@ -128,6 +129,19 @@ impl ClusterConfig {
                 read_quorum_size >= write_quorum_size,
                 "Read quorum size must be >= the write quorum size."
             );
+            if let Some(metronome_quorum_size) = self.metronome_quorum_size {
+                valid_config!(
+                    metronome_quorum_size >= write_quorum_size,
+                    "Metronome quorum size cannot be smaller that write quorum size"
+                );
+            }
+        } else {
+            if let Some(metronome_quorum_size) = self.metronome_quorum_size {
+                valid_config!(
+                    metronome_quorum_size >= num_nodes / 2 + 1,
+                    "Metronome quorum size cannot be smaller than majority quorum"
+                );
+            }
         }
         Ok(())
     }
