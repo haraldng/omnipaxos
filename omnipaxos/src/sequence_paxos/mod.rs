@@ -93,6 +93,7 @@ where
         let batch_size = if config.batch_size == 0 {
             metronome_len
         } else {
+            assert_eq!(config.batch_size % metronome_len, 0, "Batch size must be a multiple of metronome ordering size");
             config.batch_size
         };
         let internal_storage_config = InternalStorageConfig { batch_size };
