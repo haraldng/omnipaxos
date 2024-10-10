@@ -1,6 +1,6 @@
 pub(crate) mod internal_storage;
-mod state_cache;
 pub(crate) mod metronome;
+mod state_cache;
 
 use super::ballot_leader_election::Ballot;
 #[cfg(feature = "unicache")]

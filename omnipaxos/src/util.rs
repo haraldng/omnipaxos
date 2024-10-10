@@ -5,8 +5,7 @@ use super::{
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap, fmt::Debug, marker::PhantomData};
 
 /// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
@@ -89,7 +88,7 @@ where
     // the number of accepteds needed in the accept phase to decide an entry.
     pub quorum: Quorum,
     pub total_entries: usize,
-    pub accepted_per_slot: HashMap<usize, usize>
+    pub accepted_per_slot: HashMap<usize, usize>,
 }
 
 impl<T> LeaderState<T>
@@ -108,7 +107,7 @@ where
             max_pid,
             quorum,
             total_entries: 0,
-            accepted_per_slot: HashMap::new()
+            accepted_per_slot: HashMap::new(),
         }
     }
 

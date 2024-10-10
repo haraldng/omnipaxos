@@ -1,10 +1,10 @@
 use super::{ballot_leader_election::Ballot, messages::sequence_paxos::*, util::LeaderState};
-use crate::storage::metronome::{Metronome, BATCH_ACCEPTED};
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
     storage::{
         internal_storage::{InternalStorage, InternalStorageConfig},
+        metronome::{Metronome, BATCH_ACCEPTED},
         Entry, Snapshot, StopSign, Storage,
     },
     util::{
@@ -93,7 +93,11 @@ where
         let batch_size = if config.batch_size == 0 {
             metronome_len
         } else {
-            assert_eq!(config.batch_size % metronome_len, 0, "Batch size must be a multiple of metronome ordering size");
+            assert_eq!(
+                config.batch_size % metronome_len,
+                0,
+                "Batch size must be a multiple of metronome ordering size"
+            );
             config.batch_size
         };
         let internal_storage_config = InternalStorageConfig { batch_size };

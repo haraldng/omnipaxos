@@ -1,9 +1,8 @@
-use crate::sequence_paxos::Phase;
 use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
     messages::Message,
-    sequence_paxos::SequencePaxos,
+    sequence_paxos::{Phase, SequencePaxos},
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, FLUSH_BATCH_TIMEOUT, RESEND_MESSAGE_TIMEOUT},

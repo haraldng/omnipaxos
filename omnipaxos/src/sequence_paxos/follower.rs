@@ -1,10 +1,12 @@
-use crate::sequence_paxos::leader::ACCEPTSYNC_MAGIC_SLOT;
 use super::super::ballot_leader_election::Ballot;
+use crate::sequence_paxos::leader::ACCEPTSYNC_MAGIC_SLOT;
 
 use super::*;
 
-use crate::util::{MessageStatus, WRITE_ERROR_MSG};
-use crate::storage::metronome::*;
+use crate::{
+    storage::metronome::*,
+    util::{MessageStatus, WRITE_ERROR_MSG},
+};
 
 impl<T, B> SequencePaxos<T, B>
 where
@@ -103,7 +105,9 @@ where
             let entries = self.internal_storage.decode_entries(acc_dec.entries);
             // metronome changes
             self.accept(Some(acc_dec.n), entries, acc_dec.start_idx);
-            self.internal_storage.set_decided_idx(acc_dec.decided_idx).expect(WRITE_ERROR_MSG);
+            self.internal_storage
+                .set_decided_idx(acc_dec.decided_idx)
+                .expect(WRITE_ERROR_MSG);
 
             /*
             let mut new_accepted_idx = self
@@ -187,7 +191,10 @@ where
             }
         };
         */
-        let accepted = Accepted { n, slot_idx: accepted_idx };
+        let accepted = Accepted {
+            n,
+            slot_idx: accepted_idx,
+        };
         self.outgoing.push(PaxosMessage {
             from: self.pid,
             to: n.pid,

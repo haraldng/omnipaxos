@@ -225,19 +225,13 @@ where
 
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
-    pub(crate) fn batch_and_return_if_full(
-        &mut self,
-        entry: T,
-    ) -> Option<Vec<T>> {
+    pub(crate) fn batch_and_return_if_full(&mut self, entry: T) -> Option<Vec<T>> {
         self.state_cache.append_entry(entry)
     }
 
     // Append entry, if the batch size is reached, flush the batch and return the actual
     // accepted index (not including the batched entries)
-    pub(crate) fn batch_entries_and_return_if_full(
-        &mut self,
-        entries: Vec<T>,
-    ) -> Option<Vec<T>> {
+    pub(crate) fn batch_entries_and_return_if_full(&mut self, entries: Vec<T>) -> Option<Vec<T>> {
         self.state_cache.append_entries(entries)
     }
 
@@ -333,10 +327,7 @@ where
         Ok(self.state_cache.accepted_idx)
     }
 
-    pub(crate) fn append_entry_no_batching(
-        &mut self,
-        entry: T,
-    ) -> StorageResult<usize> {
+    pub(crate) fn append_entry_no_batching(&mut self, entry: T) -> StorageResult<usize> {
         self.storage.append_entry(entry)?;
         self.state_cache.accepted_idx += 1;
         Ok(self.state_cache.accepted_idx)
