@@ -118,10 +118,12 @@ where
     }
 
     pub(crate) fn accept_entries_leader(&mut self, entries: Vec<T>) {
+        // leader batches entries so that there are enough entries to use the log shuffling scheme of metronome
         let batch = self
             .internal_storage
             .batch_entries_and_return_if_full(entries);
         if let Some(entries) = batch {
+            // batch is full, accept and send acceptdecide to followers
             self.leader_metronome_accept(entries);
         }
     }
@@ -370,6 +372,7 @@ where
             */
             let slot_is_decided = self.leader_state.increment_accepted_slot(accepted.slot_idx);
             if slot_is_decided {
+                // slot is decided, now check if it is contiguous. TODO return to client here?
                 let current_decided_idx = self.internal_storage.get_decided_idx();
                 // #[cfg(feature = "logging")]
                 // info!(self.logger, "------------- Slot {} is decided. Current decided_idx: {}", accepted.slot_idx, current_decided_idx);

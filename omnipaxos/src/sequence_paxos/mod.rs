@@ -316,7 +316,7 @@ where
         start_idx: usize,
     ) {
         if self.use_metronome > 0 {
-            self.metronome_accept(reply_accepted_with, entries, start_idx);
+            let _ = self.metronome_accept(reply_accepted_with, entries, start_idx);
         } else {
             self.normal_accept(reply_accepted_with, entries);
         }
@@ -382,9 +382,10 @@ where
             let mut num_remaining = entries.len();
             let my_ordering = &self.metronome.my_ordering;
             let ordering_len = my_ordering.len();
-            let mut num_iterations = 0;
+            let mut num_iterations = 0; // used to wrap around when there are more entries than what the log shuffling scheme is defined for
             while num_remaining > 0 {
                 for (x, idx) in my_ordering.iter().enumerate() {
+                    // go through my log shuffling scheme
                     let index = num_iterations * ordering_len + idx;
                     assert!(index < entries.len(), "Metronome index out of bounds: {}, iteration: {}, ordering_len: {}, idx: {}, num_remaining: {}", index, num_iterations, ordering_len, idx, num_remaining);
                     let entry = entries[index].clone();
@@ -397,6 +398,7 @@ where
                         if self.use_metronome == METRONOME_WORKSTEALING
                             && x >= self.metronome.critical_len
                         {
+                            // skip entries that are not in the critical batch
                             num_remaining -= 1;
                             if num_remaining == 0 {
                                 break;
@@ -411,7 +413,7 @@ where
                         }
                         */
                         // self.reply_accepted(n, slot_idx);
-                        let accepted = Accepted { n, slot_idx };
+                        let accepted = Accepted { n, slot_idx }; // send accepted for this slot
                         self.outgoing.push(PaxosMessage {
                             from: self.pid,
                             to: n.pid,
