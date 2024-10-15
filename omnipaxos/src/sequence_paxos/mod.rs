@@ -386,20 +386,19 @@ where
         } else {
             for (idx, entry) in entries.into_iter().enumerate() {
                 let slot_idx = start_idx + idx;
-                let metronome_slot_idx = if slot_idx < self.metronome.total_len {
-                    slot_idx
-                } else {
-                    slot_idx % self.metronome.total_len
-                };
-                if self
+                let metronome_slot_idx = slot_idx % self.metronome.total_len;
+                let in_my_critical_order = self
                     .metronome
                     .my_critical_ordering
-                    .contains(&metronome_slot_idx)
-                {
+                    .contains(&metronome_slot_idx);
+                // Leader always needs to save entry so it can reply to client with state.
+                if in_my_critical_order || reply_accepted_with.is_none() {
                     let _ = self
                         .internal_storage
                         .append_entry_no_batching(entry)
                         .expect(WRITE_ERROR_MSG);
+                }
+                if in_my_critical_order {
                     match reply_accepted_with {
                         Some(n) => {
                             let accepted = Accepted { n, slot_idx }; // send accepted for this slot
