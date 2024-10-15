@@ -147,10 +147,12 @@ where
             && self.state.1 == Phase::Accept
             && self.handle_sequence_num(dec.seq_num, dec.n.pid) == MessageStatus::Expected
         {
-            let new_accepted_idx = self.update_decided_idx_and_get_accepted_idx(dec.decided_idx);
+            let _ = self.update_decided_idx_and_get_accepted_idx(dec.decided_idx);
+            /*
             if let Some(idx) = new_accepted_idx {
                 self.reply_accepted(dec.n, idx);
             }
+            */
         }
     }
 

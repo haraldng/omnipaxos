@@ -391,6 +391,8 @@ fn resync_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        use_metronome: 0,
+        metronome_quorum_size: None,
     };
     leader.on_definition(|x| {
         x.set_connection(follower_id, false);
@@ -459,6 +461,8 @@ fn reconnect_after_dropped_acceptstopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        use_metronome: 0,
+        metronome_quorum_size: None,
     };
     let leader = sys.nodes.get(&leader_id).unwrap();
     leader.on_definition(|x| {
@@ -516,6 +520,8 @@ fn reconnect_after_dropped_decidestopsign_test() {
         configuration_id: 2,
         nodes: vec![1, 2],
         flexible_quorum: None,
+        use_metronome: 0,
+        metronome_quorum_size: None,
     };
     for other_follower in followers.clone() {
         sys.nodes.get(&other_follower).unwrap().on_definition(|x| {

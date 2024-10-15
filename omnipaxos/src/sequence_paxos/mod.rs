@@ -87,17 +87,13 @@ where
             None => quorum.get_write_quorum_size(),
         };
         let metronome = Metronome::with(pid, num_nodes, metronome_quorum_size);
-        let my_ordering = metronome.my_ordering.clone();
+        let my_ordering = metronome.my_critical_ordering.clone();
         // batch at least as large as metronome ordering size to prevent out of index for an entry.
-        let metronome_len = metronome.my_ordering.len();
+        let critical_len = metronome.critical_len;
+        let total_len = metronome.total_len;
         let batch_size = if config.batch_size == 0 {
-            metronome_len
+            critical_len
         } else {
-            assert_eq!(
-                config.batch_size % metronome_len,
-                0,
-                "Batch size must be a multiple of metronome ordering size"
-            );
             config.batch_size
         };
         let internal_storage_config = InternalStorageConfig { batch_size };
@@ -141,7 +137,7 @@ where
         {
             info!(
                 paxos.logger,
-                "Paxos component pid: {} created! batch size: {}, my ordering: {:?}",
+                "Paxos component pid: {} created! batch size: {}, my ordering: {:?}, total_len: {total_len}, critical_len: {critical_len}",
                 pid,
                 batch_size,
                 my_ordering
@@ -316,9 +312,9 @@ where
         start_idx: usize,
     ) {
         if self.use_metronome > 0 {
-            let _ = self.metronome_accept(reply_accepted_with, entries, start_idx);
+            self.metronome_accept(reply_accepted_with, entries, start_idx);
         } else {
-            self.normal_accept(reply_accepted_with, entries);
+            let _ = self.normal_accept(reply_accepted_with, entries);
         }
     }
 
@@ -358,7 +354,7 @@ where
         reply_accepted_with: Option<Ballot>,
         entries: Vec<T>,
         start_idx: usize,
-    ) -> usize {
+    ) {
         if BATCH_ACCEPTED {
             let (critical_batch, rest_batch) = {
                 todo!("Split entries into critical and rest batch based on ordering");
@@ -377,68 +373,47 @@ where
             if let Some(n) = reply_accepted_with {
                 self.reply_accepted(n, new_accepted_idx);
             }
-            0
         } else {
-            let mut num_remaining = entries.len();
-            let my_ordering = &self.metronome.my_ordering;
-            let ordering_len = my_ordering.len();
-            let mut num_iterations = 0; // used to wrap around when there are more entries than what the log shuffling scheme is defined for
-            while num_remaining > 0 {
-                for (x, idx) in my_ordering.iter().enumerate() {
-                    // go through my log shuffling scheme
-                    let index = num_iterations * ordering_len + idx;
-                    assert!(index < entries.len(), "Metronome index out of bounds: {}, iteration: {}, ordering_len: {}, idx: {}, num_remaining: {}", index, num_iterations, ordering_len, idx, num_remaining);
-                    let entry = entries[index].clone();
+            for (idx, entry) in entries.into_iter().enumerate() {
+                let slot_idx = start_idx + idx;
+                let metronome_slot_idx = if slot_idx < self.metronome.total_len {
+                    slot_idx
+                } else {
+                    slot_idx % self.metronome.total_len
+                };
+                if self
+                    .metronome
+                    .my_critical_ordering
+                    .contains(&metronome_slot_idx)
+                {
                     let _ = self
                         .internal_storage
                         .append_entry_no_batching(entry)
                         .expect(WRITE_ERROR_MSG);
-                    let slot_idx = start_idx + index;
-                    if let Some(n) = reply_accepted_with {
-                        if self.use_metronome == METRONOME_WORKSTEALING
-                            && x >= self.metronome.critical_len
-                        {
-                            // skip entries that are not in the critical batch
-                            num_remaining -= 1;
-                            if num_remaining == 0 {
-                                break;
-                            } else {
-                                continue;
-                            }
+                    match reply_accepted_with {
+                        Some(n) => {
+                            let accepted = Accepted { n, slot_idx }; // send accepted for this slot
+                            self.outgoing.push(PaxosMessage {
+                                from: self.pid,
+                                to: n.pid,
+                                msg: PaxosMsg::Accepted(accepted),
+                            });
                         }
-                        /*
-                        #[cfg(feature = "logging")]
-                        if slot_idx % 1 == 0 {
-                            info!(self.logger, "Node: {} replying accepted for slot_idx: {}", self.pid, slot_idx);
+                        None => {
+                            let new_num_accepted = self
+                                .leader_state
+                                .accepted_per_slot
+                                .get(&slot_idx)
+                                .copied()
+                                .unwrap_or_default()
+                                + 1;
+                            self.leader_state
+                                .accepted_per_slot
+                                .insert(slot_idx, new_num_accepted);
                         }
-                        */
-                        // self.reply_accepted(n, slot_idx);
-                        let accepted = Accepted { n, slot_idx }; // send accepted for this slot
-                        self.outgoing.push(PaxosMessage {
-                            from: self.pid,
-                            to: n.pid,
-                            msg: PaxosMsg::Accepted(accepted),
-                        });
-                    } else {
-                        let new_num_accepted = self
-                            .leader_state
-                            .accepted_per_slot
-                            .get(&slot_idx)
-                            .copied()
-                            .unwrap_or_default()
-                            + 1;
-                        self.leader_state
-                            .accepted_per_slot
-                            .insert(slot_idx, new_num_accepted);
-                    }
-                    num_remaining -= 1;
-                    if num_remaining == 0 {
-                        break;
                     }
                 }
-                num_iterations += 1;
             }
-            self.internal_storage.get_accepted_idx()
         }
     }
 

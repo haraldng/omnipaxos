@@ -30,6 +30,8 @@ fn reconfig_test() {
         configuration_id: new_config_id,
         nodes: new_nodes,
         flexible_quorum: None,
+        use_metronome: 0,
+        metronome_quorum_size: None,
     };
     let metadata = Some(vec![SS_METADATA]);
 

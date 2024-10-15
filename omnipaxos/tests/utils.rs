@@ -8,10 +8,7 @@ use omnipaxos::{
     util::{FlexibleQuorum, NodeId},
     ClusterConfig, OmniPaxosConfig, ServerConfig,
 };
-use omnipaxos_storage::{
-    memory_storage::MemoryStorage,
-    persistent_storage::{PersistentStorage, PersistentStorageConfig},
-};
+use omnipaxos_storage::memory_storage::MemoryStorage;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::HashMap,
@@ -118,6 +115,8 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids,
             flexible_quorum,
+            use_metronome: 2,
+            metronome_quorum_size: None,
         };
         let server_config = ServerConfig {
             pid,
@@ -204,7 +203,7 @@ pub enum StorageType<T>
 where
     T: Entry,
 {
-    Persistent(PersistentStorage<T>),
+    Persistent(MemoryStorage<T>),
     Memory(MemoryStorage<T>),
     /// Mocks a storage that fails depending of the config.
     /// Arc<Mutex<_>> is needed since we need to mutate conf through immutable references.
@@ -222,8 +221,7 @@ where
     pub fn with(storage_type: StorageTypeSelector, my_path: &str) -> Self {
         match storage_type {
             StorageTypeSelector::Persistent => {
-                let persist_conf = PersistentStorageConfig::with_path(my_path.to_string());
-                StorageType::Persistent(PersistentStorage::open(persist_conf))
+                unimplemented!("Persistent storage not implemented yet.")
             }
             StorageTypeSelector::Memory => StorageType::Memory(MemoryStorage::default()),
             StorageTypeSelector::Broken(config) => StorageType::Broken(
@@ -819,7 +817,13 @@ pub mod omnireplica {
         }
 
         pub fn read_decided_log(&self) -> Vec<LogEntry<Value>> {
-            self.paxos.read_decided_suffix(0).unwrap()
+            info!(
+                self.ctx.log(),
+                "Node {} reading log with decided_idx: {}",
+                self.pid,
+                self.paxos.get_decided_idx()
+            );
+            self.paxos.read_entries(0..).unwrap()
         }
 
         fn send_outgoing_msgs(&mut self) {
@@ -999,10 +1003,12 @@ pub fn create_temp_dir() -> String {
 
 pub mod verification {
     use super::{Value, ValueSnapshot};
+    use itertools::Itertools;
     use omnipaxos::{
         storage::{Snapshot, StopSign},
         util::{LogEntry, NodeId},
     };
+    use std::collections::HashMap;
 
     /// Verify that the log matches the proposed values, Depending on
     /// the timing the log should match one of the following cases.
@@ -1148,10 +1154,6 @@ pub mod verification {
 
     /// Verifies logs do not diverge. **NOTE**: this check assumes normal execution within one round without any snapshots, trimming.
     pub fn check_consistent_log_prefixes(logs: &Vec<(NodeId, Vec<LogEntry<Value>>)>) {
-        for (pid, log) in logs {
-            println!("Log for node {pid}");
-            println!("{:?}", log.get(10..20));
-        }
         let (_, longest_log) = logs
             .iter()
             .max_by(|(_, sr), (_, other_sr)| sr.len().cmp(&other_sr.len()))
@@ -1159,5 +1161,39 @@ pub mod verification {
         for (_, log) in logs {
             assert!(longest_log.starts_with(log.as_slice()));
         }
+    }
+
+    pub fn check_metronome_log_consistency(
+        logs: &Vec<(NodeId, Vec<LogEntry<Value>>)>,
+        proposals: &[Value],
+        quorum_size: usize,
+    ) {
+        use omnipaxos::storage::metronome::*;
+
+        let mut accepted_counters =
+            HashMap::<u64, usize>::from_iter(proposals.iter().map(|v| (v.id, 0)));
+
+        let num_nodes = logs.len();
+
+        for (pid, log) in logs {
+            let m = Metronome::with(*pid, num_nodes, quorum_size);
+            let mut m_iter = m.my_critical_ordering.iter().cycle();
+            for entry in log {
+                let value = match entry {
+                    LogEntry::Undecided(v) => v.id,
+                    LogEntry::Decided(v) => v.id,
+                    _ => {
+                        unimplemented!("Only decided and undecided entries are expected in the log")
+                    }
+                };
+                accepted_counters.insert(value, accepted_counters.get(&value).unwrap() + 1);
+                let metronome_idx = (value - 1) % m.total_len as u64;
+                assert_eq!(metronome_idx, *m_iter.next().unwrap() as u64);
+            }
+        }
+        assert!(
+            accepted_counters.values().all(|&v| v >= quorum_size),
+            "Not all proposals were decided by a quorum"
+        );
     }
 }

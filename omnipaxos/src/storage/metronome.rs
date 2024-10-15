@@ -4,17 +4,18 @@ use std::collections::HashSet;
 
 pub(crate) const BATCH_ACCEPTED: bool = false;
 
-pub(crate) struct Metronome {
+pub struct Metronome {
     /// Id of this node
     pub pid: NodeId,
-    pub my_ordering: Vec<usize>,
+    pub my_critical_ordering: Vec<usize>,
     pub all_orderings: Vec<Vec<usize>>,
     pub critical_len: usize,
+    pub total_len: usize,
 }
 
 impl Metronome {
     pub(crate) fn get_critical_ordering(&self) -> Vec<usize> {
-        self.my_ordering
+        self.my_critical_ordering
             .iter()
             .take(self.critical_len)
             .cloned()
@@ -102,21 +103,12 @@ impl Metronome {
         ordered_quorums: &Vec<QuorumTuple>,
     ) -> (Vec<usize>, usize) {
         let mut ordering = Vec::with_capacity(ordered_quorums.len());
-        let mut rest = Vec::with_capacity(ordered_quorums.len() / 2);
-        let mut critical_len = 0;
         for (entry_id, q) in ordered_quorums.iter().enumerate() {
             if q.contains(&my_pid) {
                 ordering.push(entry_id);
-            } else {
-                // I'm not in this quorum i.e., this entry is not part of my "critical batch"
-                rest.push(entry_id);
-            }
-            // set the critical length when processing the last entry
-            if critical_len == 0 && entry_id == ordered_quorums.len() - 1 {
-                critical_len = ordering.len();
             }
         }
-        ordering.append(&mut rest);
+        let critical_len = ordering.len();
         (ordering, critical_len)
     }
 
@@ -124,15 +116,16 @@ impl Metronome {
         todo!()
     }
 
-    pub(crate) fn with(pid: NodeId, num_nodes: usize, quorum_size: usize) -> Self {
+    pub fn with(pid: NodeId, num_nodes: usize, quorum_size: usize) -> Self {
         let ordered_quorums = Self::create_ordered_quorums(num_nodes, quorum_size);
         let (ordering, critical_len) =
             Self::get_my_ordering_and_critical_len(pid, &ordered_quorums);
         Metronome {
             pid,
-            my_ordering: ordering,
+            my_critical_ordering: ordering,
             all_orderings: vec![],
             critical_len,
+            total_len: ordered_quorums.len(),
         }
     }
 }
@@ -142,36 +135,56 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn check_critical_len(all_metronomes: &Vec<Metronome>) {
+    /// Check that the ordering of the critical slots is increasing, this is important because if not increasing we would need to buffer some entries in omnipaxos
+    /// e.g., if ordering is [3, 2, 1] then we will first handle entry 2 that must be buffered until we have flushed entry 3.
+    fn check_increasing_slot(all_metronomes: &Vec<Metronome>) {
+        for m in all_metronomes {
+            let ordering = &m.my_critical_ordering;
+            for i in 0..ordering.len() - 1 {
+                assert!(ordering[i] < ordering[i + 1]);
+            }
+        }
+    }
+
+    /// check that all metronomes have the same critical length and that all operations are assigned quorum_size times at the critical length
+    fn check_critical_len(all_metronomes: &Vec<Metronome>, quorum_size: usize) {
         let critical_len = all_metronomes[0].critical_len;
         let all_same_critical_len = all_metronomes
             .iter()
             .all(|m| m.critical_len == critical_len);
         assert!(all_same_critical_len);
         let num_nodes = all_metronomes.len();
+        let mut num_ops = 0;
         let mut all_orderings = Vec::with_capacity(num_nodes);
         for m in all_metronomes {
-            all_orderings.push(m.my_ordering.clone());
+            let ordering = m.get_critical_ordering();
+            let max = ordering.iter().max().unwrap();
+            if max > &num_ops {
+                num_ops = *max;
+            }
+            all_orderings.push(ordering.clone());
         }
-        let quorum_size = num_nodes / 2 + 1;
-        let num_ops = all_orderings[0].len();
-        let mut h: HashMap<usize, usize> = HashMap::from_iter((0..num_ops).map(|x| (x, 0)));
+        let mut op_counters: HashMap<usize, usize> =
+            HashMap::from_iter((0..=num_ops).map(|x| (x, 0)));
         for column in 0..num_ops {
             for ordering in &all_orderings {
-                // row
-                let op_id = ordering[column];
-                h.insert(op_id, h[&op_id] + 1);
+                match ordering.get(column) {
+                    Some(op_id) => {
+                        op_counters.insert(*op_id, op_counters[op_id] + 1);
+                    }
+                    None => {}
+                }
             }
             if column == critical_len - 1 {
-                for (_, count) in h.iter() {
+                for (_, count) in op_counters.iter() {
                     // at critical length, all ops should have been assigned quorum_size times
                     assert_eq!(*count, quorum_size);
                 }
             }
         }
         // check all ops where indeed assigned
-        for (_, count) in h.iter() {
-            assert_eq!(*count, num_nodes);
+        for (op_id, count) in op_counters.iter() {
+            assert_eq!(*count, quorum_size, "op_id: {}", op_id);
         }
     }
 
@@ -216,13 +229,14 @@ mod tests {
                     println!(
                         "N={}: ordering len: {}, critical len: {}",
                         num_nodes,
-                        m.my_ordering.len(),
+                        m.my_critical_ordering.len(),
                         m.critical_len
                     );
                 }
                 all_metronomes.push(m);
             }
-            check_critical_len(&all_metronomes);
+            check_critical_len(&all_metronomes, quorum_size);
+            check_increasing_slot(&all_metronomes);
         }
     }
 }
