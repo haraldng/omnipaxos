@@ -372,16 +372,17 @@ where
             */
             let slot_is_decided = self.leader_state.increment_accepted_slot(accepted.slot_idx);
             if slot_is_decided {
-                // slot is decided, now check if it is contiguous. TODO return to client here?
-                let current_decided_idx = self.internal_storage.get_decided_idx();
                 // #[cfg(feature = "logging")]
-                // info!(self.logger, "------------- Slot {} is decided. Current decided_idx: {}", accepted.slot_idx, current_decided_idx);
-                let new_decided_idx = self
-                    .leader_state
-                    .find_new_decided_idx_and_gc_slots(current_decided_idx);
-                if new_decided_idx > current_decided_idx {
+                // info!(self.logger, "------------- Slot {} is decided", accepted.slot_idx);
+                self.add_decided_slot(accepted.slot_idx);
+                self.leader_state
+                    .accepted_per_slot
+                    .remove(&accepted.slot_idx);
+
+                let current_decided_idx = self.internal_storage.get_decided_idx();
+                if accepted.slot_idx > current_decided_idx {
                     self.internal_storage
-                        .set_decided_idx(new_decided_idx)
+                        .set_decided_idx(accepted.slot_idx)
                         .expect(WRITE_ERROR_MSG);
                     for pid in self.leader_state.get_promised_followers() {
                         match self.leader_state.get_batch_accept_meta(pid) {
@@ -390,12 +391,12 @@ where
                                     self.outgoing.get_mut(msg_idx).unwrap();
                                 match msg {
                                     PaxosMsg::AcceptDecide(acc) => {
-                                        acc.decided_idx = new_decided_idx
+                                        acc.decided_idx = accepted.slot_idx
                                     }
                                     _ => panic!("Cached index is not an AcceptDecide!"),
                                 }
                             }
-                            _ => self.send_decide(pid, new_decided_idx, false),
+                            _ => self.send_decide(pid, accepted.slot_idx, false),
                         };
                     }
                 }

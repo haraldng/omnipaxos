@@ -32,17 +32,13 @@ fn consensus_test() {
 
     sys.start_all_nodes();
 
-    /*
-    match FutureCollection::collect_with_timeout::<Vec<_>>(futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => panic!("Error on collecting futures of decided proposals: {}", e),
-    }
-    */
     std::thread::sleep(cfg.wait_timeout);
 
     let mut log = vec![];
     for (pid, node) in sys.nodes {
         log.push(node.on_definition(|x| {
+            let slots = x.paxos.take_decided_slots_since_last_call();
+            println!("Node {pid}: Decided slots: {:?}", slots.len());
             let log = x.read_decided_log();
             (pid, log)
         }));

@@ -44,6 +44,7 @@ where
     buffer_size: usize,
     metronome: Metronome,
     use_metronome: usize,
+    decided_slots_since_last_call: Vec<usize>, // TODO fix this for followers, currently only leader keeps track of this.
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -117,6 +118,7 @@ where
             buffer_size: config.buffer_size,
             use_metronome: config.use_metronome,
             metronome,
+            decided_slots_since_last_call: Vec::with_capacity(1000),
             #[cfg(feature = "logging")]
             logger: {
                 if let Some(logger) = config.custom_logger {
@@ -159,6 +161,14 @@ where
 
     pub(crate) fn get_promise(&self) -> Ballot {
         self.internal_storage.get_promise()
+    }
+
+    pub(crate) fn add_decided_slot(&mut self, slot_idx: usize) {
+        self.decided_slots_since_last_call.push(slot_idx);
+    }
+
+    pub fn take_decided_slots_since_last_call(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.decided_slots_since_last_call)
     }
 
     /// Initiates the trim process.
