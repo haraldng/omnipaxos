@@ -98,7 +98,7 @@ where
     }
 
     fn try_encode(&mut self, field: &Encodable) -> MaybeEncoded<Encodable, Encoded> {
-        match self.lru_cache_encoder.get(&field) {
+        match self.lru_cache_encoder.get(field) {
             Some(encoding) => MaybeEncoded::<Encodable, Encoded>::Encoded(encoding.clone()),
             None => {
                 if self.lru_cache_encoder.len() == self.size {
@@ -159,7 +159,7 @@ mod serialization {
         {
             let len = self.0.len();
             let mut seq = serializer.serialize_seq(Some(len))?;
-            let _ = self.0.iter().rev().for_each(|item| {
+            self.0.iter().rev().for_each(|item| {
                 seq.serialize_element(&item).unwrap();
             });
             seq.end()
@@ -185,8 +185,8 @@ mod serialization {
     impl<Encodable, Encoded> LruWrapperVisitor<Encodable, Encoded> {
         fn new() -> Self {
             Self {
-                _k: PhantomData::default(),
-                _v: PhantomData::default(),
+                _k: PhantomData,
+                _v: PhantomData,
             }
         }
     }

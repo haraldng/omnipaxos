@@ -13,7 +13,7 @@ where
     {
         let len = self.0.len();
         let mut seq = serializer.serialize_seq(Some(len))?;
-        let _ = self.0.iter().for_each(|item| {
+        self.0.iter().for_each(|item| {
             seq.serialize_element(&item).unwrap();
         });
         seq.end()

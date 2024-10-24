@@ -86,18 +86,18 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
     /// Method marked as mutable because it internally updates the frequency of the accessed key
     pub fn get(&mut self, key: &K) -> Option<&V> {
         self.update_frequency_bin(key);
-        self.values.get(&key).map(|x| &x.value)
+        self.values.get(key).map(|x| &x.value)
     }
 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
         self.update_frequency_bin(key);
-        self.values.get_mut(&key).map(|x| &mut x.value)
+        self.values.get_mut(key).map(|x| &mut x.value)
     }
 
     fn update_frequency_bin(&mut self, key: &K) {
-        if let Some(value_counter) = self.values.get_mut(&key) {
+        if let Some(value_counter) = self.values.get_mut(key) {
             let bin = self.frequency_bin.get_mut(&value_counter.count).unwrap();
-            bin.0.remove(&key);
+            bin.0.remove(key);
             let count = value_counter.count;
             value_counter.inc();
             if count == self.min_frequency && bin.0.is_empty() {

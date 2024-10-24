@@ -52,7 +52,7 @@ where
     }
 
     fn try_encode(&mut self, field: &Encodable) -> MaybeEncoded<Encodable, Encoded> {
-        match self.lfu_cache_encoder.get(&field) {
+        match self.lfu_cache_encoder.get(field) {
             Some(encoding) => MaybeEncoded::<Encodable, Encoded>::Encoded(encoding.clone()),
             None => {
                 if self.lfu_cache_encoder.len() == self.size {
