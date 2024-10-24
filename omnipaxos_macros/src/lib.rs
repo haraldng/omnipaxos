@@ -40,10 +40,8 @@ pub fn entry_derive(input: TokenStream) -> TokenStream {
 ///
 /// # Attributes
 /// * `encoding(T)`: (Optional) The type for what the annotated field should be encoded as. The default is `u8`.
-/// * `size(usize)`: (Optional) The size of the cache for this field. Should not be larger than the max size of the encoding type, e.g., if `encoding(u8)` is used, the max size should be 255.
-/// The default value is `u8::MAX`.
-/// * `cache(C)`: (Optional) The cache implementation which is a type `C: UniCache`. To use one of the provided implementations, simply use `cache(lru)` or `cache(lfu)`.
-/// The default uses `lru` (least-recently-used) eviction policy.
+/// * `size(usize)`: (Optional) The size of the cache for this field. Should not be larger than the max size of the encoding type, e.g., if `encoding(u8)` is used, the max size should be 255. Default is u8::MAX.
+/// * `cache(C)`: (Optional) The cache implementation which is a type `C: UniCache`. `cache(lru)` or `cache(lfu)` are provided out of the box. The default is `lru` (least-recently-used) eviction policy.
 ///
 /// ## Usage
 ///

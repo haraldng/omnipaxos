@@ -152,8 +152,7 @@ impl ClusterConfig {
 /// Configuration for a singular `OmniPaxos` instance in a cluster.
 /// # Fields
 /// * `pid`: The unique identifier of this node. Must not be 0.
-/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated.
-/// If this is set to 5 and `tick()` is called every 10ms, then the election timeout will be 50ms. Must not be 0.
+/// * `election_tick_timeout`: The number of calls to `tick()` before leader election is updated. If this is set to 5 and `tick()` is called every 10ms, then the election timeout will be 50ms. Must not be 0.
 /// * `resend_message_tick_timeout`: The number of calls to `tick()` before a message is considered dropped and thus resent. Must not be 0.
 /// * `buffer_size`: The buffer size for outgoing messages.
 /// * `batch_size`: The size of the buffer for log batching. The default is 1, which means no batching.
