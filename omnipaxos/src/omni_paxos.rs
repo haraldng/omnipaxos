@@ -176,6 +176,7 @@ impl ClusterConfig {
 /// * `leader_priority` : Custom priority for this node to be elected as the leader.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "toml_config", derive(Deserialize), serde(default))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ServerConfig {
     /// The unique identifier of this node. Must not be 0.
     pub pid: NodeId,
@@ -197,6 +198,7 @@ pub struct ServerConfig {
     /// Custom logger, if provided, will be used instead of the default logger.
     #[cfg(feature = "logging")]
     #[cfg_attr(feature = "toml_config", serde(skip_deserializing))]
+    #[cfg_attr(feature = "serde", serde(skip_serializing))]
     pub custom_logger: Option<slog::Logger>,
 }
 
