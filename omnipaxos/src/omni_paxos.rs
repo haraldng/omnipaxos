@@ -421,7 +421,7 @@ where
 
         ui::OmniPaxosStates {
             current_ballot: self.ble.get_current_ballot(),
-            current_leader: self.get_current_leader(),
+            current_leader: self.get_current_leader().map(|(leader, _)| leader),
             decided_idx: self.get_decided_idx(),
             heartbeats: self.ble.get_ballots(),
             cluster_state,
