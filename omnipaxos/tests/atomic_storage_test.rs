@@ -132,7 +132,7 @@ fn _setup_leader() -> (
     });
     op.handle_incoming(setup_msg);
     assert!(
-        op.get_current_leader().expect("should have leader") == 1,
+        op.get_current_leader().expect("should have leader").0 == 1,
         "should be leader"
     );
     (mem_storage, storage_conf, op)
@@ -193,7 +193,7 @@ fn setup_follower() -> (
     op.handle_incoming(setup_msg);
     op.outgoing_messages();
     assert!(
-        op.get_current_leader().expect("should have leader") == 2,
+        op.get_current_leader().expect("should have leader").0 == 2,
         "node 2 should be leader"
     );
     (mem_storage, storage_conf, op)
@@ -569,7 +569,7 @@ fn atomic_storage_majority_promises_test() {
         let new_snapshot = s.get_snapshot().unwrap();
         let new_accepted_round = s.get_accepted_round().unwrap();
         assert!(
-            op.get_current_leader().expect("should have leader") == 1,
+            op.get_current_leader().expect("should have leader").0 == 1,
             "should be leader"
         );
         assert!(

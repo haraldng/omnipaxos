@@ -85,7 +85,8 @@ fn main() {
         .lock()
         .unwrap()
         .get_current_leader()
-        .expect("Failed to get leader");
+        .expect("Failed to get leader")
+        .0;
     println!("Elected leader: {}", leader);
 
     let follower = SERVERS.iter().find(|&&p| p != leader).unwrap();
@@ -137,7 +138,8 @@ fn main() {
         .lock()
         .unwrap()
         .get_current_leader()
-        .expect("Failed to get leader");
+        .expect("Failed to get leader")
+        .0;
     println!("Elected new leader: {}", leader);
     let kv3 = KeyValue {
         key: "b".to_string(),

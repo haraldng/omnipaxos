@@ -2,7 +2,7 @@ use crate::{
     ballot_leader_election::{Ballot, BallotLeaderElection},
     errors::{valid_config, ConfigError},
     messages::Message,
-    sequence_paxos::SequencePaxos,
+    sequence_paxos::{Phase, SequencePaxos},
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, FLUSH_BATCH_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
@@ -268,13 +268,19 @@ where
         self.seq_paxos.get_compacted_idx()
     }
 
-    /// Returns the id of the current leader.
-    pub fn get_current_leader(&self) -> Option<NodeId> {
+    /// Returns the ID of the current leader and whether the node's `Phase` is `Phase::Accepted`.
+    ///
+    /// If the node's phase is `Phase::Accepted`, this implies that the returned leader is also
+    /// in the accepted phase. However, a `Phase::Prepare` or a `false` response does not
+    /// necessarily imply that the leader is not in the accepted phase; it only reflects the current
+    /// phase of this node.
+    pub fn get_current_leader(&self) -> Option<(NodeId, bool)> {
         let promised_pid = self.seq_paxos.get_promise().pid;
         if promised_pid == 0 {
             None
         } else {
-            Some(promised_pid)
+            let is_accepted = self.seq_paxos.get_state().1 == Phase::Accept;
+            Some((promised_pid, is_accepted))
         }
     }
 
@@ -414,7 +420,7 @@ where
 
         ui::OmniPaxosStates {
             current_ballot: self.ble.get_current_ballot(),
-            current_leader: self.get_current_leader(),
+            current_leader: self.get_current_leader().map(|(leader, _)| leader),
             decided_idx: self.get_decided_idx(),
             heartbeats: self.ble.get_ballots(),
             cluster_state,
