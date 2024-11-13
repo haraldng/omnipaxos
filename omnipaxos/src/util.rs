@@ -149,7 +149,9 @@ where
             .iter()
             .filter(|p| matches!(p, PromiseState::Promised(_)))
             .count();
-        self.quorum.is_prepare_quorum(num_promised)
+        // self.quorum.is_prepare_quorum(num_promised)
+        // NOTE: changed since metronome needs all followers
+        num_promised >= self.max_pid
     }
 
     pub fn reset_promise(&mut self, pid: NodeId) {

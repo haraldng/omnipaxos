@@ -384,21 +384,21 @@ where
                     self.internal_storage
                         .set_decided_idx(accepted.slot_idx)
                         .expect(WRITE_ERROR_MSG);
-                    for pid in self.leader_state.get_promised_followers() {
-                        match self.leader_state.get_batch_accept_meta(pid) {
-                            Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
-                                let PaxosMessage { msg, .. } =
-                                    self.outgoing.get_mut(msg_idx).unwrap();
-                                match msg {
-                                    PaxosMsg::AcceptDecide(acc) => {
-                                        acc.decided_idx = accepted.slot_idx
-                                    }
-                                    _ => panic!("Cached index is not an AcceptDecide!"),
-                                }
-                            }
-                            _ => self.send_decide(pid, accepted.slot_idx, false),
-                        };
-                    }
+                    // for pid in self.leader_state.get_promised_followers() {
+                    //     match self.leader_state.get_batch_accept_meta(pid) {
+                    //         Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
+                    //             let PaxosMessage { msg, .. } =
+                    //                 self.outgoing.get_mut(msg_idx).unwrap();
+                    //             match msg {
+                    //                 PaxosMsg::AcceptDecide(acc) => {
+                    //                     acc.decided_idx = accepted.slot_idx
+                    //                 }
+                    //                 _ => panic!("Cached index is not an AcceptDecide!"),
+                    //             }
+                    //         }
+                    //         _ => self.send_decide(pid, accepted.slot_idx, false),
+                    //     };
+                    // }
                 }
             }
         }
