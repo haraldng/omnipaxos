@@ -24,6 +24,7 @@ const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
 pub const STOPSIGN_ID: u64 = u64::MAX;
+pub const TEST_USE_METRONOME: usize = 3;
 
 #[cfg(feature = "unicache")]
 use omnipaxos::unicache::{MaybeEncoded, UniCache};
@@ -115,7 +116,7 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids,
             flexible_quorum,
-            use_metronome: 2,       // TODO
+            use_metronome: TEST_USE_METRONOME,
             metronome_quorum_size: None,
         };
         let server_config = ServerConfig {
@@ -1009,6 +1010,7 @@ pub mod verification {
         util::{LogEntry, NodeId},
     };
     use std::collections::HashMap;
+    use crate::utils::TEST_USE_METRONOME;
 
     /// Verify that the log matches the proposed values, Depending on
     /// the timing the log should match one of the following cases.
@@ -1188,7 +1190,7 @@ pub mod verification {
                     }
                 };
                 accepted_counters.insert(value, accepted_counters.get(&value).unwrap() + 1);
-                if *pid != leader {
+                if *pid != leader && TEST_USE_METRONOME != 3 {
                     // leader flushes all so we skip the check
                     let metronome_idx = (value - 1) % m.total_len as u64;
                     let exp_metronome_idx = *m_iter.next().unwrap();

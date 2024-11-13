@@ -202,7 +202,9 @@ where
             let mut quorum_remaining = self.leader_state.quorum.get_write_quorum_size();
             for pid in self.leader_state.get_nodes_sorted_by_num_accepted() {
                 let flush = quorum_remaining > 0;
-                quorum_remaining -= 1;
+                if flush {
+                    quorum_remaining -= 1;
+                }
                 if pid == self.pid {
                     continue;
                 }

@@ -9,6 +9,7 @@ use serial_test::serial;
 use utils::{
     create_temp_dir, verification::*, StorageType, TestConfig, TestSystem, Value, ValueSnapshot,
 };
+use crate::utils::TEST_USE_METRONOME;
 
 /// Verifies the 3 properties that the Paxos algorithm offers
 /// Quorum, Validity, Uniform Agreement
@@ -52,8 +53,11 @@ fn consensus_test() {
     }
 
     let quorum_size = cfg.num_nodes / 2 + 1;
-    check_metronome_log_consistency(&log, &vec_proposals, quorum_size, leader);
-    // check_quorum(&log, quorum_size, &vec_proposals);     // not needed as already tested by check_metronome_log_consistency
+    if TEST_USE_METRONOME > 0 {
+        check_metronome_log_consistency(&log, &vec_proposals, quorum_size, leader);
+    } else {
+        check_quorum(&log, quorum_size, &vec_proposals);
+    }
     check_validity(&log, &vec_proposals);
 
     let kompact_system =
