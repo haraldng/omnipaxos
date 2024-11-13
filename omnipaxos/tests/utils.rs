@@ -1167,6 +1167,7 @@ pub mod verification {
         logs: &Vec<(NodeId, Vec<LogEntry<Value>>)>,
         proposals: &[Value],
         quorum_size: usize,
+        leader: NodeId,
     ) {
         use omnipaxos::storage::metronome::*;
 
@@ -1187,9 +1188,12 @@ pub mod verification {
                     }
                 };
                 accepted_counters.insert(value, accepted_counters.get(&value).unwrap() + 1);
-                let metronome_idx = (value - 1) % m.total_len as u64;
-                let exp_metronome_idx = *m_iter.next().unwrap();
-                assert_eq!(metronome_idx, exp_metronome_idx as u64, "Metronome mismatch: pid: {}, got: {}, expected: {}", pid, metronome_idx, exp_metronome_idx);
+                if *pid != leader {
+                    // leader flushes all so we skip the check
+                    let metronome_idx = (value - 1) % m.total_len as u64;
+                    let exp_metronome_idx = *m_iter.next().unwrap();
+                    assert_eq!(metronome_idx, exp_metronome_idx as u64, "Metronome mismatch: pid: {}, got: {}, expected: {}", pid, metronome_idx, exp_metronome_idx);
+                }
             }
         }
         assert!(

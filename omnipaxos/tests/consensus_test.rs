@@ -35,8 +35,15 @@ fn consensus_test() {
     std::thread::sleep(cfg.wait_timeout);
 
     let mut log = vec![];
+    let mut leader = 0;
     for (pid, node) in sys.nodes {
         log.push(node.on_definition(|x| {
+            let l = x.paxos.get_current_leader().unwrap_or_default();
+            if l != leader && leader > 0 {
+                panic!("Leader changed from {} to {}", leader, l);
+            } else if leader == 0 {
+                leader = l;
+            }
             let slots = x.paxos.take_decided_slots_since_last_call();
             println!("Node {pid}: Decided slots: {:?}", slots.len());
             let log = x.read_decided_log();
@@ -45,9 +52,9 @@ fn consensus_test() {
     }
 
     let quorum_size = cfg.num_nodes / 2 + 1;
-    check_quorum(&log, quorum_size, &vec_proposals);
+    check_metronome_log_consistency(&log, &vec_proposals, quorum_size, leader);
+    // check_quorum(&log, quorum_size, &vec_proposals);     // not needed as already tested by check_metronome_log_consistency
     check_validity(&log, &vec_proposals);
-    check_metronome_log_consistency(&log, &vec_proposals, quorum_size);
 
     let kompact_system =
         std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
