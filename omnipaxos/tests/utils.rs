@@ -115,7 +115,7 @@ impl TestConfig {
             configuration_id: 1,
             nodes: all_pids,
             flexible_quorum,
-            use_metronome: 2,
+            use_metronome: 2,       // TODO
             metronome_quorum_size: None,
         };
         let server_config = ServerConfig {
@@ -1188,7 +1188,8 @@ pub mod verification {
                 };
                 accepted_counters.insert(value, accepted_counters.get(&value).unwrap() + 1);
                 let metronome_idx = (value - 1) % m.total_len as u64;
-                assert_eq!(metronome_idx, *m_iter.next().unwrap() as u64);
+                let exp_metronome_idx = *m_iter.next().unwrap();
+                assert_eq!(metronome_idx, exp_metronome_idx as u64, "Metronome mismatch: pid: {}, got: {}, expected: {}", pid, metronome_idx, exp_metronome_idx);
             }
         }
         assert!(

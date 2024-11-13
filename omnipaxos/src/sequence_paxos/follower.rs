@@ -3,10 +3,7 @@ use crate::sequence_paxos::leader::ACCEPTSYNC_MAGIC_SLOT;
 
 use super::*;
 
-use crate::{
-    storage::metronome::*,
-    util::{MessageStatus, WRITE_ERROR_MSG},
-};
+use crate::util::{MessageStatus, WRITE_ERROR_MSG};
 
 impl<T, B> SequencePaxos<T, B>
 where

@@ -2,8 +2,6 @@ use crate::{storage::Entry, util::NodeId};
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) const BATCH_ACCEPTED: bool = false;
-
 pub struct Metronome {
     /// Id of this node
     pub pid: NodeId,

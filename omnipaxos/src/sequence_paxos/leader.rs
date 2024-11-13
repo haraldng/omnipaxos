@@ -2,7 +2,7 @@ use super::super::{
     ballot_leader_election::Ballot,
     util::{LeaderState, PromiseMetaData},
 };
-use crate::util::{AcceptedMetaData, WRITE_ERROR_MSG};
+use crate::util::WRITE_ERROR_MSG;
 
 use super::*;
 
@@ -198,55 +198,44 @@ where
 
     fn send_acceptdecide(&mut self, entries: Vec<T>, start_idx: usize) {
         let decided_idx = self.internal_storage.get_decided_idx();
-        for pid in self.leader_state.get_promised_followers() {
-            /*
-            let cached_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
-                Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
-                    let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
-                    match msg {
-                        PaxosMsg::AcceptDecide(acc) => Some(acc),
-                        _ => panic!("Cached index is not an AcceptDecide!"),
-                    }
+        if self.use_metronome == METRONOME_FASTEST {
+            let mut quorum_remaining = self.leader_state.quorum.get_write_quorum_size();
+            for pid in self.leader_state.get_nodes_sorted_by_num_accepted() {
+                let flush = quorum_remaining > 0;
+                quorum_remaining -= 1;
+                if pid == self.pid {
+                    continue;
                 }
-                _ => None,
-            };
-            match cached_acceptdecide {
-                // Modify existing AcceptDecide message to follower
-                Some(_acc) => {
-                    unimplemented!("Don't reuse AcceptDecide msgs in Metronome!")
-                    // acc.entries.append(accepted.entries.clone().as_mut());
-                    // acc.decided_idx = decided_idx;
-                }
-                // Add new AcceptDecide message to follower
-                None => {
-                    // self.leader_state
-                    //     .set_batch_accept_meta(pid, Some(self.outgoing.len()));
-                    let acc = AcceptDecide {
-                        n: self.leader_state.n_leader,
-                        seq_num: self.leader_state.next_seq_num(pid),
-                        decided_idx,
-                        entries: accepted.entries.clone(),
-                    };
-                    self.outgoing.push(PaxosMessage {
-                        from: self.pid,
-                        to: pid,
-                        msg: PaxosMsg::AcceptDecide(acc),
-                    });
-                }
+                let acc = AcceptDecide {
+                    n: self.leader_state.n_leader,
+                    seq_num: self.leader_state.next_seq_num(pid),
+                    decided_idx,
+                    entries: entries.clone(),
+                    start_idx,
+                    metronome_fastest_flush: flush,
+                };
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: pid,
+                    msg: PaxosMsg::AcceptDecide(acc),
+                });
             }
-            */
-            let acc = AcceptDecide {
-                n: self.leader_state.n_leader,
-                seq_num: self.leader_state.next_seq_num(pid),
-                decided_idx,
-                entries: entries.clone(),
-                start_idx,
-            };
-            self.outgoing.push(PaxosMessage {
-                from: self.pid,
-                to: pid,
-                msg: PaxosMsg::AcceptDecide(acc),
-            });
+        } else {
+            for pid in self.leader_state.get_promised_followers() {
+                let acc = AcceptDecide {
+                    n: self.leader_state.n_leader,
+                    seq_num: self.leader_state.next_seq_num(pid),
+                    decided_idx,
+                    entries: entries.clone(),
+                    start_idx,
+                    metronome_fastest_flush: true,
+                };
+                self.outgoing.push(PaxosMessage {
+                    from: self.pid,
+                    to: pid,
+                    msg: PaxosMsg::AcceptDecide(acc),
+                });
+            }
         }
     }
 
@@ -370,7 +359,9 @@ where
                 // self.leader_state.accepted_indexes
             );
             */
-            let slot_is_decided = self.leader_state.increment_accepted_slot(accepted.slot_idx);
+            let slot_is_decided = self
+                .leader_state
+                .increment_accepted_slot(accepted.slot_idx, from);
             if slot_is_decided {
                 // #[cfg(feature = "logging")]
                 // info!(self.logger, "------------- Slot {} is decided", accepted.slot_idx);

@@ -4,7 +4,7 @@ use crate::utils::logger::create_logger;
 use crate::{
     storage::{
         internal_storage::{InternalStorage, InternalStorageConfig},
-        metronome::{Metronome, BATCH_ACCEPTED},
+        metronome::Metronome,
         Entry, Snapshot, StopSign, Storage,
     },
     util::{
@@ -14,9 +14,10 @@ use crate::{
 };
 #[cfg(feature = "logging")]
 use slog::{debug, info, trace, warn, Logger};
-use std::{cmp, fmt::Debug, vec};
+use std::{fmt::Debug, vec};
 
 const METRONOME_WORKSTEALING: usize = 2;
+const METRONOME_FASTEST: usize = 3;
 
 pub mod follower;
 pub mod leader;
@@ -88,10 +89,8 @@ where
             None => quorum.get_write_quorum_size(),
         };
         let metronome = Metronome::with(pid, num_nodes, metronome_quorum_size);
-        let my_ordering = metronome.my_critical_ordering.clone();
         // batch at least as large as metronome ordering size to prevent out of index for an entry.
         let critical_len = metronome.critical_len;
-        let total_len = metronome.total_len;
         let batch_size = if config.batch_size == 0 {
             critical_len
         } else {
@@ -322,7 +321,13 @@ where
         start_idx: usize,
     ) {
         if self.use_metronome > 0 {
-            self.metronome_accept(reply_accepted_with, entries, start_idx);
+            let metronome_fastest_flush = true; // leader always handles it as true
+            self.metronome_accept(
+                reply_accepted_with,
+                entries,
+                start_idx,
+                metronome_fastest_flush,
+            );
         } else {
             let _ = self.normal_accept(reply_accepted_with, entries);
         }
@@ -364,24 +369,42 @@ where
         reply_accepted_with: Option<Ballot>,
         entries: Vec<T>,
         start_idx: usize,
+        metronome_fastest_flush: bool,
     ) {
-        if BATCH_ACCEPTED {
-            let (critical_batch, rest_batch) = {
-                todo!("Split entries into critical and rest batch based on ordering");
-            };
-            let new_accepted_idx = self
-                .internal_storage
-                .append_entries_without_batching(critical_batch)
-                .expect(WRITE_ERROR_MSG);
-            if let Some(n) = reply_accepted_with {
-                self.reply_accepted(n, new_accepted_idx);
-            } // do rest batch
-            let new_accepted_idx = self
-                .internal_storage
-                .append_entries_without_batching(rest_batch)
-                .expect(WRITE_ERROR_MSG);
-            if let Some(n) = reply_accepted_with {
-                self.reply_accepted(n, new_accepted_idx);
+        if self.use_metronome == METRONOME_FASTEST {
+            if metronome_fastest_flush {
+                let num_entries = entries.len();
+                let _ = self
+                    .internal_storage
+                    .append_entries_without_batching(entries)
+                    .expect(WRITE_ERROR_MSG);
+
+                match reply_accepted_with {
+                    None => {
+                        for slot_idx in start_idx..start_idx + num_entries {
+                            let new_num_accepted = self
+                                .leader_state
+                                .accepted_per_slot
+                                .get(&slot_idx)
+                                .copied()
+                                .unwrap_or_default()
+                                + 1;
+                            self.leader_state
+                                .accepted_per_slot
+                                .insert(slot_idx, new_num_accepted);
+                        }
+                    }
+                    Some(n) => {
+                        for slot_idx in start_idx..start_idx + num_entries {
+                            let accepted = Accepted { n, slot_idx }; // send accepted for this slot
+                            self.outgoing.push(PaxosMessage {
+                                from: self.pid,
+                                to: n.pid,
+                                msg: PaxosMsg::Accepted(accepted),
+                            });
+                        }
+                    }
+                }
             }
         } else {
             for (idx, entry) in entries.into_iter().enumerate() {

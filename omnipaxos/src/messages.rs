@@ -101,6 +101,8 @@ pub mod sequence_paxos {
         #[cfg(feature = "unicache")]
         /// Entries to be replicated.
         pub entries: Vec<T::EncodeResult>,
+        /// indicates whether a receiving node should flush to disk
+        pub metronome_fastest_flush: bool,
     }
 
     /// Message sent by follower to leader when entries has been accepted.

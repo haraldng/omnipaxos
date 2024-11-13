@@ -3,6 +3,7 @@ use super::{
     messages::sequence_paxos::Promise,
     storage::{Entry, SnapshotType, StopSign},
 };
+use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap, fmt::Debug, marker::PhantomData};
@@ -89,6 +90,7 @@ where
     pub quorum: Quorum,
     pub total_entries: usize,
     pub accepted_per_slot: HashMap<usize, usize>,
+    pub follower_num_accepted_slots: Vec<usize>,
 }
 
 impl<T> LeaderState<T>
@@ -108,6 +110,7 @@ where
             quorum,
             total_entries: 0,
             accepted_per_slot: HashMap::new(),
+            follower_num_accepted_slots: vec![0; max_pid],
         }
     }
 
@@ -217,6 +220,15 @@ where
             .collect()
     }
 
+    pub fn get_nodes_sorted_by_num_accepted(&self) -> Vec<NodeId> {
+        self.follower_num_accepted_slots
+            .iter()
+            .enumerate()
+            .sorted_by(|(_, num_slots1), (_, num_slots2)| num_slots1.cmp(num_slots2))
+            .map(|(pid, _)| pid as NodeId + 1)
+            .collect()
+    }
+
     /// The pids of peers which have not promised a higher ballot than mine.
     pub fn get_preparable_peers(&self) -> Vec<NodeId> {
         self.promises_meta
@@ -234,9 +246,9 @@ where
         self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
-    pub fn increment_accepted_slot(&mut self, slot_idx: usize) -> bool {
+    pub fn increment_accepted_slot(&mut self, slot_idx: usize, from: NodeId) -> bool {
         let count = self.accepted_per_slot.entry(slot_idx).or_insert(0);
-        *count += 1;
+        self.follower_num_accepted_slots[Self::pid_to_idx(from)] += 1;
         self.quorum.is_accept_quorum(*count)
     }
 
