@@ -164,17 +164,17 @@ mod tests {
     #[test]
     fn test_distance() {
         let t1 = vec![1, 2, 3];
-        let t2 = vec![4, 5, 6];
-        assert_eq!(Metronome::distance(&t1, &t2), 5);
+        let t2 = vec![3, 5, 6];
+        assert_eq!(Metronome::distance(&t1, &t2), 2);
     }
 
     #[test]
     fn test_maximize_distance_ordering() {
         let mut tuples = vec![
             vec![1, 2, 3],
+            vec![3, 4, 5],
+            vec![1, 2, 4],
             vec![4, 5, 6],
-            vec![7, 8, 9],
-            vec![10, 11, 12],
         ];
 
         let ordered_tuples = Metronome::maximize_distance_ordering(&mut tuples);
@@ -183,9 +183,9 @@ mod tests {
             ordered_tuples,
             vec![
                 vec![1, 2, 3],
-                vec![10, 11, 12],
                 vec![4, 5, 6],
-                vec![7, 8, 9],
+                vec![1, 2, 4],
+                vec![3, 4, 5],
             ]
         );
     }
