@@ -113,6 +113,8 @@ pub mod sequence_paxos {
         pub n: Ballot,
         /// The accepted index.
         pub slot_idx: usize,
+        /// Queue size
+        pub queue_size: usize,
     }
 
     /// Message sent by leader to followers to decide up to a certain index in the log.

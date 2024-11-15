@@ -69,6 +69,7 @@ where
             let accepted = Accepted {
                 n: accsync.n,
                 slot_idx: ACCEPTSYNC_MAGIC_SLOT,
+                queue_size: 0,
             };
             self.state = (Role::Follower, Phase::Accept);
             self.current_seq_num = accsync.seq_num;
@@ -193,6 +194,7 @@ where
         let accepted = Accepted {
             n,
             slot_idx: accepted_idx,
+            queue_size: 0,
         };
         self.outgoing.push(PaxosMessage {
             from: self.pid,

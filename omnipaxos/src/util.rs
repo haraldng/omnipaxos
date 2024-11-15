@@ -90,7 +90,7 @@ where
     pub quorum: Quorum,
     pub total_entries: usize,
     pub accepted_per_slot: HashMap<usize, usize>,
-    pub follower_num_accepted_slots: Vec<usize>,
+    pub follower_queue_sizes: Vec<usize>,
 }
 
 impl<T> LeaderState<T>
@@ -110,7 +110,7 @@ where
             quorum,
             total_entries: 0,
             accepted_per_slot: HashMap::new(),
-            follower_num_accepted_slots: vec![0; max_pid],
+            follower_queue_sizes: vec![0; max_pid],
         }
     }
 
@@ -220,8 +220,8 @@ where
             .collect()
     }
 
-    pub fn get_nodes_sorted_by_num_accepted(&self) -> Vec<NodeId> {
-        self.follower_num_accepted_slots
+    pub fn get_nodes_sorted_by_smallest_queue_size(&self) -> Vec<NodeId> {
+        self.follower_queue_sizes
             .iter()
             .enumerate()
             .sorted_by(|(_, num_slots1), (_, num_slots2)| num_slots1.cmp(num_slots2))
@@ -248,8 +248,11 @@ where
 
     pub fn increment_accepted_slot(&mut self, slot_idx: usize, from: NodeId) -> bool {
         let count = self.accepted_per_slot.entry(slot_idx).or_insert(0);
-        self.follower_num_accepted_slots[Self::pid_to_idx(from)] += 1;
         self.quorum.is_accept_quorum(*count)
+    }
+
+    pub fn set_queue_size(&mut self, pid: NodeId, size: usize) {
+        self.follower_queue_sizes[Self::pid_to_idx(pid)] = size;
     }
 
     /*

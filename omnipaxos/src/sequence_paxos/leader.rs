@@ -200,7 +200,7 @@ where
         let decided_idx = self.internal_storage.get_decided_idx();
         if self.use_metronome == METRONOME_FASTEST {
             let mut quorum_remaining = self.leader_state.quorum.get_write_quorum_size();
-            for pid in self.leader_state.get_nodes_sorted_by_num_accepted() {
+            for pid in self.leader_state.get_nodes_sorted_by_smallest_queue_size() {
                 let flush = quorum_remaining > 0;
                 if flush {
                     quorum_remaining -= 1;
@@ -361,6 +361,7 @@ where
                 // self.leader_state.accepted_indexes
             );
             */
+            self.leader_state.set_queue_size(from, accepted.queue_size);
             let slot_is_decided = self
                 .leader_state
                 .increment_accepted_slot(accepted.slot_idx, from);

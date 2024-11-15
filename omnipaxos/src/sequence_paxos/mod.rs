@@ -396,7 +396,7 @@ where
                     }
                     Some(n) => {
                         for slot_idx in start_idx..start_idx + num_entries {
-                            let accepted = Accepted { n, slot_idx }; // send accepted for this slot
+                            let accepted = Accepted { n, slot_idx, queue_size: 0 }; // send accepted for this slot
                             self.outgoing.push(PaxosMessage {
                                 from: self.pid,
                                 to: n.pid,
@@ -424,7 +424,7 @@ where
                 if in_my_critical_order {
                     match reply_accepted_with {
                         Some(n) => {
-                            let accepted = Accepted { n, slot_idx }; // send accepted for this slot
+                            let accepted = Accepted { n, slot_idx, queue_size: 0 }; // send accepted for this slot
                             self.outgoing.push(PaxosMessage {
                                 from: self.pid,
                                 to: n.pid,
