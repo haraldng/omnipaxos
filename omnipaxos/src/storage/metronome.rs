@@ -29,42 +29,18 @@ impl Metronome {
         let mut ordered_tuples = vec![tuples.remove(0)];
 
         while !tuples.is_empty() {
-            // try order quorums such that there is no common node with the last quorum
-            let no_repeat_tuples: Vec<_> = tuples
+            // all quorums have common nodes with the last quorum, pick the one with the max distance
+            let next_tuple = tuples
                 .iter()
-                .filter(|t| {
-                    let t_set: HashSet<_> = t.iter().collect();
-                    let last_set: HashSet<_> = ordered_tuples.last().unwrap().iter().collect();
-                    t_set.intersection(&last_set).count() == 0 // no common nodes
+                .max_by(|t1, t2| {
+                    let dist1 = Self::distance(ordered_tuples.last().unwrap(), t1);
+                    let dist2 = Self::distance(ordered_tuples.last().unwrap(), t2);
+                    dist1.cmp(&dist2)
                 })
                 .cloned()
-                .collect();
-
-            let next_tuple = if !no_repeat_tuples.is_empty() {
-                // there is a quorum that has no common nodes with the last quorum, pick the one with the max distance (probably not necessary)
-                no_repeat_tuples
-                    .into_iter()
-                    .max_by(|t1, t2| {
-                        let dist1 = Self::distance(ordered_tuples.last().unwrap(), t1);
-                        let dist2 = Self::distance(ordered_tuples.last().unwrap(), t2);
-                        dist1.cmp(&dist2)
-                    })
-                    .unwrap()
-            } else {
-                // all quorums have common nodes with the last quorum, pick the one with the max distance
-                tuples
-                    .iter()
-                    .max_by(|t1, t2| {
-                        let dist1 = Self::distance(ordered_tuples.last().unwrap(), t1);
-                        let dist2 = Self::distance(ordered_tuples.last().unwrap(), t2);
-                        dist1.cmp(&dist2)
-                    })
-                    .cloned()
-                    .unwrap()
-            };
-
-            ordered_tuples.push(next_tuple.clone());
+                .unwrap();
             let index = tuples.iter().position(|x| x == &next_tuple).unwrap();
+            ordered_tuples.push(next_tuple);
             tuples.remove(index);
         }
 
@@ -78,14 +54,13 @@ impl Metronome {
             "Vectors must have the same dimension for distance calculation"
         );
 
-        let sum_of_squares: usize = t1
-            .iter()
-            .zip(t2.iter())
-            .map(|(x1, x2)| (*x1 as isize - *x2 as isize).pow(2) as usize)
-            .sum();
-
-        // Integer square root approximation (you might want to use a more accurate method if needed)
-        (sum_of_squares as f64).sqrt() as usize
+        let mut distance = 0;
+        for node in t1 {
+            if !t2.contains(node) {
+                distance += 1;
+            }
+        }
+        distance
     }
 
     fn create_ordered_quorums(num_nodes: usize, quorum_size: usize) -> Vec<QuorumTuple> {
