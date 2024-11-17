@@ -1010,7 +1010,7 @@ pub mod verification {
         util::{LogEntry, NodeId},
     };
     use std::collections::HashMap;
-    use crate::utils::TEST_USE_METRONOME;
+    use super::TEST_USE_METRONOME;
 
     /// Verify that the log matches the proposed values, Depending on
     /// the timing the log should match one of the following cases.

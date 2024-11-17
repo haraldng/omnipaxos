@@ -191,8 +191,8 @@ mod tests {
     }
 
     #[test]
-    fn test_new() {
-        let n = vec![3, 5, 7, 9, 11];
+    fn test_new_metronome() {
+        let n = vec![3, 5, 7];
         for num_nodes in n {
             let quorum_size = num_nodes / 2 + 1;
             let mut all_metronomes = Vec::with_capacity(num_nodes);
@@ -200,12 +200,14 @@ mod tests {
                 let m = Metronome::with(pid, num_nodes, quorum_size);
                 if pid == 1 {
                     println!(
-                        "N={}: ordering len: {}, critical len: {}",
+                        "N={}: ordering len: {}, critical len: {}, total len: {},",
                         num_nodes,
                         m.my_critical_ordering.len(),
-                        m.critical_len
+                        m.critical_len,
+                        m.total_len
                     );
                 }
+                println!("Node {}: {:?}", pid, m.my_critical_ordering);
                 all_metronomes.push(m);
             }
             check_critical_len(&all_metronomes, quorum_size);

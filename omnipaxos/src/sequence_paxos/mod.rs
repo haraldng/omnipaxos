@@ -138,10 +138,9 @@ where
         {
             info!(
                 paxos.logger,
-                "Paxos component pid: {} created! batch size: {}, my ordering: {:?}, total_len: {total_len}, critical_len: {critical_len}",
+                "Paxos component pid: {} created! batch size: {}",
                 pid,
                 batch_size,
-                my_ordering
             );
             if let Quorum::Flexible(flex_quorum) = quorum {
                 if flex_quorum.read_quorum_size > num_nodes - flex_quorum.write_quorum_size + 1 {
