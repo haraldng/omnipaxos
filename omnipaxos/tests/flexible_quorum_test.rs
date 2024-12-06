@@ -12,6 +12,12 @@ use utils::{verification::verify_log, TestConfig, TestSystem, Value};
 fn flexible_quorum_prepare_phase_test() {
     // Start Kompact system
     let cfg = TestConfig::load("flexible_quorum_test").expect("Test config couldn't be loaded");
+
+    if cfg.num_nodes < 2 {
+        // this test needs at least two nodes because it kills the leader
+        return;
+    }
+
     let mut sys = TestSystem::with(cfg);
     sys.start_all_nodes();
 
@@ -22,7 +28,7 @@ fn flexible_quorum_prepare_phase_test() {
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some initial values
-    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
 
     // Kill maximum number of nodes (including leader) such that cluster can still function
@@ -38,7 +44,7 @@ fn flexible_quorum_prepare_phase_test() {
     // Wait for next leader to get elected
     thread::sleep(8 * cfg.election_timeout);
 
-    // Make some propsals
+    // Make some proposals
     let still_alive_node_id = sys.nodes.keys().next().unwrap();
     let still_alive_node = sys.nodes.get(still_alive_node_id).unwrap();
     sys.make_proposals(*still_alive_node_id, last_proposals, cfg.wait_timeout);
@@ -65,7 +71,7 @@ fn flexible_quorum_accept_phase_test() {
     let expected_log: Vec<Value> = (0..cfg.num_proposals).map(Value::with_id).collect();
 
     // Propose some values
-    sys.make_proposals(2, initial_proposals, cfg.wait_timeout);
+    sys.make_proposals(1, initial_proposals, cfg.wait_timeout);
     let leader_id = sys.get_elected_leader(1, cfg.wait_timeout);
 
     // Kill maximum number of followers such that leader can still function

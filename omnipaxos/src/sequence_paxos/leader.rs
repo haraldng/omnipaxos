@@ -37,7 +37,6 @@ where
                 accepted_idx,
                 log_sync: None,
             };
-            self.leader_state.set_promise(my_promise, self.pid, true);
             /* initialise longest chosen sequence and update state */
             self.state = (Role::Leader, Phase::Prepare);
             let prep = Prepare {
@@ -54,6 +53,7 @@ where
                     msg: PaxosMsg::Prepare(prep),
                 });
             }
+            self.handle_promise_prepare(my_promise, self.pid);
         } else {
             self.become_follower();
         }
@@ -114,10 +114,17 @@ where
             .append_entry_with_batching(entry)
             .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
-            self.leader_state
-                .set_accepted_idx(self.pid, metadata.accepted_idx);
-            self.send_acceptdecide(metadata);
+            self.handle_accepted_entries(metadata);
         }
+    }
+
+    fn handle_accepted_entries(&mut self, metadata: AcceptedMetaData<T>) {
+        let self_accepted = Accepted {
+            n: self.leader_state.n_leader,
+            accepted_idx: metadata.accepted_idx
+        };
+        self.send_acceptdecide(metadata);
+        self.handle_accepted(self_accepted, self.pid);
     }
 
     pub(crate) fn accept_entries_leader(&mut self, entries: Vec<T>) {
@@ -126,9 +133,7 @@ where
             .append_entries_with_batching(entries)
             .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
-            self.leader_state
-                .set_accepted_idx(self.pid, metadata.accepted_idx);
-            self.send_acceptdecide(metadata);
+            self.handle_accepted_entries(metadata);
         }
     }
 
@@ -141,10 +146,14 @@ where
             self.send_acceptdecide(metadata);
         }
         let accepted_idx = self.internal_storage.get_accepted_idx();
-        self.leader_state.set_accepted_idx(self.pid, accepted_idx);
+        let self_accepted = Accepted {
+            n: self.leader_state.n_leader,
+            accepted_idx
+        };
         for pid in self.leader_state.get_promised_followers() {
             self.send_accept_stopsign(pid, ss.clone(), false);
         }
+        self.handle_accepted(self_accepted, self.pid);
     }
 
     fn send_accsync(&mut self, to: NodeId) {
@@ -286,11 +295,14 @@ where
             }
         }
         self.state = (Role::Leader, Phase::Accept);
-        self.leader_state
-            .set_accepted_idx(self.pid, new_accepted_idx);
         for pid in self.leader_state.get_promised_followers() {
             self.send_accsync(pid);
         }
+        let self_accepted = Accepted {
+            n: self.leader_state.n_leader,
+            accepted_idx: new_accepted_idx,
+        };
+        self.handle_accepted(self_accepted, self.pid);
     }
 
     pub(crate) fn handle_promise_prepare(&mut self, prom: Promise<T>, from: NodeId) {
@@ -404,9 +416,7 @@ where
             .flush_batch_and_get_entries()
             .expect(WRITE_ERROR_MSG);
         if let Some(metadata) = accepted_metadata {
-            self.leader_state
-                .set_accepted_idx(self.pid, metadata.accepted_idx);
-            self.send_acceptdecide(metadata);
+            self.handle_accepted_entries(metadata);
         }
     }
 }

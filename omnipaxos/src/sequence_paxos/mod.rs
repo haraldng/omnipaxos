@@ -55,7 +55,7 @@ where
         let peers = config.peers;
         let num_nodes = &peers.len() + 1;
         let quorum = Quorum::with(config.flexible_quorum, num_nodes);
-        let max_peer_pid = peers.iter().max().unwrap();
+        let max_peer_pid = peers.iter().max().unwrap_or(&NodeId::MIN);
         let max_pid = *std::cmp::max(max_peer_pid, &pid) as usize;
         let mut outgoing = Vec::with_capacity(config.buffer_size);
         let (state, leader) = match storage
