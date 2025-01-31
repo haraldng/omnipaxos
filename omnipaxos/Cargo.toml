@@ -25,8 +25,8 @@ num-traits = { version = "0.2.16", optional = true }
 linked_hash_set = { version = "0.1.4", optional = true }
 
 [dev-dependencies]
-kompact = { git = "https://github.com/kompics/kompact", rev = "94956af", features = ["silent_logging"] }
-omnipaxos_storage = { path = "../omnipaxos_storage", default-features = true } 
+kompact = { git = "https://github.com/kompics/kompact", rev = "4fd1fdc", features = ["silent_logging"] }
+omnipaxos_storage = { path = "../omnipaxos_storage", features = ["persistent_storage"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.7.3"
 tempfile = "3.3.0"

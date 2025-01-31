@@ -51,7 +51,7 @@ pub(crate) fn parse_arguments() -> Result<(u64, u64, Duration, u64), String> {
             }
             "duration" => {
                 i += 1;
-                duration_in_seconds = args[i].parse().expect("Invalid duration."); // Set the default duration to 10
+                duration_in_seconds = args[i].parse().expect("Invalid duration.");
             }
             "crash" => {
                 i += 1;
