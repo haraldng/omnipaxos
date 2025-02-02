@@ -205,7 +205,11 @@ impl BallotLeaderElection {
         self.new_hb_round();
         if seq_paxos_promise > self.leader {
             // Sync leader with Paxos promise in case ballot didn't make it to BLE followers
+            // or become_leader() was called.
             self.leader = seq_paxos_promise;
+            if seq_paxos_promise.pid == self.pid {
+                self.current_ballot = seq_paxos_promise;
+            }
             self.happy = true;
         }
         if self.leader == self.current_ballot {
