@@ -394,6 +394,13 @@ where
         }
     }
 
+    /// Manually attempt to become the leader with the round number `n`.
+    pub fn become_leader(&mut self, n: u32) {
+        let mut my_ballot = self.ble.get_current_ballot();
+        my_ballot.n = n;
+        self.seq_paxos.handle_leader(my_ballot);
+    }
+
     /*** BLE calls ***/
     /// Update the custom priority used in the Ballot for this server. Note that changing the
     /// priority triggers a leader re-election.
