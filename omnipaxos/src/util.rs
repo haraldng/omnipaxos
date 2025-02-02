@@ -336,9 +336,9 @@ where
 pub(crate) mod defaults {
     pub(crate) const BUFFER_SIZE: usize = 100000;
     pub(crate) const BLE_BUFFER_SIZE: usize = 100;
-    pub(crate) const ELECTION_TIMEOUT: u64 = 10;
-    pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 1000;
-    pub(crate) const FLUSH_BATCH_TIMEOUT: u64 = 2000;
+    pub(crate) const ELECTION_TIMEOUT: u64 = 1;
+    pub(crate) const RESEND_MESSAGE_TIMEOUT: u64 = 100;
+    pub(crate) const FLUSH_BATCH_TIMEOUT: u64 = 200;
 }
 
 #[allow(missing_docs)]
