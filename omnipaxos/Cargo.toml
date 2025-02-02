@@ -37,6 +37,7 @@ serde_json = "1.0"
 [features]
 logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
+serde = ["serde"]
 macros = ["omnipaxos_macros"]
 unicache = ["lru", "num-traits", "linked_hash_set"]
 

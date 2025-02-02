@@ -124,7 +124,7 @@ impl<T> Storage<T> for MemoryStorage<T>
 ```
 
 ## PersistentStorage
-`PersistentStorage` is a persistent storage implementation, built on top of [RocksDB](https://crates.io/crates/rocksdb), that stores the replicated log and the state of OmniPaxos. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments.
+`PersistentStorage` is a persistent storage implementation, built on top of [RocksDB](https://crates.io/crates/rocksdb), that stores the replicated log and the state of OmniPaxos. It can be enabled with the "persistent_storage" feature flag. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments.
 
 ```toml
 [dependencies]
