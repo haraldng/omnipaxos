@@ -7,6 +7,6 @@ OmniPaxos provide several features that can be used to enhance both usability an
 - `macros` - Macros for convenience, e.g., deriving blanket implementations for OmniPaxos traits.
 
 ## `omnipaxos_storage` feature flags
-- `persistent_storage` - RocksDB-backed storage implementation for OmniPaxos state. Allows for recovery even if all nodes in a cluster fail.
+- `persistent_storage` - a persistent storage implementation using RocksDB.
 
 Configure the features in your `Cargo.toml` file.
