@@ -20,7 +20,7 @@ fn ble_test() {
     let num_elections = cfg.num_nodes / 2;
     for _ in 0..num_elections {
         // Wait to ensure stabilized leader
-        thread::sleep(8 * cfg.election_timeout);
+        thread::sleep(10 * cfg.election_timeout);
         let alive_node = sys
             .nodes
             .keys()
