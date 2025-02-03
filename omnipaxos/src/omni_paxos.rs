@@ -394,10 +394,12 @@ where
         }
     }
 
-    /// Manually attempt to become the leader with the round number `n`.
-    pub fn become_leader(&mut self, n: u32) {
+    /// Manually attempt to become the leader by incrementing this instance's Ballot. Calling this
+    /// function may not result in gainig leadership if other instances are competing for
+    /// leadership with higher Ballots.
+    pub fn try_become_leader(&mut self) {
         let mut my_ballot = self.ble.get_current_ballot();
-        my_ballot.n = n;
+        my_ballot.n += 1;
         self.seq_paxos.handle_leader(my_ballot);
     }
 
