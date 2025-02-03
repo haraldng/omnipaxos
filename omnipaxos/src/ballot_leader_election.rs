@@ -156,9 +156,9 @@ impl BallotLeaderElection {
         self.current_ballot.priority = p;
     }
 
-    /// Returns outgoing messages
-    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
-        std::mem::take(&mut self.outgoing)
+    /// Returns reference to outgoing messages
+    pub(crate) fn get_outgoing(&mut self) -> &mut Vec<BLEMessage> {
+        &mut self.outgoing
     }
 
     /// Handle an incoming message.

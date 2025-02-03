@@ -761,6 +761,7 @@ pub mod omnireplica {
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
         decided_idx: usize,
+        outgoing_buffer: Vec<Message<Value>>,
     }
 
     impl ComponentLifecycle for OmniPaxosComponent {
@@ -816,6 +817,7 @@ pub mod omnireplica {
                 decided_futures: HashMap::new(),
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
+                outgoing_buffer: Vec::new(),
             }
         }
 
@@ -824,9 +826,9 @@ pub mod omnireplica {
         }
 
         fn send_outgoing_msgs(&mut self) {
-            let outgoing = self.paxos.outgoing_messages();
-            for out in outgoing {
-                if self.is_connected_to(&out.get_receiver()) {
+            self.paxos.outgoing_messages(&mut self.outgoing_buffer);
+            for out in self.outgoing_buffer.drain(..) {
+                if !self.peer_disconnections.contains(&out.get_receiver()) {
                     match self.peers.get(&out.get_receiver()) {
                         Some(receiver) => receiver.tell(out),
                         None => warn!(
@@ -850,10 +852,6 @@ pub mod omnireplica {
                 true => self.peer_disconnections.remove(&pid),
                 false => self.peer_disconnections.insert(pid),
             };
-        }
-
-        pub fn is_connected_to(&self, pid: &NodeId) -> bool {
-            !self.peer_disconnections.contains(pid)
         }
 
         fn answer_election_future(&mut self, l: Ballot) {

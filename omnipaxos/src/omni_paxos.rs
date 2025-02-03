@@ -289,19 +289,10 @@ where
         self.seq_paxos.get_promise()
     }
 
-    /// Returns the outgoing messages from this server. The messages should then be sent via the network implementation.
-    pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
-        let paxos_msgs = self
-            .seq_paxos
-            .get_outgoing_msgs()
-            .into_iter()
-            .map(|p| Message::SequencePaxos(p));
-        let ble_msgs = self
-            .ble
-            .get_outgoing_msgs()
-            .into_iter()
-            .map(|b| Message::BLE(b));
-        ble_msgs.chain(paxos_msgs).collect()
+    /// Moves outgoing messages from this server into the buffer. The messages should then be sent via the network implementation.
+    pub fn outgoing_messages(&mut self, buffer: &mut Vec<Message<T>>) {
+        self.seq_paxos.get_outgoing_msgs(buffer);
+        buffer.extend(self.ble.get_outgoing().drain(..).map(|b| Message::BLE(b)));
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.

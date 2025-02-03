@@ -61,6 +61,7 @@ fn main() {
             omni_paxos: Arc::clone(&omni_paxos),
             incoming: receiver_channels.remove(pid).unwrap(),
             outgoing: sender_channels.clone(),
+            message_buffer: vec![],
         };
         let join_handle = runtime.spawn({
             async move {

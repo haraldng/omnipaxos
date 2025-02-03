@@ -42,11 +42,11 @@ where
                 log_sync,
             };
             self.cached_promise_message = Some(promise.clone());
-            self.outgoing.push(PaxosMessage {
+            self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Promise(promise),
-            });
+            }));
         }
     }
 
@@ -68,11 +68,11 @@ where
             self.current_seq_num = accsync.seq_num;
             let cached_idx = self.outgoing.len();
             self.latest_accepted_meta = Some((accsync.n, cached_idx));
-            self.outgoing.push(PaxosMessage {
+            self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                 from: self.pid,
                 to: from,
                 msg: PaxosMsg::Accepted(accepted),
-            });
+            }));
             #[cfg(feature = "unicache")]
             self.internal_storage.set_unicache(accsync.unicache);
         }
@@ -160,23 +160,25 @@ where
     fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
         match &self.latest_accepted_meta {
             Some((round, outgoing_idx)) if round == &n => {
-                let PaxosMessage { msg, .. } = self.outgoing.get_mut(*outgoing_idx).unwrap();
-                match msg {
-                    PaxosMsg::Accepted(a) => {
-                        a.accepted_idx = accepted_idx;
-                    }
-                    _ => panic!("Cached idx is not an Accepted Message<T>!"),
+                if let Message::SequencePaxos(PaxosMessage {
+                    msg: PaxosMsg::Accepted(a),
+                    ..
+                }) = self.outgoing.get_mut(*outgoing_idx).unwrap()
+                {
+                    a.accepted_idx = accepted_idx
+                } else {
+                    panic!("Cached idx is not an Accepted Message<T>!");
                 }
             }
             _ => {
                 let accepted = Accepted { n, accepted_idx };
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
-                self.outgoing.push(PaxosMessage {
+                self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                     from: self.pid,
                     to: n.pid,
                     msg: PaxosMsg::Accepted(accepted),
-                });
+                }));
             }
         };
     }
@@ -195,11 +197,11 @@ where
                     my_promise,
                     message_ballot
                 );
-                self.outgoing.push(PaxosMessage {
+                self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                     from: self.pid,
                     to: message_ballot.pid,
                     msg: PaxosMsg::NotAccepted(not_acc),
-                });
+                }));
                 false
             }
             std::cmp::Ordering::Less => {
@@ -232,11 +234,11 @@ where
                 // Resend Promise
                 match &self.cached_promise_message {
                     Some(promise) => {
-                        self.outgoing.push(PaxosMessage {
+                        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                             from: self.pid,
                             to: promise.n.pid,
                             msg: PaxosMsg::Promise(promise.clone()),
-                        });
+                        }));
                     }
                     None => {
                         // Shouldn't be possible to be in prepare phase without having
@@ -262,11 +264,11 @@ where
             n: self.get_promise(),
         };
         for peer in &self.peers {
-            self.outgoing.push(PaxosMessage {
+            self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                 from: self.pid,
                 to: *peer,
                 msg: PaxosMsg::PrepareReq(prepreq),
-            });
+            }));
         }
     }
 
