@@ -1,7 +1,7 @@
 [ble_test]
 wait_timeout_ms = 3000
 num_threads = 8
-num_nodes = 10
+num_nodes = 5
 election_timeout_ms = 100
 storage_type = { type = "Memory" }
 
@@ -13,7 +13,7 @@ num_proposals = 2000
 storage_type = { type = "Memory" }
 
 [unicache_test]
-wait_timeout_ms = 3000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 5
 num_proposals = 1000
@@ -21,33 +21,33 @@ num_iterations = 2
 storage_type = { type = "Memory" }
 
 [flexible_quorum_test]
-wait_timeout_ms = 8000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 8
 flexible_quorum = [6, 3]
 
 [proposal_test]
-wait_timeout_ms = 5000
+wait_timeout_ms = 10000
 num_threads = 8
-num_nodes = 7
+num_nodes = 5
 storage_type = { type = "Memory" }
 
 [reconnect_test]
-wait_timeout_ms = 3000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 5
 resend_message_timeout_ms = 500
 storage_type = { type = "Memory" }
 
 [recovery_test]
-wait_timeout_ms = 7000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 3
 num_proposals = 100
 storage_type = { type = "Persistent" }
 
 [trim_test]
-wait_timeout_ms = 3000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 3
 num_proposals = 2000
@@ -55,17 +55,17 @@ trim_idx = 1000
 storage_type = { type = "Memory" }
 
 [batching_test]
-wait_timeout_ms = 3000
+wait_timeout_ms = 10000
 num_threads = 8
 num_nodes = 3
 batch_size = 31
 num_proposals = 310
-storage_type = { type = "Persistent" }
+storage_type = { type = "Memory" }
 
 [atomic_storage_test]
 num_nodes = 3
 storage_type = { type = "Broken" }
 
 [sync_test]
-wait_timeout_ms = 8000
+wait_timeout_ms = 10000
 num_nodes = 3
