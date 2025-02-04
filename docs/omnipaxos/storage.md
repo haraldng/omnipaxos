@@ -2,9 +2,9 @@ You are free to use any storage implementation with `OmniPaxos`. The only requir
 
 ## Importing `omnipaxos_storage`
 To use the provided storage implementations, we need to add `omnipaxos_storage` to the dependencies in the cargo file. You can find the latest version on [crates](https://crates.io/crates/omnipaxos_storage).
-```rust
+```toml
 [dependencies]
-omnipaxos_storage = { version = "LATEST_VERSION", default-features = true } 
+omnipaxos_storage = { version = "LATEST_VERSION", default-features = true }
 ```
 
 **If** you **do** decide to implement your own storage, we recommend taking a look at `MemoryStorage` as a reference for implementing the functions required by `Storage`.
@@ -124,7 +124,14 @@ impl<T> Storage<T> for MemoryStorage<T>
 ```
 
 ## PersistentStorage
-`PersistentStorage` is a persistent storage implementation, built on top of [RocksDB](https://crates.io/crates/rocksdb), that stores the replicated log and the state of OmniPaxos. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments.
+`PersistentStorage` is a persistent storage implementation, built on top of [RocksDB](https://crates.io/crates/rocksdb), that stores the replicated log and the state of OmniPaxos. It can be enabled with the "persistent_storage" feature flag. Users can configure the path to log entries and OmniPaxos state, and storage-related options through `PersistentStorageConfig`. The configuration struct features a `default()` constructor for generating default configuration, and the constructor `with()` that takes the storage path and options as arguments.
+
+```toml
+[dependencies]
+omnipaxos_storage = { version = "LATEST_VERSION", features=["persistent_storage"] }
+```
+The persistent storage implementation must first be enabled via the "persistent_storage" feature flag.
+
 ```rust
 use omnipaxos_storage::{
     persistent_storage::{PersistentStorage, PersistentStorageConfig},

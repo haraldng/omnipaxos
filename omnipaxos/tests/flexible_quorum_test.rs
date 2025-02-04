@@ -36,7 +36,7 @@ fn flexible_quorum_prepare_phase_test() {
     sys.kill_node(leader_id);
 
     // Wait for next leader to get elected
-    thread::sleep(8 * cfg.election_timeout);
+    thread::sleep(10 * cfg.election_timeout);
 
     // Make some propsals
     let still_alive_node_id = sys.nodes.keys().next().unwrap();
@@ -77,7 +77,7 @@ fn flexible_quorum_accept_phase_test() {
     }
 
     // Wait for next leader to get elected
-    thread::sleep(8 * cfg.election_timeout);
+    thread::sleep(10 * cfg.election_timeout);
 
     // Make some more propsals
     sys.make_proposals(leader_id, last_proposals, cfg.wait_timeout);
