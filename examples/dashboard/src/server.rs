@@ -24,7 +24,7 @@ impl OmniPaxosServer {
         self.omni_paxos
             .lock()
             .unwrap()
-            .outgoing_messages(&mut self.message_buffer);
+            .take_outgoing_messages(&mut self.message_buffer);
         for msg in self.message_buffer.drain(..) {
             let receiver = msg.get_receiver();
             let channel = self

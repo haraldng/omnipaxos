@@ -499,6 +499,7 @@ impl TestSystem {
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
+                    op_config.server_config.buffer_size,
                     op_config.build(storage).unwrap(),
                     test_config.election_timeout,
                 )
@@ -567,6 +568,7 @@ impl TestSystem {
             .create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
+                    op_config.server_config.buffer_size,
                     op_config.build(storage).unwrap(),
                     test_config.election_timeout,
                 )
@@ -801,6 +803,7 @@ pub mod omnireplica {
     impl OmniPaxosComponent {
         pub fn with(
             pid: NodeId,
+            buffer_size: usize,
             paxos: OmniPaxos<Value, StorageType<Value>>,
             tick_timeout: Duration,
         ) -> Self {
@@ -817,7 +820,7 @@ pub mod omnireplica {
                 decided_futures: HashMap::new(),
                 election_futures: vec![],
                 current_leader_ballot: Ballot::default(),
-                outgoing_buffer: Vec::new(),
+                outgoing_buffer: Vec::with_capacity(buffer_size),
             }
         }
 
@@ -826,7 +829,7 @@ pub mod omnireplica {
         }
 
         fn send_outgoing_msgs(&mut self) {
-            self.paxos.outgoing_messages(&mut self.outgoing_buffer);
+            self.paxos.take_outgoing_messages(&mut self.outgoing_buffer);
             for out in self.outgoing_buffer.drain(..) {
                 if !self.peer_disconnections.contains(&out.get_receiver()) {
                     match self.peers.get(&out.get_receiver()) {

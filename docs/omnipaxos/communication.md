@@ -15,8 +15,8 @@ By handling incoming messages and local calls such as `append()`, our local `omn
 
 ```rust
 // send outgoing messages. This should be called periodically, e.g. every ms
-let mut msg_buffer = Vec::new();
-omni_paxos.outgoing_messages(&mut msg_buffer);
+let mut msg_buffer = Vec::with_capacity(1000);
+omni_paxos.take_outgoing_messages(&mut msg_buffer);
 for out_msg in msg_buffer.drain(..) {
     let receiver = out_msg.get_receiver();
     // send out_msg to receiver on network layer

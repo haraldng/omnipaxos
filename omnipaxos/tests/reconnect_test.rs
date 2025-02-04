@@ -56,7 +56,7 @@ fn increasing_accept_seq_num_test() {
     for val in leaders_proposals {
         leader.on_definition(|x| {
             x.paxos.append(val).expect("Failed to append");
-            x.paxos.outgoing_messages(&mut outgoing_messages)
+            x.paxos.take_outgoing_messages(&mut outgoing_messages)
         });
 
         let seq_nums = outgoing_messages

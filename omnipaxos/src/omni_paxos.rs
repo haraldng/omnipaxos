@@ -290,9 +290,9 @@ where
     }
 
     /// Moves outgoing messages from this server into the buffer. The messages should then be sent via the network implementation.
-    pub fn outgoing_messages(&mut self, buffer: &mut Vec<Message<T>>) {
-        self.seq_paxos.get_outgoing_msgs(buffer);
-        buffer.extend(self.ble.get_outgoing().drain(..).map(|b| Message::BLE(b)));
+    pub fn take_outgoing_messages(&mut self, buffer: &mut Vec<Message<T>>) {
+        self.seq_paxos.take_outgoing_msgs(buffer);
+        buffer.extend(self.ble.outgoing_mut().drain(..).map(|b| Message::BLE(b)));
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.

@@ -157,7 +157,7 @@ impl BallotLeaderElection {
     }
 
     /// Returns reference to outgoing messages
-    pub(crate) fn get_outgoing(&mut self) -> &mut Vec<BLEMessage> {
+    pub(crate) fn outgoing_mut(&mut self) -> &mut Vec<BLEMessage> {
         &mut self.outgoing
     }
 

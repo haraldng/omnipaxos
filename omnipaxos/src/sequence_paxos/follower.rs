@@ -158,19 +158,10 @@ where
     }
 
     fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
-        match &self.latest_accepted_meta {
-            Some((round, outgoing_idx)) if round == &n => {
-                if let Message::SequencePaxos(PaxosMessage {
-                    msg: PaxosMsg::Accepted(a),
-                    ..
-                }) = self.outgoing.get_mut(*outgoing_idx).unwrap()
-                {
-                    a.accepted_idx = accepted_idx
-                } else {
-                    panic!("Cached idx is not an Accepted Message<T>!");
-                }
-            }
-            _ => {
+        let buffered_accepted = self.get_buffered_accepted_message(n);
+        match buffered_accepted {
+            Some(acc) => acc.accepted_idx = accepted_idx,
+            None => {
                 let accepted = Accepted { n, accepted_idx };
                 let cached_idx = self.outgoing.len();
                 self.latest_accepted_meta = Some((n, cached_idx));
@@ -180,7 +171,25 @@ where
                     msg: PaxosMsg::Accepted(accepted),
                 }));
             }
-        };
+        }
+    }
+
+    fn get_buffered_accepted_message(&mut self, n: Ballot) -> Option<&mut Accepted> {
+        if let Some((ballot, outgoing_idx)) = &self.latest_accepted_meta {
+            if *ballot == n {
+                if let Message::SequencePaxos(PaxosMessage {
+                    msg: PaxosMsg::Accepted(a),
+                    ..
+                }) = self.outgoing.get_mut(*outgoing_idx).unwrap()
+                {
+                    return Some(a);
+                } else {
+                    #[cfg(feature = "logging")]
+                    warn!(self.logger, "Cached idx is not an Accepted message!");
+                }
+            }
+        }
+        return None;
     }
 
     /// Also returns whether the message's ballot was promised

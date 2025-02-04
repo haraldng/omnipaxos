@@ -112,7 +112,7 @@ fn _setup_leader() -> (
     op.handle_incoming(setup_msg);
     op.tick(); // trigger leader change
     let mut msgs = vec![];
-    op.outgoing_messages(&mut msgs);
+    op.take_outgoing_messages(&mut msgs);
     for msg in msgs {
         if let Message::SequencePaxos(ref px_msg) = msg {
             if let PaxosMsg::Prepare(prep) = px_msg.msg {
@@ -192,7 +192,7 @@ fn setup_follower() -> (
         }),
     });
     op.handle_incoming(setup_msg);
-    op.outgoing_messages(&mut vec![]);
+    op.take_outgoing_messages(&mut vec![]);
     assert!(
         op.get_current_leader().expect("should have leader").0 == 2,
         "node 2 should be leader"
@@ -525,7 +525,7 @@ fn atomic_storage_majority_promises_test() {
         op.handle_incoming(setup_msg);
         op.tick(); // 1 gains leadership here
         let mut msgs = vec![];
-        op.outgoing_messages(&mut msgs);
+        op.take_outgoing_messages(&mut msgs);
         for msg in msgs {
             if let Message::SequencePaxos(px_msg) = msg {
                 if let PaxosMsg::Prepare(prep) = px_msg.msg {

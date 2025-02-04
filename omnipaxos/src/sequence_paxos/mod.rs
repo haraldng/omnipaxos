@@ -246,10 +246,13 @@ where
     }
 
     /// Moves the outgoing messages from this replica into the buffer. The messages should then be sent via the network implementation.
-    pub(crate) fn get_outgoing_msgs(&mut self, buffer: &mut Vec<Message<T>>) {
+    /// If the buffer is empty it can be efficently swapped, otherwise messages must be copied into
+    /// the buffer.
+    pub(crate) fn take_outgoing_msgs(&mut self, buffer: &mut Vec<Message<T>>) {
         if buffer.is_empty() {
             std::mem::swap(buffer, &mut self.outgoing);
         } else {
+            // User has unsent messages in their buffer, must extend their buffer.
             buffer.append(&mut self.outgoing);
         }
         self.leader_state.reset_batch_accept_meta();
