@@ -2,6 +2,7 @@ use super::{ballot_leader_election::Ballot, messages::sequence_paxos::*, util::L
 #[cfg(feature = "logging")]
 use crate::utils::logger::create_logger;
 use crate::{
+    messages::Message,
     storage::{
         internal_storage::{InternalStorage, InternalStorageConfig},
         Entry, Snapshot, StopSign, Storage,
@@ -32,13 +33,12 @@ where
     state: (Role, Phase),
     buffered_proposals: Vec<T>,
     buffered_stopsign: Option<StopSign>,
-    outgoing: Vec<PaxosMessage<T>>,
+    outgoing: Vec<Message<T>>,
     leader_state: LeaderState<T>,
     latest_accepted_meta: Option<(Ballot, usize)>,
     // Keeps track of sequence of accepts from leader where AcceptSync = 1
     current_seq_num: SequenceNumber,
     cached_promise_message: Option<Promise<T>>,
-    buffer_size: usize,
     #[cfg(feature = "logging")]
     logger: Logger,
 }
@@ -67,11 +67,11 @@ where
                 let state = (Role::Follower, Phase::Recover);
                 for peer_pid in &peers {
                     let prepreq = PrepareReq { n: b };
-                    outgoing.push(PaxosMessage {
+                    outgoing.push(Message::SequencePaxos(PaxosMessage {
                         from: pid,
                         to: *peer_pid,
                         msg: PaxosMsg::PrepareReq(prepreq),
-                    });
+                    }));
                 }
                 (state, b)
             }
@@ -97,7 +97,6 @@ where
             latest_accepted_meta: None,
             current_seq_num: SequenceNumber::default(),
             cached_promise_message: None,
-            buffer_size: config.buffer_size,
             #[cfg(feature = "logging")]
             logger: {
                 if let Some(logger) = config.custom_logger {
@@ -162,11 +161,11 @@ where
                 if result.is_ok() {
                     for pid in &self.peers {
                         let msg = PaxosMsg::Compaction(Compaction::Trim(trimmed_idx));
-                        self.outgoing.push(PaxosMessage {
+                        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                             from: self.pid,
                             to: *pid,
                             msg,
-                        });
+                        }));
                     }
                 }
                 result.map_err(|e| {
@@ -192,11 +191,11 @@ where
             // since it is decided, it is ok even for a follower to send this
             for pid in &self.peers {
                 let msg = PaxosMsg::Compaction(Compaction::Snapshot(idx));
-                self.outgoing.push(PaxosMessage {
+                self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                     from: self.pid,
                     to: *pid,
                     msg,
-                });
+                }));
             }
         }
         result.map_err(|e| {
@@ -246,13 +245,18 @@ where
         }
     }
 
-    /// Returns the outgoing messages from this replica. The messages should then be sent via the network implementation.
-    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<PaxosMessage<T>> {
-        let mut outgoing = Vec::with_capacity(self.buffer_size);
-        std::mem::swap(&mut self.outgoing, &mut outgoing);
-        self.leader_state.reset_batch_accept_meta();
+    /// Moves the outgoing messages from this replica into the buffer. The messages should then be sent via the network implementation.
+    /// If `buffer` is empty, it gets swapped with the internal message buffer. Otherwise, messages are appended to the buffer. This prevents messages from getting discarded.
+    /// the buffer.
+    pub(crate) fn take_outgoing_msgs(&mut self, buffer: &mut Vec<Message<T>>) {
+        if buffer.is_empty() {
+            std::mem::swap(buffer, &mut self.outgoing);
+        } else {
+            // User has unsent messages in their buffer, must extend their buffer.
+            buffer.append(&mut self.outgoing);
+        }
+        self.leader_state.reset_latest_accept_meta();
         self.latest_accepted_meta = None;
-        outgoing
     }
 
     /// Handle an incoming message.
@@ -340,11 +344,11 @@ where
         let prepreq = PrepareReq {
             n: self.get_promise(),
         };
-        self.outgoing.push(PaxosMessage {
+        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
             from: self.pid,
             to: pid,
             msg: PaxosMsg::PrepareReq(prepreq),
-        });
+        }));
     }
 
     fn propose_entry(&mut self, entry: T) {
@@ -363,11 +367,11 @@ where
         let leader = self.get_current_leader();
         if leader > 0 && self.pid != leader {
             let pf = PaxosMsg::ProposalForward(entries);
-            let msg = PaxosMessage {
+            let msg = Message::SequencePaxos(PaxosMessage {
                 from: self.pid,
                 to: leader,
                 msg: pf,
-            };
+            });
             self.outgoing.push(msg);
         } else {
             self.buffered_proposals.append(&mut entries);
@@ -380,11 +384,11 @@ where
             #[cfg(feature = "logging")]
             trace!(self.logger, "Forwarding StopSign to Leader {:?}", leader);
             let fs = PaxosMsg::ForwardStopSign(ss);
-            let msg = PaxosMessage {
+            let msg = Message::SequencePaxos(PaxosMessage {
                 from: self.pid,
                 to: leader,
                 msg: fs,
-            };
+            });
             self.outgoing.push(msg);
         } else if self.buffered_stopsign.as_mut().is_none() {
             self.buffered_stopsign = Some(ss);

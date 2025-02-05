@@ -15,12 +15,16 @@ pub struct OmniPaxosServer {
     pub omni_paxos: Arc<Mutex<OmniPaxosKV>>,
     pub incoming: mpsc::Receiver<Message<KeyValue>>,
     pub outgoing: HashMap<NodeId, mpsc::Sender<Message<KeyValue>>>,
+    pub message_buffer: Vec<Message<KeyValue>>,
 }
 
 impl OmniPaxosServer {
     async fn send_outgoing_msgs(&mut self) {
-        let messages = self.omni_paxos.lock().unwrap().outgoing_messages();
-        for msg in messages {
+        self.omni_paxos
+            .lock()
+            .unwrap()
+            .take_outgoing_messages(&mut self.message_buffer);
+        for msg in self.message_buffer.drain(..) {
             let receiver = msg.get_receiver();
             let channel = self
                 .outgoing

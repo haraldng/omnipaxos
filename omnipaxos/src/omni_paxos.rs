@@ -289,19 +289,10 @@ where
         self.seq_paxos.get_promise()
     }
 
-    /// Returns the outgoing messages from this server. The messages should then be sent via the network implementation.
-    pub fn outgoing_messages(&mut self) -> Vec<Message<T>> {
-        let paxos_msgs = self
-            .seq_paxos
-            .get_outgoing_msgs()
-            .into_iter()
-            .map(|p| Message::SequencePaxos(p));
-        let ble_msgs = self
-            .ble
-            .get_outgoing_msgs()
-            .into_iter()
-            .map(|b| Message::BLE(b));
-        ble_msgs.chain(paxos_msgs).collect()
+    /// Moves outgoing messages from this server into the buffer. The messages should then be sent via the network implementation.
+    pub fn take_outgoing_messages(&mut self, buffer: &mut Vec<Message<T>>) {
+        self.seq_paxos.take_outgoing_msgs(buffer);
+        buffer.extend(self.ble.outgoing_mut().drain(..).map(|b| Message::BLE(b)));
     }
 
     /// Read entry at index `idx` in the log. Returns `None` if `idx` is out of bounds.
@@ -392,6 +383,15 @@ where
         if self.flush_batch_clock.tick_and_check_timeout() {
             self.seq_paxos.flush_batch_timeout();
         }
+    }
+
+    /// Manually attempt to become the leader by incrementing this instance's Ballot. Calling this
+    /// function may not result in gainig leadership if other instances are competing for
+    /// leadership with higher Ballots.
+    pub fn try_become_leader(&mut self) {
+        let mut my_ballot = self.ble.get_current_ballot();
+        my_ballot.n += 1;
+        self.seq_paxos.handle_leader(my_ballot);
     }
 
     /*** BLE calls ***/

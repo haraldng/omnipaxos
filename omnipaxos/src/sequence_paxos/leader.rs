@@ -48,11 +48,11 @@ where
             };
             /* send prepare */
             for pid in &self.peers {
-                self.outgoing.push(PaxosMessage {
+                self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                     from: self.pid,
                     to: *pid,
                     msg: PaxosMsg::Prepare(prep),
-                });
+                }));
             }
         } else {
             self.become_follower();
@@ -68,7 +68,7 @@ where
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
             self.leader_state.reset_promise(from);
-            self.leader_state.set_batch_accept_meta(from, None);
+            self.leader_state.set_latest_accept_meta(from, None);
             self.send_prepare(from);
         }
     }
@@ -101,11 +101,11 @@ where
             n_accepted: self.internal_storage.get_accepted_round(),
             accepted_idx: self.internal_storage.get_accepted_idx(),
         };
-        self.outgoing.push(PaxosMessage {
+        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::Prepare(prep),
-        });
+        }));
     }
 
     pub(crate) fn accept_entry_leader(&mut self, entry: T) {
@@ -182,48 +182,39 @@ where
             #[cfg(feature = "unicache")]
             unicache: self.internal_storage.get_unicache(),
         };
-        let msg = PaxosMessage {
+        let msg = Message::SequencePaxos(PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::AcceptSync(acc_sync),
-        };
+        });
         self.outgoing.push(msg);
     }
 
     fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
-            let cached_acceptdecide = match self.leader_state.get_batch_accept_meta(pid) {
-                Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
-                    let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
-                    match msg {
-                        PaxosMsg::AcceptDecide(acc) => Some(acc),
-                        _ => panic!("Cached index is not an AcceptDecide!"),
-                    }
-                }
-                _ => None,
-            };
-            match cached_acceptdecide {
+            let latest_accdec = self.get_latest_accdec_message(pid);
+            match latest_accdec {
                 // Modify existing AcceptDecide message to follower
-                Some(acc) => {
-                    acc.entries.append(accepted.entries.clone().as_mut());
-                    acc.decided_idx = decided_idx;
+                Some(accdec) => {
+                    accdec.entries.extend(accepted.entries.iter().cloned());
+                    accdec.decided_idx = decided_idx;
                 }
                 // Add new AcceptDecide message to follower
                 None => {
                     self.leader_state
-                        .set_batch_accept_meta(pid, Some(self.outgoing.len()));
+                        .set_latest_accept_meta(pid, Some(self.outgoing.len()));
                     let acc = AcceptDecide {
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),
                         decided_idx,
                         entries: accepted.entries.clone(),
                     };
-                    self.outgoing.push(PaxosMessage {
+                    self.outgoing.push(Message::SequencePaxos(PaxosMessage {
                         from: self.pid,
                         to: pid,
                         msg: PaxosMsg::AcceptDecide(acc),
-                    });
+                    }));
                 }
             }
         }
@@ -239,11 +230,11 @@ where
             n: self.leader_state.n_leader,
             ss,
         });
-        self.outgoing.push(PaxosMessage {
+        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
             from: self.pid,
             to,
             msg: acc_ss,
-        });
+        }));
     }
 
     pub(crate) fn send_decide(&mut self, to: NodeId, decided_idx: usize, resend: bool) {
@@ -256,11 +247,11 @@ where
             seq_num,
             decided_idx,
         };
-        self.outgoing.push(PaxosMessage {
+        self.outgoing.push(Message::SequencePaxos(PaxosMessage {
             from: self.pid,
             to,
             msg: PaxosMsg::Decide(d),
-        });
+        }));
     }
 
     fn handle_majority_promises(&mut self) {
@@ -343,19 +334,32 @@ where
                     .set_decided_idx(decided_idx)
                     .expect(WRITE_ERROR_MSG);
                 for pid in self.leader_state.get_promised_followers() {
-                    match self.leader_state.get_batch_accept_meta(pid) {
-                        Some((bal, msg_idx)) if bal == self.leader_state.n_leader => {
-                            let PaxosMessage { msg, .. } = self.outgoing.get_mut(msg_idx).unwrap();
-                            match msg {
-                                PaxosMsg::AcceptDecide(acc) => acc.decided_idx = decided_idx,
-                                _ => panic!("Cached index is not an AcceptDecide!"),
-                            }
-                        }
-                        _ => self.send_decide(pid, decided_idx, false),
-                    };
+                    let latest_accdec = self.get_latest_accdec_message(pid);
+                    match latest_accdec {
+                        Some(accdec) => accdec.decided_idx = decided_idx,
+                        None => self.send_decide(pid, decided_idx, false),
+                    }
                 }
             }
         }
+    }
+
+    fn get_latest_accdec_message(&mut self, to: NodeId) -> Option<&mut AcceptDecide<T>> {
+        if let Some((bal, outgoing_idx)) = self.leader_state.get_latest_accept_meta(to) {
+            if bal == self.leader_state.n_leader {
+                if let Message::SequencePaxos(PaxosMessage {
+                    msg: PaxosMsg::AcceptDecide(accdec),
+                    ..
+                }) = self.outgoing.get_mut(outgoing_idx).unwrap()
+                {
+                    return Some(accdec);
+                } else {
+                    #[cfg(feature = "logging")]
+                    debug!(self.logger, "Cached idx is not an AcceptedDecide!");
+                }
+            }
+        }
+        None
     }
 
     pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {

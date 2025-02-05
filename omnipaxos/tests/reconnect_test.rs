@@ -52,14 +52,15 @@ fn increasing_accept_seq_num_test() {
 
     // Get leader to propose more values and then collect cooresponding AcceptDecide messages
     let mut accept_seq_nums = vec![];
+    let mut outgoing_messages = vec![];
     for val in leaders_proposals {
-        let outgoing_messages = leader.on_definition(|x| {
+        leader.on_definition(|x| {
             x.paxos.append(val).expect("Failed to append");
-            x.paxos.outgoing_messages()
+            x.paxos.take_outgoing_messages(&mut outgoing_messages)
         });
 
         let seq_nums = outgoing_messages
-            .iter()
+            .drain(..)
             .filter_map(|msg| match msg {
                 Message::SequencePaxos(m) => Some(m),
                 _ => None,

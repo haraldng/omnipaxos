@@ -156,9 +156,9 @@ impl BallotLeaderElection {
         self.current_ballot.priority = p;
     }
 
-    /// Returns outgoing messages
-    pub(crate) fn get_outgoing_msgs(&mut self) -> Vec<BLEMessage> {
-        std::mem::take(&mut self.outgoing)
+    /// Returns reference to outgoing messages
+    pub(crate) fn outgoing_mut(&mut self) -> &mut Vec<BLEMessage> {
+        &mut self.outgoing
     }
 
     /// Handle an incoming message.
@@ -205,7 +205,11 @@ impl BallotLeaderElection {
         self.new_hb_round();
         if seq_paxos_promise > self.leader {
             // Sync leader with Paxos promise in case ballot didn't make it to BLE followers
+            // or become_leader() was called.
             self.leader = seq_paxos_promise;
+            if seq_paxos_promise.pid == self.pid {
+                self.current_ballot = seq_paxos_promise;
+            }
             self.happy = true;
         }
         if self.leader == self.current_ballot {
