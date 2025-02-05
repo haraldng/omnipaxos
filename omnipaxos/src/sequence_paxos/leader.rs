@@ -68,7 +68,7 @@ where
         debug!(self.logger, "Incoming message PrepareReq from {}", from);
         if self.state.0 == Role::Leader && prepreq.n <= self.leader_state.n_leader {
             self.leader_state.reset_promise(from);
-            self.leader_state.set_batch_accept_meta(from, None);
+            self.leader_state.set_latest_accept_meta(from, None);
             self.send_prepare(from);
         }
     }
@@ -193,8 +193,8 @@ where
     fn send_acceptdecide(&mut self, accepted: AcceptedMetaData<T>) {
         let decided_idx = self.internal_storage.get_decided_idx();
         for pid in self.leader_state.get_promised_followers() {
-            let buffered_accdec = self.get_buffered_accdec_message(pid);
-            match buffered_accdec {
+            let latest_accdec = self.get_latest_accdec_message(pid);
+            match latest_accdec {
                 // Modify existing AcceptDecide message to follower
                 Some(accdec) => {
                     accdec.entries.extend(accepted.entries.iter().cloned());
@@ -203,7 +203,7 @@ where
                 // Add new AcceptDecide message to follower
                 None => {
                     self.leader_state
-                        .set_batch_accept_meta(pid, Some(self.outgoing.len()));
+                        .set_latest_accept_meta(pid, Some(self.outgoing.len()));
                     let acc = AcceptDecide {
                         n: self.leader_state.n_leader,
                         seq_num: self.leader_state.next_seq_num(pid),
@@ -334,8 +334,8 @@ where
                     .set_decided_idx(decided_idx)
                     .expect(WRITE_ERROR_MSG);
                 for pid in self.leader_state.get_promised_followers() {
-                    let buffered_accdec = self.get_buffered_accdec_message(pid);
-                    match buffered_accdec {
+                    let latest_accdec = self.get_latest_accdec_message(pid);
+                    match latest_accdec {
                         Some(accdec) => accdec.decided_idx = decided_idx,
                         None => self.send_decide(pid, decided_idx, false),
                     }
@@ -344,8 +344,8 @@ where
         }
     }
 
-    fn get_buffered_accdec_message(&mut self, to: NodeId) -> Option<&mut AcceptDecide<T>> {
-        if let Some((bal, outgoing_idx)) = self.leader_state.get_batch_accept_meta(to) {
+    fn get_latest_accdec_message(&mut self, to: NodeId) -> Option<&mut AcceptDecide<T>> {
+        if let Some((bal, outgoing_idx)) = self.leader_state.get_latest_accept_meta(to) {
             if bal == self.leader_state.n_leader {
                 if let Message::SequencePaxos(PaxosMessage {
                     msg: PaxosMsg::AcceptDecide(accdec),
@@ -355,11 +355,11 @@ where
                     return Some(accdec);
                 } else {
                     #[cfg(feature = "logging")]
-                    warn!(self.logger, "Cached idx is not an AcceptedDecide!");
+                    debug!(self.logger, "Cached idx is not an AcceptedDecide!");
                 }
             }
         }
-        return None;
+        None
     }
 
     pub(crate) fn handle_notaccepted(&mut self, not_acc: NotAccepted, from: NodeId) {

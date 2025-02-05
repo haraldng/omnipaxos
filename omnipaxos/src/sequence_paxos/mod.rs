@@ -255,7 +255,7 @@ where
             // User has unsent messages in their buffer, must extend their buffer.
             buffer.append(&mut self.outgoing);
         }
-        self.leader_state.reset_batch_accept_meta();
+        self.leader_state.reset_latest_accept_meta();
         self.latest_accepted_meta = None;
     }
 

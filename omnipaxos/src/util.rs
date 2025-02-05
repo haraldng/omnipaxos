@@ -82,7 +82,7 @@ where
     pub accepted_indexes: Vec<usize>,
     max_promise_meta: PromiseMetaData,
     max_promise_sync: Option<LogSync<T>>,
-    batch_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
+    latest_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
@@ -101,7 +101,7 @@ where
             accepted_indexes: vec![0; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise_sync: None,
-            batch_accept_meta: vec![None; max_pid],
+            latest_accept_meta: vec![None; max_pid],
             max_pid,
             quorum,
         }
@@ -190,8 +190,8 @@ where
             .expect("Should be all initialised to 0!")
     }
 
-    pub fn reset_batch_accept_meta(&mut self) {
-        self.batch_accept_meta = vec![None; self.max_pid];
+    pub fn reset_latest_accept_meta(&mut self) {
+        self.latest_accept_meta = vec![None; self.max_pid];
     }
 
     pub fn get_promised_followers(&self) -> Vec<NodeId> {
@@ -219,17 +219,17 @@ where
             .collect()
     }
 
-    pub fn set_batch_accept_meta(&mut self, pid: NodeId, idx: Option<usize>) {
+    pub fn set_latest_accept_meta(&mut self, pid: NodeId, idx: Option<usize>) {
         let meta = idx.map(|x| (self.n_leader, x));
-        self.batch_accept_meta[Self::pid_to_idx(pid)] = meta;
+        self.latest_accept_meta[Self::pid_to_idx(pid)] = meta;
     }
 
     pub fn set_accepted_idx(&mut self, pid: NodeId, idx: usize) {
         self.accepted_indexes[Self::pid_to_idx(pid)] = idx;
     }
 
-    pub fn get_batch_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
-        self.batch_accept_meta
+    pub fn get_latest_accept_meta(&self, pid: NodeId) -> Option<(Ballot, usize)> {
+        self.latest_accept_meta
             .get(Self::pid_to_idx(pid))
             .unwrap()
             .as_ref()

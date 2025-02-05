@@ -158,8 +158,8 @@ where
     }
 
     fn reply_accepted(&mut self, n: Ballot, accepted_idx: usize) {
-        let buffered_accepted = self.get_buffered_accepted_message(n);
-        match buffered_accepted {
+        let latest_accepted = self.get_latest_accepted_message(n);
+        match latest_accepted {
             Some(acc) => acc.accepted_idx = accepted_idx,
             None => {
                 let accepted = Accepted { n, accepted_idx };
@@ -174,7 +174,7 @@ where
         }
     }
 
-    fn get_buffered_accepted_message(&mut self, n: Ballot) -> Option<&mut Accepted> {
+    fn get_latest_accepted_message(&mut self, n: Ballot) -> Option<&mut Accepted> {
         if let Some((ballot, outgoing_idx)) = &self.latest_accepted_meta {
             if *ballot == n {
                 if let Message::SequencePaxos(PaxosMessage {
@@ -185,11 +185,11 @@ where
                     return Some(a);
                 } else {
                     #[cfg(feature = "logging")]
-                    warn!(self.logger, "Cached idx is not an Accepted message!");
+                    debug!(self.logger, "Cached idx is not an Accepted message!");
                 }
             }
         }
-        return None;
+        None
     }
 
     /// Also returns whether the message's ballot was promised
