@@ -246,7 +246,7 @@ where
     }
 
     /// Moves the outgoing messages from this replica into the buffer. The messages should then be sent via the network implementation.
-    /// If the buffer is empty it can be efficently swapped, otherwise messages must be copied into
+    /// If `buffer` is empty, it gets swapped with the internal message buffer. Otherwise, messages are appended to the buffer. This prevents messages from getting discarded.
     /// the buffer.
     pub(crate) fn take_outgoing_msgs(&mut self, buffer: &mut Vec<Message<T>>) {
         if buffer.is_empty() {
