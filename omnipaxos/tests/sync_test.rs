@@ -217,7 +217,7 @@ fn sync_test(test: SyncTest) {
         Some((_, write_quorum)) => write_quorum,
         None => cfg.num_nodes / 2 + 1,
     };
-    let num_nodes_to_stop = cfg.num_nodes - write_quorum_size; // one follower is already disconnected
+    let num_nodes_to_stop = cfg.num_nodes - (write_quorum_size-1); // one follower is already disconnected
     let nodes_to_stop = (1..=cfg.num_nodes as NodeId)
         .filter(|&n| n != follower_id && n != leader_id)
         .take(num_nodes_to_stop);
