@@ -390,7 +390,8 @@ where
     /// leadership with higher Ballots.
     pub fn try_become_leader(&mut self) {
         let mut my_ballot = self.ble.get_current_ballot();
-        my_ballot.n += 1;
+        let promise = self.seq_paxos.get_promise();
+        my_ballot.n = promise.n + 1;
         self.seq_paxos.handle_leader(my_ballot);
     }
 
