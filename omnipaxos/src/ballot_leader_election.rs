@@ -208,6 +208,12 @@ impl BallotLeaderElection {
             self.leader = seq_paxos_promise;
             self.happy = true;
         }
+
+        // Sync epoch with leader
+        if self.leader.n > self.current_ballot.n {
+            self.current_ballot.n = self.leader.n;
+        }
+
         if self.leader == self.current_ballot {
             Some(self.current_ballot)
         } else {
@@ -221,6 +227,10 @@ impl BallotLeaderElection {
             if max > self.leader {
                 self.leader = max;
             }
+        }
+
+        if self.current_ballot > self.leader {
+            self.leader = self.current_ballot;
         }
     }
 
