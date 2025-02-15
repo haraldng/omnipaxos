@@ -372,7 +372,7 @@ where
         match self.state.1 {
             Phase::Prepare => {
                 // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
+                let preparable_peers = self.leader_state.get_preparable_peers(&self.peers);
                 for peer in preparable_peers {
                     self.send_prepare(peer);
                 }
@@ -392,7 +392,7 @@ where
                     }
                 }
                 // Resend Prepare
-                let preparable_peers = self.leader_state.get_preparable_peers();
+                let preparable_peers = self.leader_state.get_preparable_peers(&self.peers);
                 for peer in preparable_peers {
                     self.send_prepare(peer);
                 }
