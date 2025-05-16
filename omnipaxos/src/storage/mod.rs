@@ -95,7 +95,7 @@ where
 }
 
 /// The Result type returned by the storage API.
-pub type StorageResult<T> = Result<T, Box<dyn Error>>;
+pub type StorageResult<T> = Result<T, Box<dyn Error + Send + Sync + 'static>>;
 
 /// The write operations of the storge implementation.
 #[derive(Debug)]
