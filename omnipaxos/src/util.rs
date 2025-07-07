@@ -1,3 +1,7 @@
+
+
+use crate::{utils::VecLike, vec_like};
+
 use super::{
     ballot_leader_election::Ballot,
     messages::sequence_paxos::Promise,
@@ -70,19 +74,20 @@ enum PromiseState {
     PromisedHigher,
 }
 
+
 #[derive(Debug, Clone)]
 pub(crate) struct LeaderState<T>
 where
     T: Entry,
 {
     pub n_leader: Ballot,
-    promises_meta: Vec<PromiseState>,
+    promises_meta: VecLike<PromiseState>,
     // the sequence number of accepts for each follower where AcceptSync has sequence number = 1
-    follower_seq_nums: Vec<SequenceNumber>,
-    pub accepted_indexes: Vec<usize>,
+    follower_seq_nums: VecLike<SequenceNumber>,
+    pub accepted_indexes: VecLike<usize>,
     max_promise_meta: PromiseMetaData,
     max_promise_sync: Option<LogSync<T>>,
-    latest_accept_meta: Vec<Option<(Ballot, usize)>>, //  index in outgoing
+    latest_accept_meta: VecLike<Option<(Ballot, usize)>>, //  index in outgoing
     pub max_pid: usize,
     // The number of promises needed in the prepare phase to become synced and
     // the number of accepteds needed in the accept phase to decide an entry.
@@ -96,12 +101,12 @@ where
     pub fn with(n_leader: Ballot, max_pid: usize, quorum: Quorum) -> Self {
         Self {
             n_leader,
-            promises_meta: vec![PromiseState::NotPromised; max_pid],
-            follower_seq_nums: vec![SequenceNumber::default(); max_pid],
-            accepted_indexes: vec![0; max_pid],
+            promises_meta: vec_like![PromiseState::NotPromised; max_pid],
+            follower_seq_nums: vec_like![SequenceNumber::default(); max_pid],
+            accepted_indexes: vec_like![0; max_pid],
             max_promise_meta: PromiseMetaData::default(),
             max_promise_sync: None,
-            latest_accept_meta: vec![None; max_pid],
+            latest_accept_meta: vec_like![None; max_pid],
             max_pid,
             quorum,
         }
@@ -191,7 +196,7 @@ where
     }
 
     pub fn reset_latest_accept_meta(&mut self) {
-        self.latest_accept_meta = vec![None; self.max_pid];
+        self.latest_accept_meta = vec_like![None; self.max_pid];
     }
 
     pub fn get_promised_followers(&self) -> Vec<NodeId> {

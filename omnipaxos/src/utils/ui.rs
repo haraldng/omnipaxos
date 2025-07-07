@@ -5,11 +5,13 @@ use crate::{
     util::{LeaderState, NodeId},
 };
 
+use super::VecLike;
+
 /// The states of all the nodes in the cluster.
 #[derive(Debug, Clone, Default)]
 pub struct ClusterState {
     /// The accepted indexes of all the nodes in the cluster. The index of the vector is the node id.
-    pub accepted_indexes: Vec<usize>,
+    pub accepted_indexes: VecLike<usize>,
     /// All the received heartbeats from the previous heartbeat round, including the current node.
     /// Represents nodes that are currently alive from the view of the current node.
     pub heartbeats: Vec<HeartbeatReply>,
