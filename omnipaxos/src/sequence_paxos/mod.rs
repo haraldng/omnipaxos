@@ -141,20 +141,20 @@ where
     pub(crate) fn trim(&mut self, trim_idx: Option<usize>) -> Result<(), CompactionErr> {
         match self.state {
             (Role::Leader, _) => {
-                let min_all_accepted_idx = self.leader_state.get_min_all_accepted_idx();
+                let decided_idx = self.get_decided_idx();
                 let trimmed_idx = match trim_idx {
-                    Some(idx) if idx <= *min_all_accepted_idx => idx,
+                    Some(idx) if idx <= decided_idx => idx,
                     None => {
                         #[cfg(feature = "logging")]
                         trace!(
                             self.logger,
                             "No trim index provided, using min_las_idx: {:?}",
-                            min_all_accepted_idx
+                            decided_idx
                         );
-                        *min_all_accepted_idx
+                        decided_idx
                     }
                     _ => {
-                        return Err(CompactionErr::NotAllDecided(*min_all_accepted_idx));
+                        return Err(CompactionErr::NotAllDecided(decided_idx));
                     }
                 };
                 let result = self.internal_storage.try_trim(trimmed_idx);
