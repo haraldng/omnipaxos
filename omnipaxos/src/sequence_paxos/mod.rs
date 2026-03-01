@@ -20,6 +20,7 @@ use std::{
     fmt::Debug,
     vec,
 };
+use crate::clock::Clock;
 
 pub mod follower;
 pub mod leader;
@@ -52,6 +53,7 @@ where
     committed: HashMap<RequestId, bool>,
     #[cfg(feature = "logging")]
     logger: Logger,
+    clock: Clock,
 }
 
 impl<T, B> SequencePaxos<T, B>
@@ -113,6 +115,7 @@ where
             late_buffer: HashMap::new(),
             reply_set: HashMap::new(),
             committed: HashMap::new(),
+            clock: Clock::new(),
             #[cfg(feature = "logging")]
             logger: {
                 if let Some(logger) = config.custom_logger {

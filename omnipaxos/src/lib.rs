@@ -37,6 +37,10 @@ pub mod util;
 /// A module containing helper functions and structs.
 pub mod utils;
 
+/// Clock simulation module.
+
+pub mod clock;
+
 #[cfg(feature = "macros")]
 #[allow(unused_imports)]
 #[macro_use]
