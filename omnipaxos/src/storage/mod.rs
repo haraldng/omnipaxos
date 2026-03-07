@@ -7,7 +7,27 @@ use crate::unicache::*;
 use crate::ClusterConfig;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt::Debug};
+use std::{
+    error::Error,
+    fmt::{Debug, Display, Formatter},
+};
+
+#[derive(Debug)]
+struct UnsupportedStorageOp {
+    name: &'static str,
+}
+
+impl Display for UnsupportedStorageOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "storage operation not supported: {}", self.name)
+    }
+}
+
+impl Error for UnsupportedStorageOp {}
+
+fn unsupported<T>(name: &'static str) -> StorageResult<T> {
+    Err(Box::new(UnsupportedStorageOp { name }))
+}
 
 /// Type of the entries stored in the log.
 pub trait Entry: Clone + Debug {
@@ -193,6 +213,73 @@ where
 
     /// Returns the stored snapshot.
     fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>>;
+
+    // /*** Synced log (SynLog) ***/
+    // /// Appends an entry to the end of the synced log.
+    // fn synlog_append_entry(&mut self, _entry: T) -> StorageResult<()> {
+    //     unsupported("synlog_append_entry")
+    // }
+
+    // /// Appends entries to the end of the synced log.
+    // fn synlog_append_entries(&mut self, _entries: Vec<T>) -> StorageResult<()> {
+    //     unsupported("synlog_append_entries")
+    // }
+
+    // /// Appends entries to the synced log from the prefix specified by the given index.
+    // fn synlog_append_on_prefix(&mut self, _from_idx: usize, _entries: Vec<T>) -> StorageResult<()> {
+    //     unsupported("synlog_append_on_prefix")
+    // }
+
+    // /// Returns the entries in the synced log in the index interval of [from, to).
+    // fn synlog_get_entries(&self, _from: usize, _to: usize) -> StorageResult<Vec<T>> {
+    //     unsupported("synlog_get_entries")
+    // }
+
+    // /// Returns the current length of the synced log (without the trimmed/snapshotted entries).
+    // fn synlog_get_log_len(&self) -> StorageResult<usize> {
+    //     unsupported("synlog_get_log_len")
+    // }
+
+    // /// Returns the suffix of entries in the synced log from index `from` (inclusive).
+    // fn synlog_get_suffix(&self, _from: usize) -> StorageResult<Vec<T>> {
+    //     unsupported("synlog_get_suffix")
+    // }
+
+    // /// Removes elements up to the given [`idx`] from the synced log.
+    // fn synlog_trim(&mut self, _idx: usize) -> StorageResult<()> {
+    //     unsupported("synlog_trim")
+    // }
+
+    // /// Sets the compacted (i.e. trimmed or snapshotted) index for the synced log.
+    // fn synlog_set_compacted_idx(&mut self, _idx: usize) -> StorageResult<()> {
+    //     unsupported("synlog_set_compacted_idx")
+    // }
+
+    // /// Returns the compacted index for the synced log.
+    // fn synlog_get_compacted_idx(&self) -> StorageResult<usize> {
+    //     unsupported("synlog_get_compacted_idx")
+    // }
+
+    /*** Unsynced log (UnsynLog) ***/
+    /// Inserts or updates an unsynced entry with the given index.
+    fn unsynlog_put(&mut self, _idx: usize, _entry: T) -> StorageResult<()> {
+        unsupported("unsynlog_put")
+    }
+
+    /// Gets an unsynced entry by index.
+    fn unsynlog_get(&self, _idx: usize) -> StorageResult<Option<T>> {
+        unsupported("unsynlog_get")
+    }
+
+    /// Removes an unsynced entry by index.
+    fn unsynlog_remove(&mut self, _idx: usize) -> StorageResult<()> {
+        unsupported("unsynlog_remove")
+    }
+
+    /// Clears all unsynced entries.
+    fn unsynlog_clear(&mut self) -> StorageResult<()> {
+        unsupported("unsynlog_clear")
+    }
 }
 
 /// A place holder type for when not using snapshots. You should not use this type, it is only internally when deriving the Entry implementation.

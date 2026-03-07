@@ -1,7 +1,7 @@
 #![cfg(feature = "toml_config")]
 pub mod utils;
 
-use omnipaxos::{util::FlexibleQuorum, OmniPaxosConfig};
+use omnipaxos::{util::FlexibleQuorum, util::{SystemClock, SYSTEM_CLOCK}, OmniPaxosConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use serial_test::serial;
 use utils::Value;
@@ -38,7 +38,10 @@ fn config_all_fields_test() {
             assert_eq!(config.server_config.leader_priority, 2);
 
             // Make sure we pass asserts in build
-            config.build(MemoryStorage::<Value>::default()).unwrap();
+            let clock: &SystemClock = &SYSTEM_CLOCK;
+            config
+                .build(MemoryStorage::<Value>::default(), clock)
+                .unwrap();
         }
     }
 }

@@ -5,7 +5,12 @@ use super::{
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
+use std::{
+    cmp::Ordering,
+    fmt::Debug,
+    marker::PhantomData,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 /// Struct used to help another server synchronize their log with the current state of our own log.
 #[derive(Clone, Debug)]
@@ -410,6 +415,44 @@ impl LogicalClock {
         }
     }
 }
+
+/// Trait for obtaining physical time with uncertainty.
+pub trait PhysicalClock {
+    /// Returns the current physical time.
+    fn get_time(&self) -> i64;
+    /// Returns the uncertainty of the physical time.
+    fn get_uncertainty(&self) -> i64;
+    /// Returns the pair of the current physical time and its uncertainty.
+    fn get_time_with_uncertainty(&self) -> (i64, i64);
+}
+
+/// System clock that returns UTC nanoseconds since Unix epoch.
+pub struct SystemClock;
+
+impl PhysicalClock for SystemClock {
+    fn get_time(&self) -> i64 {
+        let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos(),
+            Err(_) => 0,
+        };
+        if nanos > i64::MAX as u128 {
+            i64::MAX
+        } else {
+            nanos as i64
+        }
+    }
+
+    fn get_uncertainty(&self) -> i64 {
+        0
+    }
+
+    fn get_time_with_uncertainty(&self) -> (i64, i64) {
+        (self.get_time(), self.get_uncertainty())
+    }
+}
+
+/// Global system clock instance.
+pub static SYSTEM_CLOCK: SystemClock = SystemClock;
 
 /// Flexible quorums can be used to increase/decrease the read and write quorum sizes,
 /// for different latency vs fault tolerance tradeoffs.

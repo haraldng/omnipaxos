@@ -5,7 +5,7 @@ use omnipaxos::{
     macros::*,
     messages::Message,
     storage::{Entry, Snapshot, Storage, StorageResult},
-    util::{FlexibleQuorum, NodeId},
+    util::{FlexibleQuorum, NodeId, SystemClock, SYSTEM_CLOCK},
     ClusterConfig, OmniPaxosConfig, ServerConfig,
 };
 use omnipaxos_storage::{
@@ -30,6 +30,10 @@ pub const STOPSIGN_ID: u64 = u64::MAX;
 
 #[cfg(feature = "unicache")]
 use omnipaxos::unicache::{MaybeEncoded, UniCache};
+
+pub fn test_clock() -> &'static SystemClock {
+    &SYSTEM_CLOCK
+}
 
 /// Serde deserialize function to deserialize toml milliseconds u64s to std::time::Duration
 fn deserialize_duration_millis<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -496,11 +500,12 @@ impl TestSystem {
             let op_config = test_config.into_omnipaxos_config(pid);
             let storage: StorageType<Value> =
                 StorageType::with(test_config.storage_type, &format!("{temp_dir_path}{pid}"));
+            let clock = test_clock();
             let (omni_replica, omni_reg_f) = system.create_and_register(|| {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.server_config.buffer_size,
-                    op_config.build(storage).unwrap(),
+                    op_config.build(storage, clock).unwrap(),
                     test_config.election_timeout,
                 )
             });
@@ -561,6 +566,7 @@ impl TestSystem {
     ) {
         let mut omni_refs: HashMap<NodeId, ActorRef<Message<Value>>> = HashMap::new();
         let op_config = test_config.into_omnipaxos_config(pid);
+        let clock = test_clock();
         let (omni_replica, omni_reg_f) = self
             .kompact_system
             .as_ref()
@@ -569,7 +575,7 @@ impl TestSystem {
                 OmniPaxosComponent::with(
                     pid,
                     op_config.server_config.buffer_size,
-                    op_config.build(storage).unwrap(),
+                    op_config.build(storage, clock).unwrap(),
                     test_config.election_timeout,
                 )
             });
@@ -758,7 +764,7 @@ pub mod omnireplica {
         paxos_timer: Option<ScheduledTimer>,
         tick_timer: Option<ScheduledTimer>,
         tick_timeout: Duration,
-        pub paxos: OmniPaxos<Value, StorageType<Value>>,
+        pub paxos: OmniPaxos<'static, Value, StorageType<Value>, SystemClock>,
         decided_futures: HashMap<NodeId, Ask<Value, ()>>,
         pub election_futures: Vec<Ask<(), Ballot>>,
         current_leader_ballot: Ballot,
@@ -804,7 +810,7 @@ pub mod omnireplica {
         pub fn with(
             pid: NodeId,
             buffer_size: usize,
-            paxos: OmniPaxos<Value, StorageType<Value>>,
+            paxos: OmniPaxos<'static, Value, StorageType<Value>, SystemClock>,
             tick_timeout: Duration,
         ) -> Self {
             Self {

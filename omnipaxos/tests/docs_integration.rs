@@ -11,8 +11,8 @@ mod docs_integration_test {
     #![cfg(feature = "toml_config")]
 
     use omnipaxos::{
-        messages::Message, storage::Snapshot, util::LogEntry, ClusterConfig, OmniPaxos,
-        OmniPaxosConfig, ServerConfig,
+        messages::Message, storage::Snapshot, util::LogEntry, util::{SystemClock, SYSTEM_CLOCK},
+        ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig,
     };
     use omnipaxos_storage::{
         memory_storage::MemoryStorage,
@@ -81,7 +81,7 @@ mod docs_integration_test {
     // END_CODE_EXAMPLE
 
     // https://github.com/haraldng/omnipaxos/blob/master/docs/omnipaxos/index.md#creating-a-node
-    fn creating_a_node() -> OmniPaxos<KeyValue, MemoryStorage<KeyValue>> {
+    fn creating_a_node() -> OmniPaxos<'static, KeyValue, MemoryStorage<KeyValue>, SystemClock> {
         // CODE_EXAMPLE
         use omnipaxos::{ClusterConfig, OmniPaxos, OmniPaxosConfig, ServerConfig};
         use omnipaxos_storage::memory_storage::MemoryStorage;
@@ -106,8 +106,9 @@ mod docs_integration_test {
         };
 
         let storage = MemoryStorage::default();
-        let mut omni_paxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> =
-            omnipaxos_config.build(storage).unwrap();
+        let clock = &SYSTEM_CLOCK;
+        let mut omni_paxos: OmniPaxos<'static, KeyValue, MemoryStorage<KeyValue>, SystemClock> =
+            omnipaxos_config.build(storage, clock).unwrap();
         // END_CODE_EXAMPLE
 
         return omni_paxos;
@@ -138,7 +139,8 @@ mod docs_integration_test {
 
         // Re-create storage with previous state, then create `OmniPaxos`
         let recovered_storage: PersistentStorage<KeyValue> = PersistentStorage::open(persist_conf);
-        let mut recovered_paxos = omnipaxos_config.build(recovered_storage);
+        let clock = &SYSTEM_CLOCK;
+        let mut recovered_paxos = omnipaxos_config.build(recovered_storage, clock);
         // END_CODE_EXAMPLE
     }
 
@@ -329,10 +331,15 @@ mod docs_integration_test {
                         if new_configuration.nodes.contains(&my_pid) {
                             // current configuration has been safely stopped. Start new instance
                             let new_storage = MemoryStorage::default();
-                            let mut new_omnipaxos: OmniPaxos<KeyValue, MemoryStorage<KeyValue>> =
-                                new_configuration
-                                    .build_for_server(current_config.clone(), new_storage)
-                                    .unwrap();
+                            let clock = &SYSTEM_CLOCK;
+                            let mut new_omnipaxos: OmniPaxos<
+                                'static,
+                                KeyValue,
+                                MemoryStorage<KeyValue>,
+                                SystemClock,
+                            > = new_configuration
+                                .build_for_server(current_config.clone(), new_storage, clock)
+                                .unwrap();
 
                             // use new_omnipaxos
                             // ...

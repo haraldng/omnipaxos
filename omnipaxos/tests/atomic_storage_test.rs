@@ -26,7 +26,7 @@ use omnipaxos::{
         Message,
     },
     storage::{Snapshot, SnapshotType, Storage},
-    util::{LogSync, NodeId, SequenceNumber},
+    util::{LogSync, NodeId, SequenceNumber, SystemClock},
     OmniPaxos, OmniPaxosConfig,
 };
 use omnipaxos_storage::memory_storage::MemoryStorage;
@@ -39,6 +39,7 @@ use utils::{BrokenStorageConfig, TestConfig, Value, ValueSnapshot};
 
 type MemoryStore = Arc<Mutex<MemoryStorage<Value>>>;
 type BrokenStore = Arc<Mutex<BrokenStorageConfig>>;
+type TestOmniPaxos = OmniPaxos<'static, Value, StorageType<Value>, SystemClock>;
 
 /// Creates a new OmniPaxos instance with `BrokenStorage` in its initial state.
 /// Also returns an `Arc<Mutex<_>>` pointer to the underlying `MemoryStorage` and
@@ -46,7 +47,7 @@ type BrokenStore = Arc<Mutex<BrokenStorageConfig>>;
 fn basic_setup() -> (
     MemoryStore,
     BrokenStore,
-    OmniPaxos<Value, StorageType<Value>>,
+    TestOmniPaxos,
 ) {
     let cfg = TestConfig::load("atomic_storage_test").expect("Test config loaded");
     let storage = StorageType::with(cfg.storage_type, "");
@@ -60,7 +61,8 @@ fn basic_setup() -> (
     op_config.cluster_config.nodes = (1..=cfg.num_nodes as NodeId).collect();
     op_config.cluster_config.configuration_id = 1;
     op_config.server_config.election_tick_timeout = 1; // set tick timeout to 1 as we need to trigger leader change when we call tick() in the tests.
-    let op = op_config.build(storage).unwrap();
+    let clock = utils::test_clock();
+    let op = op_config.build(storage, clock).unwrap();
     (mem_storage, storage_conf, op)
 }
 
@@ -70,7 +72,7 @@ fn basic_setup() -> (
 fn _setup_leader() -> (
     MemoryStore,
     BrokenStore,
-    OmniPaxos<Value, StorageType<Value>>,
+    TestOmniPaxos,
 ) {
     let (mem_storage, storage_conf, mut op) = setup_follower();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();
@@ -146,7 +148,7 @@ fn _setup_leader() -> (
 fn setup_follower() -> (
     MemoryStore,
     BrokenStore,
-    OmniPaxos<Value, StorageType<Value>>,
+    TestOmniPaxos,
 ) {
     let (mem_storage, storage_conf, mut op) = basic_setup();
     let mut n = mem_storage.lock().unwrap().get_promise().unwrap().unwrap();

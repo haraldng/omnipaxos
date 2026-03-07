@@ -6,7 +6,7 @@ use crate::{
     storage::{Entry, StopSign, Storage},
     util::{
         defaults::{BUFFER_SIZE, ELECTION_TIMEOUT, FLUSH_BATCH_TIMEOUT, RESEND_MESSAGE_TIMEOUT},
-        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId,
+        ConfigurationId, FlexibleQuorum, LogEntry, LogicalClock, NodeId, PhysicalClock,
     },
     utils::{ui, ui::ClusterState},
 };
@@ -58,10 +58,15 @@ impl OmniPaxosConfig {
     }
 
     /// Checks all configuration fields and returns the local OmniPaxos node if successful.
-    pub fn build<T, B>(self, storage: B) -> Result<OmniPaxos<T, B>, ConfigError>
+    pub fn build<'a, T, B, C>(
+        self,
+        storage: B,
+        clock: &'a C,
+    ) -> Result<OmniPaxos<'a, T, B, C>, ConfigError>
     where
         T: Entry,
         B: Storage<T>,
+        C: PhysicalClock,
     {
         self.validate()?;
         // Use stored ballot as initial BLE leader
@@ -69,13 +74,14 @@ impl OmniPaxosConfig {
             .get_promise()
             .expect("storage error while trying to read promise");
         Ok(OmniPaxos {
+            clock,
             ble: BallotLeaderElection::with(self.clone().into(), recovered_leader),
             election_clock: LogicalClock::with(self.server_config.election_tick_timeout),
             resend_message_clock: LogicalClock::with(
                 self.server_config.resend_message_tick_timeout,
             ),
             flush_batch_clock: LogicalClock::with(self.server_config.flush_batch_tick_timeout),
-            seq_paxos: SequencePaxos::with(self.into(), storage),
+            seq_paxos: SequencePaxos::with(self.into(), storage, clock),
         })
     }
 }
@@ -132,20 +138,22 @@ impl ClusterConfig {
 
     /// Checks all configuration fields and builds a local OmniPaxos node with settings for this
     /// node defined in `server_config` and using storage `with_storage`.
-    pub fn build_for_server<T, B>(
+    pub fn build_for_server<'a, T, B, C>(
         self,
         server_config: ServerConfig,
         with_storage: B,
-    ) -> Result<OmniPaxos<T, B>, ConfigError>
+        clock: &'a C,
+    ) -> Result<OmniPaxos<'a, T, B, C>, ConfigError>
     where
         T: Entry,
         B: Storage<T>,
+        C: PhysicalClock,
     {
         let op_config = OmniPaxosConfig {
             cluster_config: self,
             server_config,
         };
-        op_config.build(with_storage)
+        op_config.build(with_storage, clock)
     }
 }
 
@@ -222,22 +230,25 @@ impl Default for ServerConfig {
 
 /// The `OmniPaxos` struct represents an OmniPaxos server. Maintains the replicated log that can be read from and appended to.
 /// It also handles incoming messages and produces outgoing messages that you need to fetch and send periodically using your own network implementation.
-pub struct OmniPaxos<T, B>
+pub struct OmniPaxos<'a, T, B, C>
 where
     T: Entry,
     B: Storage<T>,
+    C: PhysicalClock,
 {
-    seq_paxos: SequencePaxos<T, B>,
+    clock: &'a C,
+    seq_paxos: SequencePaxos<'a, T, B, C>,
     ble: BallotLeaderElection,
     election_clock: LogicalClock,
     resend_message_clock: LogicalClock,
     flush_batch_clock: LogicalClock,
 }
 
-impl<T, B> OmniPaxos<T, B>
+impl<'a, T, B, C> OmniPaxos<'a, T, B, C>
 where
     T: Entry,
     B: Storage<T>,
+    C: PhysicalClock,
 {
     /// Initiates the trim process.
     /// # Arguments

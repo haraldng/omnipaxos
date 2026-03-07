@@ -4,10 +4,11 @@ use super::*;
 
 use crate::util::{MessageStatus, WRITE_ERROR_MSG};
 
-impl<T, B> SequencePaxos<T, B>
+impl<'a, T, B, C> SequencePaxos<'a, T, B, C>
 where
     T: Entry,
     B: Storage<T>,
+    C: PhysicalClock,
 {
     /*** Follower ***/
     pub(crate) fn handle_prepare(&mut self, prep: Prepare, from: NodeId) {
@@ -108,6 +109,8 @@ where
             }
         }
     }
+
+    pub(crate) fn handle_fastaccept(&mut self, acc_dec: FastAccept<T>) { }
 
     pub(crate) fn handle_accept_stopsign(&mut self, acc_ss: AcceptStopSign) {
         if self.check_valid_ballot(acc_ss.n)

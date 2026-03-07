@@ -6,10 +6,11 @@ use crate::util::{AcceptedMetaData, WRITE_ERROR_MSG};
 
 use super::*;
 
-impl<T, B> SequencePaxos<T, B>
+impl<'a, T, B, C> SequencePaxos<'a, T, B, C>
 where
     T: Entry,
     B: Storage<T>,
+    C: PhysicalClock,
 {
     /// Handle a new leader. Should be called when the leader election has elected a new leader with the ballot `n`
     /*** Leader ***/
@@ -91,6 +92,76 @@ where
             (Role::Leader, Phase::Prepare) => self.buffered_stopsign = Some(ss),
             (Role::Leader, Phase::Accept) => self.accept_stopsign_leader(ss),
             _ => self.forward_stopsign(ss),
+        }
+    }
+
+    pub(crate) fn handle_fast_accepted(&mut self, fast_acc: FastAccepted<T>, from: NodeId) {
+        //if currentRnd != n then return
+        if self.leader_state.n_leader != fast_acc.n {
+            return;
+        }
+
+        // only handle if we are leader in accept phase
+        if self.state != (Role::Leader, Phase::Accept) {
+            return;
+        }
+
+        // if acceptedMap<idx> is null then initialize acceptedMap<idx>
+        let entry = self
+            .accepted_map
+            .entry(fast_acc.idx)
+            .or_insert_with(|| AcceptedMapEntry {
+                entry: fast_acc.entry.clone(),
+                prev_hash: fast_acc.prev_hash.clone(),
+                fast: HashMap::new(),
+                slow: Set::new(),
+            });
+
+        // acceptedMap<idx>.fast<(entry.prevHash, entry.entryHash)>.append(f)
+        let entry_hash = fast_acc.idx.to_le_bytes().to_vec();
+        let key = (fast_acc.prev_hash.clone(), entry_hash);
+        entry.fast.entry(key).or_insert_with(Set::new).insert(from);
+
+        // compute quorum sizes
+        let num_nodes = self.peers.len() + 1;
+        let f = (num_nodes - 1) / 2;
+        let fast_quorum = f + (f + 1) / 2 + 1;
+        let slow_quorum = f + 1;
+
+        // collect all fast voters across all keys
+        let fast_voters: Set<NodeId> = entry.fast.values().flatten().cloned().collect();
+
+        // Union(acceptedMap<idx>.fast, acceptedMap<idx>.slow)
+        let combined: Set<NodeId> = fast_voters.union(&entry.slow).cloned().collect();
+
+        // Check fast quorum (f + ceil(f/2) + 1)
+        // if self in acceptedMap<idx>.slow AND |Union(fast, slow)| >= f + ceil(f/2) + 1
+        if entry.slow.contains(&self.pid) && combined.len() >= fast_quorum {
+            //decidedIdx = idx
+            let decided_idx = fast_acc.idx;
+            self.internal_storage
+                .set_decided_idx(decided_idx)
+                .expect(WRITE_ERROR_MSG);
+
+            //send <Decide, currentRnd, decidedIdx> to all followers in promises{}
+            for pid in self.leader_state.get_promised_followers() {
+                self.send_decide(pid, decided_idx, false);
+            }
+            return;
+        }
+
+        // Check slow quorum (f + 1)
+        // else if |acceptedMap<idx>.slow| >= f+1 AND self in acceptedMap<idx>.slow
+        if entry.slow.contains(&self.pid) && entry.slow.len() >= slow_quorum {
+            // decidedIdx = idx
+            let decided_idx = fast_acc.idx;
+            self.internal_storage
+                .set_decided_idx(decided_idx)
+                .expect(WRITE_ERROR_MSG);
+            // send <Decide, currentRnd, decidedIdx> to all followers in promises{}
+            for pid in self.leader_state.get_promised_followers() {
+                self.send_decide(pid, decided_idx, false);
+            }
         }
     }
 

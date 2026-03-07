@@ -13,3 +13,7 @@ docs/.DS_Store
 .DS_Store
 */.idea/*
 
+# Unused workspace files for group project
+/examples/*
+/omnipaxos_ui/*
+/docs/*
