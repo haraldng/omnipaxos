@@ -263,6 +263,13 @@ where
         self.seq_paxos.get_decided_idx()
     }
 
+    /// Return the accepted index of this node's log (as if it was never compacted).
+    /// Equal to the index of the last accepted entry; useful for tagging a just-appended
+    /// entry so that decision can be awaited.
+    pub fn get_accepted_idx(&self) -> usize {
+        self.seq_paxos.internal_storage.get_accepted_idx()
+    }
+
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> usize {
         self.seq_paxos.get_compacted_idx()

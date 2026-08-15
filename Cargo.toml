@@ -6,6 +6,7 @@ members = [
     "omnipaxos_macros",
     "omnipaxos_ui",
     "examples/kv_store",
+    "examples/kv_store_async",
     "examples/dashboard",
 ]
 

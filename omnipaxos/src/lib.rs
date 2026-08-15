@@ -27,6 +27,12 @@ pub(crate) mod sequence_paxos;
 /// Traits and structs related to the backend storage of an OmniPaxos server.
 pub mod storage;
 
+/// Async runtime wrapper. Runs OmniPaxos in a background actor and exposes a
+/// cloneable handle with `append_notify` and `subscribe_events`. Gated behind
+/// the `async_runtime` feature; use with `TokioRuntime` behind `tokio_runtime`.
+#[cfg(feature = "async_runtime")]
+pub mod runtime;
+
 #[cfg(feature = "unicache")]
 /// Traits, structs, and types related to the unicache.
 pub mod unicache;
