@@ -27,6 +27,7 @@ futures = { version = "0.3", optional = true }
 async-channel = { version = "2", optional = true }
 futures-timer = { version = "3", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "time", "sync", "macros"] }
+uuid = { version = "1", optional = true, features = ["v4"] }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "4fd1fdc", features = ["silent_logging"] }
@@ -43,8 +44,10 @@ logging  = ["slog", "slog-term", "slog-async"]
 toml_config = ["serde", "toml"]
 macros = ["omnipaxos_macros"]
 unicache = ["lru", "num-traits", "linked_hash_set"]
-async_runtime = ["dep:futures", "dep:async-channel", "dep:futures-timer"]
+async_runtime = ["dep:futures", "dep:async-channel", "dep:futures-timer", "dep:uuid"]
 tokio_runtime = ["async_runtime", "dep:tokio"]
+# Explicit serde feature so it can chain uuid's serde support when both are on.
+serde = ["dep:serde", "uuid?/serde"]
 
 default = ["macros"]
 

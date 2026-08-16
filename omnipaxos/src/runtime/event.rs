@@ -34,15 +34,17 @@ where
 {
     /// The underlying [`OmniPaxos::append`](crate::OmniPaxos::append) call failed.
     Propose(ProposeErr<T>),
-    /// The entry was forwarded to the leader instead of accepted locally, so the actor
-    /// cannot correlate it with a decided index. Retry `append_notify` on the leader.
+    /// No leader is currently known so the entry cannot be routed. Retry after election.
     NotLeader {
         /// The current leader as observed by this node, if known.
         current_leader: Option<NodeId>,
     },
-    /// A leader change occurred while the entry was pending; it may have been overwritten
-    /// under a higher ballot. Users should re-append if this error is returned.
+    /// A leader change occurred after the entry was accepted at its assigned index but
+    /// before it was decided; the entry at that index may have been overwritten under a
+    /// higher ballot. Users should re-append if this error is returned.
     Superseded,
+    /// The `append_notify_timeout` elapsed before the entry was decided. Retry safe.
+    Timeout,
     /// The actor has shut down before the entry could be decided.
     Shutdown,
 }

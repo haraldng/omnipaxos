@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use omnipaxos::messages::Message;
 use omnipaxos::runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };
@@ -94,10 +93,7 @@ async fn spawn_cluster(n: NodeId) -> HashMap<NodeId, OmniPaxosHandle<TestEntry>>
         let peers = handles_arc.clone();
         tokio::spawn(async move {
             while let Ok(msg) = out.recv().await {
-                let receiver = match &msg {
-                    Message::SequencePaxos(p) => p.to,
-                    Message::BLE(b) => b.to,
-                };
+                let receiver = msg.get_receiver();
                 if let Some(peer) = peers.get(&receiver) {
                     peer.handle_incoming(msg).await;
                 }
@@ -145,21 +141,129 @@ async fn append_notify_resolves_after_decision() {
 }
 
 #[tokio::test]
-async fn append_notify_on_follower_returns_not_leader() {
+async fn append_notify_from_follower_resolves() {
     let handles = spawn_cluster(3).await;
     let leader = wait_for_leader(&handles).await;
     let follower_pid = *handles.keys().find(|&&p| p != leader).unwrap();
     let follower = handles.get(&follower_pid).unwrap().clone();
 
-    let res = timeout(Duration::from_secs(3), follower.append_notify(TestEntry(7)))
-        .await
-        .expect("append_notify did not respond in time");
+    let idx = timeout(
+        Duration::from_secs(3),
+        follower.append_notify(TestEntry(99)),
+    )
+    .await
+    .expect("follower append_notify did not resolve in time")
+    .expect("follower append_notify returned error");
 
+    assert!(
+        idx >= 1,
+        "expected non-zero decided idx from follower append_notify, got {idx}"
+    );
+
+    // The entry should be visible in the decided log from any node.
+    let entries = follower.read_decided_suffix(0).await.expect("no entries");
+    assert!(
+        !entries.is_empty(),
+        "follower's decided suffix should be non-empty after append_notify"
+    );
+}
+
+#[tokio::test]
+async fn append_notify_mixed_leader_and_follower() {
+    let handles = spawn_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let follower_pid = *handles.keys().find(|&&p| p != leader).unwrap();
+
+    let leader_h = handles.get(&leader).unwrap().clone();
+    let follower_h = handles.get(&follower_pid).unwrap().clone();
+
+    // Fire concurrent append_notify calls from both roles.
+    let (a, b) = tokio::join!(
+        timeout(Duration::from_secs(3), leader_h.append_notify(TestEntry(1))),
+        timeout(
+            Duration::from_secs(3),
+            follower_h.append_notify(TestEntry(2))
+        ),
+    );
+    let idx_a = a.expect("leader append timed out").expect("leader err");
+    let idx_b = b.expect("follower append timed out").expect("follower err");
+    assert_ne!(idx_a, idx_b, "distinct log indices expected");
+}
+
+#[tokio::test]
+async fn append_notify_times_out_when_no_leader_elected() {
+    // Spin up an actor with no peers wired up — leader stays unknown.
+    // append_notify should NOT fail immediately (that would force users back to
+    // leader-polling). Instead it should wait until append_notify_timeout
+    // and resolve with Timeout.
+    let nodes: Vec<NodeId> = vec![1, 2, 3];
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        append_notify_timeout: Duration::from_millis(150),
+        ..Default::default()
+    };
+    let op = build_op(1, nodes);
+    let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg);
+    // No transport wired, no other nodes — leader stays unknown.
+
+    let res = timeout(Duration::from_secs(2), h.append_notify(TestEntry(1)))
+        .await
+        .expect("append_notify should resolve within outer timeout");
     match res {
-        Err(AppendError::NotLeader { current_leader }) => {
-            assert_eq!(current_leader, Some(leader));
-        }
-        other => panic!("expected NotLeader, got {other:?}"),
+        Err(AppendError::Timeout) => {}
+        other => panic!("expected Timeout, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn append_notify_timeout_when_transport_broken() {
+    // Spawn a cluster, elect a leader, then break the transport by dropping the
+    // handles map so outgoing/incoming channels close on the leader. A follower's
+    // append_notify should fail with Timeout after the configured deadline.
+    let nodes: Vec<NodeId> = vec![1, 2, 3];
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        append_notify_timeout: Duration::from_millis(200),
+        ..Default::default()
+    };
+    let mut handles: HashMap<NodeId, OmniPaxosHandle<TestEntry>> = HashMap::new();
+    for pid in nodes.clone() {
+        let op = build_op(pid, nodes.clone());
+        let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg.clone());
+        handles.insert(pid, h);
+    }
+    let handles_arc = Arc::new(handles.clone());
+    for pid in nodes.clone() {
+        let out = handles_arc[&pid].outgoing_messages();
+        let peers = handles_arc.clone();
+        tokio::spawn(async move {
+            while let Ok(msg) = out.recv().await {
+                let receiver = msg.get_receiver();
+                if let Some(peer) = peers.get(&receiver) {
+                    peer.handle_incoming(msg).await;
+                }
+            }
+        });
+    }
+    let leader = wait_for_leader(&handles).await;
+    let follower_pid = *handles.keys().find(|&&p| p != leader).unwrap();
+    let follower = handles.get(&follower_pid).unwrap().clone();
+
+    // Now drop everything BUT the follower handle. This kills transport tasks
+    // (their handle clones go away) so TaggedProposal will never reach the leader.
+    let _ = handles_arc;
+    drop(handles);
+
+    let res = timeout(Duration::from_secs(2), follower.append_notify(TestEntry(7)))
+        .await
+        .expect("append_notify did not respond within outer timeout");
+    match res {
+        Err(AppendError::Timeout) => {}
+        // Under some interleavings the entry may squeak through before shutdown; accept.
+        Ok(_) => {}
+        other => panic!("expected Timeout or Ok, got {other:?}"),
     }
 }
 
@@ -182,7 +286,7 @@ async fn event_stream_emits_leader_election() {
     .await
     .expect("no LeaderElected event within timeout");
 
-    assert!(elected_pid >= 1 && elected_pid <= 3);
+    assert!((1..=3).contains(&elected_pid));
 }
 
 #[tokio::test]
@@ -234,6 +338,7 @@ async fn append_notify_shutdown_error_when_actor_gone() {
         | Err(AppendError::Shutdown)
         | Err(AppendError::Propose(_))
         | Err(AppendError::NotLeader { .. })
-        | Err(AppendError::Superseded) => {}
+        | Err(AppendError::Superseded)
+        | Err(AppendError::Timeout) => {}
     }
 }

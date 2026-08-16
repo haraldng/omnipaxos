@@ -21,6 +21,7 @@ mod traits;
 #[cfg(feature = "tokio_runtime")]
 mod tokio_rt;
 
+pub use crate::messages::EntryId;
 pub use event::{AppendError, OmniPaxosEvent};
 pub use handle::{spawn_actor, OmniPaxosHandle, RuntimeConfig};
 pub use traits::{ActorEntry, AsyncRuntime};

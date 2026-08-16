@@ -10,9 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use omnipaxos::messages::Message;
 use omnipaxos::runtime::{
     spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };
@@ -49,10 +47,7 @@ fn wire_transport(handles: &HashMap<NodeId, OmniPaxosHandle<KeyValue>>) {
         let peers = handles.clone();
         tokio::spawn(async move {
             while let Ok(msg) = out.recv().await {
-                let dst = match &msg {
-                    Message::SequencePaxos(p) => p.to,
-                    Message::BLE(b) => b.to,
-                };
+                let dst = msg.get_receiver();
                 if let Some(peer) = peers.get(&dst) {
                     peer.handle_incoming(msg).await;
                 }
@@ -93,20 +88,10 @@ async fn main() {
         }
     });
 
-    // 3. Wait for a leader by asking any node (fast poll instead of sleep — but this is
-    //    optional: `append_notify` on a follower will also work, it just takes longer).
-    let leader = loop {
-        if let Some((pid, true)) = handles[&1].current_leader().await {
-            break pid;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
-    println!("Elected leader: {leader}");
-
-    // 4. Append entries via the leader and await decision. No sleep, no polling, no lock —
-    //    the Future resolves exactly when the entry is decided. `append_notify` requires
-    //    the entry to land locally, so it must be called on the leader; a follower call
-    //    returns `AppendError::NotLeader` (fire-and-forget `append` on a follower forwards).
+    // 3. Append entries via node 1 (which may be leader or follower — the actor routes
+    //    tagged proposals to the current leader and correlates the assignment for us).
+    //    No leader polling needed; `append_notify` waits until a leader is known and the
+    //    entry is decided at its assigned index. No sleep, no polling, no lock.
     for kv in [
         KeyValue {
             key: "a".into(),
@@ -117,17 +102,17 @@ async fn main() {
             value: 2,
         },
     ] {
-        println!("Adding value {:?} via leader {leader}", kv);
-        let idx = handles[&leader]
+        println!("Adding value {:?} via node 1", kv);
+        let idx = handles[&1]
             .append_notify(kv)
             .await
             .expect("append_notify failed");
         println!("  -> decided at log idx {idx}");
     }
 
-    // 5. Materialize the KV store from the decided log.
+    // 4. Materialize the KV store from the decided log.
     let mut store = HashMap::new();
-    let ents = handles[&leader].read_decided_suffix(0).await.expect("read");
+    let ents = handles[&1].read_decided_suffix(0).await.expect("read");
     for e in ents {
         if let LogEntry::Decided(kv) = e {
             store.insert(kv.key, kv.value);

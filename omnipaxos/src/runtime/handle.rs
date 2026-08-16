@@ -29,6 +29,9 @@ pub struct RuntimeConfig {
     pub incoming_capacity: usize,
     /// Bounded capacity for the event channel.
     pub event_capacity: usize,
+    /// How long an `append_notify` call waits for its entry to be decided before
+    /// resolving with [`AppendError::Timeout`](super::AppendError::Timeout).
+    pub append_notify_timeout: Duration,
 }
 
 impl Default for RuntimeConfig {
@@ -40,6 +43,7 @@ impl Default for RuntimeConfig {
             outgoing_capacity: 10_000,
             incoming_capacity: 10_000,
             event_capacity: 1024,
+            append_notify_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -77,9 +81,16 @@ impl<T> OmniPaxosHandle<T>
 where
     T: Entry + Send + 'static,
 {
-    /// Append an entry and await its decided log index. If a leader change causes
-    /// the entry to be overwritten before decision, returns [`AppendError::Superseded`]
-    /// and the user should re-append.
+    /// Append an entry and await its decided log index.
+    ///
+    /// Works from any node: the actor tags the entry with a unique id, routes it to
+    /// the current leader, and resolves the future when the assigned log index is
+    /// decided. Fails with:
+    /// - [`AppendError::Timeout`] if the entry is not decided within
+    ///   [`RuntimeConfig::append_notify_timeout`];
+    /// - [`AppendError::Superseded`] if a leader change invalidated the assignment
+    ///   before decision;
+    /// - [`AppendError::NotLeader`] if no leader is currently known.
     pub async fn append_notify(&self, entry: T) -> Result<usize, AppendError<T>> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
@@ -233,6 +244,7 @@ where
         event_tx,
         cfg.tick_period,
         cfg.egress_period,
+        cfg.append_notify_timeout,
     );
 
     R::spawn(run::<T, B, R>(state, PhantomData::<fn() -> R>));

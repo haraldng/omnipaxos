@@ -6,6 +6,9 @@ use crate::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "async_runtime")]
+pub use async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
+
 /// Internal component for log replication
 pub mod sequence_paxos {
     use crate::{
@@ -246,7 +249,9 @@ pub mod ballot_leader_election {
 }
 
 #[allow(missing_docs)]
-/// Message in OmniPaxos. Can be either a `SequencePaxos` message (for log replication) or `BLE` message (for leader election)
+/// Message in OmniPaxos. Can be either a `SequencePaxos` message (for log replication),
+/// a `BLE` message (for leader election), or (when the `async_runtime` feature is enabled)
+/// an `AsyncRuntime` message used by the actor layer for `append_notify` correlation.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Message<T>
@@ -255,6 +260,8 @@ where
 {
     SequencePaxos(PaxosMessage<T>),
     BLE(BLEMessage),
+    #[cfg(feature = "async_runtime")]
+    AsyncRuntime(AsyncRuntimeMessage<T>),
 }
 
 impl<T> Message<T>
@@ -266,6 +273,8 @@ where
         match self {
             Message::SequencePaxos(p) => p.from,
             Message::BLE(b) => b.from,
+            #[cfg(feature = "async_runtime")]
+            Message::AsyncRuntime(a) => a.from,
         }
     }
 
@@ -274,6 +283,62 @@ where
         match self {
             Message::SequencePaxos(p) => p.to,
             Message::BLE(b) => b.to,
+            #[cfg(feature = "async_runtime")]
+            Message::AsyncRuntime(a) => a.to,
         }
+    }
+}
+
+/// Messages exchanged between actor instances for `append_notify` correlation.
+/// These do not touch the core Paxos protocol — they run alongside it.
+#[cfg(feature = "async_runtime")]
+pub mod async_runtime {
+    use crate::{storage::Entry, util::NodeId};
+    #[cfg(feature = "serde")]
+    use serde::{Deserialize, Serialize};
+
+    /// A unique identifier for a tagged proposal, used to correlate a
+    /// forwarded entry with its assigned log index.
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct EntryId(pub uuid::Uuid);
+
+    /// Wrapper carrying sender/receiver for an [`AsyncRuntimeMsg`].
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub struct AsyncRuntimeMessage<T>
+    where
+        T: Entry,
+    {
+        /// Sender of `msg`.
+        pub from: NodeId,
+        /// Receiver of `msg`.
+        pub to: NodeId,
+        /// The runtime-message content.
+        pub msg: AsyncRuntimeMsg<T>,
+    }
+
+    /// Runtime-layer messages used by the actor to correlate `append_notify` calls
+    /// with the log index the leader eventually assigns.
+    #[allow(missing_docs)]
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub enum AsyncRuntimeMsg<T>
+    where
+        T: Entry,
+    {
+        /// Follower actor → leader actor. Carries an entry the originator wants
+        /// tracked. Replaces the untagged `PaxosMsg::ProposalForward` path when
+        /// the caller used `append_notify`.
+        TaggedProposal { id: EntryId, entry: T },
+        /// Leader actor → originating follower actor. Carries the log index the
+        /// leader assigned to a previously received `TaggedProposal`, plus the
+        /// ballot number under which it was accepted so the follower can detect
+        /// supersession after a leader change.
+        Assigned {
+            id: EntryId,
+            assigned_idx: usize,
+            promise_n: u32,
+        },
     }
 }

@@ -296,6 +296,11 @@ where
         self.seq_paxos.get_promise()
     }
 
+    /// Returns this node's own pid.
+    pub fn get_pid(&self) -> NodeId {
+        self.seq_paxos.get_pid()
+    }
+
     /// Moves outgoing messages from this server into the buffer. The messages should then be sent via the network implementation.
     pub fn take_outgoing_messages(&mut self, buffer: &mut Vec<Message<T>>) {
         self.seq_paxos.take_outgoing_msgs(buffer);
@@ -339,6 +344,11 @@ where
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
             Message::BLE(b) => self.ble.handle(b),
+            #[cfg(feature = "async_runtime")]
+            Message::AsyncRuntime(_) => {
+                // Runtime-layer messages are consumed by the actor before reaching here.
+                // If one leaks through (e.g. user hand-delivered), silently ignore.
+            }
         }
     }
 

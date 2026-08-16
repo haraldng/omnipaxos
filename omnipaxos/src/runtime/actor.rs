@@ -1,11 +1,12 @@
 use core::time::Duration;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use futures::channel::oneshot;
 use futures::{select_biased, FutureExt, StreamExt};
 
-use crate::ballot_leader_election::Ballot;
+use crate::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
 use crate::messages::Message;
 use crate::storage::{Entry, Storage};
 use crate::util::NodeId;
@@ -14,17 +15,27 @@ use crate::OmniPaxos;
 use super::event::{AppendError, Command, OmniPaxosEvent};
 use super::traits::{ActorEntry, AsyncRuntime};
 
-/// A pending `append_notify` awaiting decision.
+/// A pending `append_notify` awaiting decision. Uniform representation regardless
+/// of whether the entry was accepted locally (we are leader) or forwarded (we are
+/// follower). The `assigned` field is filled in by either code path; the drain
+/// loop treats every pending item the same way.
 struct Pending<T>
 where
     T: Entry,
 {
-    /// The 1-based accepted index at which we believe the entry landed.
-    tentative: usize,
-    /// The ballot round under which the entry was accepted. If the current ballot
-    /// promotes above this, the entry may have been overwritten and we fail with
-    /// [`AppendError::Superseded`].
-    promise_n: u32,
+    id: EntryId,
+    /// The entry, retained until we've dispatched it. Cleared once we've either
+    /// accepted it locally or sent a `TaggedProposal` to the leader. When `Some`
+    /// on each tick, `try_dispatch_undispatched` attempts to route it. This is
+    /// what enables `append_notify` to be called before a leader is elected —
+    /// the entry simply waits until routing becomes possible.
+    undispatched: Option<T>,
+    /// `(assigned_idx, ballot_n_at_assignment)`. `None` until either:
+    ///   (a) we accepted the entry ourselves as leader, or
+    ///   (b) we received `AsyncRuntimeMsg::Assigned` from the leader.
+    /// The ballot lets us detect supersession after a leader change.
+    assigned: Option<(usize, u32)>,
+    deadline: Instant,
     reply: oneshot::Sender<Result<usize, AppendError<T>>>,
 }
 
@@ -41,6 +52,8 @@ where
     pub(crate) tick_period: Duration,
     pub(crate) egress_period: Duration,
 
+    own_pid: NodeId,
+    append_notify_timeout: Duration,
     outgoing_buf: Vec<Message<T>>,
     pending: VecDeque<Pending<T>>,
     last_leader: Option<(NodeId, bool)>,
@@ -53,6 +66,7 @@ where
     T: Entry,
     B: Storage<T>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         op: OmniPaxos<T, B>,
         cmd_rx: async_channel::Receiver<Command<T>>,
@@ -61,9 +75,11 @@ where
         event_tx: async_channel::Sender<OmniPaxosEvent>,
         tick_period: Duration,
         egress_period: Duration,
+        append_notify_timeout: Duration,
     ) -> Self {
         let last_decided_idx = op.get_decided_idx();
         let last_leader = op.get_current_leader();
+        let own_pid = op.get_pid();
         Self {
             op,
             cmd_rx,
@@ -72,6 +88,8 @@ where
             event_tx,
             tick_period,
             egress_period,
+            own_pid,
+            append_notify_timeout,
             outgoing_buf: Vec::new(),
             pending: VecDeque::new(),
             last_leader,
@@ -112,18 +130,26 @@ where
         }
     }
 
+    /// One drain path for every pending item. Never branches on "were we leader
+    /// when this was created" — that context lives only in the code that writes
+    /// `assigned`.
     fn drain_notifiers(&mut self) {
         let decided = self.op.get_decided_idx();
-        let cur_ballot: Ballot = self.op.get_promise();
-        while let Some(head) = self.pending.front() {
-            if head.tentative <= decided {
-                let p = self.pending.pop_front().unwrap();
-                let _ = p.reply.send(Ok(p.tentative));
-            } else if head.promise_n < cur_ballot.n {
-                let p = self.pending.pop_front().unwrap();
-                let _ = p.reply.send(Err(AppendError::Superseded));
-            } else {
-                break;
+        let now = Instant::now();
+        let cur_n = self.op.get_promise().n;
+        let old = std::mem::take(&mut self.pending);
+        for p in old {
+            match p.assigned {
+                Some((idx, _)) if idx <= decided => {
+                    let _ = p.reply.send(Ok(idx));
+                }
+                Some((_, ballot_n)) if ballot_n < cur_n => {
+                    let _ = p.reply.send(Err(AppendError::Superseded));
+                }
+                _ if now > p.deadline => {
+                    let _ = p.reply.send(Err(AppendError::Timeout));
+                }
+                _ => self.pending.push_back(p),
             }
         }
     }
@@ -138,36 +164,129 @@ where
         }
     }
 
-    fn handle_command(&mut self, cmd: Command<T>) {
+    fn record_assignment(&mut self, id: EntryId, idx: usize, ballot_n: u32) {
+        for p in self.pending.iter_mut() {
+            if p.id == id {
+                p.assigned = Some((idx, ballot_n));
+                return;
+            }
+        }
+        // No matching pending — late reply after timeout drain, or duplicate. Ignore.
+    }
+
+    /// Leader-side accept. Runs when we originate an `append_notify` locally *or*
+    /// when we receive a `TaggedProposal` from a follower. Populates the local
+    /// pending's `assigned` (if any) and, if `reply_to` is set, sends `Assigned`
+    /// back to the originator.
+    async fn accept_as_leader(&mut self, id: EntryId, entry: T, reply_to: Option<NodeId>) {
+        let before = self.op.get_accepted_idx();
+        if self.op.append(entry).is_ok() {
+            let after = self.op.get_accepted_idx();
+            if after > before {
+                let ballot_n = self.op.get_promise().n;
+                self.record_assignment(id, after, ballot_n);
+                if let Some(origin) = reply_to {
+                    let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+                        from: self.own_pid,
+                        to: origin,
+                        msg: AsyncRuntimeMsg::Assigned {
+                            id,
+                            assigned_idx: after,
+                            promise_n: ballot_n,
+                        },
+                    });
+                    let _ = self.outgoing_tx.send(reply_msg).await;
+                }
+            }
+            // else: leader in Prepare phase, entry buffered. No assignment recorded.
+            // Origin (or ourselves) will resolve via Timeout unless we re-route later.
+        }
+    }
+
+    /// Attempt to dispatch every pending entry that hasn't yet been sent or
+    /// accepted locally. Called from `Command::AppendNotify` and on each tick,
+    /// which lets a call issued *before* an election eventually succeed once a
+    /// leader is known.
+    async fn try_dispatch_undispatched(&mut self) {
+        let cur = self.op.get_current_leader();
+        let Some((leader, accepted)) = cur else {
+            return;
+        };
+        // Snapshot the entries to dispatch. We take() them out of pending so the
+        // borrow of self.pending doesn't overlap the following async sends.
+        let mut to_local: Vec<(EntryId, T)> = Vec::new();
+        let mut to_remote: Vec<(EntryId, T)> = Vec::new();
+        for p in self.pending.iter_mut() {
+            let Some(entry) = p.undispatched.take() else {
+                continue;
+            };
+            if leader == self.own_pid && accepted {
+                to_local.push((p.id, entry));
+            } else if leader != self.own_pid {
+                to_remote.push((p.id, entry));
+            } else {
+                // leader == self.own_pid but we're not yet in Accept phase —
+                // put the entry back and wait for the next tick.
+                p.undispatched = Some(entry);
+            }
+        }
+        for (id, entry) in to_local {
+            self.accept_as_leader(id, entry, None).await;
+        }
+        for (id, entry) in to_remote {
+            let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+                from: self.own_pid,
+                to: leader,
+                msg: AsyncRuntimeMsg::TaggedProposal { id, entry },
+            });
+            let _ = self.outgoing_tx.send(msg).await;
+        }
+    }
+
+    async fn handle_runtime_msg(&mut self, arm: AsyncRuntimeMessage<T>) {
+        match arm.msg {
+            AsyncRuntimeMsg::TaggedProposal { id, entry } => {
+                let cur = self.op.get_current_leader().map(|(p, _)| p);
+                if cur == Some(self.own_pid) {
+                    self.accept_as_leader(id, entry, Some(arm.from)).await;
+                } else if let Some(new_leader) = cur {
+                    // Leadership drifted since sender chose us. Hop forward, preserving
+                    // the original `from` so the leader replies to the true origin.
+                    let fwd = Message::AsyncRuntime(AsyncRuntimeMessage {
+                        from: arm.from,
+                        to: new_leader,
+                        msg: AsyncRuntimeMsg::TaggedProposal { id, entry },
+                    });
+                    let _ = self.outgoing_tx.send(fwd).await;
+                }
+                // Else: no leader; drop. Originator will timeout.
+            }
+            AsyncRuntimeMsg::Assigned {
+                id,
+                assigned_idx,
+                promise_n,
+            } => {
+                self.record_assignment(id, assigned_idx, promise_n);
+            }
+        }
+    }
+
+    async fn handle_command(&mut self, cmd: Command<T>) {
         match cmd {
             Command::Append { entry, reply } => {
                 let res = self.op.append(entry);
                 let _ = reply.send(res);
             }
             Command::AppendNotify { entry, reply } => {
-                let before = self.op.get_accepted_idx();
-                match self.op.append(entry) {
-                    Err(e) => {
-                        let _ = reply.send(Err(AppendError::Propose(e)));
-                    }
-                    Ok(()) => {
-                        let after = self.op.get_accepted_idx();
-                        if after > before {
-                            // Locally accepted (we are the leader in Accept phase).
-                            let promise_n = self.op.get_promise().n;
-                            self.pending.push_back(Pending {
-                                tentative: after,
-                                promise_n,
-                                reply,
-                            });
-                        } else {
-                            // Entry was forwarded (or leader is in Prepare phase and buffered
-                            // the proposal) — we can't correlate it with a decided index.
-                            let current_leader = self.op.get_current_leader().map(|(pid, _)| pid);
-                            let _ = reply.send(Err(AppendError::NotLeader { current_leader }));
-                        }
-                    }
-                }
+                let id = EntryId(uuid::Uuid::new_v4());
+                self.pending.push_back(Pending {
+                    id,
+                    undispatched: Some(entry),
+                    assigned: None,
+                    deadline: Instant::now() + self.append_notify_timeout,
+                    reply,
+                });
+                self.try_dispatch_undispatched().await;
             }
             Command::CurrentLeader { reply } => {
                 let _ = reply.send(self.op.get_current_leader());
@@ -218,6 +337,7 @@ where
             _ = tick_fut => {
                 state.op.tick();
                 state.detect_and_emit_events().await;
+                state.try_dispatch_undispatched().await;
                 state.drain_notifiers();
                 tick_fut = Box::pin(R::sleep(state.tick_period)).fuse();
             }
@@ -227,13 +347,14 @@ where
             }
             in_msg = incoming_rx.next() => {
                 match in_msg {
+                    Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm).await,
                     Some(m) => state.op.handle_incoming(m),
                     None => break,
                 }
             }
             cmd = cmd_rx.next() => {
                 match cmd {
-                    Some(c) => state.handle_command(c),
+                    Some(c) => state.handle_command(c).await,
                     None => break,
                 }
             }
