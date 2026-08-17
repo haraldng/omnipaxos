@@ -32,6 +32,9 @@ pub struct RuntimeConfig {
     /// How long an `append_notify` call waits for its entry to be decided before
     /// resolving with [`AppendError::Timeout`](super::AppendError::Timeout).
     pub append_notify_timeout: Duration,
+    /// Bounded capacity for each per-subscriber decided-log stream returned by
+    /// [`OmniPaxosHandle::subscribe_decided`].
+    pub decided_channel_capacity: usize,
 }
 
 impl Default for RuntimeConfig {
@@ -44,6 +47,7 @@ impl Default for RuntimeConfig {
             incoming_capacity: 10_000,
             event_capacity: 1024,
             append_notify_timeout: Duration::from_secs(5),
+            decided_channel_capacity: 1024,
         }
     }
 }
@@ -61,6 +65,7 @@ where
     events_rx: async_channel::Receiver<OmniPaxosEvent>,
     outgoing_rx: async_channel::Receiver<Message<T>>,
     incoming_tx: async_channel::Sender<Message<T>>,
+    decided_channel_capacity: usize,
 }
 
 impl<T> Clone for OmniPaxosHandle<T>
@@ -73,6 +78,7 @@ where
             events_rx: self.events_rx.clone(),
             outgoing_rx: self.outgoing_rx.clone(),
             incoming_tx: self.incoming_tx.clone(),
+            decided_channel_capacity: self.decided_channel_capacity,
         }
     }
 }
@@ -212,6 +218,25 @@ where
         self.events_rx.clone()
     }
 
+    /// Subscribe to decided log entries, starting at `from`. Returns a receiver
+    /// that emits [`LogEntry`]s in log order — both the backlog already decided
+    /// at subscription time and entries decided later.
+    ///
+    /// Each call creates an independent subscription with its own cursor;
+    /// multiple subscribers can coexist. Dropping the receiver ends the
+    /// subscription; slow subscribers apply backpressure by causing the actor
+    /// to defer pushes rather than blocking the actor loop.
+    pub async fn subscribe_decided(&self, from: usize) -> async_channel::Receiver<LogEntry<T>> {
+        let (tx, rx) = async_channel::bounded(self.decided_channel_capacity);
+        // If the actor is gone, `rx` stays open but never receives — the
+        // caller's stream drops naturally when the sender is dropped here.
+        let _ = self
+            .cmd_tx
+            .send(Command::SubscribeDecided { from, tx })
+            .await;
+        rx
+    }
+
     /// Returns a receiver from which outgoing messages should be drained and forwarded
     /// by the application's transport.
     pub fn outgoing_messages(&self) -> async_channel::Receiver<Message<T>> {
@@ -254,5 +279,6 @@ where
         events_rx,
         outgoing_rx,
         incoming_tx,
+        decided_channel_capacity: cfg.decided_channel_capacity,
     }
 }

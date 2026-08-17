@@ -75,6 +75,10 @@ where
         from: usize,
         reply: oneshot::Sender<Option<Vec<LogEntry<T>>>>,
     },
+    SubscribeDecided {
+        from: usize,
+        tx: async_channel::Sender<LogEntry<T>>,
+    },
     Reconfigure {
         new_configuration: ClusterConfig,
         metadata: Option<Vec<u8>>,

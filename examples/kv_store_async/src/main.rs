@@ -88,7 +88,26 @@ async fn main() {
         }
     });
 
-    // 3. Append entries via node 1 (which may be leader or follower — the actor routes
+    // 3. Subscribe to the decided log stream on node 1 and run a state machine that
+    //    materializes the KV store as entries arrive. No polling, no cursor
+    //    bookkeeping — the stream pushes each decided entry in order.
+    let decided = handles[&1].subscribe_decided(0).await;
+    let store_task = tokio::spawn(async move {
+        let mut store: HashMap<String, u64> = HashMap::new();
+        while let Ok(entry) = decided.recv().await {
+            if let LogEntry::Decided(kv) = entry {
+                store.insert(kv.key.clone(), kv.value);
+                println!("[state machine] applied {kv:?} — store now {store:?}");
+                if store.len() == 2 {
+                    // We know we're finishing after two writes — return the final state.
+                    break;
+                }
+            }
+        }
+        store
+    });
+
+    // 4. Append entries via node 1 (which may be leader or follower — the actor routes
     //    tagged proposals to the current leader and correlates the assignment for us).
     //    No leader polling needed; `append_notify` waits until a leader is known and the
     //    entry is decided at its assigned index. No sleep, no polling, no lock.
@@ -110,13 +129,7 @@ async fn main() {
         println!("  -> decided at log idx {idx}");
     }
 
-    // 4. Materialize the KV store from the decided log.
-    let mut store = HashMap::new();
-    let ents = handles[&1].read_decided_suffix(0).await.expect("read");
-    for e in ents {
-        if let LogEntry::Decided(kv) = e {
-            store.insert(kv.key, kv.value);
-        }
-    }
-    println!("KV store: {store:?}");
+    // 5. Wait for the state machine to finish applying and print the final store.
+    let store = store_task.await.expect("state machine task panicked");
+    println!("Final KV store: {store:?}");
 }

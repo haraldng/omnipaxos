@@ -12,7 +12,7 @@ use omnipaxos::runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };
 use omnipaxos::storage::{Entry, Snapshot};
-use omnipaxos::util::NodeId;
+use omnipaxos::util::{LogEntry, NodeId};
 use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 use tokio::time::timeout;
@@ -340,5 +340,114 @@ async fn append_notify_shutdown_error_when_actor_gone() {
         | Err(AppendError::NotLeader { .. })
         | Err(AppendError::Superseded)
         | Err(AppendError::Timeout) => {}
+    }
+}
+
+async fn recv_decided(
+    rx: &async_channel::Receiver<LogEntry<TestEntry>>,
+    n: usize,
+) -> Vec<TestEntry> {
+    let mut out = Vec::with_capacity(n);
+    while out.len() < n {
+        let entry = timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .expect("subscribe_decided stream stalled")
+            .expect("subscribe_decided stream closed");
+        if let LogEntry::Decided(e) = entry {
+            out.push(e);
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn subscribe_decided_delivers_history_and_live() {
+    let handles = spawn_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let leader_h = handles.get(&leader).unwrap().clone();
+
+    // Append two entries first — these become the "history" the subscriber must
+    // receive on catch-up.
+    for v in [10u64, 11] {
+        leader_h
+            .append_notify(TestEntry(v))
+            .await
+            .expect("append_notify");
+    }
+
+    // Subscribe AFTER those entries are already decided.
+    let observer = handles.values().next().unwrap().clone();
+    let rx = observer.subscribe_decided(0).await;
+
+    let history = recv_decided(&rx, 2).await;
+    assert_eq!(history, vec![TestEntry(10), TestEntry(11)]);
+
+    // Now write a live entry and confirm it comes through the same stream.
+    leader_h
+        .append_notify(TestEntry(12))
+        .await
+        .expect("append_notify");
+    let live = recv_decided(&rx, 1).await;
+    assert_eq!(live, vec![TestEntry(12)]);
+}
+
+#[tokio::test]
+async fn subscribe_decided_multi_subscriber_independent() {
+    let handles = spawn_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let leader_h = handles.get(&leader).unwrap().clone();
+
+    // Write one entry so the subscribers have something to catch up on.
+    leader_h
+        .append_notify(TestEntry(1))
+        .await
+        .expect("append_notify");
+
+    let a_h = handles.values().next().unwrap().clone();
+    let b_h = handles.values().nth(1).unwrap().clone();
+    let rx_a = a_h.subscribe_decided(0).await;
+    let rx_b = b_h.subscribe_decided(0).await;
+
+    // Each subscriber should independently see the same suffix.
+    assert_eq!(recv_decided(&rx_a, 1).await, vec![TestEntry(1)]);
+    assert_eq!(recv_decided(&rx_b, 1).await, vec![TestEntry(1)]);
+
+    // Add another entry. Both should observe it.
+    leader_h
+        .append_notify(TestEntry(2))
+        .await
+        .expect("append_notify");
+    assert_eq!(recv_decided(&rx_a, 1).await, vec![TestEntry(2)]);
+    assert_eq!(recv_decided(&rx_b, 1).await, vec![TestEntry(2)]);
+}
+
+#[tokio::test]
+async fn subscribe_decided_drop_receiver_removes_sub() {
+    let handles = spawn_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let leader_h = handles.get(&leader).unwrap().clone();
+
+    let observer = handles.values().next().unwrap().clone();
+    let rx = observer.subscribe_decided(0).await;
+    drop(rx);
+
+    // Actor must not panic when it tries to push to the closed subscriber.
+    // Sanity: subsequent writes continue to decide normally.
+    let idx = leader_h
+        .append_notify(TestEntry(42))
+        .await
+        .expect("append_notify after dropping subscriber");
+    assert!(idx >= 1);
+    // The observer's local decided_idx should catch up; poll briefly to allow
+    // the follower to see the AcceptDecide broadcast.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if observer.decided_idx().await >= idx {
+            break;
+        }
+        if tokio::time::Instant::now() > deadline {
+            panic!("observer's decided_idx never caught up");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }

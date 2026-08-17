@@ -9,7 +9,7 @@ use futures::{select_biased, FutureExt, StreamExt};
 use crate::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
 use crate::messages::Message;
 use crate::storage::{Entry, Storage};
-use crate::util::NodeId;
+use crate::util::{LogEntry, NodeId};
 use crate::OmniPaxos;
 
 use super::event::{AppendError, Command, OmniPaxosEvent};
@@ -56,9 +56,20 @@ where
     append_notify_timeout: Duration,
     outgoing_buf: Vec<Message<T>>,
     pending: VecDeque<Pending<T>>,
+    decided_subscribers: Vec<DecidedSub<T>>,
     last_leader: Option<(NodeId, bool)>,
     last_decided_idx: usize,
     last_reconfigured: bool,
+}
+
+/// A single subscriber to the decided-log stream. `next_idx` is the next log
+/// index the actor must deliver; incremented on every successful `try_send`.
+struct DecidedSub<T>
+where
+    T: Entry,
+{
+    next_idx: usize,
+    tx: async_channel::Sender<LogEntry<T>>,
 }
 
 impl<T, B> ActorState<T, B>
@@ -92,6 +103,7 @@ where
             append_notify_timeout,
             outgoing_buf: Vec::new(),
             pending: VecDeque::new(),
+            decided_subscribers: Vec::new(),
             last_leader,
             last_decided_idx,
             last_reconfigured: false,
@@ -160,6 +172,74 @@ where
             if self.outgoing_tx.send(msg).await.is_err() {
                 // Receiver dropped — user is not draining outgoing. Discard.
                 break;
+            }
+        }
+    }
+
+    /// Push newly-decided entries to a single, freshly-added subscriber. Used
+    /// only on the immediate catch-up path from `Command::SubscribeDecided`,
+    /// where there is no shared read to amortize against. Returns `false` if
+    /// the receiver was already closed.
+    fn push_to_sub(op: &mut OmniPaxos<T, B>, sub: &mut DecidedSub<T>) -> bool {
+        let decided = op.get_decided_idx();
+        if sub.next_idx >= decided {
+            return true;
+        }
+        let Some(entries) = op.read_decided_suffix(sub.next_idx) else {
+            return true;
+        };
+        for entry in entries {
+            match sub.tx.try_send(entry) {
+                Ok(()) => sub.next_idx += 1,
+                Err(async_channel::TrySendError::Full(_)) => return true,
+                Err(async_channel::TrySendError::Closed(_)) => return false,
+            }
+        }
+        true
+    }
+
+    /// Push newly-decided entries to every subscriber, reading the log suffix
+    /// **once** and fanning out. Each sub keeps its own cursor, so slow subs
+    /// don't block fast ones; the storage read is amortized across all subs
+    /// starting from the trailing sub's position.
+    fn push_to_all_subs(&mut self) {
+        if self.decided_subscribers.is_empty() {
+            return;
+        }
+        let cur = self.op.get_decided_idx();
+        let min_next = self
+            .decided_subscribers
+            .iter()
+            .map(|s| s.next_idx)
+            .min()
+            .expect("non-empty checked above");
+        if min_next >= cur {
+            return;
+        }
+        // Read once, from the trailing sub's position. `entries[i]` is the log
+        // entry at position `min_next + i`.
+        let Some(entries) = self.op.read_decided_suffix(min_next) else {
+            return;
+        };
+        // Fan out. Preserve the drain-and-refill idiom so closed subs are
+        // pruned without borrow-checker gymnastics.
+        let subs = std::mem::take(&mut self.decided_subscribers);
+        for mut sub in subs {
+            // sub.next_idx should always be >= min_next; guard defensively.
+            let start = sub.next_idx.saturating_sub(min_next);
+            let mut alive = true;
+            for entry in entries.iter().skip(start) {
+                match sub.tx.try_send(entry.clone()) {
+                    Ok(()) => sub.next_idx += 1,
+                    Err(async_channel::TrySendError::Full(_)) => break,
+                    Err(async_channel::TrySendError::Closed(_)) => {
+                        alive = false;
+                        break;
+                    }
+                }
+            }
+            if alive {
+                self.decided_subscribers.push(sub);
             }
         }
     }
@@ -297,6 +377,13 @@ where
             Command::ReadDecidedSuffix { from, reply } => {
                 let _ = reply.send(self.op.read_decided_suffix(from));
             }
+            Command::SubscribeDecided { from, tx } => {
+                let mut sub = DecidedSub { next_idx: from, tx };
+                // Immediate catch-up: push whatever is already decided from `from`.
+                if Self::push_to_sub(&mut self.op, &mut sub) {
+                    self.decided_subscribers.push(sub);
+                }
+            }
             Command::Reconfigure {
                 new_configuration,
                 metadata,
@@ -339,6 +426,7 @@ where
                 state.detect_and_emit_events().await;
                 state.try_dispatch_undispatched().await;
                 state.drain_notifiers();
+                state.push_to_all_subs();
                 tick_fut = Box::pin(R::sleep(state.tick_period)).fuse();
             }
             _ = egress_fut => {
