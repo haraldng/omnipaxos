@@ -6,7 +6,10 @@
 //!
 //! 1. Spawns each node with `spawn_actor::<_, _, TokioRuntime>`.
 //! 2. Wires in-process message transport (one task per node).
-//! 3. Awaits `append_notify(...)` and reads events off `subscribe_events()`.
+//! 3. Reads events off `subscribe_events()` and applies the decided log via
+//!    `subscribe_decided()` — no per-entry confirmation needed for ordinary writes.
+//! 4. Uses `append_notify(...)` only for the one entry where the caller specifically
+//!    needs to know its durable decided index before proceeding.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -98,8 +101,8 @@ async fn main() {
             if let LogEntry::Decided(kv) = entry {
                 store.insert(kv.key.clone(), kv.value);
                 println!("[state machine] applied {kv:?} — store now {store:?}");
-                if store.len() == 2 {
-                    // We know we're finishing after two writes — return the final state.
+                if store.len() == 3 {
+                    // We know we're finishing after three writes — return the final state.
                     break;
                 }
             }
@@ -107,10 +110,10 @@ async fn main() {
         store
     });
 
-    // 4. Append entries via node 1 (which may be leader or follower — the actor routes
-    //    tagged proposals to the current leader and correlates the assignment for us).
-    //    No leader polling needed; `append_notify` waits until a leader is known and the
-    //    entry is decided at its assigned index. No sleep, no polling, no lock.
+    // 4. Append ordinary writes via node 1 (which may be leader or follower — the actor
+    //    routes tagged proposals to the current leader). We don't need to know exactly
+    //    when each one lands; the state machine above picks them up off the decided
+    //    stream as they arrive, so plain fire-and-forget `append` is all we need here.
     for kv in [
         KeyValue {
             key: "a".into(),
@@ -121,13 +124,26 @@ async fn main() {
             value: 2,
         },
     ] {
-        println!("Adding value {:?} via node 1", kv);
-        let idx = handles[&1]
-            .append_notify(kv)
-            .await
-            .expect("append_notify failed");
-        println!("  -> decided at log idx {idx}");
+        println!("Adding value {:?} via node 1 (fire-and-forget)", kv);
+        handles[&1].append(kv).await.expect("append failed");
     }
+
+    // 4b. "quota" is different: it's a gating value an operator needs to announce as
+    //    live, so before doing that we need to know its *exact* decided index rather
+    //    than just observing it eventually via the stream. This is what `append_notify`
+    //    is for — a specific entry whose durability the caller must confirm
+    //    synchronously. It waits until a leader is known and the entry is decided at
+    //    its assigned index. No sleep, no polling, no lock.
+    let quota = KeyValue {
+        key: "quota".into(),
+        value: 100,
+    };
+    println!("Adding value {:?} via node 1 (must confirm durability)", quota);
+    let idx = handles[&1]
+        .append_notify(quota)
+        .await
+        .expect("append_notify failed");
+    println!("  -> quota entry durably decided at log idx {idx}, safe to announce");
 
     // 5. Wait for the state machine to finish applying and print the final store.
     let store = store_task.await.expect("state machine task panicked");
