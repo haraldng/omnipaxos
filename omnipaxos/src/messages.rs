@@ -327,18 +327,15 @@ pub mod async_runtime {
     where
         T: Entry,
     {
-        /// Follower actor → leader actor. Carries an entry the originator wants
-        /// tracked. Replaces the untagged `PaxosMsg::ProposalForward` path when
-        /// the caller used `append_notify`.
-        TaggedProposal { id: EntryId, entry: T },
-        /// Leader actor → originating follower actor. Carries the log index the
-        /// leader assigned to a previously received `TaggedProposal`, plus the
-        /// ballot number under which it was accepted so the follower can detect
-        /// supersession after a leader change.
-        Assigned {
-            id: EntryId,
-            assigned_idx: usize,
-            promise_n: u32,
-        },
+        /// Follower actor → leader actor. Carries entries the originator(s) want
+        /// tracked, batched into one message. Replaces the untagged
+        /// `PaxosMsg::ProposalForward` path when the caller used `append_notify`.
+        TaggedProposal { entries: Vec<(EntryId, T)> },
+        /// Leader actor → originating follower actor. Carries, for each entry in a
+        /// previously received `TaggedProposal` batch that was actually accepted,
+        /// the log index the leader assigned plus the ballot number under which it
+        /// was accepted so the follower can detect supersession after a leader
+        /// change. Batched into one message per originating `TaggedProposal`.
+        Assigned { entries: Vec<(EntryId, usize, u32)> },
     }
 }

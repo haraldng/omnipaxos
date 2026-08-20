@@ -256,31 +256,22 @@ where
 
     /// Leader-side accept. Runs when we originate an `append_notify` locally *or*
     /// when we receive a `TaggedProposal` from a follower. Populates the local
-    /// pending's `assigned` (if any) and, if `reply_to` is set, sends `Assigned`
-    /// back to the originator.
-    async fn accept_as_leader(&mut self, id: EntryId, entry: T, reply_to: Option<NodeId>) {
+    /// pending's `assigned` and returns `(id, assigned_idx, promise_n)` if the
+    /// entry was actually accepted, so callers processing a batch can collect
+    /// these and send a single `Assigned` reply covering the whole batch.
+    fn accept_as_leader(&mut self, id: EntryId, entry: T) -> Option<(EntryId, usize, u32)> {
         let before = self.op.get_accepted_idx();
         if self.op.append(entry).is_ok() {
             let after = self.op.get_accepted_idx();
             if after > before {
                 let ballot_n = self.op.get_promise().n;
                 self.record_assignment(id, after, ballot_n);
-                if let Some(origin) = reply_to {
-                    let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
-                        from: self.own_pid,
-                        to: origin,
-                        msg: AsyncRuntimeMsg::Assigned {
-                            id,
-                            assigned_idx: after,
-                            promise_n: ballot_n,
-                        },
-                    });
-                    let _ = self.outgoing_tx.send(reply_msg).await;
-                }
+                return Some((id, after, ballot_n));
             }
             // else: leader in Prepare phase, entry buffered. No assignment recorded.
             // Origin (or ourselves) will resolve via Timeout unless we re-route later.
         }
+        None
     }
 
     /// Attempt to dispatch every pending entry that hasn't yet been sent or
@@ -288,36 +279,32 @@ where
     /// which lets a call issued *before* an election eventually succeed once a
     /// leader is known.
     async fn try_dispatch_undispatched(&mut self) {
-        let cur = self.op.get_current_leader();
-        let Some((leader, accepted)) = cur else {
+        let Some((leader, accepted)) = self.op.get_current_leader() else {
             return;
         };
-        // Snapshot the entries to dispatch. We take() them out of pending so the
-        // borrow of self.pending doesn't overlap the following async sends.
-        let mut to_local: Vec<(EntryId, T)> = Vec::new();
-        let mut to_remote: Vec<(EntryId, T)> = Vec::new();
-        for p in self.pending.iter_mut() {
-            let Some(entry) = p.undispatched.take() else {
-                continue;
-            };
-            if leader == self.own_pid && accepted {
-                to_local.push((p.id, entry));
-            } else if leader != self.own_pid {
-                to_remote.push((p.id, entry));
-            } else {
-                // leader == self.own_pid but we're not yet in Accept phase —
-                // put the entry back and wait for the next tick.
-                p.undispatched = Some(entry);
+        if leader == self.own_pid && !accepted {
+            // We're leader but not yet in Accept phase — leave entries undispatched
+            // and wait for the next tick.
+            return;
+        }
+        // Every pending entry takes the same path this tick (leader/accepted are
+        // fixed above), so snapshot them all at once. We take() out of pending so
+        // the borrow doesn't overlap the following async sends/accepts.
+        let entries: Vec<(EntryId, T)> = self
+            .pending
+            .iter_mut()
+            .filter_map(|p| p.undispatched.take().map(|entry| (p.id, entry)))
+            .collect();
+        if leader == self.own_pid {
+            for (id, entry) in entries {
+                self.accept_as_leader(id, entry);
             }
-        }
-        for (id, entry) in to_local {
-            self.accept_as_leader(id, entry, None).await;
-        }
-        for (id, entry) in to_remote {
+        } else if !entries.is_empty() {
+            // One wire message for the whole batch, rather than one per entry.
             let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
                 from: self.own_pid,
                 to: leader,
-                msg: AsyncRuntimeMsg::TaggedProposal { id, entry },
+                msg: AsyncRuntimeMsg::TaggedProposal { entries },
             });
             let _ = self.outgoing_tx.send(msg).await;
         }
@@ -325,28 +312,40 @@ where
 
     async fn handle_runtime_msg(&mut self, arm: AsyncRuntimeMessage<T>) {
         match arm.msg {
-            AsyncRuntimeMsg::TaggedProposal { id, entry } => {
+            AsyncRuntimeMsg::TaggedProposal { entries } => {
                 let cur = self.op.get_current_leader().map(|(p, _)| p);
                 if cur == Some(self.own_pid) {
-                    self.accept_as_leader(id, entry, Some(arm.from)).await;
+                    // Collect accepted assignments and reply to the origin with a
+                    // single batched `Assigned`, rather than one message per entry.
+                    let assigned: Vec<(EntryId, usize, u32)> = entries
+                        .into_iter()
+                        .filter_map(|(id, entry)| self.accept_as_leader(id, entry))
+                        .collect();
+                    if !assigned.is_empty() {
+                        let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+                            from: self.own_pid,
+                            to: arm.from,
+                            msg: AsyncRuntimeMsg::Assigned { entries: assigned },
+                        });
+                        let _ = self.outgoing_tx.send(reply_msg).await;
+                    }
                 } else if let Some(new_leader) = cur {
-                    // Leadership drifted since sender chose us. Hop forward, preserving
-                    // the original `from` so the leader replies to the true origin.
+                    // Leadership drifted since sender chose us. Hop the whole batch
+                    // forward, preserving the original `from` so the leader replies
+                    // to the true origin.
                     let fwd = Message::AsyncRuntime(AsyncRuntimeMessage {
                         from: arm.from,
                         to: new_leader,
-                        msg: AsyncRuntimeMsg::TaggedProposal { id, entry },
+                        msg: AsyncRuntimeMsg::TaggedProposal { entries },
                     });
                     let _ = self.outgoing_tx.send(fwd).await;
                 }
-                // Else: no leader; drop. Originator will timeout.
+                // Else: no leader; drop. Originators will timeout.
             }
-            AsyncRuntimeMsg::Assigned {
-                id,
-                assigned_idx,
-                promise_n,
-            } => {
-                self.record_assignment(id, assigned_idx, promise_n);
+            AsyncRuntimeMsg::Assigned { entries } => {
+                for (id, assigned_idx, promise_n) in entries {
+                    self.record_assignment(id, assigned_idx, promise_n);
+                }
             }
         }
     }
