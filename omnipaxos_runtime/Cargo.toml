@@ -1,0 +1,36 @@
+[package]
+name = "omnipaxos_runtime"
+version = "0.1.0"
+authors = ["Harald Ng <hng@kth.se>"]
+edition = "2021"
+description = "Async runtime actor layer for OmniPaxos."
+readme = "README.md"
+license = "Apache-2.0"
+repository = "https://github.com/haraldng/omnipaxos"
+homepage = "https://omnipaxos.com/"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+omnipaxos = { version = "0.2.2", path = "../omnipaxos", features = ["async_runtime"] }
+futures = "0.3"
+async-channel = "2"
+futures-timer = "3"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", optional = true, features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+omnipaxos_storage = { path = "../omnipaxos_storage" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[features]
+tokio_runtime = ["dep:tokio"]
+unicache = ["omnipaxos/unicache"]
+serde = ["omnipaxos/serde"]
+logging = ["omnipaxos/logging"]
+
+[profile.release]
+lto = true

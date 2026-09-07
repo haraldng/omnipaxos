@@ -14,9 +14,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use omnipaxos::runtime::{
-    spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
-};
+use omnipaxos_runtime::{spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime};
 use omnipaxos::util::{LogEntry, NodeId};
 use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig};
 use omnipaxos_storage::memory_storage::MemoryStorage;

@@ -3,10 +3,10 @@ use std::marker::PhantomData;
 
 use futures::channel::oneshot;
 
-use crate::messages::Message;
-use crate::storage::{Entry, Storage};
-use crate::util::{LogEntry, NodeId};
-use crate::{ClusterConfig, OmniPaxos, ProposeErr};
+use omnipaxos::messages::Message;
+use omnipaxos::storage::{Entry, Storage};
+use omnipaxos::util::{LogEntry, NodeId};
+use omnipaxos::{ClusterConfig, OmniPaxos, ProposeErr};
 
 use super::actor::{run, ActorState};
 use super::event::{AppendError, Command, OmniPaxosEvent};
@@ -35,6 +35,16 @@ pub struct RuntimeConfig {
     /// Bounded capacity for each per-subscriber decided-log stream returned by
     /// [`OmniPaxosHandle::subscribe_decided`].
     pub decided_channel_capacity: usize,
+    /// Maximum number of concurrently outstanding `append_notify` calls (i.e.
+    /// calls that have not yet resolved). Once reached, further `append_notify`
+    /// calls are rejected immediately with [`AppendError::TooManyOutstanding`]
+    /// rather than queued, so a stalled cluster (e.g. no leader) can't grow this
+    /// backlog without bound.
+    pub max_pending_appends: usize,
+    /// Maximum number of concurrent [`OmniPaxosHandle::subscribe_decided`]
+    /// subscribers. Once reached, a new subscription is rejected: the returned
+    /// receiver's channel is closed immediately without delivering any entries.
+    pub max_decided_subscribers: usize,
 }
 
 impl Default for RuntimeConfig {
@@ -48,6 +58,8 @@ impl Default for RuntimeConfig {
             event_capacity: 1024,
             append_notify_timeout: Duration::from_secs(5),
             decided_channel_capacity: 1024,
+            max_pending_appends: 1024,
+            max_decided_subscribers: 128,
         }
     }
 }
@@ -96,7 +108,9 @@ where
     ///   [`RuntimeConfig::append_notify_timeout`];
     /// - [`AppendError::Superseded`] if a leader change invalidated the assignment
     ///   before decision;
-    /// - [`AppendError::NotLeader`] if no leader is currently known.
+    /// - [`AppendError::NotLeader`] if no leader is currently known;
+    /// - [`AppendError::TooManyOutstanding`] if [`RuntimeConfig::max_pending_appends`]
+    ///   outstanding calls are already queued.
     pub async fn append_notify(&self, entry: T) -> Result<usize, AppendError<T>> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
@@ -223,7 +237,9 @@ where
     /// at subscription time and entries decided later.
     ///
     /// Each call creates an independent subscription with its own cursor;
-    /// multiple subscribers can coexist. Dropping the receiver ends the
+    /// multiple subscribers can coexist, up to [`RuntimeConfig::max_decided_subscribers`]
+    /// — beyond that, the returned receiver's channel is closed immediately
+    /// without delivering any entries. Dropping the receiver ends the
     /// subscription; slow subscribers apply backpressure by causing the actor
     /// to defer pushes rather than blocking the actor loop.
     pub async fn subscribe_decided(&self, from: usize) -> async_channel::Receiver<LogEntry<T>> {
@@ -270,6 +286,8 @@ where
         cfg.tick_period,
         cfg.egress_period,
         cfg.append_notify_timeout,
+        cfg.max_pending_appends,
+        cfg.max_decided_subscribers,
     );
 
     R::spawn(run::<T, B, R>(state, PhantomData::<fn() -> R>));

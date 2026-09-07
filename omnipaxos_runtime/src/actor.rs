@@ -6,11 +6,11 @@ use std::time::Instant;
 use futures::channel::oneshot;
 use futures::{select_biased, FutureExt, StreamExt};
 
-use crate::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
-use crate::messages::Message;
-use crate::storage::{Entry, Storage};
-use crate::util::{LogEntry, NodeId};
-use crate::OmniPaxos;
+use omnipaxos::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
+use omnipaxos::messages::Message;
+use omnipaxos::storage::{Entry, Storage};
+use omnipaxos::util::{LogEntry, NodeId};
+use omnipaxos::OmniPaxos;
 
 use super::event::{AppendError, Command, OmniPaxosEvent};
 use super::traits::{ActorEntry, AsyncRuntime};
@@ -54,6 +54,8 @@ where
 
     own_pid: NodeId,
     append_notify_timeout: Duration,
+    max_pending_appends: usize,
+    max_decided_subscribers: usize,
     outgoing_buf: Vec<Message<T>>,
     pending: VecDeque<Pending<T>>,
     decided_subscribers: Vec<DecidedSub<T>>,
@@ -87,6 +89,8 @@ where
         tick_period: Duration,
         egress_period: Duration,
         append_notify_timeout: Duration,
+        max_pending_appends: usize,
+        max_decided_subscribers: usize,
     ) -> Self {
         let last_decided_idx = op.get_decided_idx();
         let last_leader = op.get_current_leader();
@@ -101,6 +105,8 @@ where
             egress_period,
             own_pid,
             append_notify_timeout,
+            max_pending_appends,
+            max_decided_subscribers,
             outgoing_buf: Vec::new(),
             pending: VecDeque::new(),
             decided_subscribers: Vec::new(),
@@ -357,6 +363,10 @@ where
                 let _ = reply.send(res);
             }
             Command::AppendNotify { entry, reply } => {
+                if self.pending.len() >= self.max_pending_appends {
+                    let _ = reply.send(Err(AppendError::TooManyOutstanding));
+                    return;
+                }
                 let id = EntryId(uuid::Uuid::new_v4());
                 self.pending.push_back(Pending {
                     id,
@@ -377,6 +387,11 @@ where
                 let _ = reply.send(self.op.read_decided_suffix(from));
             }
             Command::SubscribeDecided { from, tx } => {
+                if self.decided_subscribers.len() >= self.max_decided_subscribers {
+                    // Reject: drop `tx` without storing it, closing the
+                    // subscriber's channel immediately with no entries delivered.
+                    return;
+                }
                 let mut sub = DecidedSub { next_idx: from, tx };
                 // Immediate catch-up: push whatever is already decided from `from`.
                 if Self::push_to_sub(&mut self.op, &mut sub) {

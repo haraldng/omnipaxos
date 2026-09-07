@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use omnipaxos::runtime::{
+use omnipaxos_runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };
 use omnipaxos::storage::{Entry, Snapshot};
@@ -268,6 +268,47 @@ async fn append_notify_timeout_when_transport_broken() {
 }
 
 #[tokio::test]
+async fn append_notify_rejects_when_too_many_outstanding() {
+    // No leader ever gets elected (single node, no peers wired), so every
+    // append_notify call stays queued in `pending` indefinitely — perfect for
+    // deterministically filling the backlog up to the cap.
+    let nodes: Vec<NodeId> = vec![1, 2, 3];
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        append_notify_timeout: Duration::from_secs(10),
+        max_pending_appends: 2,
+        ..Default::default()
+    };
+    let op = build_op(1, nodes);
+    let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg);
+
+    // Fill the backlog to the cap. Spawn so these calls actually get sent and
+    // queued rather than sitting unpolled.
+    let mut fillers = Vec::new();
+    for v in 0..2u64 {
+        let h = h.clone();
+        fillers.push(tokio::spawn(async move { h.append_notify(TestEntry(v)).await }));
+    }
+    // Give the actor a moment to receive and queue both commands.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // One more call should be rejected immediately rather than queued — assert
+    // this with a short outer timeout so a Timeout couldn't be mistaken for it.
+    let res = timeout(Duration::from_millis(500), h.append_notify(TestEntry(99)))
+        .await
+        .expect("rejection should be immediate, not wait for append_notify_timeout");
+    match res {
+        Err(AppendError::TooManyOutstanding) => {}
+        other => panic!("expected TooManyOutstanding, got {other:?}"),
+    }
+
+    for f in fillers {
+        f.abort();
+    }
+}
+
+#[tokio::test]
 async fn event_stream_emits_leader_election() {
     let handles = spawn_cluster(3).await;
     // Subscribe on one node before waiting for election so we don't miss the event.
@@ -339,7 +380,8 @@ async fn append_notify_shutdown_error_when_actor_gone() {
         | Err(AppendError::Propose(_))
         | Err(AppendError::NotLeader { .. })
         | Err(AppendError::Superseded)
-        | Err(AppendError::Timeout) => {}
+        | Err(AppendError::Timeout)
+        | Err(AppendError::TooManyOutstanding) => {}
     }
 }
 
@@ -450,4 +492,31 @@ async fn subscribe_decided_drop_receiver_removes_sub() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+#[tokio::test]
+async fn subscribe_decided_rejects_when_too_many_subscribers() {
+    let nodes: Vec<NodeId> = vec![1, 2, 3];
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        max_decided_subscribers: 1,
+        ..Default::default()
+    };
+    let op = build_op(1, nodes);
+    let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg);
+
+    // First subscriber is accepted and stays open.
+    let _rx_a = h.subscribe_decided(0).await;
+
+    // A second subscriber exceeds the cap: its channel should close immediately,
+    // with no entries ever delivered.
+    let rx_b = h.subscribe_decided(0).await;
+    let res = timeout(Duration::from_secs(1), rx_b.recv())
+        .await
+        .expect("rejection should be immediate, not hang");
+    assert!(
+        res.is_err(),
+        "expected the rejected subscriber's channel to be closed, got {res:?}"
+    );
 }

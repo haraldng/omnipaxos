@@ -1,12 +1,13 @@
-//! Async runtime wrapper for OmniPaxos.
+//! Async runtime actor layer for OmniPaxos.
 //!
-//! The [`AsyncRuntime`] trait abstracts over the async executor so this module can be used
+//! The [`AsyncRuntime`] trait abstracts over the async executor so this crate can be used
 //! on top of any runtime. A ready-to-use [`TokioRuntime`] is provided behind the
 //! `tokio_runtime` feature.
 //!
-//! The main entry point is [`spawn_actor`], which takes an [`OmniPaxos`](crate::OmniPaxos)
-//! instance and returns an [`OmniPaxosHandle`]. The handle is cloneable and provides
-//! `async` methods to append entries and observe state transitions.
+//! The main entry point is [`spawn_actor`], which takes an
+//! [`OmniPaxos`](omnipaxos::OmniPaxos) instance and returns an [`OmniPaxosHandle`]. The
+//! handle is cloneable and provides `async` methods to append entries and observe state
+//! transitions.
 //!
 //! The runtime does NOT own message transport: use [`OmniPaxosHandle::outgoing_messages`]
 //! to drain outgoing messages and [`OmniPaxosHandle::handle_incoming`] to deliver
@@ -21,9 +22,9 @@ mod traits;
 #[cfg(feature = "tokio_runtime")]
 mod tokio_rt;
 
-pub use crate::messages::EntryId;
 pub use event::{AppendError, OmniPaxosEvent};
 pub use handle::{spawn_actor, OmniPaxosHandle, RuntimeConfig};
+pub use omnipaxos::messages::EntryId;
 pub use traits::{ActorEntry, AsyncRuntime};
 
 #[cfg(feature = "tokio_runtime")]

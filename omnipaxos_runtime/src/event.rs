@@ -1,8 +1,8 @@
 use futures::channel::oneshot;
 
-use crate::storage::Entry;
-use crate::util::{LogEntry, NodeId};
-use crate::{ClusterConfig, ProposeErr};
+use omnipaxos::storage::Entry;
+use omnipaxos::util::{LogEntry, NodeId};
+use omnipaxos::{ClusterConfig, ProposeErr};
 
 /// A state transition observed by the actor and broadcast on the event stream.
 #[derive(Debug, Clone)]
@@ -47,6 +47,11 @@ where
     Timeout,
     /// The actor has shut down before the entry could be decided.
     Shutdown,
+    /// The actor already has [`RuntimeConfig::max_pending_appends`](super::RuntimeConfig::max_pending_appends)
+    /// outstanding `append_notify` calls; this one was rejected immediately rather
+    /// than queued. Nothing was proposed, so it's safe to retry (ideally after a
+    /// backoff, since the backlog needs time to drain).
+    TooManyOutstanding,
 }
 
 /// Commands sent from an [`OmniPaxosHandle`](super::OmniPaxosHandle) to the actor task.

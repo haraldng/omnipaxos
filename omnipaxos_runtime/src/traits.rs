@@ -1,7 +1,7 @@
 use core::future::Future;
 use core::time::Duration;
 
-use crate::storage::Entry;
+use omnipaxos::storage::Entry;
 
 /// A blanket trait that fixes all the `Send` bounds an [`Entry`] must satisfy to cross
 /// the actor boundary. Users normally do not implement this manually — a blanket impl
