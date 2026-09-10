@@ -293,7 +293,7 @@ where
 /// These do not touch the core Paxos protocol — they run alongside it.
 #[cfg(feature = "async_runtime")]
 pub mod async_runtime {
-    use crate::{storage::Entry, util::NodeId};
+    use crate::{ballot_leader_election::Ballot, storage::Entry, util::NodeId};
     #[cfg(feature = "serde")]
     use serde::{Deserialize, Serialize};
 
@@ -333,9 +333,14 @@ pub mod async_runtime {
         TaggedProposal { entries: Vec<(EntryId, T)> },
         /// Leader actor → originating follower actor. Carries, for each entry in a
         /// previously received `TaggedProposal` batch that was actually accepted,
-        /// the log index the leader assigned plus the ballot number under which it
-        /// was accepted so the follower can detect supersession after a leader
-        /// change. Batched into one message per originating `TaggedProposal`.
-        Assigned { entries: Vec<(EntryId, usize, u32)> },
+        /// the log index the leader assigned, plus the single full ballot under
+        /// which the *whole batch* was accepted (one ballot, not per-entry: the
+        /// leader processes one incoming `TaggedProposal` synchronously with no
+        /// yield points, so every entry in it is necessarily accepted under the
+        /// same ballot). 
+        Assigned {
+            ballot: Ballot,
+            entries: Vec<(EntryId, usize)>,
+        },
     }
 }

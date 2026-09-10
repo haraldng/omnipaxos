@@ -6,11 +6,12 @@ use std::time::Instant;
 use futures::channel::oneshot;
 use futures::{select_biased, FutureExt, StreamExt};
 
+use omnipaxos::ballot_leader_election::Ballot;
 use omnipaxos::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
 use omnipaxos::messages::Message;
 use omnipaxos::storage::{Entry, Storage};
 use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::OmniPaxos;
+use omnipaxos::{OmniPaxos, ProposeErr};
 
 use super::event::{AppendError, Command, OmniPaxosEvent};
 use super::traits::{ActorEntry, AsyncRuntime};
@@ -30,11 +31,13 @@ where
     /// what enables `append_notify` to be called before a leader is elected —
     /// the entry simply waits until routing becomes possible.
     undispatched: Option<T>,
-    /// `(assigned_idx, ballot_n_at_assignment)`. `None` until either:
+    /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
     ///   (a) we accepted the entry ourselves as leader, or
     ///   (b) we received `AsyncRuntimeMsg::Assigned` from the leader.
-    /// The ballot lets us detect supersession after a leader change.
-    assigned: Option<(usize, u32)>,
+    /// The full ballot (not just its `n`) lets us detect supersession after a
+    /// leader change: two ballots can share `n` while still being totally
+    /// ordered by `(n, priority, pid)`.
+    assigned: Option<(usize, Ballot)>,
     deadline: Instant,
     reply: oneshot::Sender<Result<usize, AppendError<T>>>,
 }
@@ -62,6 +65,19 @@ where
     last_leader: Option<(NodeId, bool)>,
     last_decided_idx: usize,
     last_reconfigured: bool,
+    /// One entry per locally-appended write deferred by batching (`before ==
+    /// after` in `append_tracked`), in call order, awaiting the batch flush
+    /// that will actually assign it an index. `id` is `Some` only for writes
+    /// that originated from `append_notify`/`TaggedProposal`; plain
+    /// `Command::Append` writes still need a placeholder here (`None`)
+    /// because they share the exact same per-node batch buffer
+    /// (`state_cache.batched_entries`) — without one, an untracked entry
+    /// batched ahead of a tracked one would shift the FIFO correspondence
+    /// between queue position and assigned index. Paired with the ballot in
+    /// effect when buffered so a leader change before the flush is detected
+    /// rather than mis-assigned.
+    unconfirmed_local: VecDeque<(Option<EntryId>, Ballot)>,
+    last_seen_accepted_idx: usize,
 }
 
 /// A single subscriber to the decided-log stream. `next_idx` is the next log
@@ -113,6 +129,8 @@ where
             last_leader,
             last_decided_idx,
             last_reconfigured: false,
+            unconfirmed_local: VecDeque::new(),
+            last_seen_accepted_idx: 0,
         }
     }
 
@@ -154,14 +172,14 @@ where
     fn drain_notifiers(&mut self) {
         let decided = self.op.get_decided_idx();
         let now = Instant::now();
-        let cur_n = self.op.get_promise().n;
+        let cur_ballot = self.op.get_promise();
         let old = std::mem::take(&mut self.pending);
         for p in old {
             match p.assigned {
                 Some((idx, _)) if idx <= decided => {
                     let _ = p.reply.send(Ok(idx));
                 }
-                Some((_, ballot_n)) if ballot_n < cur_n => {
+                Some((_, ballot)) if ballot < cur_ballot => {
                     let _ = p.reply.send(Err(AppendError::Superseded));
                 }
                 _ if now > p.deadline => {
@@ -172,14 +190,33 @@ where
         }
     }
 
+    /// Drains newly-produced outgoing messages onto `outgoing_tx`. Uses
+    /// `try_send` rather than `.send().await`: a bounded channel that's
+    /// merely *full* (consumer alive but slow) must not block this call --
+    /// it's on the single actor loop, so blocking here would stall tick,
+    /// election, and command processing for this node entirely, not just
+    /// delay egress. On `Full`, the unsent remainder (in order) is kept in
+    /// `outgoing_buf` to retry on the next egress tick; `take_outgoing_messages`
+    /// appends rather than overwrites, so nothing is lost or reordered.
     async fn flush_outgoing(&mut self) {
         self.op.take_outgoing_messages(&mut self.outgoing_buf);
-        for msg in self.outgoing_buf.drain(..) {
-            if self.outgoing_tx.send(msg).await.is_err() {
-                // Receiver dropped — user is not draining outgoing. Discard.
-                break;
+        let pending = std::mem::take(&mut self.outgoing_buf);
+        let mut iter = pending.into_iter();
+        for msg in iter.by_ref() {
+            match self.outgoing_tx.try_send(msg) {
+                Ok(()) => {}
+                Err(async_channel::TrySendError::Full(msg)) => {
+                    self.outgoing_buf.push(msg);
+                    break;
+                }
+                Err(async_channel::TrySendError::Closed(_)) => {
+                    // Receiver dropped — user is not draining outgoing. Discard
+                    // everything remaining; nothing left to retry against.
+                    return;
+                }
             }
         }
+        self.outgoing_buf.extend(iter);
     }
 
     /// Push newly-decided entries to a single, freshly-added subscriber. Used
@@ -250,34 +287,117 @@ where
         }
     }
 
-    fn record_assignment(&mut self, id: EntryId, idx: usize, ballot_n: u32) {
+    fn record_assignment(&mut self, id: EntryId, idx: usize, ballot: Ballot) {
         for p in self.pending.iter_mut() {
             if p.id == id {
-                p.assigned = Some((idx, ballot_n));
+                p.assigned = Some((idx, ballot));
                 return;
             }
         }
         // No matching pending — late reply after timeout drain, or duplicate. Ignore.
     }
 
+    /// Resolves a pending `append_notify` immediately with the propose error that
+    /// just failed it, instead of leaving it to silently time out. Only affects
+    /// entries this node itself owns in `self.pending` — when `id` came from a
+    /// remote `TaggedProposal`, the owning `Pending` lives on the origin node, so
+    /// this is a no-op there and that call still resolves via `Timeout`.
+    fn resolve_pending_failed(&mut self, id: EntryId, err: ProposeErr<T>) {
+        if let Some(pos) = self.pending.iter().position(|p| p.id == id) {
+            let p = self.pending.remove(pos).unwrap();
+            let _ = p.reply.send(Err(AppendError::Propose(err)));
+        }
+    }
+
+    /// Appends `entry` to the local log, tracking it in `unconfirmed_local` if
+    /// the write is deferred by batching rather than immediately reflected in
+    /// `get_accepted_idx()`. `id` is `Some` for callers that want the
+    /// eventual index recorded against a pending `append_notify`
+    /// (`accept_as_leader`); plain `Command::Append` passes `None`. Both go
+    /// through the exact same per-node batch buffer
+    /// (`state_cache.batched_entries`), so an untracked (`None`) call still
+    /// needs its own placeholder in the queue — otherwise a later flush
+    /// triggered by someone else's call would let a still-queued tracked
+    /// entry be matched to the wrong index (see `reconcile_unconfirmed`).
+    fn append_tracked(
+        &mut self,
+        id: Option<EntryId>,
+        entry: T,
+    ) -> Result<Option<(usize, Ballot)>, ProposeErr<T>> {
+        let before = self.op.get_accepted_idx();
+        self.op.append(entry)?;
+        let after = self.op.get_accepted_idx();
+        if after > before {
+            let ballot = self.op.get_promise();
+            if let Some(id) = id {
+                self.record_assignment(id, after, ballot);
+            }
+            Ok(Some((after, ballot)))
+        } else {
+            // Batching deferred the write. This is still safe to track locally:
+            // unlike Prepare-phase buffering, batching never crosses node
+            // boundaries, so nothing but our own appends (in call order) can
+            // land in this queue. `reconcile_unconfirmed` matches it to an
+            // index once the batch flushes, guarded by the ballot to detect a
+            // leader change in the meantime.
+            self.unconfirmed_local
+                .push_back((id, self.op.get_promise()));
+            Ok(None)
+        }
+    }
+
     /// Leader-side accept. Runs when we originate an `append_notify` locally *or*
     /// when we receive a `TaggedProposal` from a follower. Populates the local
-    /// pending's `assigned` and returns `(id, assigned_idx, promise_n)` if the
-    /// entry was actually accepted, so callers processing a batch can collect
-    /// these and send a single `Assigned` reply covering the whole batch.
-    fn accept_as_leader(&mut self, id: EntryId, entry: T) -> Option<(EntryId, usize, u32)> {
-        let before = self.op.get_accepted_idx();
-        if self.op.append(entry).is_ok() {
-            let after = self.op.get_accepted_idx();
-            if after > before {
-                let ballot_n = self.op.get_promise().n;
-                self.record_assignment(id, after, ballot_n);
-                return Some((id, after, ballot_n));
-            }
-            // else: leader in Prepare phase, entry buffered. No assignment recorded.
-            // Origin (or ourselves) will resolve via Timeout unless we re-route later.
+    /// pending's `assigned` and returns `(id, assigned_idx)` if the entry was
+    /// actually accepted, so callers processing a batch can collect these and
+    /// send a single `Assigned` reply covering the whole batch. The ballot isn't
+    /// part of the return value: every entry in one batch is necessarily
+    /// accepted under the same ballot (see `AsyncRuntimeMsg::Assigned`'s doc
+    /// comment), so the caller reads it once for the whole batch instead.
+    fn accept_as_leader(&mut self, id: EntryId, entry: T) -> Option<(EntryId, usize)> {
+        // Only accept while leadership is stable (Accept phase). A Prepare-phase
+        // append only buffers the entry internally, and that buffer can be
+        // forwarded to a *different* node if we step down before reaching Accept
+        // phase (see `forward_buffered_proposals` in
+        // sequence_paxos/follower.rs) — at that point there's no index or
+        // ballot on our side that could ever be matched to it. So we simply
+        // don't accept it yet; the caller (origin or this same node retrying
+        // on a later tick) times out and retries once leadership is stable.
+        let stable_leader =
+            matches!(self.op.get_current_leader(), Some((pid, true)) if pid == self.own_pid);
+        if !stable_leader {
+            return None;
         }
-        None
+        match self.append_tracked(Some(id), entry) {
+            Ok(Some((after, _ballot))) => Some((id, after)),
+            Ok(None) => None,
+            Err(err) => {
+                self.resolve_pending_failed(id, err);
+                None
+            }
+        }
+    }
+
+    /// Matches ids buffered by batching (`append_tracked`'s deferred branch) to
+    /// the index they're assigned once their batch flushes and
+    /// `get_accepted_idx()` advances. FIFO correspondence is exact here — see
+    /// `unconfirmed_local` — as long as the ballot hasn't changed since the id
+    /// was buffered; if it has, leadership moved on and this index may belong
+    /// to different writes, so we drop tracking and let the caller time out.
+    fn reconcile_unconfirmed(&mut self) {
+        let cur_ballot = self.op.get_promise();
+        let accepted = self.op.get_accepted_idx();
+        let mut idx = self.last_seen_accepted_idx;
+        while idx < accepted {
+            idx += 1;
+            let Some((id, ballot)) = self.unconfirmed_local.pop_front() else {
+                break;
+            };
+            if let (Some(id), true) = (id, ballot == cur_ballot) {
+                self.record_assignment(id, idx, ballot);
+            }
+        }
+        self.last_seen_accepted_idx = accepted;
     }
 
     /// Attempt to dispatch every pending entry that hasn't yet been sent or
@@ -323,15 +443,22 @@ where
                 if cur == Some(self.own_pid) {
                     // Collect accepted assignments and reply to the origin with a
                     // single batched `Assigned`, rather than one message per entry.
-                    let assigned: Vec<(EntryId, usize, u32)> = entries
+                    let assigned: Vec<(EntryId, usize)> = entries
                         .into_iter()
                         .filter_map(|(id, entry)| self.accept_as_leader(id, entry))
                         .collect();
                     if !assigned.is_empty() {
+                        // Every entry above was accepted under the same ballot: the
+                        // whole batch is processed synchronously with no yield
+                        // points, so nothing could change it in between.
+                        let ballot = self.op.get_promise();
                         let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
                             from: self.own_pid,
                             to: arm.from,
-                            msg: AsyncRuntimeMsg::Assigned { entries: assigned },
+                            msg: AsyncRuntimeMsg::Assigned {
+                                ballot,
+                                entries: assigned,
+                            },
                         });
                         let _ = self.outgoing_tx.send(reply_msg).await;
                     }
@@ -348,9 +475,9 @@ where
                 }
                 // Else: no leader; drop. Originators will timeout.
             }
-            AsyncRuntimeMsg::Assigned { entries } => {
-                for (id, assigned_idx, promise_n) in entries {
-                    self.record_assignment(id, assigned_idx, promise_n);
+            AsyncRuntimeMsg::Assigned { ballot, entries } => {
+                for (id, assigned_idx) in entries {
+                    self.record_assignment(id, assigned_idx, ballot);
                 }
             }
         }
@@ -359,7 +486,12 @@ where
     async fn handle_command(&mut self, cmd: Command<T>) {
         match cmd {
             Command::Append { entry, reply } => {
-                let res = self.op.append(entry);
+                // Routed through `append_tracked` (with `id: None`) rather than
+                // `self.op.append` directly: both share the same per-node batch
+                // buffer, so a deferred write here still needs a placeholder in
+                // `unconfirmed_local` to keep FIFO position matching exact for
+                // any `append_notify` entries batched alongside it.
+                let res = self.append_tracked(None, entry).map(|_| ());
                 let _ = reply.send(res);
             }
             Command::AppendNotify { entry, reply } => {
@@ -439,6 +571,7 @@ where
                 state.op.tick();
                 state.detect_and_emit_events().await;
                 state.try_dispatch_undispatched().await;
+                state.reconcile_unconfirmed();
                 state.drain_notifiers();
                 state.push_to_all_subs();
                 tick_fut = Box::pin(R::sleep(state.tick_period)).fuse();

@@ -32,13 +32,15 @@ pub enum AppendError<T>
 where
     T: Entry,
 {
-    /// The underlying [`OmniPaxos::append`](crate::OmniPaxos::append) call failed.
+    /// The underlying [`OmniPaxos::append`](crate::OmniPaxos::append) call failed while
+    /// this node was accepting the entry as leader (e.g. a reconfiguration is already
+    /// pending). Unlike the other variants, this is resolved immediately rather than
+    /// waiting for `append_notify_timeout` -- but only when this node itself owns the
+    /// pending call (i.e. it originated the `append_notify` or was routed to it as
+    /// leader). If the failure happens on a different node than the origin, the origin
+    /// still just sees a `Timeout`, since surfacing the specific error cross-node would
+    /// require a new wire message.
     Propose(ProposeErr<T>),
-    /// No leader is currently known so the entry cannot be routed. Retry after election.
-    NotLeader {
-        /// The current leader as observed by this node, if known.
-        current_leader: Option<NodeId>,
-    },
     /// A leader change occurred after the entry was accepted at its assigned index but
     /// before it was decided; the entry at that index may have been overwritten under a
     /// higher ballot. Users should re-append if this error is returned.
@@ -52,6 +54,27 @@ where
     /// than queued. Nothing was proposed, so it's safe to retry (ideally after a
     /// backoff, since the backlog needs time to drain).
     TooManyOutstanding,
+}
+
+/// Error returned by [`OmniPaxosHandle::append`](super::OmniPaxosHandle::append) and
+/// [`OmniPaxosHandle::reconfigure`](super::OmniPaxosHandle::reconfigure). Distinct from
+/// [`AppendError`]: these calls don't track decision, so they only ever fail
+/// synchronously -- either the propose call itself was rejected, or the actor is gone.
+/// `Shutdown` is a dedicated variant rather than being fabricated from [`ProposeErr`]'s
+/// unrelated variants (as this crate used to do), since a caller that retries on a
+/// `ProposeErr` variant is relying on its real meaning ("a reconfiguration is already
+/// pending") to know the retry will eventually stop being necessary -- which isn't true
+/// if the actual cause is that the actor is gone for good.
+#[derive(Debug)]
+pub enum RuntimeProposeErr<T>
+where
+    T: Entry,
+{
+    /// The underlying propose call failed (e.g. a reconfiguration is already pending,
+    /// or an invalid cluster config was proposed).
+    Propose(ProposeErr<T>),
+    /// The actor has shut down.
+    Shutdown,
 }
 
 /// Commands sent from an [`OmniPaxosHandle`](super::OmniPaxosHandle) to the actor task.

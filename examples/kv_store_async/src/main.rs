@@ -14,9 +14,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use omnipaxos_runtime::{spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime};
 use omnipaxos::util::{LogEntry, NodeId};
 use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig};
+use omnipaxos_runtime::{
+    spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
+};
 use omnipaxos_storage::memory_storage::MemoryStorage;
 
 mod kv;
@@ -136,7 +138,10 @@ async fn main() {
         key: "quota".into(),
         value: 100,
     };
-    println!("Adding value {:?} via node 1 (must confirm durability)", quota);
+    println!(
+        "Adding value {:?} via node 1 (must confirm durability)",
+        quota
+    );
     let idx = handles[&1]
         .append_notify(quota)
         .await

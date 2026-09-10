@@ -22,7 +22,7 @@ mod traits;
 #[cfg(feature = "tokio_runtime")]
 mod tokio_rt;
 
-pub use event::{AppendError, OmniPaxosEvent};
+pub use event::{AppendError, OmniPaxosEvent, RuntimeProposeErr};
 pub use handle::{spawn_actor, OmniPaxosHandle, RuntimeConfig};
 pub use omnipaxos::messages::EntryId;
 pub use traits::{ActorEntry, AsyncRuntime};

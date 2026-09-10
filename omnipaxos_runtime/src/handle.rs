@@ -6,10 +6,10 @@ use futures::channel::oneshot;
 use omnipaxos::messages::Message;
 use omnipaxos::storage::{Entry, Storage};
 use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{ClusterConfig, OmniPaxos, ProposeErr};
+use omnipaxos::{ClusterConfig, OmniPaxos};
 
 use super::actor::{run, ActorState};
-use super::event::{AppendError, Command, OmniPaxosEvent};
+use super::event::{AppendError, Command, OmniPaxosEvent, RuntimeProposeErr};
 use super::traits::{ActorEntry, AsyncRuntime};
 
 /// Configuration for the async runtime actor.
@@ -103,12 +103,17 @@ where
     ///
     /// Works from any node: the actor tags the entry with a unique id, routes it to
     /// the current leader, and resolves the future when the assigned log index is
-    /// decided. Fails with:
+    /// decided. If no leader is known yet, the call waits rather than failing fast --
+    /// it resolves once a leader is elected, or with `Timeout` if none is elected in
+    /// time. Fails with:
     /// - [`AppendError::Timeout`] if the entry is not decided within
-    ///   [`RuntimeConfig::append_notify_timeout`];
+    ///   [`RuntimeConfig::append_notify_timeout`] (including when no leader was ever
+    ///   elected in that time);
+    /// - [`AppendError::Propose`] if the underlying propose call itself failed (e.g. a
+    ///   reconfiguration is already pending) -- only when this node owns the pending
+    ///   call, otherwise it still resolves via `Timeout`;
     /// - [`AppendError::Superseded`] if a leader change invalidated the assignment
     ///   before decision;
-    /// - [`AppendError::NotLeader`] if no leader is currently known;
     /// - [`AppendError::TooManyOutstanding`] if [`RuntimeConfig::max_pending_appends`]
     ///   outstanding calls are already queued.
     pub async fn append_notify(&self, entry: T) -> Result<usize, AppendError<T>> {
@@ -121,24 +126,16 @@ where
     }
 
     /// Append an entry without waiting for decision. Mirrors the sync API.
-    pub async fn append(&self, entry: T) -> Result<(), ProposeErr<T>> {
+    pub async fn append(&self, entry: T) -> Result<(), RuntimeProposeErr<T>> {
         let (tx, rx) = oneshot::channel();
-        // Sending failure means the actor has shut down; treat as if pending reconfig.
-        // We can't fabricate a ProposeErr without T though, so we panic — the correct
-        // sentinel would be an AppendError, but `append` mirrors the sync API. Instead:
-        // if the send fails, return the entry via PendingReconfigEntry as a best-effort.
-        if let Err(err) = self.cmd_tx.send(Command::Append { entry, reply: tx }).await {
-            // Recover the entry from the returned Command so we can hand it back.
-            if let Command::Append { entry, .. } = err.into_inner() {
-                return Err(ProposeErr::PendingReconfigEntry(entry));
-            }
-            unreachable!("Command::Append round-trips its variant");
+        self.cmd_tx
+            .send(Command::Append { entry, reply: tx })
+            .await
+            .map_err(|_| RuntimeProposeErr::Shutdown)?;
+        match rx.await {
+            Ok(res) => res.map_err(RuntimeProposeErr::Propose),
+            Err(_) => Err(RuntimeProposeErr::Shutdown),
         }
-        rx.await.unwrap_or_else(|_| {
-            // Actor dropped without responding; nothing we can return that carries T.
-            // Users can subscribe to events to observe shutdown.
-            Ok(())
-        })
     }
 
     /// Ask the actor for the current leader.
@@ -188,31 +185,20 @@ where
         &self,
         new_configuration: ClusterConfig,
         metadata: Option<Vec<u8>>,
-    ) -> Result<(), ProposeErr<T>> {
+    ) -> Result<(), RuntimeProposeErr<T>> {
         let (tx, rx) = oneshot::channel();
-        if let Err(err) = self
-            .cmd_tx
+        self.cmd_tx
             .send(Command::Reconfigure {
                 new_configuration,
                 metadata,
                 reply: tx,
             })
             .await
-        {
-            if let Command::Reconfigure {
-                new_configuration,
-                metadata,
-                ..
-            } = err.into_inner()
-            {
-                return Err(ProposeErr::PendingReconfigConfig(
-                    new_configuration,
-                    metadata,
-                ));
-            }
-            unreachable!("Command::Reconfigure round-trips its variant");
+            .map_err(|_| RuntimeProposeErr::Shutdown)?;
+        match rx.await {
+            Ok(res) => res.map_err(RuntimeProposeErr::Propose),
+            Err(_) => Err(RuntimeProposeErr::Shutdown),
         }
-        rx.await.unwrap_or(Ok(()))
     }
 
     /// Attempt to become the leader by incrementing the local ballot.
