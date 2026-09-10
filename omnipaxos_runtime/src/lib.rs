@@ -14,6 +14,8 @@
 //! incoming ones. This keeps the crate free of I/O dependencies and lets users plug in
 //! any transport (TCP, QUIC, in-process channels, etc.).
 
+#![deny(missing_docs)]
+
 mod actor;
 mod event;
 mod handle;

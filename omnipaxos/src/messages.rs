@@ -337,7 +337,7 @@ pub mod async_runtime {
         /// which the *whole batch* was accepted (one ballot, not per-entry: the
         /// leader processes one incoming `TaggedProposal` synchronously with no
         /// yield points, so every entry in it is necessarily accepted under the
-        /// same ballot). 
+        /// same ballot).
         Assigned {
             ballot: Ballot,
             entries: Vec<(EntryId, usize)>,

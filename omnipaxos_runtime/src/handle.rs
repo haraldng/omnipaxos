@@ -8,7 +8,7 @@ use omnipaxos::storage::{Entry, Storage};
 use omnipaxos::util::{LogEntry, NodeId};
 use omnipaxos::{ClusterConfig, OmniPaxos};
 
-use super::actor::{run, ActorState};
+use super::actor::{run, ActorConfig, ActorState};
 use super::event::{AppendError, Command, OmniPaxosEvent, RuntimeProposeErr};
 use super::traits::{ActorEntry, AsyncRuntime};
 
@@ -45,6 +45,18 @@ pub struct RuntimeConfig {
     /// subscribers. Once reached, a new subscription is rejected: the returned
     /// receiver's channel is closed immediately without delivering any entries.
     pub max_decided_subscribers: usize,
+    /// Fallback cap on how many outgoing messages the actor buffers internally
+    /// waiting for room on the (bounded) `outgoing_messages` channel, used only
+    /// if that channel's own capacity can't be read. In practice the channel's
+    /// capacity is always known (`outgoing_capacity` above), so this is a
+    /// last-resort bound, not the primary one. Once over the effective cap, the
+    /// *oldest* buffered messages are dropped to make room for new ones, rather
+    /// than growing without bound -- safe because OmniPaxos already tolerates
+    /// lost messages via its own resend/retry mechanisms, the same way it would
+    /// tolerate them being dropped by a flaky network. A sufficiently slow or
+    /// stalled `outgoing_messages` consumer will lose outgoing messages under
+    /// this cap rather than cause unbounded memory growth.
+    pub max_outgoing_buffered: usize,
 }
 
 impl Default for RuntimeConfig {
@@ -60,6 +72,7 @@ impl Default for RuntimeConfig {
             decided_channel_capacity: 1024,
             max_pending_appends: 1024,
             max_decided_subscribers: 128,
+            max_outgoing_buffered: 10_000,
         }
     }
 }
@@ -269,11 +282,7 @@ where
         incoming_rx,
         outgoing_tx,
         event_tx,
-        cfg.tick_period,
-        cfg.egress_period,
-        cfg.append_notify_timeout,
-        cfg.max_pending_appends,
-        cfg.max_decided_subscribers,
+        ActorConfig::from(&cfg),
     );
 
     R::spawn(run::<T, B, R>(state, PhantomData::<fn() -> R>));

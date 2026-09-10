@@ -333,6 +333,7 @@ where
         self.get_promise().pid
     }
 
+    /// Returns this node's own pid.
     pub(crate) fn get_pid(&self) -> NodeId {
         self.pid
     }

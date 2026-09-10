@@ -14,7 +14,34 @@ use omnipaxos::util::{LogEntry, NodeId};
 use omnipaxos::{OmniPaxos, ProposeErr};
 
 use super::event::{AppendError, Command, OmniPaxosEvent};
+use super::handle::RuntimeConfig;
 use super::traits::{ActorEntry, AsyncRuntime};
+
+/// Actor-loop-relevant subset of [`RuntimeConfig`]. Excludes the channel-capacity
+/// fields, which are only needed once, to construct the channels in `spawn_actor`
+/// before the actor itself is built — mirrors how `SequencePaxosConfig` in the core
+/// crate trims down the public `OmniPaxosConfig` to just what that component needs.
+pub(crate) struct ActorConfig {
+    tick_period: Duration,
+    egress_period: Duration,
+    append_notify_timeout: Duration,
+    max_pending_appends: usize,
+    max_decided_subscribers: usize,
+    max_outgoing_buffered: usize,
+}
+
+impl From<&RuntimeConfig> for ActorConfig {
+    fn from(cfg: &RuntimeConfig) -> Self {
+        Self {
+            tick_period: cfg.tick_period,
+            egress_period: cfg.egress_period,
+            append_notify_timeout: cfg.append_notify_timeout,
+            max_pending_appends: cfg.max_pending_appends,
+            max_decided_subscribers: cfg.max_decided_subscribers,
+            max_outgoing_buffered: cfg.max_outgoing_buffered,
+        }
+    }
+}
 
 /// A pending `append_notify` awaiting decision. Uniform representation regardless
 /// of whether the entry was accepted locally (we are leader) or forwarded (we are
@@ -34,9 +61,6 @@ where
     /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
     ///   (a) we accepted the entry ourselves as leader, or
     ///   (b) we received `AsyncRuntimeMsg::Assigned` from the leader.
-    /// The full ballot (not just its `n`) lets us detect supersession after a
-    /// leader change: two ballots can share `n` while still being totally
-    /// ordered by `(n, priority, pid)`.
     assigned: Option<(usize, Ballot)>,
     deadline: Instant,
     reply: oneshot::Sender<Result<usize, AppendError<T>>>,
@@ -52,13 +76,9 @@ where
     pub(crate) incoming_rx: async_channel::Receiver<Message<T>>,
     pub(crate) outgoing_tx: async_channel::Sender<Message<T>>,
     pub(crate) event_tx: async_channel::Sender<OmniPaxosEvent>,
-    pub(crate) tick_period: Duration,
-    pub(crate) egress_period: Duration,
+    pub(crate) config: ActorConfig,
 
-    own_pid: NodeId,
-    append_notify_timeout: Duration,
-    max_pending_appends: usize,
-    max_decided_subscribers: usize,
+    pid: NodeId,
     outgoing_buf: Vec<Message<T>>,
     pending: VecDeque<Pending<T>>,
     decided_subscribers: Vec<DecidedSub<T>>,
@@ -95,34 +115,25 @@ where
     T: Entry,
     B: Storage<T>,
 {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         op: OmniPaxos<T, B>,
         cmd_rx: async_channel::Receiver<Command<T>>,
         incoming_rx: async_channel::Receiver<Message<T>>,
         outgoing_tx: async_channel::Sender<Message<T>>,
         event_tx: async_channel::Sender<OmniPaxosEvent>,
-        tick_period: Duration,
-        egress_period: Duration,
-        append_notify_timeout: Duration,
-        max_pending_appends: usize,
-        max_decided_subscribers: usize,
+        config: ActorConfig,
     ) -> Self {
         let last_decided_idx = op.get_decided_idx();
         let last_leader = op.get_current_leader();
-        let own_pid = op.get_pid();
+        let pid = op.get_pid();
         Self {
             op,
             cmd_rx,
             incoming_rx,
             outgoing_tx,
             event_tx,
-            tick_period,
-            egress_period,
-            own_pid,
-            append_notify_timeout,
-            max_pending_appends,
-            max_decided_subscribers,
+            config,
+            pid,
             outgoing_buf: Vec::new(),
             pending: VecDeque::new(),
             decided_subscribers: Vec::new(),
@@ -198,8 +209,22 @@ where
     /// delay egress. On `Full`, the unsent remainder (in order) is kept in
     /// `outgoing_buf` to retry on the next egress tick; `take_outgoing_messages`
     /// appends rather than overwrites, so nothing is lost or reordered.
+    ///
+    /// If the consumer stays slow/stalled for long enough that `outgoing_buf`
+    /// itself grows past `outgoing_tx`'s capacity (or `max_outgoing_buffered`
+    /// as a fallback, if that capacity can't be read), the *oldest* buffered
+    /// messages are dropped to keep memory bounded -- see
+    /// `RuntimeConfig::max_outgoing_buffered`'s doc comment for why dropping
+    /// is safe here.
     async fn flush_outgoing(&mut self) {
         self.op.take_outgoing_messages(&mut self.outgoing_buf);
+
+        let cap = self
+            .outgoing_tx
+            .capacity()
+            .unwrap_or(self.config.max_outgoing_buffered);
+        trim_oldest(&mut self.outgoing_buf, cap);
+
         let pending = std::mem::take(&mut self.outgoing_buf);
         let mut iter = pending.into_iter();
         for msg in iter.by_ref() {
@@ -364,7 +389,7 @@ where
         // don't accept it yet; the caller (origin or this same node retrying
         // on a later tick) times out and retries once leadership is stable.
         let stable_leader =
-            matches!(self.op.get_current_leader(), Some((pid, true)) if pid == self.own_pid);
+            matches!(self.op.get_current_leader(), Some((pid, true)) if pid == self.pid);
         if !stable_leader {
             return None;
         }
@@ -408,7 +433,7 @@ where
         let Some((leader, accepted)) = self.op.get_current_leader() else {
             return;
         };
-        if leader == self.own_pid && !accepted {
+        if leader == self.pid && !accepted {
             // We're leader but not yet in Accept phase — leave entries undispatched
             // and wait for the next tick.
             return;
@@ -421,14 +446,14 @@ where
             .iter_mut()
             .filter_map(|p| p.undispatched.take().map(|entry| (p.id, entry)))
             .collect();
-        if leader == self.own_pid {
+        if leader == self.pid {
             for (id, entry) in entries {
                 self.accept_as_leader(id, entry);
             }
         } else if !entries.is_empty() {
             // One wire message for the whole batch, rather than one per entry.
             let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
-                from: self.own_pid,
+                from: self.pid,
                 to: leader,
                 msg: AsyncRuntimeMsg::TaggedProposal { entries },
             });
@@ -440,7 +465,7 @@ where
         match arm.msg {
             AsyncRuntimeMsg::TaggedProposal { entries } => {
                 let cur = self.op.get_current_leader().map(|(p, _)| p);
-                if cur == Some(self.own_pid) {
+                if cur == Some(self.pid) {
                     // Collect accepted assignments and reply to the origin with a
                     // single batched `Assigned`, rather than one message per entry.
                     let assigned: Vec<(EntryId, usize)> = entries
@@ -453,7 +478,7 @@ where
                         // points, so nothing could change it in between.
                         let ballot = self.op.get_promise();
                         let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
-                            from: self.own_pid,
+                            from: self.pid,
                             to: arm.from,
                             msg: AsyncRuntimeMsg::Assigned {
                                 ballot,
@@ -495,7 +520,7 @@ where
                 let _ = reply.send(res);
             }
             Command::AppendNotify { entry, reply } => {
-                if self.pending.len() >= self.max_pending_appends {
+                if self.pending.len() >= self.config.max_pending_appends {
                     let _ = reply.send(Err(AppendError::TooManyOutstanding));
                     return;
                 }
@@ -504,7 +529,7 @@ where
                     id,
                     undispatched: Some(entry),
                     assigned: None,
-                    deadline: Instant::now() + self.append_notify_timeout,
+                    deadline: Instant::now() + self.config.append_notify_timeout,
                     reply,
                 });
                 self.try_dispatch_undispatched().await;
@@ -519,7 +544,7 @@ where
                 let _ = reply.send(self.op.read_decided_suffix(from));
             }
             Command::SubscribeDecided { from, tx } => {
-                if self.decided_subscribers.len() >= self.max_decided_subscribers {
+                if self.decided_subscribers.len() >= self.config.max_decided_subscribers {
                     // Reject: drop `tx` without storing it, closing the
                     // subscriber's channel immediately with no entries delivered.
                     return;
@@ -555,8 +580,8 @@ where
     B: Storage<T> + Send + 'static,
     R: AsyncRuntime,
 {
-    let mut tick_fut = Box::pin(R::sleep(state.tick_period)).fuse();
-    let mut egress_fut = Box::pin(R::sleep(state.egress_period)).fuse();
+    let mut tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
+    let mut egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
 
     // async_channel::Receiver is !Unpin; keep it in a Pin<Box<...>> so the Stream
     // impl works under select_biased!.
@@ -574,11 +599,11 @@ where
                 state.reconcile_unconfirmed();
                 state.drain_notifiers();
                 state.push_to_all_subs();
-                tick_fut = Box::pin(R::sleep(state.tick_period)).fuse();
+                tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
             }
             _ = egress_fut => {
                 state.flush_outgoing().await;
-                egress_fut = Box::pin(R::sleep(state.egress_period)).fuse();
+                egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
             }
             in_msg = incoming_rx.next() => {
                 match in_msg {
@@ -594,5 +619,47 @@ where
                 }
             }
         }
+    }
+}
+
+/// Drops the oldest elements of `buf` until its length is at most `cap`, preserving
+/// the relative order of what remains. A no-op if `buf` is already within `cap`.
+fn trim_oldest<M>(buf: &mut Vec<M>, cap: usize) {
+    if buf.len() > cap {
+        let excess = buf.len() - cap;
+        buf.drain(..excess);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_oldest;
+
+    #[test]
+    fn trim_oldest_drops_front_keeps_cap_most_recent() {
+        let mut buf = vec![1, 2, 3, 4, 5];
+        trim_oldest(&mut buf, 3);
+        assert_eq!(buf, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn trim_oldest_is_noop_when_within_cap() {
+        let mut buf = vec![1, 2, 3];
+        trim_oldest(&mut buf, 5);
+        assert_eq!(buf, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn trim_oldest_is_noop_when_exactly_at_cap() {
+        let mut buf = vec![1, 2, 3];
+        trim_oldest(&mut buf, 3);
+        assert_eq!(buf, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn trim_oldest_can_drop_everything() {
+        let mut buf = vec![1, 2, 3];
+        trim_oldest(&mut buf, 0);
+        assert!(buf.is_empty());
     }
 }
