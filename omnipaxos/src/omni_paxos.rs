@@ -270,6 +270,16 @@ where
         self.seq_paxos.internal_storage.get_accepted_idx()
     }
 
+    /// Return the number of entries currently buffered for batching (see
+    /// `ServerConfig::batch_size`), not yet reflected in `get_accepted_idx()`.
+    /// Useful, alongside `get_accepted_idx()`, for observing every entry that
+    /// enters this node's log -- including ones added by internal protocol
+    /// handling (e.g. a forwarded proposal or replicated entries) rather than
+    /// a direct call to `append`/`reconfigure`.
+    pub fn get_batched_len(&self) -> usize {
+        self.seq_paxos.internal_storage.get_batched_len()
+    }
+
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> usize {
         self.seq_paxos.get_compacted_idx()

@@ -486,6 +486,12 @@ where
         self.state_cache.accepted_idx
     }
 
+    /// The number of entries currently buffered for batching, not yet reflected
+    /// in `get_accepted_idx()`.
+    pub(crate) fn get_batched_len(&self) -> usize {
+        self.state_cache.batched_entries.len()
+    }
+
     pub(crate) fn get_suffix(&self, from: usize) -> StorageResult<Vec<T>> {
         self.storage.get_suffix(from)
     }

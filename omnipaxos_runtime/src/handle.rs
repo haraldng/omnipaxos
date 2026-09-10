@@ -46,16 +46,11 @@ pub struct RuntimeConfig {
     /// receiver's channel is closed immediately without delivering any entries.
     pub max_decided_subscribers: usize,
     /// Fallback cap on how many outgoing messages the actor buffers internally
-    /// waiting for room on the (bounded) `outgoing_messages` channel, used only
-    /// if that channel's own capacity can't be read. In practice the channel's
-    /// capacity is always known (`outgoing_capacity` above), so this is a
-    /// last-resort bound, not the primary one. Once over the effective cap, the
-    /// *oldest* buffered messages are dropped to make room for new ones, rather
-    /// than growing without bound -- safe because OmniPaxos already tolerates
-    /// lost messages via its own resend/retry mechanisms, the same way it would
-    /// tolerate them being dropped by a flaky network. A sufficiently slow or
-    /// stalled `outgoing_messages` consumer will lose outgoing messages under
-    /// this cap rather than cause unbounded memory growth.
+    /// while waiting for room on the (bounded) `outgoing_messages` channel,
+    /// used only if that channel's own capacity can't be read. Past this cap,
+    /// the *oldest* buffered messages are dropped rather than growing without
+    /// bound -- safe because OmniPaxos already tolerates lost messages via its
+    /// own resend/retry mechanisms.
     pub max_outgoing_buffered: usize,
 }
 

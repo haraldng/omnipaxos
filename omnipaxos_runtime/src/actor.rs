@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::time::Instant;
 
@@ -52,11 +52,10 @@ where
     T: Entry,
 {
     id: EntryId,
-    /// The entry, retained until we've dispatched it. Cleared once we've either
-    /// accepted it locally or sent a `TaggedProposal` to the leader. When `Some`
-    /// on each tick, `try_dispatch_undispatched` attempts to route it. This is
-    /// what enables `append_notify` to be called before a leader is elected —
-    /// the entry simply waits until routing becomes possible.
+    /// The entry, retained until dispatched (accepted locally or sent as a
+    /// `TaggedProposal`). While `Some`, `try_dispatch_undispatched` retries it
+    /// each tick — this is what lets `append_notify` be called before a
+    /// leader is known.
     undispatched: Option<T>,
     /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
     ///   (a) we accepted the entry ourselves as leader, or
@@ -64,6 +63,25 @@ where
     assigned: Option<(usize, Ballot)>,
     deadline: Instant,
     reply: oneshot::Sender<Result<usize, AppendError<T>>>,
+}
+
+/// What to do, once its index is known, for a write buffered in the shared
+/// batch buffer. Every code path that can add to that buffer pushes one of
+/// these (see `track_untracked_batch_growth`), keeping `unconfirmed_local`'s
+/// FIFO position in sync with the buffer regardless of source.
+enum TrackIntent {
+    /// Not tracked: a plain `Command::Append`, or an entry that entered the
+    /// buffer via core-internal protocol handling we have no id for (a
+    /// forwarded proposal, replicated entries, a reconfiguration stopsign).
+    Untracked,
+    /// Resolve a pending `append_notify` we own directly, via `self.pending`,
+    /// once this index is known.
+    Local(EntryId),
+    /// Reply with `AsyncRuntimeMsg::Assigned` to `from` once this index is
+    /// known -- used for entries that arrived via a remote `TaggedProposal`
+    /// and got deferred by batching rather than accepted immediately (the
+    /// immediate case is handled inline by `handle_runtime_msg` instead).
+    Remote { id: EntryId, from: NodeId },
 }
 
 pub(crate) struct ActorState<T, B>
@@ -85,18 +103,13 @@ where
     last_leader: Option<(NodeId, bool)>,
     last_decided_idx: usize,
     last_reconfigured: bool,
-    /// One entry per locally-appended write deferred by batching (`before ==
-    /// after` in `append_tracked`), in call order, awaiting the batch flush
-    /// that will actually assign it an index. `id` is `Some` only for writes
-    /// that originated from `append_notify`/`TaggedProposal`; plain
-    /// `Command::Append` writes still need a placeholder here (`None`)
-    /// because they share the exact same per-node batch buffer
-    /// (`state_cache.batched_entries`) — without one, an untracked entry
-    /// batched ahead of a tracked one would shift the FIFO correspondence
-    /// between queue position and assigned index. Paired with the ballot in
-    /// effect when buffered so a leader change before the flush is detected
-    /// rather than mis-assigned.
-    unconfirmed_local: VecDeque<(Option<EntryId>, Ballot)>,
+    /// One entry per write currently sitting in the shared per-node batch
+    /// buffer, in the order it was added, awaiting the flush that assigns it
+    /// an index. Popping one entry per unit of `get_accepted_idx()` advance
+    /// (`reconcile_unconfirmed`) lines up with what actually flushed. Paired
+    /// with the ballot in effect when buffered so a leader change before the
+    /// flush is detected rather than mis-assigned.
+    unconfirmed_local: VecDeque<(TrackIntent, Ballot)>,
     last_seen_accepted_idx: usize,
 }
 
@@ -126,6 +139,7 @@ where
         let last_decided_idx = op.get_decided_idx();
         let last_leader = op.get_current_leader();
         let pid = op.get_pid();
+        let accepted_idx = op.get_accepted_idx();
         Self {
             op,
             cmd_rx,
@@ -141,7 +155,7 @@ where
             last_decided_idx,
             last_reconfigured: false,
             unconfirmed_local: VecDeque::new(),
-            last_seen_accepted_idx: op.get_accepted_idx(),
+            last_seen_accepted_idx: accepted_idx,
         }
     }
 
@@ -201,20 +215,13 @@ where
     }
 
     /// Drains newly-produced outgoing messages onto `outgoing_tx`. Uses
-    /// `try_send` rather than `.send().await`: a bounded channel that's
-    /// merely *full* (consumer alive but slow) must not block this call --
-    /// it's on the single actor loop, so blocking here would stall tick,
-    /// election, and command processing for this node entirely, not just
-    /// delay egress. On `Full`, the unsent remainder (in order) is kept in
-    /// `outgoing_buf` to retry on the next egress tick; `take_outgoing_messages`
-    /// appends rather than overwrites, so nothing is lost or reordered.
-    ///
-    /// If the consumer stays slow/stalled for long enough that `outgoing_buf`
-    /// itself grows past `outgoing_tx`'s capacity (or `max_outgoing_buffered`
-    /// as a fallback, if that capacity can't be read), the *oldest* buffered
-    /// messages are dropped to keep memory bounded -- see
-    /// `RuntimeConfig::max_outgoing_buffered`'s doc comment for why dropping
-    /// is safe here.
+    /// `try_send` rather than `.send().await` so a merely-full channel (slow
+    /// consumer) doesn't block the whole actor loop; unsent messages stay in
+    /// `outgoing_buf` to retry next egress tick. If the consumer stays
+    /// stalled long enough for `outgoing_buf` to exceed the channel's
+    /// capacity (or `max_outgoing_buffered` as a fallback), the oldest
+    /// buffered messages are dropped to keep memory bounded — see
+    /// `RuntimeConfig::max_outgoing_buffered`.
     async fn flush_outgoing(&mut self) {
         self.op.take_outgoing_messages(&mut self.outgoing_buf);
 
@@ -334,53 +341,70 @@ where
     }
 
     /// Appends `entry` to the local log, tracking it in `unconfirmed_local` if
-    /// the write is deferred by batching rather than immediately reflected in
-    /// `get_accepted_idx()`. `id` is `Some` for callers that want the
-    /// eventual index recorded against a pending `append_notify`
-    /// (`accept_as_leader`); plain `Command::Append` passes `None`. Both go
-    /// through the exact same per-node batch buffer
-    /// (`state_cache.batched_entries`), so an untracked (`None`) call still
-    /// needs its own placeholder in the queue — otherwise a later flush
-    /// triggered by someone else's call would let a still-queued tracked
-    /// entry be matched to the wrong index (see `reconcile_unconfirmed`).
+    /// the write is genuinely deferred by batching (`get_batched_len()` grew)
+    /// rather than immediately reflected in `get_accepted_idx()`. `intent`
+    /// says what to do with the eventual index; plain `Command::Append` passes
+    /// `TrackIntent::Untracked`.
+    ///
+    /// Must check `get_batched_len()` rather than inferring "batched" from
+    /// `before == after`: a follower, or a leader still in `Phase::Prepare`,
+    /// also has `before == after`, but the entry went to `buffered_proposals`
+    /// or out as a `ProposalForward`, not the shared batch buffer — pushing a
+    /// placeholder for that case would desync `unconfirmed_local`'s FIFO
+    /// count. `accept_as_leader`'s stable-leader gate means only plain
+    /// `Command::Append` can hit this case.
     fn append_tracked(
         &mut self,
-        id: Option<EntryId>,
+        intent: TrackIntent,
         entry: T,
     ) -> Result<Option<(usize, Ballot)>, ProposeErr<T>> {
-        let before = self.op.get_accepted_idx();
+        let accepted_before = self.op.get_accepted_idx();
+        let batched_before = self.op.get_batched_len();
         self.op.append(entry)?;
-        let after = self.op.get_accepted_idx();
-        if after > before {
+        let accepted_after = self.op.get_accepted_idx();
+        let batched_after = self.op.get_batched_len();
+        if accepted_after > accepted_before {
             let ballot = self.op.get_promise();
-            if let Some(id) = id {
-                self.record_assignment(id, after, ballot);
+            if let TrackIntent::Local(id) = intent {
+                self.record_assignment(id, accepted_after, ballot);
             }
-            Ok(Some((after, ballot)))
-        } else {
-            // Batching deferred the write.
+            Ok(Some((accepted_after, ballot)))
+        } else if batched_after > batched_before {
+            // Genuinely deferred by batching.
             self.unconfirmed_local
-                .push_back((id, self.op.get_promise()));
+                .push_back((intent, self.op.get_promise()));
+            Ok(None)
+        } else {
+            // Went somewhere else entirely (forwarded, or buffered pending a
+            // Prepare -> Accept transition) -- nothing entered the shared
+            // batch buffer, so there's nothing to track here.
             Ok(None)
         }
     }
 
-    /// Leader-side accept. Runs when we originate an `append_notify` locally *or*
-    /// when we receive a `TaggedProposal` from a follower. Populates the local
-    /// pending's `assigned` and returns `(id, assigned_idx)` if the entry was
-    /// actually accepted, so callers processing a batch can collect these and
-    /// send a single `Assigned` reply covering the whole batch. The ballot isn't
-    /// part of the return value: every entry in one batch is necessarily
-    /// accepted under the same ballot (see `AsyncRuntimeMsg::Assigned`'s doc
-    /// comment), so the caller reads it once for the whole batch instead.
-    fn accept_as_leader(&mut self, id: EntryId, entry: T) -> Option<(EntryId, usize)> {
+    /// Leader-side accept, for an entry we originate locally (`from: None`)
+    /// or received via `TaggedProposal` from follower `from`. Populates the
+    /// pending's `assigned` (or, if buffered by batching, queues a
+    /// `TrackIntent` for `reconcile_unconfirmed` to resolve later) and
+    /// returns `(id, assigned_idx)` if accepted immediately, so batch callers
+    /// can collect these and send one `Assigned` reply for the whole batch.
+    fn accept_as_leader(
+        &mut self,
+        id: EntryId,
+        entry: T,
+        from: Option<NodeId>,
+    ) -> Option<(EntryId, usize)> {
         // Only accept while leadership is stable (Accept phase).
         let stable_leader =
             matches!(self.op.get_current_leader(), Some((pid, true)) if pid == self.pid);
         if !stable_leader {
             return None;
         }
-        match self.append_tracked(Some(id), entry) {
+        let intent = match from {
+            None => TrackIntent::Local(id),
+            Some(from) => TrackIntent::Remote { id, from },
+        };
+        match self.append_tracked(intent, entry) {
             Ok(Some((after, _ballot))) => Some((id, after)),
             Ok(None) => None,
             Err(err) => {
@@ -390,26 +414,55 @@ where
         }
     }
 
-    /// Matches ids buffered by batching (`append_tracked`'s deferred branch) to
-    /// the index they're assigned once their batch flushes and
-    /// `get_accepted_idx()` advances. FIFO correspondence is exact here — see
-    /// `unconfirmed_local` — as long as the ballot hasn't changed since the id
-    /// was buffered; if it has, leadership moved on and this index may belong
-    /// to different writes, so we drop tracking and let the caller time out.
-    fn reconcile_unconfirmed(&mut self) {
+    /// Matches everything buffered in `unconfirmed_local` to the index it's
+    /// assigned once its batch flushes and `get_accepted_idx()` advances.
+    /// FIFO correspondence is exact here regardless of what added to the
+    /// shared batch buffer (see `unconfirmed_local`'s doc comment), as long as
+    /// the ballot hasn't changed since the entry was buffered; if it has,
+    /// leadership moved on and this index may belong to different writes, so
+    /// we drop tracking for it and let the caller time out.
+    async fn reconcile_unconfirmed(&mut self) {
         let cur_ballot = self.op.get_promise();
         let accepted = self.op.get_accepted_idx();
         let mut idx = self.last_seen_accepted_idx;
+        // Entries from a single remote TaggedProposal batch can resolve
+        // across several different `idx` values here (their own batch may
+        // have been interleaved with others' writes); group by origin so
+        // each gets one `Assigned` reply instead of one message per entry.
+        let mut remote_assigned: HashMap<NodeId, Vec<(EntryId, usize)>> = HashMap::new();
         while idx < accepted {
             idx += 1;
-            let Some((id, ballot)) = self.unconfirmed_local.pop_front() else {
+            let Some((intent, ballot)) = self.unconfirmed_local.pop_front() else {
                 break;
             };
-            if let (Some(id), true) = (id, ballot == cur_ballot) {
-                self.record_assignment(id, idx, ballot);
+            if ballot != cur_ballot {
+                // Leadership moved on since this was buffered; the index may
+                // belong to different writes. Drop tracking -- Local/Remote
+                // origins simply time out, matching the ballot-mismatch
+                // handling in `drain_notifiers` for already-assigned entries.
+                continue;
+            }
+            match intent {
+                TrackIntent::Untracked => {}
+                TrackIntent::Local(id) => self.record_assignment(id, idx, ballot),
+                TrackIntent::Remote { id, from } => {
+                    remote_assigned.entry(from).or_default().push((id, idx));
+                }
             }
         }
         self.last_seen_accepted_idx = accepted;
+
+        for (from, entries) in remote_assigned {
+            let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+                from: self.pid,
+                to: from,
+                msg: AsyncRuntimeMsg::Assigned {
+                    ballot: cur_ballot,
+                    entries,
+                },
+            });
+            let _ = self.outgoing_tx.send(reply_msg).await;
+        }
     }
 
     /// Attempt to dispatch every pending entry that hasn't yet been sent or
@@ -432,7 +485,7 @@ where
             .collect();
         if leader == self.pid {
             for (id, entry) in entries {
-                self.accept_as_leader(id, entry);
+                self.accept_as_leader(id, entry, None);
             }
         } else if !entries.is_empty() {
             let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
@@ -451,9 +504,10 @@ where
                 if cur == Some(self.pid) {
                     // Collect accepted assignments and reply to the origin with a
                     // single batched `Assigned`.
+                    let from = arm.from;
                     let assigned: Vec<(EntryId, usize)> = entries
                         .into_iter()
-                        .filter_map(|(id, entry)| self.accept_as_leader(id, entry))
+                        .filter_map(|(id, entry)| self.accept_as_leader(id, entry, Some(from)))
                         .collect();
                     if !assigned.is_empty() {
                         let ballot = self.op.get_promise();
@@ -488,15 +542,48 @@ where
         }
     }
 
+    /// Given a `(batched_len, accepted_idx)` snapshot taken before some call
+    /// that may have silently added to the shared batch buffer (a forwarded
+    /// proposal, an incoming replication batch, a reconfiguration stopsign),
+    /// pushes a `TrackIntent::Untracked` placeholder in `unconfirmed_local`
+    /// for each newly-added entry, keeping its FIFO count accurate.
+    ///
+    /// Growth is `(accepted_after - accepted_before) + (batched_after -
+    /// batched_before)`, computed with signed arithmetic and clamped at 0:
+    /// `accepted_idx` can legitimately *decrease* when a follower's log is
+    /// truncated by an incoming `AcceptSync` from a new leader, which isn't a
+    /// case with anything new to track.
+    fn track_batch_growth(&mut self, batched_before: usize, accepted_before: usize) {
+        let batched_after = self.op.get_batched_len();
+        let accepted_after = self.op.get_accepted_idx();
+        let added = accepted_after as isize - accepted_before as isize + batched_after as isize
+            - batched_before as isize;
+        let ballot = self.op.get_promise();
+        for _ in 0..added.max(0) {
+            self.unconfirmed_local
+                .push_back((TrackIntent::Untracked, ballot));
+        }
+    }
+
+    /// Delivers an incoming `SequencePaxos`/BLE message to the core, tracking
+    /// any entries it silently adds to the shared batch buffer -- see
+    /// `track_batch_growth`.
+    fn handle_incoming_tracked(&mut self, m: Message<T>) {
+        let batched_before = self.op.get_batched_len();
+        let accepted_before = self.op.get_accepted_idx();
+        self.op.handle_incoming(m);
+        self.track_batch_growth(batched_before, accepted_before);
+    }
+
     async fn handle_command(&mut self, cmd: Command<T>) {
         match cmd {
             Command::Append { entry, reply } => {
-                // Routed through `append_tracked` (with `id: None`) rather than
-                // `self.op.append` directly: both share the same per-node batch
-                // buffer, so a deferred write here still needs a placeholder in
-                // `unconfirmed_local` to keep FIFO position matching exact for
-                // any `append_notify` entries batched alongside it.
-                let res = self.append_tracked(None, entry).map(|_| ());
+                // Via append_tracked (not self.op.append) so a deferred write
+                // still gets its unconfirmed_local placeholder, keeping FIFO
+                // position exact for any append_notify entries batched alongside it.
+                let res = self
+                    .append_tracked(TrackIntent::Untracked, entry)
+                    .map(|_| ());
                 let _ = reply.send(res);
             }
             Command::AppendNotify {
@@ -545,7 +632,13 @@ where
                 metadata,
                 reply,
             } => {
-                let _ = reply.send(self.op.reconfigure(new_configuration, metadata));
+                // Wrapped like handle_incoming_tracked: a stopsign accepted as
+                // leader is itself an untracked addition to the shared batch buffer.
+                let batched_before = self.op.get_batched_len();
+                let accepted_before = self.op.get_accepted_idx();
+                let res = self.op.reconfigure(new_configuration, metadata);
+                self.track_batch_growth(batched_before, accepted_before);
+                let _ = reply.send(res);
             }
             Command::TryBecomeLeader => {
                 self.op.try_become_leader();
@@ -581,7 +674,7 @@ where
                 state.op.tick();
                 state.detect_and_emit_events().await;
                 state.try_dispatch_undispatched().await;
-                state.reconcile_unconfirmed();
+                state.reconcile_unconfirmed().await;
                 state.drain_notifiers();
                 state.push_to_all_subs();
                 tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
@@ -593,7 +686,7 @@ where
             in_msg = incoming_rx.next() => {
                 match in_msg {
                     Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm).await,
-                    Some(m) => state.op.handle_incoming(m),
+                    Some(m) => state.handle_incoming_tracked(m),
                     None => break,
                 }
             }

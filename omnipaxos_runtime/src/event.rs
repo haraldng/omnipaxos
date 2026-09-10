@@ -44,16 +44,12 @@ where
     /// require a new wire message.
     Propose(ProposeErr<T>),
     /// A leader change occurred after the entry was accepted at the given index but
-    /// before it was decided. This is a *heuristic*, not a certainty, and can be a
-    /// false positive: when a new leader takes over, it's required (by the underlying
-    /// Paxos protocol) to adopt any value that a majority-overlapping quorum may have
-    /// already accepted at each log index, so the same entry can end up decided at
-    /// this same index anyway under the new leader's ballot -- we simply stop waiting
-    /// to find out as soon as we observe the ballot change, rather than waiting for
-    /// resolution. If you need to know for sure, check whether the entry actually
-    /// ended up decided at `log_entry_idx` (e.g. via
-    /// [`OmniPaxosHandle::read_decided_suffix`](super::OmniPaxosHandle::read_decided_suffix))
-    /// before deciding whether to re-append.
+    /// before it was decided. This is a *heuristic*, not a certainty: a new leader is
+    /// required to adopt any value a majority-overlapping quorum may have already
+    /// accepted, so the entry can still end up decided at `log_entry_idx` under the
+    /// new ballot -- we just stop waiting rather than confirm it. Check
+    /// [`OmniPaxosHandle::read_decided_suffix`](super::OmniPaxosHandle::read_decided_suffix)
+    /// at that index if you need to know for sure before re-appending.
     Superseded {
         /// The log index the entry was assigned before the leader change.
         log_entry_idx: usize,
@@ -73,11 +69,6 @@ where
 /// [`OmniPaxosHandle::reconfigure`](super::OmniPaxosHandle::reconfigure). Distinct from
 /// [`AppendError`]: these calls don't track decision, so they only ever fail
 /// synchronously -- either the propose call itself was rejected, or the actor is gone.
-/// `Shutdown` is a dedicated variant rather than being fabricated from [`ProposeErr`]'s
-/// unrelated variants (as this crate used to do), since a caller that retries on a
-/// `ProposeErr` variant is relying on its real meaning ("a reconfiguration is already
-/// pending") to know the retry will eventually stop being necessary -- which isn't true
-/// if the actual cause is that the actor is gone for good.
 #[derive(Debug)]
 pub enum RuntimeProposeErr<T>
 where

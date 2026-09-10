@@ -247,6 +247,203 @@ async fn append_notify_from_follower_resolves() {
     );
 }
 
+/// Regression test: a follower's `append_notify`, forwarded to the leader via
+/// `TaggedProposal`, used to never get an `Assigned` reply if the leader
+/// deferred it by batching -- the leader's own `accept_as_leader` returned
+/// `None` for the deferred entry, and `handle_runtime_msg`'s `filter_map`
+/// only sent `Assigned` for entries accepted *immediately*. `batch_size = 2`
+/// with a single entry in flight guarantees deferral: nothing else fills the
+/// batch, so it can only flush once `flush_batch_tick_timeout` forces it --
+/// exercising exactly the deferred-then-later-resolved path.
+#[tokio::test]
+async fn append_notify_from_follower_resolves_when_batched_and_deferred() {
+    let handles = spawn_cluster_with_filter(3, 2, Duration::from_secs(5), |_| true).await;
+    let leader = wait_for_leader(&handles).await;
+    let follower_pid = *handles.keys().find(|&&p| p != leader).unwrap();
+    let follower_h = handles.get(&follower_pid).unwrap().clone();
+
+    let idx = timeout(
+        Duration::from_secs(3),
+        follower_h.append_notify(TestEntry(7)),
+    )
+    .await
+    .expect("append_notify hung")
+    .expect(
+        "append_notify should eventually succeed even when deferred by \
+             batching on a remote leader",
+    );
+    assert!(idx >= 1);
+}
+
+/// Regression test: a follower's plain `.append()` is routed to the leader
+/// via the core's own `PaxosMsg::ProposalForward` -- entirely bypassing our
+/// tracking layer -- and enters the exact same shared per-node batch buffer
+/// as a concurrently-batched `append_notify` entry, with no placeholder in
+/// `unconfirmed_local`. That used to let a forwarded entry "steal" the slot a
+/// tracked entry was assigned once the batch flushed -- but only when the
+/// tracked entry *doesn't* trigger the flush itself (the entry that fills
+/// the batch always resolves correctly, since it's provably the last one
+/// pushed). So this sends the tracked entry first, then several untracked
+/// ones after it, batch_size sized so multiple untracked entries are needed
+/// to fill the batch: with more than one competitor after it, the tracked
+/// entry is very unlikely to end up being the one that self-triggers the
+/// flush. The assertion is content-based (reads back what's actually decided
+/// at the returned index) rather than assuming a specific interleaving, so
+/// it's correct regardless of which precise order occurs. Note: a tracked
+/// entry pushed *first* or *last* in the batch always resolves correctly
+/// regardless of this bug (first because it happens to occupy the position
+/// the FIFO count would give it anyway, last because it's provably the entry
+/// that triggers its own flush) -- the bug needs the tracked entry preceded
+/// by at least one untracked one *and* followed by another that ends up
+/// triggering the flush, so an untracked entry is sent before and after it.
+#[tokio::test]
+async fn append_notify_index_correct_when_batched_with_forwarded_proposal() {
+    let handles = spawn_cluster_with_filter(3, 3, Duration::from_secs(5), |_| true).await;
+    let leader = wait_for_leader(&handles).await;
+    let (f1, f2): (NodeId, NodeId) = {
+        let mut followers = handles.keys().copied().filter(|&p| p != leader);
+        (followers.next().unwrap(), followers.next().unwrap())
+    };
+    let h_notify = handles.get(&f2).unwrap().clone();
+    let h_plain = handles.get(&f1).unwrap().clone();
+
+    // Real sleeps, not `yield_now`: each node ticks/flushes egress on its own
+    // independent timer (tick_period=2ms/egress_period=1ms here), so only
+    // waiting several multiples of that is enough to be confident a given
+    // entry has actually left its origin node and been processed by the
+    // leader before the next one is submitted -- submission order alone
+    // doesn't imply leader-arrival order.
+    h_plain
+        .append(TestEntry(101))
+        .await
+        .expect("plain append (before) failed");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let entry_n = TestEntry(202);
+    let send_n = entry_n.clone();
+    let n1 = tokio::spawn(async move { h_notify.append_notify(send_n).await });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    h_plain
+        .append(TestEntry(103))
+        .await
+        .expect("plain append (after) failed");
+
+    let idx = timeout(Duration::from_secs(3), n1)
+        .await
+        .expect("append_notify hung")
+        .unwrap()
+        .expect("append_notify should succeed");
+
+    let leader_h = handles.get(&leader).unwrap().clone();
+    let decided = timeout(Duration::from_secs(3), async {
+        loop {
+            if leader_h.decided_idx().await >= idx {
+                return leader_h
+                    .read_decided_suffix(0)
+                    .await
+                    .expect("no entries decided");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("index never decided");
+    match decided.get(idx - 1) {
+        Some(LogEntry::Decided(v)) => {
+            assert_eq!(*v, entry_n, "wrong entry decided at idx {idx}")
+        }
+        other => panic!("expected a decided entry at idx {idx}, got {other:?}"),
+    }
+}
+
+/// Regression test: `append_tracked` used to infer "deferred by batching"
+/// purely from "accepted_idx didn't move" -- but that's also true when a
+/// follower's plain `.append()` gets forwarded (`ProposalForward`) or
+/// buffered pending a Prepare -> Accept transition, neither of which touches
+/// the shared batch buffer at all. That pushed a spurious placeholder into
+/// `unconfirmed_local` that never corresponds to a real buffer position,
+/// corrupting the FIFO count for later genuinely-tracked entries once this
+/// same node becomes leader. Forces exactly that: a plain append while still
+/// a follower, then promotes that node to leader and checks two
+/// batch-deferred `append_notify` entries resolve to their real content.
+#[tokio::test]
+async fn append_notify_index_correct_after_follower_plain_append_then_becomes_leader() {
+    let handles = spawn_cluster_with_filter(3, 2, Duration::from_secs(5), |_| true).await;
+    let leader1 = wait_for_leader(&handles).await;
+    let candidate = *handles.keys().find(|&&p| p != leader1).unwrap();
+    let candidate_h = handles.get(&candidate).unwrap().clone();
+
+    // Plain append while still a follower -- exercises the buggy inference.
+    candidate_h
+        .append(TestEntry(999))
+        .await
+        .expect("plain append failed");
+
+    // Force `candidate` to become the new leader.
+    candidate_h.try_become_leader().await;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some((pid, true)) = candidate_h.current_leader().await {
+                if pid == candidate {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("candidate never became its own stable leader");
+
+    // Two tracked entries: with batch_size=2, the first defers and the
+    // second triggers the flush.
+    let entry1 = TestEntry(11);
+    let entry2 = TestEntry(12);
+    let send1 = entry1.clone();
+    let n1 = tokio::spawn({
+        let h = candidate_h.clone();
+        async move { h.append_notify(send1).await }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let idx2 = timeout(
+        Duration::from_secs(3),
+        candidate_h.append_notify(entry2.clone()),
+    )
+    .await
+    .expect("append_notify(entry2) hung")
+    .expect("append_notify(entry2) should succeed");
+    let idx1 = timeout(Duration::from_secs(3), n1)
+        .await
+        .expect("append_notify(entry1) hung")
+        .unwrap()
+        .expect("append_notify(entry1) should succeed");
+
+    assert_ne!(idx1, idx2, "distinct log indices expected");
+
+    let decided = timeout(Duration::from_secs(3), async {
+        loop {
+            if candidate_h.decided_idx().await >= idx1.max(idx2) {
+                return candidate_h
+                    .read_decided_suffix(0)
+                    .await
+                    .expect("no entries decided");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("indices never decided");
+
+    match decided.get(idx1 - 1) {
+        Some(LogEntry::Decided(v)) => assert_eq!(*v, entry1, "wrong entry at idx1={idx1}"),
+        other => panic!("expected a decided entry at idx1={idx1}, got {other:?}"),
+    }
+    match decided.get(idx2 - 1) {
+        Some(LogEntry::Decided(v)) => assert_eq!(*v, entry2, "wrong entry at idx2={idx2}"),
+        other => panic!("expected a decided entry at idx2={idx2}, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn append_notify_mixed_leader_and_follower() {
     let handles = spawn_cluster(3).await;
