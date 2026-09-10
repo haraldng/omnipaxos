@@ -141,7 +141,7 @@ where
             last_decided_idx,
             last_reconfigured: false,
             unconfirmed_local: VecDeque::new(),
-            last_seen_accepted_idx: 0,
+            last_seen_accepted_idx: op.get_accepted_idx(),
         }
     }
 
@@ -177,9 +177,6 @@ where
         }
     }
 
-    /// One drain path for every pending item. Never branches on "were we leader
-    /// when this was created" — that context lives only in the code that writes
-    /// `assigned`.
     fn drain_notifiers(&mut self) {
         let decided = self.op.get_decided_idx();
         let now = Instant::now();
@@ -190,8 +187,10 @@ where
                 Some((idx, _)) if idx <= decided => {
                     let _ = p.reply.send(Ok(idx));
                 }
-                Some((_, ballot)) if ballot < cur_ballot => {
-                    let _ = p.reply.send(Err(AppendError::Superseded));
+                Some((idx, ballot)) if ballot < cur_ballot => {
+                    let _ = p
+                        .reply
+                        .send(Err(AppendError::Superseded { log_entry_idx: idx }));
                 }
                 _ if now > p.deadline => {
                     let _ = p.reply.send(Err(AppendError::Timeout));
@@ -359,12 +358,7 @@ where
             }
             Ok(Some((after, ballot)))
         } else {
-            // Batching deferred the write. This is still safe to track locally:
-            // unlike Prepare-phase buffering, batching never crosses node
-            // boundaries, so nothing but our own appends (in call order) can
-            // land in this queue. `reconcile_unconfirmed` matches it to an
-            // index once the batch flushes, guarded by the ballot to detect a
-            // leader change in the meantime.
+            // Batching deferred the write.
             self.unconfirmed_local
                 .push_back((id, self.op.get_promise()));
             Ok(None)
@@ -380,14 +374,7 @@ where
     /// accepted under the same ballot (see `AsyncRuntimeMsg::Assigned`'s doc
     /// comment), so the caller reads it once for the whole batch instead.
     fn accept_as_leader(&mut self, id: EntryId, entry: T) -> Option<(EntryId, usize)> {
-        // Only accept while leadership is stable (Accept phase). A Prepare-phase
-        // append only buffers the entry internally, and that buffer can be
-        // forwarded to a *different* node if we step down before reaching Accept
-        // phase (see `forward_buffered_proposals` in
-        // sequence_paxos/follower.rs) — at that point there's no index or
-        // ballot on our side that could ever be matched to it. So we simply
-        // don't accept it yet; the caller (origin or this same node retrying
-        // on a later tick) times out and retries once leadership is stable.
+        // Only accept while leadership is stable (Accept phase).
         let stable_leader =
             matches!(self.op.get_current_leader(), Some((pid, true)) if pid == self.pid);
         if !stable_leader {
@@ -438,9 +425,6 @@ where
             // and wait for the next tick.
             return;
         }
-        // Every pending entry takes the same path this tick (leader/accepted are
-        // fixed above), so snapshot them all at once. We take() out of pending so
-        // the borrow doesn't overlap the following async sends/accepts.
         let entries: Vec<(EntryId, T)> = self
             .pending
             .iter_mut()
@@ -451,7 +435,6 @@ where
                 self.accept_as_leader(id, entry);
             }
         } else if !entries.is_empty() {
-            // One wire message for the whole batch, rather than one per entry.
             let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
                 from: self.pid,
                 to: leader,
@@ -467,15 +450,12 @@ where
                 let cur = self.op.get_current_leader().map(|(p, _)| p);
                 if cur == Some(self.pid) {
                     // Collect accepted assignments and reply to the origin with a
-                    // single batched `Assigned`, rather than one message per entry.
+                    // single batched `Assigned`.
                     let assigned: Vec<(EntryId, usize)> = entries
                         .into_iter()
                         .filter_map(|(id, entry)| self.accept_as_leader(id, entry))
                         .collect();
                     if !assigned.is_empty() {
-                        // Every entry above was accepted under the same ballot: the
-                        // whole batch is processed synchronously with no yield
-                        // points, so nothing could change it in between.
                         let ballot = self.op.get_promise();
                         let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
                             from: self.pid,
@@ -519,17 +499,22 @@ where
                 let res = self.append_tracked(None, entry).map(|_| ());
                 let _ = reply.send(res);
             }
-            Command::AppendNotify { entry, reply } => {
+            Command::AppendNotify {
+                entry,
+                timeout,
+                reply,
+            } => {
                 if self.pending.len() >= self.config.max_pending_appends {
                     let _ = reply.send(Err(AppendError::TooManyOutstanding));
                     return;
                 }
                 let id = EntryId(uuid::Uuid::new_v4());
+                let timeout = timeout.unwrap_or(self.config.append_notify_timeout);
                 self.pending.push_back(Pending {
                     id,
                     undispatched: Some(entry),
                     assigned: None,
-                    deadline: Instant::now() + self.config.append_notify_timeout,
+                    deadline: Instant::now() + timeout,
                     reply,
                 });
                 self.try_dispatch_undispatched().await;

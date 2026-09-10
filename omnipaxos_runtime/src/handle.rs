@@ -125,14 +125,42 @@ where
     /// - [`AppendError::Propose`] if the underlying propose call itself failed (e.g. a
     ///   reconfiguration is already pending) -- only when this node owns the pending
     ///   call, otherwise it still resolves via `Timeout`;
-    /// - [`AppendError::Superseded`] if a leader change invalidated the assignment
-    ///   before decision;
+    /// - [`AppendError::Superseded`] if a leader change occurred before decision --
+    ///   a heuristic, not a certainty; see its doc comment for why, and check the
+    ///   returned index yourself if you need to know for sure;
     /// - [`AppendError::TooManyOutstanding`] if [`RuntimeConfig::max_pending_appends`]
     ///   outstanding calls are already queued.
+    ///
+    /// Uses [`RuntimeConfig::append_notify_timeout`] as the deadline; use
+    /// [`Self::append_notify_with_timeout`] to override it for a single call.
     pub async fn append_notify(&self, entry: T) -> Result<usize, AppendError<T>> {
+        self.append_notify_inner(entry, None).await
+    }
+
+    /// Same as [`append_notify`](Self::append_notify), but `timeout` overrides
+    /// [`RuntimeConfig::append_notify_timeout`] for this call only -- e.g. to give a
+    /// latency-sensitive caller a shorter deadline, or a bulk/background caller a
+    /// longer one, without changing the default for every other call.
+    pub async fn append_notify_with_timeout(
+        &self,
+        entry: T,
+        timeout: Duration,
+    ) -> Result<usize, AppendError<T>> {
+        self.append_notify_inner(entry, Some(timeout)).await
+    }
+
+    async fn append_notify_inner(
+        &self,
+        entry: T,
+        timeout: Option<Duration>,
+    ) -> Result<usize, AppendError<T>> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
-            .send(Command::AppendNotify { entry, reply: tx })
+            .send(Command::AppendNotify {
+                entry,
+                timeout,
+                reply: tx,
+            })
             .await
             .map_err(|_| AppendError::Shutdown)?;
         rx.await.unwrap_or(Err(AppendError::Shutdown))

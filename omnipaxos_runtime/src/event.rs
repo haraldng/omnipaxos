@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use futures::channel::oneshot;
 
 use omnipaxos::storage::Entry;
@@ -41,10 +43,21 @@ where
     /// still just sees a `Timeout`, since surfacing the specific error cross-node would
     /// require a new wire message.
     Propose(ProposeErr<T>),
-    /// A leader change occurred after the entry was accepted at its assigned index but
-    /// before it was decided; the entry at that index may have been overwritten under a
-    /// higher ballot. Users should re-append if this error is returned.
-    Superseded,
+    /// A leader change occurred after the entry was accepted at the given index but
+    /// before it was decided. This is a *heuristic*, not a certainty, and can be a
+    /// false positive: when a new leader takes over, it's required (by the underlying
+    /// Paxos protocol) to adopt any value that a majority-overlapping quorum may have
+    /// already accepted at each log index, so the same entry can end up decided at
+    /// this same index anyway under the new leader's ballot -- we simply stop waiting
+    /// to find out as soon as we observe the ballot change, rather than waiting for
+    /// resolution. If you need to know for sure, check whether the entry actually
+    /// ended up decided at `log_entry_idx` (e.g. via
+    /// [`OmniPaxosHandle::read_decided_suffix`](super::OmniPaxosHandle::read_decided_suffix))
+    /// before deciding whether to re-append.
+    Superseded {
+        /// The log index the entry was assigned before the leader change.
+        log_entry_idx: usize,
+    },
     /// The `append_notify_timeout` elapsed before the entry was decided. Retry safe.
     Timeout,
     /// The actor has shut down before the entry could be decided.
@@ -91,6 +104,9 @@ where
     },
     AppendNotify {
         entry: T,
+        /// Overrides [`RuntimeConfig::append_notify_timeout`](super::RuntimeConfig::append_notify_timeout)
+        /// for this call only, if `Some`.
+        timeout: Option<Duration>,
         reply: oneshot::Sender<Result<usize, AppendError<T>>>,
     },
     CurrentLeader {

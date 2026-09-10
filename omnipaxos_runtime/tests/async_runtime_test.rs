@@ -407,6 +407,35 @@ async fn append_notify_times_out_when_no_leader_elected() {
     }
 }
 
+/// Regression test for `append_notify_with_timeout`: the per-call override
+/// must actually be honored instead of `RuntimeConfig::append_notify_timeout`.
+/// Leaves the config at its 5-second default and passes a much shorter custom
+/// timeout, bounding the outer wait well under 5s -- this can only pass if the
+/// short timeout was the one actually used.
+#[tokio::test]
+async fn append_notify_with_timeout_overrides_default() {
+    let nodes: Vec<NodeId> = vec![1, 2, 3];
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        ..Default::default()
+    };
+    let op = build_op(1, nodes);
+    let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg);
+    // No transport wired, no other nodes — leader stays unknown.
+
+    let res = timeout(
+        Duration::from_secs(2),
+        h.append_notify_with_timeout(TestEntry(1), Duration::from_millis(150)),
+    )
+    .await
+    .expect("append_notify_with_timeout should honor its own short timeout, not the 5s default");
+    match res {
+        Err(AppendError::Timeout) => {}
+        other => panic!("expected Timeout, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn append_notify_timeout_when_transport_broken() {
     // Spawn a cluster, elect a leader, then break the transport by dropping the
@@ -613,9 +642,107 @@ async fn append_notify_shutdown_error_when_actor_gone() {
         Ok(_)
         | Err(AppendError::Shutdown)
         | Err(AppendError::Propose(_))
-        | Err(AppendError::Superseded)
+        | Err(AppendError::Superseded { .. })
         | Err(AppendError::Timeout)
         | Err(AppendError::TooManyOutstanding) => {}
+    }
+}
+
+/// Regression test for `AppendError::Superseded` actually firing, and for the
+/// `idx` it carries being accurate and usable to manually verify what really
+/// happened -- the pattern its doc comment recommends.
+///
+/// Cuts one node's OUTGOING traffic entirely (so its own locally-accepted
+/// entry can never reach anyone) while leaving its INCOMING open (so it
+/// still learns of a new, higher-ballot leader and updates its own promise,
+/// which is what the ballot-based check needs to fire). Because the cut
+/// node's peers never hear about its locally-accepted entry, whichever
+/// *other* node they elect as the new leader starts from an empty log at
+/// that position -- this entry is genuinely lost, not just re-ballotted, so
+/// the test is deterministic rather than racing the (also valid) outcome
+/// where the entry survives reconciliation.
+#[tokio::test]
+async fn append_notify_superseded_when_entry_truly_lost() {
+    // 0 = nothing blocked yet; set to the elected leader's pid once known.
+    let blocked_pid = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let filter_blocked_pid = blocked_pid.clone();
+    let handles = spawn_cluster_with_filter(3, 1, Duration::from_secs(5), move |msg| {
+        msg.get_sender() != filter_blocked_pid.load(Ordering::SeqCst)
+    })
+    .await;
+
+    // Wait for the cluster to elect a leader (whichever pid wins), then
+    // target that node.
+    let cut = wait_for_leader(&handles).await;
+    let cut_h = handles.get(&cut).unwrap().clone();
+
+    // Cut its outgoing before submitting -- the entry it's about to accept
+    // locally must never reach anyone else.
+    blocked_pid.store(cut, Ordering::SeqCst);
+
+    let notify_fut = tokio::spawn({
+        let h = cut_h.clone();
+        async move { h.append_notify(TestEntry(42)).await }
+    });
+
+    // Wait for one of the other nodes to elect a new leader (peers stop
+    // hearing `cut` and time out).
+    let new_leader = timeout(Duration::from_secs(5), async {
+        loop {
+            for (&pid, h) in &handles {
+                if pid == cut {
+                    continue;
+                }
+                if let Some((leader_pid, true)) = h.current_leader().await {
+                    if leader_pid != cut {
+                        return leader_pid;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("no new leader elected after cutting the old leader's outgoing");
+
+    let res = timeout(Duration::from_secs(5), notify_fut)
+        .await
+        .expect("append_notify hung")
+        .unwrap();
+    let idx = match res {
+        Err(AppendError::Superseded { log_entry_idx }) => log_entry_idx,
+        other => panic!("expected Superseded, got {other:?}"),
+    };
+
+    // Demonstrate + verify the recovery pattern the doc comment recommends:
+    // submit a fresh entry (filling the now-vacant slot at `idx` under the
+    // new leader) and check the log there ourselves.
+    let new_leader_h = handles.get(&new_leader).unwrap().clone();
+    let refill_idx = timeout(
+        Duration::from_secs(3),
+        new_leader_h.append_notify(TestEntry(99)),
+    )
+    .await
+    .expect("refill append_notify hung")
+    .expect("refill append_notify should succeed on the new leader");
+    assert_eq!(
+        refill_idx, idx,
+        "expected the fresh entry to land at the same index the lost one was assigned"
+    );
+
+    let decided = new_leader_h
+        .read_decided_suffix(0)
+        .await
+        .expect("no entries decided");
+    match decided.get(idx - 1) {
+        Some(LogEntry::Decided(v)) => {
+            assert_eq!(
+                *v,
+                TestEntry(99),
+                "idx {idx} should hold the refill entry, confirming the original was lost"
+            );
+        }
+        other => panic!("expected a decided entry at idx {idx}, got {other:?}"),
     }
 }
 
