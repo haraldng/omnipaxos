@@ -152,7 +152,7 @@ fn draw_title<'a>(app: &App) -> Paragraph<'a> {
     )
 }
 
-fn draw_chart(app: &App, window_width: usize) -> BarChart {
+fn draw_chart(app: &App, window_width: usize) -> BarChart<'_> {
     let data: &Vec<(&str, u64)> = &app
         .throughput_data
         .iter()

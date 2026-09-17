@@ -174,7 +174,7 @@ where
     }
 
     /// Get handle to the log column family of the database
-    fn get_log_handle(&self) -> ColumnFamilyRef {
+    fn get_log_handle(&self) -> ColumnFamilyRef<'_> {
         self.db
             .cf_handle(LOG)
             .expect("Couldn't find RocksDB log column family")
