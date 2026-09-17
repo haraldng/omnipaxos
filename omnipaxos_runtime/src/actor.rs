@@ -214,21 +214,21 @@ where
         }
     }
 
-    /// Drains newly-produced outgoing messages onto `outgoing_tx`. Uses
-    /// `try_send` rather than `.send().await` so a merely-full channel (slow
-    /// consumer) doesn't block the whole actor loop; unsent messages stay in
-    /// `outgoing_buf` to retry next egress tick. If the consumer stays
-    /// stalled long enough for `outgoing_buf` to exceed the channel's
-    /// capacity (or `max_outgoing_buffered` as a fallback), the oldest
-    /// buffered messages are dropped to keep memory bounded — see
-    /// `RuntimeConfig::max_outgoing_buffered`.
-    async fn flush_outgoing(&mut self) {
-        self.op.take_outgoing_messages(&mut self.outgoing_buf);
-
-        let cap = self
-            .outgoing_tx
+    /// Effective cap for `outgoing_buf`: the channel's own capacity when known,
+    /// else [`ActorConfig::max_outgoing_buffered`].
+    fn outgoing_buf_cap(&self) -> usize {
+        self.outgoing_tx
             .capacity()
-            .unwrap_or(self.config.max_outgoing_buffered);
+            .unwrap_or(self.config.max_outgoing_buffered)
+    }
+
+    /// Non-blocking drain of `outgoing_buf` onto `outgoing_tx`. Uses `try_send`
+    /// so a merely-full channel (slow consumer) doesn't block the actor loop;
+    /// unsent messages stay in `outgoing_buf` (in order) for the next attempt.
+    /// If the buffer exceeds [`Self::outgoing_buf_cap`], oldest messages are
+    /// dropped — see [`RuntimeConfig::max_outgoing_buffered`].
+    fn drain_outgoing_buf(&mut self) {
+        let cap = self.outgoing_buf_cap();
         trim_oldest(&mut self.outgoing_buf, cap);
 
         let pending = std::mem::take(&mut self.outgoing_buf);
@@ -248,6 +248,21 @@ where
             }
         }
         self.outgoing_buf.extend(iter);
+    }
+
+    /// Enqueue one outgoing message without awaiting. Appends behind any
+    /// already-buffered messages (preserves order), then tries to drain.
+    /// Used for both core protocol traffic (via [`Self::flush_outgoing`]) and
+    /// runtime control-plane messages (`TaggedProposal` / `Assigned`).
+    fn enqueue_outgoing(&mut self, msg: Message<T>) {
+        self.outgoing_buf.push(msg);
+        self.drain_outgoing_buf();
+    }
+
+    /// Pull newly-produced OmniPaxos/BLE messages into `outgoing_buf` and drain.
+    fn flush_outgoing(&mut self) {
+        self.op.take_outgoing_messages(&mut self.outgoing_buf);
+        self.drain_outgoing_buf();
     }
 
     /// Push newly-decided entries to a single, freshly-added subscriber. Used
@@ -421,7 +436,7 @@ where
     /// the ballot hasn't changed since the entry was buffered; if it has,
     /// leadership moved on and this index may belong to different writes, so
     /// we drop tracking for it and let the caller time out.
-    async fn reconcile_unconfirmed(&mut self) {
+    fn reconcile_unconfirmed(&mut self) {
         let cur_ballot = self.op.get_promise();
         let accepted = self.op.get_accepted_idx();
         let mut idx = self.last_seen_accepted_idx;
@@ -453,15 +468,14 @@ where
         self.last_seen_accepted_idx = accepted;
 
         for (from, entries) in remote_assigned {
-            let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+            self.enqueue_outgoing(Message::AsyncRuntime(AsyncRuntimeMessage {
                 from: self.pid,
                 to: from,
                 msg: AsyncRuntimeMsg::Assigned {
                     ballot: cur_ballot,
                     entries,
                 },
-            });
-            let _ = self.outgoing_tx.send(reply_msg).await;
+            }));
         }
     }
 
@@ -469,7 +483,7 @@ where
     /// accepted locally. Called from `Command::AppendNotify` and on each tick,
     /// which lets a call issued *before* an election eventually succeed once a
     /// leader is known.
-    async fn try_dispatch_undispatched(&mut self) {
+    fn try_dispatch_undispatched(&mut self) {
         let Some((leader, accepted)) = self.op.get_current_leader() else {
             return;
         };
@@ -488,16 +502,15 @@ where
                 self.accept_as_leader(id, entry, None);
             }
         } else if !entries.is_empty() {
-            let msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+            self.enqueue_outgoing(Message::AsyncRuntime(AsyncRuntimeMessage {
                 from: self.pid,
                 to: leader,
                 msg: AsyncRuntimeMsg::TaggedProposal { entries },
-            });
-            let _ = self.outgoing_tx.send(msg).await;
+            }));
         }
     }
 
-    async fn handle_runtime_msg(&mut self, arm: AsyncRuntimeMessage<T>) {
+    fn handle_runtime_msg(&mut self, arm: AsyncRuntimeMessage<T>) {
         match arm.msg {
             AsyncRuntimeMsg::TaggedProposal { entries } => {
                 let cur = self.op.get_current_leader().map(|(p, _)| p);
@@ -511,26 +524,24 @@ where
                         .collect();
                     if !assigned.is_empty() {
                         let ballot = self.op.get_promise();
-                        let reply_msg = Message::AsyncRuntime(AsyncRuntimeMessage {
+                        self.enqueue_outgoing(Message::AsyncRuntime(AsyncRuntimeMessage {
                             from: self.pid,
                             to: arm.from,
                             msg: AsyncRuntimeMsg::Assigned {
                                 ballot,
                                 entries: assigned,
                             },
-                        });
-                        let _ = self.outgoing_tx.send(reply_msg).await;
+                        }));
                     }
                 } else if let Some(new_leader) = cur {
                     // Leadership drifted since sender chose us. Hop the whole batch
                     // forward, preserving the original `from` so the leader replies
                     // to the true origin.
-                    let fwd = Message::AsyncRuntime(AsyncRuntimeMessage {
+                    self.enqueue_outgoing(Message::AsyncRuntime(AsyncRuntimeMessage {
                         from: arm.from,
                         to: new_leader,
                         msg: AsyncRuntimeMsg::TaggedProposal { entries },
-                    });
-                    let _ = self.outgoing_tx.send(fwd).await;
+                    }));
                 }
                 // Else: no leader; drop. Originators will timeout.
             }
@@ -604,7 +615,7 @@ where
                     deadline: Instant::now() + timeout,
                     reply,
                 });
-                self.try_dispatch_undispatched().await;
+                self.try_dispatch_undispatched();
             }
             Command::CurrentLeader { reply } => {
                 let _ = reply.send(self.op.get_current_leader());
@@ -673,19 +684,19 @@ where
             _ = tick_fut => {
                 state.op.tick();
                 state.detect_and_emit_events().await;
-                state.try_dispatch_undispatched().await;
-                state.reconcile_unconfirmed().await;
+                state.try_dispatch_undispatched();
+                state.reconcile_unconfirmed();
                 state.drain_notifiers();
                 state.push_to_all_subs();
                 tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
             }
             _ = egress_fut => {
-                state.flush_outgoing().await;
+                state.flush_outgoing();
                 egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
             }
             in_msg = incoming_rx.next() => {
                 match in_msg {
-                    Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm).await,
+                    Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm),
                     Some(m) => state.handle_incoming_tracked(m),
                     None => break,
                 }

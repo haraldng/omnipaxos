@@ -994,14 +994,17 @@ async fn append_and_reconfigure_report_shutdown_not_fabricated_propose_error() {
     }
 }
 
-/// Regression test: `flush_outgoing` used to call `.send().await` on the
-/// outgoing channel, which blocks when the channel is merely *full*
-/// (consumer alive but slow) -- not just when it's closed. Since this runs
-/// on the single actor loop, that blocked tick/election/command processing
-/// for the node entirely, not just delayed egress. Uses a tiny
-/// `outgoing_capacity` and never drains it, so it fills up almost
-/// immediately (the node has configured peers and sends BLE heartbeats
-/// regardless of whether anyone's listening).
+/// Regression test: egress used to call `.send().await` on the outgoing
+/// channel for core protocol messages in `flush_outgoing`, which blocks when
+/// the channel is merely *full* (consumer alive but slow) -- not just when
+/// it's closed. Since this runs on the single actor loop, that blocked
+/// tick/election/command processing for the node entirely, not just delayed
+/// egress. Uses a tiny `outgoing_capacity` and never drains it, so it fills
+/// up almost immediately (the node has configured peers and sends BLE
+/// heartbeats regardless of whether anyone's listening).
+///
+/// Notify-path (`TaggedProposal` / `Assigned`) backpressure is covered by
+/// [`notify_egress_does_not_stall_when_outgoing_full`].
 #[tokio::test]
 async fn full_outgoing_channel_does_not_stall_actor_loop() {
     let nodes: Vec<NodeId> = vec![1, 2, 3];
@@ -1031,6 +1034,125 @@ async fn full_outgoing_channel_does_not_stall_actor_loop() {
         .await
         .expect("no message ever arrived once draining resumed")
         .expect("outgoing channel closed unexpectedly");
+}
+
+/// Like `spawn_cluster`, but each node's outgoing drain can be paused via the
+/// returned per-pid flags. While a node's flag is `true`, its drain task stops
+/// calling `recv`, so that node's bounded `outgoing_messages` channel fills
+/// and further egress hits backpressure -- without tearing down the rest of
+/// the cluster's transport.
+async fn spawn_cluster_pausable(
+    n: NodeId,
+    outgoing_capacity: usize,
+) -> (
+    HashMap<NodeId, OmniPaxosHandle<TestEntry>>,
+    HashMap<NodeId, Arc<AtomicBool>>,
+) {
+    let nodes: Vec<NodeId> = (1..=n).collect();
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        outgoing_capacity,
+        append_notify_timeout: Duration::from_secs(2),
+        ..Default::default()
+    };
+
+    let mut handles: HashMap<NodeId, OmniPaxosHandle<TestEntry>> = HashMap::new();
+    let mut pauses: HashMap<NodeId, Arc<AtomicBool>> = HashMap::new();
+    for pid in nodes.clone() {
+        let op = build_op(pid, nodes.clone());
+        let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg.clone());
+        handles.insert(pid, h);
+        pauses.insert(pid, Arc::new(AtomicBool::new(false)));
+    }
+
+    let handles_arc = Arc::new(handles.clone());
+    for pid in nodes {
+        let out = handles_arc[&pid].outgoing_messages();
+        let peers = handles_arc.clone();
+        let pause = pauses[&pid].clone();
+        tokio::spawn(async move {
+            loop {
+                if pause.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
+                match timeout(Duration::from_millis(10), out.recv()).await {
+                    Ok(Ok(msg)) => {
+                        let receiver = msg.get_receiver();
+                        if let Some(peer) = peers.get(&receiver) {
+                            peer.handle_incoming(msg).await;
+                        }
+                    }
+                    Ok(Err(_)) => break,
+                    Err(_) => {}
+                }
+            }
+        });
+    }
+
+    (handles, pauses)
+}
+
+/// Regression test: `TaggedProposal` / `Assigned` used to go out via
+/// `.send().await`. With a full (but still open) outgoing channel that
+/// blocked the entire actor loop -- the same failure mode as
+/// [`full_outgoing_channel_does_not_stall_actor_loop`], but on the notify
+/// control-plane path rather than BLE/`flush_outgoing`.
+///
+/// Phase 1 pauses a *follower*'s drain so `append_notify` must enqueue a
+/// `TaggedProposal` against a full channel. Phase 2 pauses the *leader*'s
+/// drain so accepting that proposal must enqueue an `Assigned` against a
+/// full channel. In both phases a subsequent `decided_idx` on the stalled
+/// node must still complete promptly.
+#[tokio::test]
+async fn notify_egress_does_not_stall_when_outgoing_full() {
+    let (handles, pauses) = spawn_cluster_pausable(3, 2).await;
+    let leader = wait_for_leader(&handles).await;
+    let follower = *handles.keys().find(|&&p| p != leader).unwrap();
+    let follower_h = handles.get(&follower).unwrap().clone();
+    let leader_h = handles.get(&leader).unwrap().clone();
+
+    // --- Phase 1: TaggedProposal on a full follower outgoing channel ---
+    pauses[&follower].store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let notify_tagged = tokio::spawn({
+        let h = follower_h.clone();
+        async move { h.append_notify(TestEntry(11)).await }
+    });
+    // Give the AppendNotify command time to reach try_dispatch / enqueue.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    timeout(Duration::from_millis(500), follower_h.decided_idx())
+        .await
+        .expect("follower stalled enqueueing TaggedProposal on a full outgoing channel");
+
+    // Resume follower drain so the TaggedProposal can leave (and so phase 2
+    // can deliver one to the leader). Abandon the in-flight notify -- it may
+    // still be racing; we only cared that the loop stayed responsive.
+    pauses[&follower].store(false, Ordering::SeqCst);
+    let _ = timeout(Duration::from_millis(200), notify_tagged).await;
+
+    // --- Phase 2: Assigned on a full leader outgoing channel ---
+    pauses[&leader].store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let notify_assigned = tokio::spawn({
+        let h = follower_h.clone();
+        async move { h.append_notify(TestEntry(22)).await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    timeout(Duration::from_millis(500), leader_h.decided_idx())
+        .await
+        .expect("leader stalled enqueueing Assigned on a full outgoing channel");
+
+    pauses[&leader].store(false, Ordering::SeqCst);
+    // With drains live again the in-flight notify should resolve somehow
+    // (Ok, Timeout, or Superseded from leadership churn during the pause) --
+    // what we care about is that it does not hang the actor.
+    let _ = timeout(Duration::from_secs(3), notify_assigned)
+        .await
+        .expect("append_notify hung after drains resumed");
 }
 
 async fn recv_decided(
