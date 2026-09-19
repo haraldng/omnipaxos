@@ -17,7 +17,7 @@ jobs:
   check_features:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Run check features
         run: |
           cd omnipaxos
@@ -39,7 +39,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
       - name: Use the cache to share dependencies # keyed by Cargo.lock
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -47,7 +47,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -71,7 +71,7 @@ jobs:
           components: rustfmt, clippy
           override: true
       - name: Use the cache to share dependencies # keyed by Cargo.lock
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -79,7 +79,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
         with:
@@ -89,7 +89,7 @@ jobs:
   clippy_check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run Clippy
         run: cargo clippy -- -D warnings -W clippy::all
 
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install dependencies
         run: npm install js-yaml fs
       - name: Run Document Structure Check

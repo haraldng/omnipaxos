@@ -310,27 +310,19 @@ where
         let Some(entries) = self.op.read_decided_suffix(min_next) else {
             return;
         };
-        // Fan out. Preserve the drain-and-refill idiom so closed subs are
-        // pruned without borrow-checker gymnastics.
-        let subs = std::mem::take(&mut self.decided_subscribers);
-        for mut sub in subs {
+        // Fan out; drop closed subscribers in place via retain_mut.
+        self.decided_subscribers.retain_mut(|sub| {
             // sub.next_idx should always be >= min_next; guard defensively.
             let start = sub.next_idx.saturating_sub(min_next);
-            let mut alive = true;
             for entry in entries.iter().skip(start) {
                 match sub.tx.try_send(entry.clone()) {
                     Ok(()) => sub.next_idx += 1,
                     Err(async_channel::TrySendError::Full(_)) => break,
-                    Err(async_channel::TrySendError::Closed(_)) => {
-                        alive = false;
-                        break;
-                    }
+                    Err(async_channel::TrySendError::Closed(_)) => return false,
                 }
             }
-            if alive {
-                self.decided_subscribers.push(sub);
-            }
-        }
+            true
+        });
     }
 
     fn record_assignment(&mut self, id: EntryId, idx: usize, ballot: Ballot) {
