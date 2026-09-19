@@ -11,11 +11,12 @@
 //! 4. Uses `append_notify(...)` only for the one entry where the caller specifically
 //!    needs to know its durable decided index before proceeding.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{ClusterConfig, OmniPaxosConfig, ServerConfig};
+use omnipaxos::{
+    util::{LogEntry, NodeId},
+    ClusterConfig, OmniPaxosConfig, ServerConfig,
+};
 use omnipaxos_runtime::{
     spawn_actor, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, TokioRuntime,
 };

@@ -2,9 +2,11 @@ use core::time::Duration;
 
 use futures::channel::oneshot;
 
-use omnipaxos::storage::Entry;
-use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{ClusterConfig, ProposeErr};
+use omnipaxos::{
+    storage::Entry,
+    util::{LogEntry, NodeId},
+    ClusterConfig, ProposeErr,
+};
 
 /// A state transition observed by the actor and broadcast on the event stream.
 #[derive(Debug, Clone)]

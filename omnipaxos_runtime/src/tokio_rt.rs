@@ -1,5 +1,4 @@
-use core::future::Future;
-use core::time::Duration;
+use core::{future::Future, time::Duration};
 
 use super::traits::AsyncRuntime;
 

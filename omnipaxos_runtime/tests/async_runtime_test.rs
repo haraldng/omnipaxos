@@ -4,16 +4,21 @@
 //! are shuttled between them over in-memory channels, then exercises the async API.
 #![cfg(feature = "tokio_runtime")]
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use omnipaxos::messages::sequence_paxos::PaxosMsg;
-use omnipaxos::messages::Message;
-use omnipaxos::storage::{Entry, Snapshot};
-use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{ClusterConfig, OmniPaxosConfig, ProposeErr, ServerConfig};
+use omnipaxos::{
+    messages::{sequence_paxos::PaxosMsg, Message},
+    storage::{Entry, Snapshot},
+    util::{LogEntry, NodeId},
+    ClusterConfig, OmniPaxosConfig, ProposeErr, ServerConfig,
+};
 use omnipaxos_runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, RuntimeProposeErr,
     TokioRuntime,

@@ -3,14 +3,18 @@ use std::marker::PhantomData;
 
 use futures::channel::oneshot;
 
-use omnipaxos::messages::Message;
-use omnipaxos::storage::{Entry, Storage};
-use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{ClusterConfig, OmniPaxos};
+use omnipaxos::{
+    messages::Message,
+    storage::{Entry, Storage},
+    util::{LogEntry, NodeId},
+    ClusterConfig, OmniPaxos,
+};
 
-use super::actor::{run, ActorConfig, ActorState};
-use super::event::{AppendError, Command, OmniPaxosEvent, RuntimeProposeErr};
-use super::traits::{ActorEntry, AsyncRuntime};
+use super::{
+    actor::{run, ActorConfig, ActorState},
+    event::{AppendError, Command, OmniPaxosEvent, RuntimeProposeErr},
+    traits::{ActorEntry, AsyncRuntime},
+};
 
 /// Configuration for the async runtime actor.
 #[derive(Debug, Clone)]

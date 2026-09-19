@@ -1,21 +1,28 @@
 use core::time::Duration;
-use std::collections::{HashMap, VecDeque};
-use std::marker::PhantomData;
-use std::time::Instant;
+use std::{
+    collections::{HashMap, VecDeque},
+    marker::PhantomData,
+    time::Instant,
+};
 
-use futures::channel::oneshot;
-use futures::{select_biased, FutureExt, StreamExt};
+use futures::{channel::oneshot, select_biased, FutureExt, StreamExt};
 
-use omnipaxos::ballot_leader_election::Ballot;
-use omnipaxos::messages::async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId};
-use omnipaxos::messages::Message;
-use omnipaxos::storage::{Entry, Storage};
-use omnipaxos::util::{LogEntry, NodeId};
-use omnipaxos::{OmniPaxos, ProposeErr};
+use omnipaxos::{
+    ballot_leader_election::Ballot,
+    messages::{
+        async_runtime::{AsyncRuntimeMessage, AsyncRuntimeMsg, EntryId},
+        Message,
+    },
+    storage::{Entry, Storage},
+    util::{LogEntry, NodeId},
+    OmniPaxos, ProposeErr,
+};
 
-use super::event::{AppendError, Command, OmniPaxosEvent};
-use super::handle::RuntimeConfig;
-use super::traits::{ActorEntry, AsyncRuntime};
+use super::{
+    event::{AppendError, Command, OmniPaxosEvent},
+    handle::RuntimeConfig,
+    traits::{ActorEntry, AsyncRuntime},
+};
 
 /// Actor-loop-relevant subset of [`RuntimeConfig`]. Excludes the channel-capacity
 /// fields, which are only needed once, to construct the channels in `spawn_actor`
