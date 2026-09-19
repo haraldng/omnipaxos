@@ -263,6 +263,23 @@ where
         self.seq_paxos.get_decided_idx()
     }
 
+    /// Return the accepted index of this node's log (as if it was never compacted).
+    /// Equal to the index of the last accepted entry; useful for tagging a just-appended
+    /// entry so that decision can be awaited.
+    pub fn get_accepted_idx(&self) -> usize {
+        self.seq_paxos.internal_storage.get_accepted_idx()
+    }
+
+    /// Return the number of entries currently buffered for batching (see
+    /// `ServerConfig::batch_size`), not yet reflected in `get_accepted_idx()`.
+    /// Useful, alongside `get_accepted_idx()`, for observing every entry that
+    /// enters this node's log -- including ones added by internal protocol
+    /// handling (e.g. a forwarded proposal or replicated entries) rather than
+    /// a direct call to `append`/`reconfigure`.
+    pub fn get_batched_len(&self) -> usize {
+        self.seq_paxos.internal_storage.get_batched_len()
+    }
+
     /// Return trim index from storage.
     pub fn get_compacted_idx(&self) -> usize {
         self.seq_paxos.get_compacted_idx()
@@ -287,6 +304,11 @@ where
     /// Returns the promised ballot of this node.
     pub fn get_promise(&self) -> Ballot {
         self.seq_paxos.get_promise()
+    }
+
+    /// Returns this node's own pid.
+    pub fn get_pid(&self) -> NodeId {
+        self.seq_paxos.get_pid()
     }
 
     /// Moves outgoing messages from this server into the buffer. The messages should then be sent via the network implementation.
@@ -332,6 +354,11 @@ where
         match m {
             Message::SequencePaxos(p) => self.seq_paxos.handle(p),
             Message::BLE(b) => self.ble.handle(b),
+            #[cfg(feature = "async_runtime")]
+            Message::AsyncRuntime(_) => {
+                // Runtime-layer messages are consumed by the actor before reaching here.
+                // If one leaks through (e.g. user hand-delivered), silently ignore.
+            }
         }
     }
 
