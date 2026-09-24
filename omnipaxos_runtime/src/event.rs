@@ -36,7 +36,7 @@ pub enum AppendError<T>
 where
     T: Entry,
 {
-    /// The underlying [`OmniPaxos::append`](crate::OmniPaxos::append) call failed while
+    /// The underlying [`OmniPaxos::append`](omnipaxos::OmniPaxos::append) call failed while
     /// this node was accepting the entry as leader (e.g. a reconfiguration is already
     /// pending). Unlike the other variants, this is resolved immediately rather than
     /// waiting for `append_notify_timeout` -- but only when this node itself owns the

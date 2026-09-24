@@ -19,6 +19,8 @@ use omnipaxos::{
     util::{LogEntry, NodeId},
     ClusterConfig, OmniPaxosConfig, ProposeErr, ServerConfig,
 };
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::UniCache;
 use omnipaxos_runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, RuntimeProposeErr,
     TokioRuntime,
@@ -48,8 +50,41 @@ impl Snapshot<TestEntry> for NoSnapshot {
     }
 }
 
+/// No-op UniCache so `cargo test --all-features` can compile without the macros crate.
+#[cfg(feature = "unicache")]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+struct NoUniCache;
+
+#[cfg(feature = "unicache")]
+impl UniCache for NoUniCache {
+    type T = TestEntry;
+
+    fn new() -> Self {
+        NoUniCache
+    }
+
+    fn try_encode(&mut self, entry: &Self::T) -> <Self::T as Entry>::EncodeResult {
+        entry.clone()
+    }
+
+    fn decode(&mut self, processed: <Self::T as Entry>::EncodeResult) -> Self::T {
+        processed
+    }
+}
+
 impl Entry for TestEntry {
     type Snapshot = NoSnapshot;
+
+    #[cfg(feature = "unicache")]
+    type Encoded = ();
+    #[cfg(feature = "unicache")]
+    type Encodable = TestEntry;
+    #[cfg(feature = "unicache")]
+    type NotEncodable = ();
+    #[cfg(feature = "unicache")]
+    type EncodeResult = TestEntry;
+    #[cfg(feature = "unicache")]
+    type UniCache = NoUniCache;
 }
 
 fn build_op(

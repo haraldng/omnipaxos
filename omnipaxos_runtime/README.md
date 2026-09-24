@@ -7,3 +7,11 @@ events -- no manual driving of `tick()`, `send_msg()`, or `outgoing_messages()` 
 The runtime is generic over the async executor via the `AsyncRuntime` trait; a ready-to-use
 `TokioRuntime` is provided behind the `tokio_runtime` feature. See
 `examples/kv_store_async` for a full usage example.
+
+## Usage
+
+```toml
+[dependencies]
+omnipaxos = { version = "0.2.3", features = ["async_runtime"] }
+omnipaxos_runtime = { version = "0.1.0", features = ["tokio_runtime"] }
+```
