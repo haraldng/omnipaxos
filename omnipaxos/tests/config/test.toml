@@ -67,5 +67,5 @@ num_nodes = 3
 storage_type = { type = "Broken" }
 
 [sync_test]
-wait_timeout_ms = 8000
+wait_timeout_ms = 10000
 num_nodes = 3

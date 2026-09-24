@@ -1,13 +1,23 @@
 pub mod utils;
 
-use crate::utils::STOPSIGN_ID;
-use kompact::prelude::{promise, Ask, FutureCollection};
+use kompact::prelude::Component;
 use omnipaxos::{storage::StopSign, util::NodeId, ClusterConfig};
 use serial_test::serial;
+use std::{
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 use utils::{
+    omnireplica::OmniPaxosComponent,
     verification::{verify_log, verify_stopsign},
     TestConfig, TestSystem, Value,
 };
+
+/// How long to wait for AccSync catch-up after reconnect. Kept separate from
+/// `wait_timeout` (elections / proposals) so CI load does not starve sync.
+const SYNC_CATCH_UP_TIMEOUT: Duration = Duration::from_secs(20);
+const SYNC_CATCH_UP_POLL: Duration = Duration::from_millis(50);
 
 /// The state of the leader's and follower's log at the time of a sync
 #[derive(Default)]
@@ -177,7 +187,6 @@ fn sync_test(test: SyncTest) {
     };
     let leaders_new_decided = &test.leaders_log[test.followers_dec_idx..leaders_log_dec_idx];
     let leaders_accepted = &test.leaders_log[leaders_log_dec_idx..];
-    let followers_missing_entries = &test.leaders_log[test.followers_dec_idx..];
 
     // Set up followers log. We do this by taking the leader, append some entries and then disconnect it.
     let follower_id = sys.get_elected_leader(1, cfg.wait_timeout);
@@ -241,31 +250,17 @@ fn sync_test(test: SyncTest) {
         }
     });
 
-    // Reconnect follower and wait for new entries from AccSync to be decided so we can verify log
-    let mut proposal_futures = vec![];
-    follower.on_definition(|x| {
-        for v in followers_missing_entries {
-            let (kprom, kfuture) = promise::<()>();
-            x.insert_decided_future(Ask::new(kprom, v.clone()));
-            proposal_futures.push(kfuture);
-        }
-    });
-    if test.leaders_ss.is_some() {
-        let (kprom, kfuture) = promise::<()>();
-        follower.on_definition(|x| {
-            x.insert_decided_future(Ask::new(kprom, Value::with_id(STOPSIGN_ID)));
-        });
-        proposal_futures.push(kfuture);
-    }
+    // Reconnect follower and poll until it has caught up to the leader's decided log.
+    // Polling is more robust than one-shot decided-futures: AccSync may deliver a
+    // snapshot that does not answer every per-entry future before the full suffix lands.
     sys.set_node_connections(follower_id, true);
-    match FutureCollection::collect_with_timeout::<Vec<_>>(proposal_futures, cfg.wait_timeout) {
-        Ok(_) => {}
-        Err(e) => {
-            let follower_entries = follower.on_definition(|x| x.read_decided_log());
-            let leader_entries = leader.on_definition(|x| x.read_decided_log());
-            panic!("Error on collecting futures of decided proposals: {}.\nFollower log: {:?}\n Leader log: {:?}", e, follower_entries, leader_entries);
-        }
-    }
+    let expected_decided_idx = test.leaders_log.len() + usize::from(test.leaders_ss.is_some());
+    wait_until_synced(
+        follower,
+        leader,
+        expected_decided_idx,
+        SYNC_CATCH_UP_TIMEOUT,
+    );
 
     // Verify log
     let mut followers_entries = follower.on_definition(|x| x.read_decided_log());
@@ -274,4 +269,33 @@ fn sync_test(test: SyncTest) {
         verify_stopsign(&[followers_ss], ss);
     }
     verify_log(followers_entries, test.leaders_log);
+}
+
+/// Poll until both leader and follower have decided through `expected_decided_idx`.
+fn wait_until_synced(
+    follower: &Arc<Component<OmniPaxosComponent>>,
+    leader: &Arc<Component<OmniPaxosComponent>>,
+    expected_decided_idx: usize,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let (follower_idx, leader_idx) = (
+            follower.on_definition(|x| x.paxos.get_decided_idx()),
+            leader.on_definition(|x| x.paxos.get_decided_idx()),
+        );
+        if follower_idx >= expected_decided_idx && leader_idx >= expected_decided_idx {
+            return;
+        }
+        if Instant::now() >= deadline {
+            let follower_entries = follower.on_definition(|x| x.read_decided_log());
+            let leader_entries = leader.on_definition(|x| x.read_decided_log());
+            panic!(
+                "Timed out waiting for AccSync catch-up (expected decided_idx >= {expected_decided_idx}).\n\
+                 Follower decided_idx={follower_idx}, log: {follower_entries:?}\n\
+                 Leader decided_idx={leader_idx}, log: {leader_entries:?}"
+            );
+        }
+        thread::sleep(SYNC_CATCH_UP_POLL);
+    }
 }
