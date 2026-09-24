@@ -18,6 +18,7 @@ use std::{
     error::Error,
     fs, str,
     sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 use tempfile::TempDir;
@@ -26,6 +27,11 @@ const START_TIMEOUT: Duration = Duration::from_millis(1000);
 const REGISTRATION_TIMEOUT: Duration = Duration::from_millis(1000);
 const STOP_COMPONENT_TIMEOUT: Duration = Duration::from_millis(1000);
 const CHECK_DECIDED_TIMEOUT: Duration = Duration::from_millis(1);
+/// Retries when Kompact's TCP+UDP bind races with a previous test's teardown (macOS AddrInUse).
+const KOMPACT_BUILD_ATTEMPTS: u32 = 5;
+const KOMPACT_BUILD_RETRY_DELAY: Duration = Duration::from_millis(250);
+/// Brief pause after shutdown so the OS can release the previous test's sockets.
+const KOMPACT_SHUTDOWN_SETTLE: Duration = Duration::from_millis(50);
 pub const STOPSIGN_ID: u64 = u64::MAX;
 
 #[cfg(feature = "unicache")]
@@ -477,17 +483,7 @@ pub struct TestSystem {
 impl TestSystem {
     pub fn with(test_config: TestConfig) -> Self {
         let temp_dir_path = create_temp_dir();
-
-        let mut conf = KompactConfig::default();
-        conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
-        conf.set_config_value(&system::THREADS, test_config.num_threads);
-        Self::set_executor_for_threads(test_config.num_threads, &mut conf);
-
-        let mut net = NetworkConfig::default();
-        net.set_tcp_nodelay(true);
-
-        conf.system_components(DeadletterBox::new, net.build());
-        let system = conf.build().expect("KompactSystem");
+        let system = Self::build_kompact_system(&test_config);
 
         let mut nodes = HashMap::new();
         let mut omni_refs: HashMap<NodeId, ActorRef<Message<Value>>> = HashMap::new();
@@ -517,6 +513,59 @@ impl TestSystem {
             kompact_system: Some(system),
             nodes,
             temp_dir_path,
+        }
+    }
+
+    /// Build a Kompact system with retries. Rapid serial tests can hit a macOS race where
+    /// Kompact binds TCP on an ephemeral port successfully, then fails binding UDP on the
+    /// same port because the previous system's sockets are not fully released yet.
+    fn build_kompact_system(test_config: &TestConfig) -> KompactSystem {
+        let mut last_error = None;
+        for attempt in 1..=KOMPACT_BUILD_ATTEMPTS {
+            let build_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut conf = KompactConfig::default();
+                conf.set_config_value(&system::LABEL, "KompactSystem".to_string());
+                conf.set_config_value(&system::THREADS, test_config.num_threads);
+                Self::set_executor_for_threads(test_config.num_threads, &mut conf);
+
+                let mut net = NetworkConfig::default();
+                net.set_tcp_nodelay(true);
+                conf.system_components(DeadletterBox::new, net.build());
+                conf.build()
+            }));
+
+            match build_result {
+                Ok(Ok(system)) => return system,
+                Ok(Err(e)) => {
+                    eprintln!(
+                        "KompactSystem build attempt {attempt}/{KOMPACT_BUILD_ATTEMPTS} failed: {e}"
+                    );
+                    last_error = Some(format!("{e}"));
+                }
+                Err(payload) => {
+                    let msg = panic_payload_to_string(payload);
+                    eprintln!(
+                        "KompactSystem build attempt {attempt}/{KOMPACT_BUILD_ATTEMPTS} panicked: {msg}"
+                    );
+                    last_error = Some(msg);
+                }
+            }
+            thread::sleep(KOMPACT_BUILD_RETRY_DELAY);
+        }
+        panic!(
+            "Failed to build KompactSystem after {KOMPACT_BUILD_ATTEMPTS} attempts: {:?}",
+            last_error
+        );
+    }
+
+    /// Shut down the Kompact system (if still owned) and briefly wait for sockets to release.
+    pub fn shutdown(&mut self) {
+        if let Some(system) = self.kompact_system.take() {
+            match system.shutdown() {
+                Ok(_) => {}
+                Err(e) => panic!("Error on kompact shutdown: {e}"),
+            }
+            thread::sleep(KOMPACT_SHUTDOWN_SETTLE);
         }
     }
 
@@ -738,6 +787,27 @@ impl TestSystem {
         };
     }
 }
+
+impl Drop for TestSystem {
+    fn drop(&mut self) {
+        // Best-effort cleanup if a test panics before calling shutdown().
+        if let Some(system) = self.kompact_system.take() {
+            let _ = system.shutdown();
+            thread::sleep(KOMPACT_SHUTDOWN_SETTLE);
+        }
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
 pub mod omnireplica {
     use super::*;
     use omnipaxos::{

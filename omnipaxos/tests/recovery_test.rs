@@ -38,13 +38,7 @@ fn leader_fail_follower_propose_test() {
     verify_log(read_log, proposals);
 
     println!("Pass leader_fail_follower_propose!");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 #[test]
@@ -74,13 +68,7 @@ fn leader_fail_leader_propose_test() {
     verify_log(read_log, proposals);
 
     println!("Pass leader_fail_leader_propose!");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 #[test]
@@ -113,13 +101,7 @@ fn follower_fail_leader_propose_test() {
     verify_log(read_log, proposals);
 
     println!("Pass follower_fail_leader_propose");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 #[test]
@@ -152,13 +134,7 @@ fn follower_fail_follower_propose_test() {
     verify_log(read_log, proposals);
 
     println!("Pass follower_fail_follower_propose");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Propose and check that the last proposals are decided by the

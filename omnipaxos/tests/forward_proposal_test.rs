@@ -47,11 +47,5 @@ fn forward_proposal_test() {
         .expect("The message was not proposed in the allocated time!");
 
     println!("Pass forward_proposal");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }

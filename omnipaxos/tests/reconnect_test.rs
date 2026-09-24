@@ -77,13 +77,7 @@ fn increasing_accept_seq_num_test() {
 
     assert_eq!(accept_seq_nums, expected_seq_nums);
     println!("Passed ascending_accept_sequence_test!");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a follower detects a missed AcceptDecide message from the leader and re-syncs
@@ -138,12 +132,7 @@ fn reconnect_after_dropped_accepts_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a follower that misses a prepare message from a leader change
@@ -214,12 +203,7 @@ fn reconnect_after_dropped_prepare_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a leader that misses a Promise message from a follower
@@ -296,12 +280,7 @@ fn reconnect_after_dropped_promise_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a leader that misses a PrepareReq message from a follower eventually
@@ -362,12 +341,7 @@ fn reconnect_after_dropped_preparereq_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a follower that misses an AcceptStopSign message and then becomes the leader
@@ -419,12 +393,7 @@ fn resync_after_dropped_acceptstopsign_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a follower that misses an AcceptStopSign message from their leader
@@ -489,12 +458,7 @@ fn reconnect_after_dropped_acceptstopsign_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Verifies that a follower that misses DecideStopSign message from their leader
@@ -549,10 +513,5 @@ fn reconnect_after_dropped_decidestopsign_test() {
 
     // Shutdown system
     println!("Passed reconnect_to_leader_test!");
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }

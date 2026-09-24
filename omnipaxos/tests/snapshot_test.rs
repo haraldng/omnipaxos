@@ -47,18 +47,12 @@ fn snapshot_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    for (_pid, node) in sys.nodes {
-        check_snapshot(&vec_proposals, cfg.trim_idx, node);
+    for (_pid, node) in sys.nodes.iter() {
+        check_snapshot(&vec_proposals, cfg.trim_idx, node.clone());
     }
 
     println!("Pass snapshot");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Test trimming the log twice.
@@ -107,22 +101,16 @@ fn double_snapshot_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    for (_pid, node) in sys.nodes {
+    for (_pid, node) in sys.nodes.iter() {
         check_snapshot(
             &vec_proposals,
             cfg.trim_idx + SNAPSHOT_INDEX_INCREMENT,
-            node,
+            node.clone(),
         );
     }
 
     println!("Pass double snapshot");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 fn check_snapshot(

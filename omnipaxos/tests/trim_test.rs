@@ -54,16 +54,10 @@ fn trim_test() {
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get trim
 
-    for (_pid, node) in sys.nodes {
-        check_trim(&vec_proposals, cfg.trim_idx, node);
+    for (_pid, node) in sys.nodes.iter() {
+        check_trim(&vec_proposals, cfg.trim_idx, node.clone());
     }
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 /// Test trimming the log twice.
@@ -121,16 +115,14 @@ fn double_trim_test() {
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes trim
 
-    for (_pid, node) in sys.nodes {
-        check_trim(&vec_proposals, cfg.trim_idx + TRIM_INDEX_INCREMENT, node);
+    for (_pid, node) in sys.nodes.iter() {
+        check_trim(
+            &vec_proposals,
+            cfg.trim_idx + TRIM_INDEX_INCREMENT,
+            node.clone(),
+        );
     }
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem found in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 fn check_trim(vec_proposals: &[Value], trim_idx: usize, node: Arc<Component<OmniPaxosComponent>>) {

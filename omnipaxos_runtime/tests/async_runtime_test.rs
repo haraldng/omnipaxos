@@ -13,14 +13,14 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "unicache")]
+use omnipaxos::unicache::UniCache;
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
     storage::{Entry, Snapshot},
     util::{LogEntry, NodeId},
     ClusterConfig, OmniPaxosConfig, ProposeErr, ServerConfig,
 };
-#[cfg(feature = "unicache")]
-use omnipaxos::unicache::UniCache;
 use omnipaxos_runtime::{
     spawn_actor, AppendError, OmniPaxosEvent, OmniPaxosHandle, RuntimeConfig, RuntimeProposeErr,
     TokioRuntime,

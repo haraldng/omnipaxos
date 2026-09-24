@@ -37,11 +37,5 @@ fn ble_test() {
         killed_nodes.push(elected_leader);
     }
     println!("Pass ballot_leader_election");
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }

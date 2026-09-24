@@ -82,11 +82,5 @@ fn reconfig_test() {
             .append(Value::with_id(0))
             .expect_err("Should not be able to propose after decided StopSign!")
     });
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }

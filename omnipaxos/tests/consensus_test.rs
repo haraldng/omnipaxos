@@ -38,10 +38,10 @@ fn consensus_test() {
     }
 
     let mut log = vec![];
-    for (pid, node) in sys.nodes {
+    for (pid, node) in sys.nodes.iter() {
         log.push(node.on_definition(|x| {
             let log = x.read_decided_log();
-            (pid, log)
+            (*pid, log)
         }));
     }
 
@@ -49,13 +49,7 @@ fn consensus_test() {
     check_quorum(&log, quorum_size, &vec_proposals);
     check_validity(&log, &vec_proposals);
     check_consistent_log_prefixes(&log);
-
-    let kompact_system =
-        std::mem::take(&mut sys.kompact_system).expect("No KompactSystem in memory");
-    match kompact_system.shutdown() {
-        Ok(_) => {}
-        Err(e) => panic!("Error on kompact shutdown: {}", e),
-    };
+    sys.shutdown();
 }
 
 #[test]
