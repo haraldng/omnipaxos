@@ -27,7 +27,7 @@ uuid = { version = "1", optional = true, features = ["v4"] }
 
 [dev-dependencies]
 kompact = { git = "https://github.com/kompics/kompact", rev = "4fd1fdc", features = ["silent_logging"] }
-omnipaxos_storage = { path = "../omnipaxos_storage", features = ["persistent_storage"] }
+omnipaxos_storage = { version = "0.2.3", path = "../omnipaxos_storage", features = ["persistent_storage"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.7.3"
 tempfile = "3.3.0"
