@@ -9,12 +9,7 @@
 //!
 //! To keep every operation linearizable, both reads AND writes/cas go through the OmniPaxos log
 //! (a read is proposed as a log entry just like a write, so it's ordered relative to every other
-//! operation) — this is a deliberate simplification favoring correctness over performance, which
-//! matches this crate's purpose: Jepsen/Maelstrom results are a correctness credential, not a
-//! performance number.
-//!
-//! Storage is in-memory (`MemoryStorage`), which is sufficient because Maelstrom never crashes or
-//! restarts a node mid-test — network partitions are the only fault it injects.
+//! operation)
 
 use std::{
     collections::HashMap,

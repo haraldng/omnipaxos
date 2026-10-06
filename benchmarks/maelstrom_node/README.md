@@ -3,7 +3,7 @@
 This crate builds a thin OmniPaxos-backed node for [Maelstrom](https://github.com/jepsen-io/maelstrom),
 Kyle Kingsbury's lightweight Jepsen-based workbench for testing distributed algorithms. It answers
 a **correctness/robustness** question — does OmniPaxos maintain linearizability under injected
-network faults? — not a performance one.
+network faults?
 
 ## How it works
 
@@ -72,5 +72,3 @@ node by design (`ClusterConfig::validate` rejects a single-node cluster), so alw
   harness that actually restarts nodes (e.g. a full Jepsen setup), which Maelstrom doesn't provide.
 - CAS values are compared via JSON structural equality (`serde_json::Value`'s `PartialEq`), matching
   `lin-kv`'s "arbitrary JSON value" semantics for keys/values.
-- This is a correctness check, not a benchmark — don't cite results from this crate as a performance
-  comparison against etcd/TiKV.
