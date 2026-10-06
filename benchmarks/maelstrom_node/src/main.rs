@@ -1,6 +1,6 @@
 //! A thin OmniPaxos-backed node for Maelstrom's `lin-kv` workload
 //! (https://github.com/jepsen-io/maelstrom), for Jepsen-style linearizability testing under
-//! injected faults (partitions, clock skew, crashes).
+//! injected network partitions.
 //!
 //! Maelstrom drives this binary as a subprocess per cluster node, communicating over stdin/stdout
 //! using line-delimited JSON (see doc/protocol.md and doc/workloads.md in the Maelstrom repo).
@@ -13,8 +13,8 @@
 //! matches this crate's purpose: Jepsen/Maelstrom results are a correctness credential, not a
 //! performance number.
 //!
-//! Storage is in-memory (`MemoryStorage`) for v1 — a "crash and restart with state preserved"
-//! nemesis is out of scope; a "kill" (no restart, or restart with empty state) nemesis is fine.
+//! Storage is in-memory (`MemoryStorage`), which is sufficient because Maelstrom never crashes or
+//! restarts a node mid-test — network partitions are the only fault it injects.
 
 use std::{
     collections::HashMap,
@@ -102,10 +102,7 @@ fn reply(
     mut body: Value,
 ) {
     body["in_reply_to"] = json!(in_reply_to);
-    let envelope = json!({ "src": self_id_str, "dest": dest, "body": body });
-    let mut stdout = stdout.lock().unwrap();
-    writeln!(stdout, "{}", envelope).expect("failed to write to stdout");
-    stdout.flush().expect("failed to flush stdout");
+    send(stdout, self_id_str, dest, body);
 }
 
 /// Applies every newly-decided entry (in log order) to the local `kv` map, and — for entries this
