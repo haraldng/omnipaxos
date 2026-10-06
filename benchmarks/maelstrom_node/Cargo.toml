@@ -1,0 +1,23 @@
+[package]
+name = "omnipaxos_maelstrom_node"
+version = "0.1.0"
+authors = ["Harald Ng <hng@kth.se>"]
+edition = "2021"
+description = "A thin OmniPaxos-backed lin-kv node speaking Maelstrom's JSON-over-stdio protocol, for Jepsen-style linearizability testing"
+license = "Apache-2.0"
+repository = "https://github.com/haraldng/omnipaxos"
+homepage = "https://omnipaxos.com/"
+publish = false
+
+[[bin]]
+name = "omnipaxos_maelstrom_node"
+path = "src/main.rs"
+
+[dependencies]
+omnipaxos = { version = "0.2.2", path = "../../omnipaxos", default-features = false, features = ["serde"] }
+omnipaxos_storage = { version = "0.2.2", path = "../../omnipaxos_storage" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = true

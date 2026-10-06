@@ -9,6 +9,7 @@ members = [
     "examples/kv_store",
     "examples/kv_store_async",
     "examples/dashboard",
+    "benchmarks/maelstrom_node",
 ]
 
 [profile.release]

@@ -1,0 +1,40 @@
+name: Maelstrom
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # every day at 02:00
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lin_kv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install gnuplot
+        run: sudo apt-get update && sudo apt-get install -y gnuplot
+      - name: Use the cache to share dependencies # keyed by Cargo.lock
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/maelstrom-*/store
+          key: ${{ runner.os }}-maelstrom-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run lin-kv with network partitions
+        run: ./benchmarks/maelstrom_node/run_maelstrom.sh --test-count 5
+      - name: Upload Maelstrom results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maelstrom-results
+          path: target/maelstrom-*/store/lin-kv/
