@@ -54,7 +54,7 @@ fn trim_test() {
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes get trim
 
-    for (_pid, node) in sys.nodes.iter() {
+    for node in sys.nodes.values() {
         check_trim(&vec_proposals, cfg.trim_idx, node.clone());
     }
     sys.shutdown();
@@ -115,7 +115,7 @@ fn double_trim_test() {
 
     thread::sleep(cfg.wait_timeout); // wait a little longer so that ALL nodes trim
 
-    for (_pid, node) in sys.nodes.iter() {
+    for node in sys.nodes.values() {
         check_trim(
             &vec_proposals,
             cfg.trim_idx + TRIM_INDEX_INCREMENT,

@@ -47,7 +47,7 @@ fn snapshot_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    for (_pid, node) in sys.nodes.iter() {
+    for node in sys.nodes.values() {
         check_snapshot(&vec_proposals, cfg.trim_idx, node.clone());
     }
 
@@ -101,7 +101,7 @@ fn double_snapshot_test() {
 
     thread::sleep(cfg.wait_timeout);
 
-    for (_pid, node) in sys.nodes.iter() {
+    for node in sys.nodes.values() {
         check_snapshot(
             &vec_proposals,
             cfg.trim_idx + SNAPSHOT_INDEX_INCREMENT,
