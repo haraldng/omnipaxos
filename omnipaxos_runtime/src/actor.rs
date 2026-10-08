@@ -235,64 +235,67 @@ where
         self.drain_outgoing_buf();
     }
 
-    /// Push newly-decided entries to a single, freshly-added subscriber. Used
-    /// only on the immediate catch-up path from `Command::SubscribeDecided`,
-    /// where there is no shared read to amortize against. Returns `false` if
-    /// the receiver was already closed.
-    fn push_to_sub(op: &mut OmniPaxos<T, B>, sub: &mut DecidedSub<T>) -> bool {
-        let decided = op.get_decided_idx();
-        if sub.next_idx >= decided {
-            return true;
-        }
-        let Some(entries) = op.read_decided_suffix(sub.next_idx) else {
-            return true;
-        };
-        for entry in entries {
-            match sub.tx.try_send(entry) {
-                Ok(()) => sub.next_idx += 1,
-                Err(async_channel::TrySendError::Full(_)) => return true,
-                Err(async_channel::TrySendError::Closed(_)) => return false,
-            }
-        }
-        true
-    }
-
-    /// Push newly-decided entries to every subscriber, reading the log suffix
-    /// **once** and fanning out. Each sub keeps its own cursor, so slow subs
-    /// don't block fast ones; the storage read is amortized across all subs
-    /// starting from the trailing sub's position.
+    /// Push newly-decided entries to every subscriber, reading only what fits in
+    /// their channels. Each sub keeps its own cursor, so slow subs don't block
+    /// fast ones. Subs whose wanted ranges overlap share one read, so subs near
+    /// the head of the log cost a single read between them, and a lagging sub
+    /// never causes more than its free channel space to be read. Cheap when
+    /// there is nothing to push, so it can run after every handled message.
     fn push_to_all_subs(&mut self) {
-        if self.decided_subscribers.is_empty() {
-            return;
-        }
-        let cur = self.op.get_decided_idx();
-        let min_next = self
+        self.decided_subscribers.retain(|s| !s.tx.is_closed());
+        let decided = self.op.get_decided_idx();
+        let mut wanted: Vec<(usize, usize)> = self
             .decided_subscribers
             .iter()
-            .map(|s| s.next_idx)
-            .min()
-            .expect("non-empty checked above");
-        if min_next >= cur {
-            return;
+            .filter_map(|s| {
+                let free =
+                    s.tx.capacity()
+                        .map_or(usize::MAX, |cap| cap.saturating_sub(s.tx.len()));
+                let end = decided.min(s.next_idx.saturating_add(free));
+                (s.next_idx < end).then_some((s.next_idx, end))
+            })
+            .collect();
+        wanted.sort_unstable();
+        let mut reads: Vec<(usize, usize)> = Vec::new();
+        for (from, to) in wanted {
+            match reads.last_mut() {
+                Some((_, end)) if from <= *end => *end = (*end).max(to),
+                _ => reads.push((from, to)),
+            }
         }
-        // Read once, from the trailing sub's position. `entries[i]` is the log
-        // entry at position `min_next + i`.
-        let Some(entries) = self.op.read_decided_suffix(min_next) else {
-            return;
-        };
-        // Fan out; drop closed subscribers in place via retain_mut.
-        self.decided_subscribers.retain_mut(|sub| {
-            // sub.next_idx should always be >= min_next; guard defensively.
-            let start = sub.next_idx.saturating_sub(min_next);
-            for entry in entries.iter().skip(start) {
-                match sub.tx.try_send(entry.clone()) {
-                    Ok(()) => sub.next_idx += 1,
-                    Err(async_channel::TrySendError::Full(_)) => break,
-                    Err(async_channel::TrySendError::Closed(_)) => return false,
+        for (from, to) in reads {
+            // `entries[i]` is the log entry at position `from + i`.
+            let Some(entries) = self.op.read_entries(from..to) else {
+                continue;
+            };
+            for sub in self
+                .decided_subscribers
+                .iter_mut()
+                .filter(|s| (from..to).contains(&s.next_idx))
+            {
+                for entry in entries.iter().skip(sub.next_idx - from) {
+                    if sub.tx.try_send(entry.clone()).is_err() {
+                        break;
+                    }
+                    sub.next_idx += 1;
                 }
             }
-            true
-        });
+        }
+    }
+
+    /// Reacts to whatever just changed: dispatches waiting entries, assigns
+    /// indices to flushed batches, resolves finished `append_notify` calls,
+    /// emits events, pushes decided entries, and forwards outgoing messages.
+    /// Runs after every handled burst of messages or commands and after every
+    /// tick, so callers see a decision as soon as the message carrying it is
+    /// handled rather than on the next tick.
+    fn react(&mut self) {
+        self.try_dispatch_undispatched();
+        self.reconcile_unconfirmed();
+        self.drain_notifiers();
+        self.detect_and_emit_events();
+        self.push_to_all_subs();
+        self.flush_outgoing();
     }
 
     fn record_assignment(&mut self, id: EntryId, idx: usize, ballot: Ballot) {
@@ -528,6 +531,13 @@ where
     /// Delivers an incoming `SequencePaxos`/BLE message to the core, tracking
     /// any entries it silently adds to the shared batch buffer -- see
     /// `track_batch_growth`.
+    fn handle_incoming(&mut self, m: Message<T>) {
+        match m {
+            Message::AsyncRuntime(arm) => self.handle_runtime_msg(arm),
+            m => self.handle_incoming_tracked(m),
+        }
+    }
+
     fn handle_incoming_tracked(&mut self, m: Message<T>) {
         let batched_before = self.op.get_batched_len();
         let accepted_before = self.op.get_accepted_idx();
@@ -535,7 +545,7 @@ where
         self.track_batch_growth(batched_before, accepted_before);
     }
 
-    async fn handle_command(&mut self, cmd: Command<T>) {
+    fn handle_command(&mut self, cmd: Command<T>) {
         match cmd {
             Command::Append { entry, reply } => {
                 // Via append_tracked (not self.op.append) so a deferred write
@@ -576,11 +586,9 @@ where
                     // subscriber's channel immediately with no entries delivered.
                     return;
                 }
-                let mut sub = DecidedSub { next_idx: from, tx };
-                // Immediate catch-up: push whatever is already decided from `from`.
-                if Self::push_to_sub(&mut self.op, &mut sub) {
-                    self.decided_subscribers.push(sub);
-                }
+                // The backlog from `from` is pushed by the `react` that follows.
+                self.decided_subscribers
+                    .push(DecidedSub { next_idx: from, tx });
             }
             Command::Reconfigure {
                 new_configuration,
@@ -623,15 +631,17 @@ where
     let mut cmd_rx = Box::pin(cmd_rx);
     let mut incoming_rx = Box::pin(incoming_rx);
 
+    // After a message or command wakes the actor, everything else already queued
+    // is handled before reacting, so a burst gets one round of resolution and one
+    // flush (letting the core batch replies) instead of one per message. Capped so
+    // a sustained stream can't starve ticks.
+    const MAX_BURST: usize = 1024;
+
     loop {
         select_biased! {
             _ = tick_fut => {
                 state.op.tick();
-                state.detect_and_emit_events();
-                state.try_dispatch_undispatched();
-                state.reconcile_unconfirmed();
-                state.drain_notifiers();
-                state.push_to_all_subs();
+                state.react();
                 tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
             }
             _ = egress_fut => {
@@ -639,17 +649,22 @@ where
                 egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
             }
             in_msg = incoming_rx.next() => {
-                match in_msg {
-                    Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm),
-                    Some(m) => state.handle_incoming_tracked(m),
-                    None => break,
+                let Some(m) = in_msg else { break };
+                state.handle_incoming(m);
+                for _ in 1..MAX_BURST {
+                    let Ok(m) = incoming_rx.try_recv() else { break };
+                    state.handle_incoming(m);
                 }
+                state.react();
             }
             cmd = cmd_rx.next() => {
-                match cmd {
-                    Some(c) => state.handle_command(c).await,
-                    None => break,
+                let Some(c) = cmd else { break };
+                state.handle_command(c);
+                for _ in 1..MAX_BURST {
+                    let Ok(c) = cmd_rx.try_recv() else { break };
+                    state.handle_command(c);
                 }
+                state.react();
             }
         }
     }

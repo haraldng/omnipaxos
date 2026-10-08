@@ -22,8 +22,9 @@ pub struct RuntimeConfig {
     /// How often the actor calls `tick()` on the underlying OmniPaxos.
     /// Should match the tick timeout budget used when building `ServerConfig`.
     pub tick_period: Duration,
-    /// How often outgoing messages are drained and forwarded on the `outgoing_messages`
-    /// channel.
+    /// How often the actor retries forwarding outgoing messages that did not fit in the
+    /// (full) `outgoing_messages` channel. Messages are otherwise forwarded as soon as
+    /// they are produced.
     pub egress_period: Duration,
     /// Bounded capacity for the actor's command channel.
     pub cmd_channel_capacity: usize,

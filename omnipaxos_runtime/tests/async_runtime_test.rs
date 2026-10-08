@@ -354,9 +354,9 @@ async fn append_notify_index_correct_when_batched_with_forwarded_proposal() {
     let h_notify = handles.get(&f2).unwrap().clone();
     let h_plain = handles.get(&f1).unwrap().clone();
 
-    // Real sleeps, not `yield_now`: each node ticks/flushes egress on its own
-    // independent timer (tick_period=2ms/egress_period=1ms here), so only
-    // waiting several multiples of that is enough to be confident a given
+    // Real sleeps, not `yield_now`: each node is its own actor task, scheduled
+    // independently, so only waiting well past a tick (tick_period=2ms here)
+    // is enough to be confident a given
     // entry has actually left its origin node and been processed by the
     // leader before the next one is submitted -- submission order alone
     // doesn't imply leader-arrival order.
@@ -794,6 +794,46 @@ async fn event_stream_emits_leader_election() {
     .expect("no LeaderElected event within timeout");
 
     assert!((1..=3).contains(&elected_pid));
+}
+
+/// Decisions must reach callers as soon as the messages carrying them are
+/// handled, not on the next tick. With a tick far longer than an in-process
+/// round trip, a follower's `append_notify` (forwarded to the leader, accepted,
+/// and decided) and the decided-log subscription must both complete well
+/// within a single tick.
+#[tokio::test]
+async fn append_notify_and_subscribers_resolve_without_waiting_for_tick() {
+    let tick_period = Duration::from_millis(200);
+    let cfg = RuntimeConfig {
+        tick_period,
+        egress_period: tick_period,
+        ..Default::default()
+    };
+    let handles = spawn_cluster_with_config(3, cfg).await;
+    let leader = wait_for_leader(&handles).await;
+    let follower = *handles.keys().find(|&&p| p != leader).unwrap();
+    let follower_h = handles.get(&follower).unwrap().clone();
+    let decided = follower_h.subscribe_decided(0).await;
+
+    for i in 0..3 {
+        let start = tokio::time::Instant::now();
+        let idx = timeout(tick_period, follower_h.append_notify(TestEntry(i)))
+            .await
+            .expect("append_notify waited for a tick")
+            .expect("append_notify returned error");
+        assert!(
+            start.elapsed() < tick_period / 2,
+            "append_notify took {:?} with a {:?} tick",
+            start.elapsed(),
+            tick_period
+        );
+        let entry = timeout(tick_period / 2, decided.recv())
+            .await
+            .expect("decided entry waited for a tick")
+            .expect("decided channel closed");
+        assert!(matches!(entry, LogEntry::Decided(TestEntry(v)) if v == i));
+        assert_eq!(idx, i as usize + 1);
+    }
 }
 
 /// Nobody calls `subscribe_events`, but the handle keeps the event receiver
