@@ -119,13 +119,20 @@ fn build_op(
 
 /// Spawn `n` nodes and wire their outgoing/incoming message streams together.
 async fn spawn_cluster(n: NodeId) -> HashMap<NodeId, OmniPaxosHandle<TestEntry>> {
-    let nodes: Vec<NodeId> = (1..=n).collect();
     let cfg = RuntimeConfig {
         tick_period: Duration::from_millis(2),
         egress_period: Duration::from_millis(1),
         ..Default::default()
     };
+    spawn_cluster_with_config(n, cfg).await
+}
 
+/// Like `spawn_cluster`, but with a caller-supplied `RuntimeConfig`.
+async fn spawn_cluster_with_config(
+    n: NodeId,
+    cfg: RuntimeConfig,
+) -> HashMap<NodeId, OmniPaxosHandle<TestEntry>> {
+    let nodes: Vec<NodeId> = (1..=n).collect();
     let mut handles: HashMap<NodeId, OmniPaxosHandle<TestEntry>> = HashMap::new();
     for pid in nodes.clone() {
         let op = build_op(pid, nodes.clone());
@@ -787,6 +794,39 @@ async fn event_stream_emits_leader_election() {
     .expect("no LeaderElected event within timeout");
 
     assert!((1..=3).contains(&elected_pid));
+}
+
+/// Nobody calls `subscribe_events`, but the handle keeps the event receiver
+/// alive, so the channel fills up and never closes. The actor must keep
+/// running rather than block on a full event channel.
+#[tokio::test]
+async fn undrained_event_channel_does_not_stall_actor_loop() {
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        event_capacity: 2,
+        ..Default::default()
+    };
+    let handles = spawn_cluster_with_config(3, cfg).await;
+    let leader = wait_for_leader(&handles).await;
+    let leader_h = handles.get(&leader).unwrap().clone();
+
+    for i in 0..10 {
+        timeout(Duration::from_secs(2), leader_h.append_notify(TestEntry(i)))
+            .await
+            .expect("actor loop appears stalled with a full event channel")
+            .expect("append_notify returned error");
+    }
+
+    // Overflow drops the oldest events, so the newest state is still observable.
+    let events = leader_h.subscribe_events();
+    let mut latest_decided = 0;
+    while let Ok(ev) = events.try_recv() {
+        if let OmniPaxosEvent::Decided { new_decided_idx } = ev {
+            latest_decided = new_decided_idx;
+        }
+    }
+    assert_eq!(latest_decided, leader_h.decided_idx().await);
 }
 
 #[tokio::test]

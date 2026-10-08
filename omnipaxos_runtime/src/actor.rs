@@ -166,36 +166,35 @@ where
         }
     }
 
-    async fn detect_and_emit_events(&mut self) {
+    fn detect_and_emit_events(&mut self) {
         let cur = self.op.get_current_leader();
         if cur != self.last_leader {
             if let Some((pid, accepted)) = cur {
-                let _ = self
-                    .event_tx
-                    .send(OmniPaxosEvent::LeaderElected { pid, accepted })
-                    .await;
+                self.emit_event(OmniPaxosEvent::LeaderElected { pid, accepted });
             }
             self.last_leader = cur;
         }
         let d = self.op.get_decided_idx();
         if d > self.last_decided_idx {
-            let _ = self
-                .event_tx
-                .send(OmniPaxosEvent::Decided { new_decided_idx: d })
-                .await;
+            self.emit_event(OmniPaxosEvent::Decided { new_decided_idx: d });
             self.last_decided_idx = d;
         }
         if !self.last_reconfigured {
             if let Some(_ss) = self.op.is_reconfigured() {
-                let _ = self
-                    .event_tx
-                    .send(OmniPaxosEvent::Reconfigured {
-                        stop_sign_idx: self.op.get_decided_idx(),
-                    })
-                    .await;
+                self.emit_event(OmniPaxosEvent::Reconfigured {
+                    stop_sign_idx: self.op.get_decided_idx(),
+                });
                 self.last_reconfigured = true;
             }
         }
+    }
+
+    /// Never blocks: the handle keeps the event receiver alive even if nobody
+    /// reads it, so awaiting room would stall the actor loop forever. When the
+    /// channel is full the oldest event is dropped; every event carries absolute
+    /// state, so the newest ones are what a lagging consumer needs.
+    fn emit_event(&self, event: OmniPaxosEvent) {
+        let _ = self.event_tx.force_send(event);
     }
 
     fn drain_notifiers(&mut self) {
@@ -682,7 +681,7 @@ where
         select_biased! {
             _ = tick_fut => {
                 state.op.tick();
-                state.detect_and_emit_events().await;
+                state.detect_and_emit_events();
                 state.try_dispatch_undispatched();
                 state.reconcile_unconfirmed();
                 state.drain_notifiers();

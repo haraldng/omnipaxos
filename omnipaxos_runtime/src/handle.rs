@@ -31,7 +31,8 @@ pub struct RuntimeConfig {
     pub outgoing_capacity: usize,
     /// Bounded capacity for the incoming message channel.
     pub incoming_capacity: usize,
-    /// Bounded capacity for the event channel.
+    /// Bounded capacity for the event channel. When it is full, the oldest
+    /// event is dropped to make room for the newest.
     pub event_capacity: usize,
     /// How long an `append_notify` call waits for its entry to be decided before
     /// resolving with [`AppendError::Timeout`](super::AppendError::Timeout).
@@ -254,6 +255,11 @@ where
     /// Subscribe to state-transition events. Each event is delivered to exactly one
     /// receiver: if you clone the returned receiver, the clones share the queue.
     /// For fan-out to multiple independent subscribers, wrap in a broadcasting task.
+    ///
+    /// The stream is lossy: if events are not drained fast enough to stay within
+    /// [`RuntimeConfig::event_capacity`], the oldest are dropped. Each event carries
+    /// absolute state (e.g. the current decided index), so a consumer that lags
+    /// still converges on the latest state.
     pub fn subscribe_events(&self) -> async_channel::Receiver<OmniPaxosEvent> {
         self.events_rx.clone()
     }
