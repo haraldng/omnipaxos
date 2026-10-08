@@ -17,7 +17,7 @@ use std::{
 use omnipaxos::unicache::UniCache;
 use omnipaxos::{
     messages::{sequence_paxos::PaxosMsg, Message},
-    storage::{Entry, Snapshot},
+    storage::{Entry, Snapshot, Storage},
     util::{LogEntry, NodeId},
     ClusterConfig, OmniPaxosConfig, ProposeErr, ServerConfig,
 };
@@ -37,7 +37,7 @@ use tokio::time::timeout;
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct TestEntry(u64);
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct NoSnapshot;
 
 impl Snapshot<TestEntry> for NoSnapshot {
@@ -91,6 +91,14 @@ fn build_op(
     pid: NodeId,
     nodes: Vec<NodeId>,
 ) -> omnipaxos::OmniPaxos<TestEntry, MemoryStorage<TestEntry>> {
+    build_op_with_storage(pid, nodes, MemoryStorage::default())
+}
+
+fn build_op_with_storage(
+    pid: NodeId,
+    nodes: Vec<NodeId>,
+    storage: MemoryStorage<TestEntry>,
+) -> omnipaxos::OmniPaxos<TestEntry, MemoryStorage<TestEntry>> {
     let cluster_config = ClusterConfig {
         configuration_id: 1,
         nodes,
@@ -114,7 +122,7 @@ fn build_op(
         cluster_config,
         server_config,
     };
-    cfg.build(MemoryStorage::default()).unwrap()
+    cfg.build(storage).unwrap()
 }
 
 /// Spawn `n` nodes and wire their outgoing/incoming message streams together.
@@ -1518,6 +1526,94 @@ async fn append_notify_index_correct_when_batched_with_plain_append() {
          (wrong-index assignment -- indices are 1-based)",
         decided.get(idx2 - 1)
     );
+}
+
+/// Spawns a single node whose storage holds 10 decided entries, the first 5 of
+/// them compacted (trimmed, or snapshotted if `snapshot`). No transport is
+/// needed: everything is already decided locally.
+fn spawn_compacted_node(
+    snapshot: bool,
+    decided_channel_capacity: usize,
+) -> OmniPaxosHandle<TestEntry> {
+    let mut storage = MemoryStorage::default();
+    storage
+        .append_entries((0..10).map(TestEntry).collect())
+        .unwrap();
+    storage.set_decided_idx(10).unwrap();
+    storage.trim(5).unwrap();
+    storage.set_compacted_idx(5).unwrap();
+    if snapshot {
+        storage.set_snapshot(Some(NoSnapshot)).unwrap();
+    }
+    let op = build_op_with_storage(1, vec![1, 2, 3], storage);
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        decided_channel_capacity,
+        ..Default::default()
+    };
+    spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg)
+}
+
+/// Asserts `got` is one entry standing for the compacted prefix up to index 5,
+/// followed by the decided entries 5..10, each exactly once.
+fn assert_compacted_prefix_then_rest(got: &[LogEntry<TestEntry>], snapshot: bool) {
+    let rest: Vec<_> = (5..10).map(|v| LogEntry::Decided(TestEntry(v))).collect();
+    match got.split_first() {
+        Some((LogEntry::Snapshotted(s), tail)) if snapshot => {
+            assert_eq!(s.trimmed_idx, 5);
+            assert_eq!(tail, rest);
+        }
+        Some((LogEntry::Trimmed(5), tail)) if !snapshot => assert_eq!(tail, rest),
+        _ => panic!("expected the compacted prefix followed by 5..10, got {got:?}"),
+    }
+}
+
+fn drain(rx: &async_channel::Receiver<LogEntry<TestEntry>>) -> Vec<LogEntry<TestEntry>> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
+}
+
+/// A read starting below the compacted index returns one trimmed (or
+/// snapshotted) entry standing for the whole compacted prefix. Subscribers
+/// starting inside that prefix must get that entry once and then continue at
+/// the compacted index, receiving every later entry exactly once.
+#[tokio::test]
+async fn subscribe_decided_from_compacted_prefix_delivers_each_entry_once() {
+    for snapshot in [false, true] {
+        let h = spawn_compacted_node(snapshot, 1024);
+        let from_start = h.subscribe_decided(0).await;
+        let from_inside = h.subscribe_decided(3).await;
+        let from_after = h.subscribe_decided(7).await;
+        // Let many ticks pass so any re-delivery would show up.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_compacted_prefix_then_rest(&drain(&from_start), snapshot);
+        assert_compacted_prefix_then_rest(&drain(&from_inside), snapshot);
+        let after: Vec<_> = (7..10).map(|v| LogEntry::Decided(TestEntry(v))).collect();
+        assert_eq!(drain(&from_after), after);
+    }
+}
+
+/// With room for one entry at a time, the first read lies entirely inside the
+/// compacted prefix and returns only the entry standing for it; delivery must
+/// then continue at the compacted index rather than inside the prefix.
+#[tokio::test]
+async fn subscribe_decided_from_compacted_prefix_with_tiny_channel() {
+    for snapshot in [false, true] {
+        let h = spawn_compacted_node(snapshot, 1);
+        let rx = h.subscribe_decided(0).await;
+        let mut got = Vec::new();
+        for _ in 0..6 {
+            let entry = timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("subscriber stalled")
+                .expect("decided channel closed");
+            got.push(entry);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        got.extend(drain(&rx));
+        assert_compacted_prefix_then_rest(&got, snapshot);
+    }
 }
 
 #[tokio::test]

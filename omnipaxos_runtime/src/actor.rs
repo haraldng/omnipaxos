@@ -264,20 +264,23 @@ where
             }
         }
         for (from, to) in reads {
-            // `entries[i]` is the log entry at position `from + i`.
             let Some(entries) = self.op.read_entries(from..to) else {
                 continue;
             };
+            let ends = entry_ends(from, &entries);
             for sub in self
                 .decided_subscribers
                 .iter_mut()
                 .filter(|s| (from..to).contains(&s.next_idx))
             {
-                for entry in entries.iter().skip(sub.next_idx - from) {
+                for (entry, &end) in entries.iter().zip(&ends) {
+                    if end <= sub.next_idx {
+                        continue;
+                    }
                     if sub.tx.try_send(entry.clone()).is_err() {
                         break;
                     }
-                    sub.next_idx += 1;
+                    sub.next_idx = end;
                 }
             }
         }
@@ -668,6 +671,25 @@ where
             }
         }
     }
+}
+
+/// For entries returned by a log read starting at `from`, the log index just past
+/// each entry. A read starting below the compacted index begins with one trimmed or
+/// snapshotted entry standing for every index up to the compacted index; every
+/// other entry stands for a single index.
+fn entry_ends<T: Entry>(from: usize, entries: &[LogEntry<T>]) -> Vec<usize> {
+    let mut end = from;
+    entries
+        .iter()
+        .map(|entry| {
+            end = match entry {
+                LogEntry::Trimmed(compacted_idx) => *compacted_idx,
+                LogEntry::Snapshotted(s) => s.trimmed_idx,
+                _ => end + 1,
+            };
+            end
+        })
+        .collect()
 }
 
 /// Drops the oldest elements of `buf` until its length is at most `cap`, preserving
