@@ -151,6 +151,9 @@ my_config.set_path(my_path.to_string());
 my_config.set_database_options(state_store_options);
 my_config.set_log_options(log_store_options);
 ```
+
+By default, every write is fsynced to disk before it returns, so the state OmniPaxos relies on for correctness survives a machine crash or power loss. This can be disabled with `my_config.set_sync_writes(false)` for higher throughput, but a node that crashes with unsynced writes may lose its promises or accepted entries and thereby break consensus safety. Only disable it if losing a node's recent writes is acceptable, e.g., in testing.
+
 ## Batching
 OmniPaxos supports batching to reduce the number of IO operations to storage. It is enabled by specifying the `batch_size` in `OmniPaxosConfig`.
 
