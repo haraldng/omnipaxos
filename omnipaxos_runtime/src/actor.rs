@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use futures::{channel::oneshot, select_biased, FutureExt, StreamExt};
+use futures::{select_biased, FutureExt, StreamExt};
 
 use omnipaxos::{
     ballot_leader_election::Ballot,
@@ -21,6 +21,7 @@ use omnipaxos::{
 use super::{
     event::{AppendError, Command, OmniPaxosEvent},
     handle::RuntimeConfig,
+    pending::PendingAppends,
     traits::{ActorEntry, AsyncRuntime},
 };
 
@@ -48,28 +49,6 @@ impl From<&RuntimeConfig> for ActorConfig {
             max_outgoing_buffered: cfg.max_outgoing_buffered,
         }
     }
-}
-
-/// A pending `append_notify` awaiting decision. Uniform representation regardless
-/// of whether the entry was accepted locally (we are leader) or forwarded (we are
-/// follower). The `assigned` field is filled in by either code path; the drain
-/// loop treats every pending item the same way.
-struct Pending<T>
-where
-    T: Entry,
-{
-    id: EntryId,
-    /// The entry, retained until dispatched (accepted locally or sent as a
-    /// `TaggedProposal`). While `Some`, `try_dispatch_undispatched` retries it
-    /// each tick — this is what lets `append_notify` be called before a
-    /// leader is known.
-    undispatched: Option<T>,
-    /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
-    ///   (a) we accepted the entry ourselves as leader, or
-    ///   (b) we received `AsyncRuntimeMsg::Assigned` from the leader.
-    assigned: Option<(usize, Ballot)>,
-    deadline: Instant,
-    reply: oneshot::Sender<Result<usize, AppendError<T>>>,
 }
 
 /// What to do, once its index is known, for a write buffered in the shared
@@ -105,7 +84,7 @@ where
 
     pid: NodeId,
     outgoing_buf: Vec<Message<T>>,
-    pending: VecDeque<Pending<T>>,
+    pending: PendingAppends<T>,
     decided_subscribers: Vec<DecidedSub<T>>,
     last_leader: Option<(NodeId, bool)>,
     last_decided_idx: usize,
@@ -156,7 +135,7 @@ where
             config,
             pid,
             outgoing_buf: Vec::new(),
-            pending: VecDeque::new(),
+            pending: PendingAppends::new(),
             decided_subscribers: Vec::new(),
             last_leader,
             last_decided_idx,
@@ -198,26 +177,11 @@ where
     }
 
     fn drain_notifiers(&mut self) {
-        let decided = self.op.get_decided_idx();
-        let now = Instant::now();
-        let cur_ballot = self.op.get_promise();
-        let old = std::mem::take(&mut self.pending);
-        for p in old {
-            match p.assigned {
-                Some((idx, _)) if idx <= decided => {
-                    let _ = p.reply.send(Ok(idx));
-                }
-                Some((idx, ballot)) if ballot < cur_ballot => {
-                    let _ = p
-                        .reply
-                        .send(Err(AppendError::Superseded { log_entry_idx: idx }));
-                }
-                _ if now > p.deadline => {
-                    let _ = p.reply.send(Err(AppendError::Timeout));
-                }
-                _ => self.pending.push_back(p),
-            }
-        }
+        self.pending.resolve(
+            self.op.get_decided_idx(),
+            self.op.get_promise(),
+            Instant::now(),
+        );
     }
 
     /// Effective cap for `outgoing_buf`: the channel's own capacity when known,
@@ -332,25 +296,16 @@ where
     }
 
     fn record_assignment(&mut self, id: EntryId, idx: usize, ballot: Ballot) {
-        for p in self.pending.iter_mut() {
-            if p.id == id {
-                p.assigned = Some((idx, ballot));
-                return;
-            }
-        }
-        // No matching pending — late reply after timeout drain, or duplicate. Ignore.
+        self.pending.assign(id, idx, ballot);
     }
 
     /// Resolves a pending `append_notify` immediately with the propose error that
     /// just failed it, instead of leaving it to silently time out. Only affects
     /// entries this node itself owns in `self.pending` — when `id` came from a
-    /// remote `TaggedProposal`, the owning `Pending` lives on the origin node, so
+    /// remote `TaggedProposal`, the owning call lives on the origin node, so
     /// this is a no-op there and that call still resolves via `Timeout`.
     fn resolve_pending_failed(&mut self, id: EntryId, err: ProposeErr<T>) {
-        if let Some(pos) = self.pending.iter().position(|p| p.id == id) {
-            let p = self.pending.remove(pos).unwrap();
-            let _ = p.reply.send(Err(AppendError::Propose(err)));
-        }
+        self.pending.fail(id, err);
     }
 
     /// Appends `entry` to the local log, tracking it in `unconfirmed_local` if
@@ -490,11 +445,7 @@ where
             // and wait for the next tick.
             return;
         }
-        let entries: Vec<(EntryId, T)> = self
-            .pending
-            .iter_mut()
-            .filter_map(|p| p.undispatched.take().map(|entry| (p.id, entry)))
-            .collect();
+        let entries = self.pending.take_undispatched();
         if leader == self.pid {
             for (id, entry) in entries {
                 self.accept_as_leader(id, entry, None);
@@ -606,13 +557,8 @@ where
                 }
                 let id = EntryId(uuid::Uuid::new_v4());
                 let timeout = timeout.unwrap_or(self.config.append_notify_timeout);
-                self.pending.push_back(Pending {
-                    id,
-                    undispatched: Some(entry),
-                    assigned: None,
-                    deadline: Instant::now() + timeout,
-                    reply,
-                });
+                self.pending
+                    .insert(id, entry, Instant::now() + timeout, reply);
                 self.try_dispatch_undispatched();
             }
             Command::CurrentLeader { reply } => {
