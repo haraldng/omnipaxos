@@ -316,6 +316,17 @@ where
         decided_idx: usize,
         log_sync: Option<LogSync<T>>,
     ) -> StorageResult<usize> {
+        if let Some(sync) = &log_sync {
+            debug_assert!(
+                sync.sync_idx >= self.state_cache.decided_idx,
+                "log sync from {} would overwrite decided entries up to {}",
+                sync.sync_idx,
+                self.state_cache.decided_idx
+            );
+        }
+        // A leader that completed Prepare without this node's Promise can be
+        // behind this node's decided index; it must never decrease.
+        let decided_idx = decided_idx.max(self.state_cache.decided_idx);
         self.state_cache.accepted_round = accepted_round;
         self.state_cache.decided_idx = decided_idx;
         let mut sync_txn: Vec<StorageOp<T>> = vec![
