@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use futures::{channel::oneshot, select_biased, FutureExt, StreamExt};
+use futures::{select_biased, FutureExt, StreamExt};
 
 use omnipaxos::{
     ballot_leader_election::Ballot,
@@ -21,6 +21,7 @@ use omnipaxos::{
 use super::{
     event::{AppendError, Command, OmniPaxosEvent},
     handle::RuntimeConfig,
+    pending::PendingAppends,
     traits::{ActorEntry, AsyncRuntime},
 };
 
@@ -48,28 +49,6 @@ impl From<&RuntimeConfig> for ActorConfig {
             max_outgoing_buffered: cfg.max_outgoing_buffered,
         }
     }
-}
-
-/// A pending `append_notify` awaiting decision. Uniform representation regardless
-/// of whether the entry was accepted locally (we are leader) or forwarded (we are
-/// follower). The `assigned` field is filled in by either code path; the drain
-/// loop treats every pending item the same way.
-struct Pending<T>
-where
-    T: Entry,
-{
-    id: EntryId,
-    /// The entry, retained until dispatched (accepted locally or sent as a
-    /// `TaggedProposal`). While `Some`, `try_dispatch_undispatched` retries it
-    /// each tick — this is what lets `append_notify` be called before a
-    /// leader is known.
-    undispatched: Option<T>,
-    /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
-    ///   (a) we accepted the entry ourselves as leader, or
-    ///   (b) we received `AsyncRuntimeMsg::Assigned` from the leader.
-    assigned: Option<(usize, Ballot)>,
-    deadline: Instant,
-    reply: oneshot::Sender<Result<usize, AppendError<T>>>,
 }
 
 /// What to do, once its index is known, for a write buffered in the shared
@@ -105,7 +84,7 @@ where
 
     pid: NodeId,
     outgoing_buf: Vec<Message<T>>,
-    pending: VecDeque<Pending<T>>,
+    pending: PendingAppends<T>,
     decided_subscribers: Vec<DecidedSub<T>>,
     last_leader: Option<(NodeId, bool)>,
     last_decided_idx: usize,
@@ -156,7 +135,7 @@ where
             config,
             pid,
             outgoing_buf: Vec::new(),
-            pending: VecDeque::new(),
+            pending: PendingAppends::new(),
             decided_subscribers: Vec::new(),
             last_leader,
             last_decided_idx,
@@ -166,59 +145,43 @@ where
         }
     }
 
-    async fn detect_and_emit_events(&mut self) {
+    fn detect_and_emit_events(&mut self) {
         let cur = self.op.get_current_leader();
         if cur != self.last_leader {
             if let Some((pid, accepted)) = cur {
-                let _ = self
-                    .event_tx
-                    .send(OmniPaxosEvent::LeaderElected { pid, accepted })
-                    .await;
+                self.emit_event(OmniPaxosEvent::LeaderElected { pid, accepted });
             }
             self.last_leader = cur;
         }
         let d = self.op.get_decided_idx();
         if d > self.last_decided_idx {
-            let _ = self
-                .event_tx
-                .send(OmniPaxosEvent::Decided { new_decided_idx: d })
-                .await;
+            self.emit_event(OmniPaxosEvent::Decided { new_decided_idx: d });
             self.last_decided_idx = d;
         }
         if !self.last_reconfigured {
             if let Some(_ss) = self.op.is_reconfigured() {
-                let _ = self
-                    .event_tx
-                    .send(OmniPaxosEvent::Reconfigured {
-                        stop_sign_idx: self.op.get_decided_idx(),
-                    })
-                    .await;
+                self.emit_event(OmniPaxosEvent::Reconfigured {
+                    stop_sign_idx: self.op.get_decided_idx(),
+                });
                 self.last_reconfigured = true;
             }
         }
     }
 
+    /// Never blocks: the handle keeps the event receiver alive even if nobody
+    /// reads it, so awaiting room would stall the actor loop forever. When the
+    /// channel is full the oldest event is dropped (see
+    /// `OmniPaxosHandle::subscribe_events` for what a lagging consumer can miss).
+    fn emit_event(&self, event: OmniPaxosEvent) {
+        let _ = self.event_tx.force_send(event);
+    }
+
     fn drain_notifiers(&mut self) {
-        let decided = self.op.get_decided_idx();
-        let now = Instant::now();
-        let cur_ballot = self.op.get_promise();
-        let old = std::mem::take(&mut self.pending);
-        for p in old {
-            match p.assigned {
-                Some((idx, _)) if idx <= decided => {
-                    let _ = p.reply.send(Ok(idx));
-                }
-                Some((idx, ballot)) if ballot < cur_ballot => {
-                    let _ = p
-                        .reply
-                        .send(Err(AppendError::Superseded { log_entry_idx: idx }));
-                }
-                _ if now > p.deadline => {
-                    let _ = p.reply.send(Err(AppendError::Timeout));
-                }
-                _ => self.pending.push_back(p),
-            }
-        }
+        self.pending.resolve(
+            self.op.get_decided_idx(),
+            self.op.get_promise(),
+            Instant::now(),
+        );
     }
 
     /// Effective cap for `outgoing_buf`: the channel's own capacity when known,
@@ -272,86 +235,83 @@ where
         self.drain_outgoing_buf();
     }
 
-    /// Push newly-decided entries to a single, freshly-added subscriber. Used
-    /// only on the immediate catch-up path from `Command::SubscribeDecided`,
-    /// where there is no shared read to amortize against. Returns `false` if
-    /// the receiver was already closed.
-    fn push_to_sub(op: &mut OmniPaxos<T, B>, sub: &mut DecidedSub<T>) -> bool {
-        let decided = op.get_decided_idx();
-        if sub.next_idx >= decided {
-            return true;
-        }
-        let Some(entries) = op.read_decided_suffix(sub.next_idx) else {
-            return true;
-        };
-        for entry in entries {
-            match sub.tx.try_send(entry) {
-                Ok(()) => sub.next_idx += 1,
-                Err(async_channel::TrySendError::Full(_)) => return true,
-                Err(async_channel::TrySendError::Closed(_)) => return false,
-            }
-        }
-        true
-    }
-
-    /// Push newly-decided entries to every subscriber, reading the log suffix
-    /// **once** and fanning out. Each sub keeps its own cursor, so slow subs
-    /// don't block fast ones; the storage read is amortized across all subs
-    /// starting from the trailing sub's position.
+    /// Push newly-decided entries to every subscriber, reading only what fits in
+    /// their channels. Each sub keeps its own cursor, so slow subs don't block
+    /// fast ones. Subs whose wanted ranges overlap share one read, so subs near
+    /// the head of the log cost a single read between them, and a lagging sub
+    /// never causes more than its free channel space to be read. Cheap when
+    /// there is nothing to push, so it can run after every handled message.
     fn push_to_all_subs(&mut self) {
-        if self.decided_subscribers.is_empty() {
-            return;
-        }
-        let cur = self.op.get_decided_idx();
-        let min_next = self
+        self.decided_subscribers.retain(|s| !s.tx.is_closed());
+        let decided = self.op.get_decided_idx();
+        let mut wanted: Vec<(usize, usize)> = self
             .decided_subscribers
             .iter()
-            .map(|s| s.next_idx)
-            .min()
-            .expect("non-empty checked above");
-        if min_next >= cur {
-            return;
+            .filter_map(|s| {
+                let free =
+                    s.tx.capacity()
+                        .map_or(usize::MAX, |cap| cap.saturating_sub(s.tx.len()));
+                let end = decided.min(s.next_idx.saturating_add(free));
+                (s.next_idx < end).then_some((s.next_idx, end))
+            })
+            .collect();
+        wanted.sort_unstable();
+        let mut reads: Vec<(usize, usize)> = Vec::new();
+        for (from, to) in wanted {
+            match reads.last_mut() {
+                Some((_, end)) if from <= *end => *end = (*end).max(to),
+                _ => reads.push((from, to)),
+            }
         }
-        // Read once, from the trailing sub's position. `entries[i]` is the log
-        // entry at position `min_next + i`.
-        let Some(entries) = self.op.read_decided_suffix(min_next) else {
-            return;
-        };
-        // Fan out; drop closed subscribers in place via retain_mut.
-        self.decided_subscribers.retain_mut(|sub| {
-            // sub.next_idx should always be >= min_next; guard defensively.
-            let start = sub.next_idx.saturating_sub(min_next);
-            for entry in entries.iter().skip(start) {
-                match sub.tx.try_send(entry.clone()) {
-                    Ok(()) => sub.next_idx += 1,
-                    Err(async_channel::TrySendError::Full(_)) => break,
-                    Err(async_channel::TrySendError::Closed(_)) => return false,
+        for (from, to) in reads {
+            let Some(entries) = self.op.read_entries(from..to) else {
+                continue;
+            };
+            let ends = entry_ends(from, &entries);
+            for sub in self
+                .decided_subscribers
+                .iter_mut()
+                .filter(|s| (from..to).contains(&s.next_idx))
+            {
+                for (entry, &end) in entries.iter().zip(&ends) {
+                    if end <= sub.next_idx {
+                        continue;
+                    }
+                    if sub.tx.try_send(entry.clone()).is_err() {
+                        break;
+                    }
+                    sub.next_idx = end;
                 }
             }
-            true
-        });
+        }
+    }
+
+    /// Reacts to whatever just changed: dispatches waiting entries, assigns
+    /// indices to flushed batches, resolves finished `append_notify` calls,
+    /// emits events, pushes decided entries, and forwards outgoing messages.
+    /// Runs after every handled burst of messages or commands and after every
+    /// tick, so callers see a decision as soon as the message carrying it is
+    /// handled rather than on the next tick.
+    fn react(&mut self) {
+        self.try_dispatch_undispatched();
+        self.reconcile_unconfirmed();
+        self.drain_notifiers();
+        self.detect_and_emit_events();
+        self.push_to_all_subs();
+        self.flush_outgoing();
     }
 
     fn record_assignment(&mut self, id: EntryId, idx: usize, ballot: Ballot) {
-        for p in self.pending.iter_mut() {
-            if p.id == id {
-                p.assigned = Some((idx, ballot));
-                return;
-            }
-        }
-        // No matching pending — late reply after timeout drain, or duplicate. Ignore.
+        self.pending.assign(id, idx, ballot);
     }
 
     /// Resolves a pending `append_notify` immediately with the propose error that
     /// just failed it, instead of leaving it to silently time out. Only affects
     /// entries this node itself owns in `self.pending` — when `id` came from a
-    /// remote `TaggedProposal`, the owning `Pending` lives on the origin node, so
+    /// remote `TaggedProposal`, the owning call lives on the origin node, so
     /// this is a no-op there and that call still resolves via `Timeout`.
     fn resolve_pending_failed(&mut self, id: EntryId, err: ProposeErr<T>) {
-        if let Some(pos) = self.pending.iter().position(|p| p.id == id) {
-            let p = self.pending.remove(pos).unwrap();
-            let _ = p.reply.send(Err(AppendError::Propose(err)));
-        }
+        self.pending.fail(id, err);
     }
 
     /// Appends `entry` to the local log, tracking it in `unconfirmed_local` if
@@ -479,23 +439,19 @@ where
     }
 
     /// Attempt to dispatch every pending entry that hasn't yet been sent or
-    /// accepted locally. Called from `Command::AppendNotify` and on each tick,
-    /// which lets a call issued *before* an election eventually succeed once a
-    /// leader is known.
+    /// accepted locally. Called from `Command::AppendNotify` and from every
+    /// `react`, which lets a call issued *before* an election eventually succeed
+    /// once a leader is known.
     fn try_dispatch_undispatched(&mut self) {
         let Some((leader, accepted)) = self.op.get_current_leader() else {
             return;
         };
         if leader == self.pid && !accepted {
             // We're leader but not yet in Accept phase — leave entries undispatched
-            // and wait for the next tick.
+            // and retry on the next `react`.
             return;
         }
-        let entries: Vec<(EntryId, T)> = self
-            .pending
-            .iter_mut()
-            .filter_map(|p| p.undispatched.take().map(|entry| (p.id, entry)))
-            .collect();
+        let entries = self.pending.take_undispatched();
         if leader == self.pid {
             for (id, entry) in entries {
                 self.accept_as_leader(id, entry, None);
@@ -575,6 +531,14 @@ where
         }
     }
 
+    /// Routes an incoming message to the runtime or to the core.
+    fn handle_incoming(&mut self, m: Message<T>) {
+        match m {
+            Message::AsyncRuntime(arm) => self.handle_runtime_msg(arm),
+            m => self.handle_incoming_tracked(m),
+        }
+    }
+
     /// Delivers an incoming `SequencePaxos`/BLE message to the core, tracking
     /// any entries it silently adds to the shared batch buffer -- see
     /// `track_batch_growth`.
@@ -585,7 +549,7 @@ where
         self.track_batch_growth(batched_before, accepted_before);
     }
 
-    async fn handle_command(&mut self, cmd: Command<T>) {
+    fn handle_command(&mut self, cmd: Command<T>) {
         match cmd {
             Command::Append { entry, reply } => {
                 // Via append_tracked (not self.op.append) so a deferred write
@@ -607,13 +571,8 @@ where
                 }
                 let id = EntryId(uuid::Uuid::new_v4());
                 let timeout = timeout.unwrap_or(self.config.append_notify_timeout);
-                self.pending.push_back(Pending {
-                    id,
-                    undispatched: Some(entry),
-                    assigned: None,
-                    deadline: Instant::now() + timeout,
-                    reply,
-                });
+                self.pending
+                    .insert(id, entry, Instant::now() + timeout, reply);
                 self.try_dispatch_undispatched();
             }
             Command::CurrentLeader { reply } => {
@@ -631,11 +590,9 @@ where
                     // subscriber's channel immediately with no entries delivered.
                     return;
                 }
-                let mut sub = DecidedSub { next_idx: from, tx };
-                // Immediate catch-up: push whatever is already decided from `from`.
-                if Self::push_to_sub(&mut self.op, &mut sub) {
-                    self.decided_subscribers.push(sub);
-                }
+                // The backlog from `from` is pushed by the `react` that follows.
+                self.decided_subscribers
+                    .push(DecidedSub { next_idx: from, tx });
             }
             Command::Reconfigure {
                 new_configuration,
@@ -678,15 +635,17 @@ where
     let mut cmd_rx = Box::pin(cmd_rx);
     let mut incoming_rx = Box::pin(incoming_rx);
 
+    // After a message or command wakes the actor, everything else already queued
+    // is handled before reacting, so a burst gets one round of resolution and one
+    // flush (letting the core batch replies) instead of one per message. Capped so
+    // a sustained stream can't starve ticks.
+    const MAX_BURST: usize = 1024;
+
     loop {
         select_biased! {
             _ = tick_fut => {
                 state.op.tick();
-                state.detect_and_emit_events().await;
-                state.try_dispatch_undispatched();
-                state.reconcile_unconfirmed();
-                state.drain_notifiers();
-                state.push_to_all_subs();
+                state.react();
                 tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
             }
             _ = egress_fut => {
@@ -694,20 +653,44 @@ where
                 egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
             }
             in_msg = incoming_rx.next() => {
-                match in_msg {
-                    Some(Message::AsyncRuntime(arm)) => state.handle_runtime_msg(arm),
-                    Some(m) => state.handle_incoming_tracked(m),
-                    None => break,
+                let Some(m) = in_msg else { break };
+                state.handle_incoming(m);
+                for _ in 1..MAX_BURST {
+                    let Ok(m) = incoming_rx.try_recv() else { break };
+                    state.handle_incoming(m);
                 }
+                state.react();
             }
             cmd = cmd_rx.next() => {
-                match cmd {
-                    Some(c) => state.handle_command(c).await,
-                    None => break,
+                let Some(c) = cmd else { break };
+                state.handle_command(c);
+                for _ in 1..MAX_BURST {
+                    let Ok(c) = cmd_rx.try_recv() else { break };
+                    state.handle_command(c);
                 }
+                state.react();
             }
         }
     }
+}
+
+/// For entries returned by a log read starting at `from`, the log index just past
+/// each entry. A read starting below the compacted index begins with one trimmed or
+/// snapshotted entry standing for every index up to the compacted index; every
+/// other entry stands for a single index.
+fn entry_ends<T: Entry>(from: usize, entries: &[LogEntry<T>]) -> Vec<usize> {
+    let mut end = from;
+    entries
+        .iter()
+        .map(|entry| {
+            end = match entry {
+                LogEntry::Trimmed(compacted_idx) => *compacted_idx,
+                LogEntry::Snapshotted(s) => s.trimmed_idx,
+                _ => end + 1,
+            };
+            end
+        })
+        .collect()
 }
 
 /// Drops the oldest elements of `buf` until its length is at most `cap`, preserving

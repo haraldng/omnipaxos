@@ -22,8 +22,9 @@ pub struct RuntimeConfig {
     /// How often the actor calls `tick()` on the underlying OmniPaxos.
     /// Should match the tick timeout budget used when building `ServerConfig`.
     pub tick_period: Duration,
-    /// How often outgoing messages are drained and forwarded on the `outgoing_messages`
-    /// channel.
+    /// How often the actor retries forwarding outgoing messages that did not fit in the
+    /// (full) `outgoing_messages` channel. Messages are otherwise forwarded as soon as
+    /// they are produced.
     pub egress_period: Duration,
     /// Bounded capacity for the actor's command channel.
     pub cmd_channel_capacity: usize,
@@ -31,7 +32,9 @@ pub struct RuntimeConfig {
     pub outgoing_capacity: usize,
     /// Bounded capacity for the incoming message channel.
     pub incoming_capacity: usize,
-    /// Bounded capacity for the event channel.
+    /// Bounded capacity for the event channel. When it is full, the oldest
+    /// event is dropped to make room for the newest; see
+    /// [`OmniPaxosHandle::subscribe_events`] for what a lagging consumer can miss.
     pub event_capacity: usize,
     /// How long an `append_notify` call waits for its entry to be decided before
     /// resolving with [`AppendError::Timeout`](super::AppendError::Timeout).
@@ -254,6 +257,16 @@ where
     /// Subscribe to state-transition events. Each event is delivered to exactly one
     /// receiver: if you clone the returned receiver, the clones share the queue.
     /// For fan-out to multiple independent subscribers, wrap in a broadcasting task.
+    ///
+    /// The stream is lossy: if events are not drained fast enough to stay within
+    /// [`RuntimeConfig::event_capacity`], the oldest are dropped. Only
+    /// [`OmniPaxosEvent::Decided`] is self-correcting, since each one carries the
+    /// current decided index. [`OmniPaxosEvent::LeaderElected`] and
+    /// [`OmniPaxosEvent::Reconfigured`] are emitted once per transition, so a lagging
+    /// consumer can miss them for good; use [`Self::current_leader`] for the current
+    /// leader, and the decided log ([`Self::subscribe_decided`] or
+    /// [`Self::read_decided_suffix`]), which ends in a decided [`LogEntry::StopSign`]
+    /// after a reconfiguration.
     pub fn subscribe_events(&self) -> async_channel::Receiver<OmniPaxosEvent> {
         self.events_rx.clone()
     }

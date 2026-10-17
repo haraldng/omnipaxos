@@ -19,6 +19,7 @@
 mod actor;
 mod event;
 mod handle;
+mod pending;
 mod traits;
 
 #[cfg(feature = "tokio_runtime")]

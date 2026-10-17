@@ -2,7 +2,7 @@ use omnipaxos::{
     ballot_leader_election::Ballot,
     storage::{Entry, StopSign, Storage, StorageOp, StorageResult},
 };
-use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, Options, WriteBatchWithTransaction, DB};
+use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, Options, WriteBatch, WriteOptions, DB};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use zerocopy::{AsBytes, FromBytes};
@@ -21,10 +21,12 @@ const SNAPSHOT: &[u8] = b"SNAPSHOT";
 /// * `path`: Path to the storage directory
 /// * `rocksdb_options`: Options for the RocksDB state store
 /// * `log_options` : Options for the the RocksDB log store
+/// * `sync_writes`: Whether every write is fsynced before returning. Defaults to `true`.
 pub struct PersistentStorageConfig {
     path: String,
     rocksdb_options: Options,
     log_options: Options,
+    sync_writes: bool,
 }
 
 impl PersistentStorageConfig {
@@ -58,12 +60,26 @@ impl PersistentStorageConfig {
         self.rocksdb_options = opts;
     }
 
+    /// Returns whether writes are fsynced before returning.
+    pub fn get_sync_writes(&self) -> bool {
+        self.sync_writes
+    }
+
+    /// Sets whether writes are fsynced before returning. Disabling this is faster, but writes
+    /// acknowledged shortly before a machine crash or power loss may be lost. OmniPaxos relies on
+    /// promises and accepted entries surviving such failures, so a node running with this disabled
+    /// can violate consensus safety if its machine crashes.
+    pub fn set_sync_writes(&mut self, sync_writes: bool) {
+        self.sync_writes = sync_writes;
+    }
+
     /// Creates a configuration for `PersistentStorage` with the given path and options for Commitlog and sled
     pub fn with(path: String, log_options: Options, rocksdb_options: Options) -> Self {
         Self {
             path,
             log_options,
             rocksdb_options,
+            sync_writes: true,
         }
     }
 
@@ -76,6 +92,7 @@ impl PersistentStorageConfig {
             path,
             log_options: Options::default(),
             rocksdb_options,
+            sync_writes: true,
         }
     }
 }
@@ -89,6 +106,7 @@ impl Default for PersistentStorageConfig {
             path: DEFAULT.to_string(),
             log_options: Options::default(),
             rocksdb_options,
+            sync_writes: true,
         }
     }
 }
@@ -102,8 +120,8 @@ where
 {
     /// Local RocksDB key-value store
     db: DB,
-    /// Buffered, atomic write batch
-    write_batch: WriteBatchWithTransaction<false>,
+    /// Options applied to every write
+    write_opts: WriteOptions,
     /// The index of the next log entry to be appended. Will be used as the key of the entry in big
     /// endian format.
     next_log_key: usize,
@@ -156,9 +174,11 @@ where
         };
         drop(log_iter);
 
+        let mut write_opts = WriteOptions::default();
+        write_opts.set_sync(storage_config.sync_writes);
         Self {
             db,
-            write_batch: WriteBatchWithTransaction::<false>::default(),
+            write_opts,
             next_log_key,
             t: PhantomData,
         }
@@ -180,20 +200,46 @@ where
             .expect("Couldn't find RocksDB log column family")
     }
 
-    fn batch_append_entry(&mut self, entry: T) -> StorageResult<()> {
-        self.write_batch.put_cf(
-            self.db.cf_handle(LOG).unwrap(),
-            self.next_log_key.to_be_bytes(),
-            bincode::serialize(&entry)?,
-        );
-        self.next_log_key += 1;
+    /// Adds `op` to `batch`. Advances `next_log_key` for appended entries; the caller must restore
+    /// it if the batch is not written.
+    fn add_to_batch(&mut self, batch: &mut WriteBatch, op: StorageOp<T>) -> StorageResult<()> {
+        match op {
+            StorageOp::AppendEntry(entry) => self.batch_append_entries(batch, vec![entry])?,
+            StorageOp::AppendEntries(entries) => self.batch_append_entries(batch, entries)?,
+            StorageOp::AppendOnPrefix(from_idx, entries) => {
+                // Don't need to delete entries that will be overwritten.
+                let delete_idx = from_idx + entries.len();
+                if delete_idx < self.next_log_key {
+                    let from_key = delete_idx.to_be_bytes();
+                    let to_key = self.next_log_key.to_be_bytes();
+                    batch.delete_range_cf(self.get_log_handle(), from_key, to_key);
+                }
+                self.next_log_key = from_idx;
+                self.batch_append_entries(batch, entries)?
+            }
+            StorageOp::SetPromise(bal) => batch.put(NPROM, bincode::serialize(&bal)?),
+            StorageOp::SetDecidedIndex(idx) => batch.put(DECIDE, usize::as_bytes(&idx)),
+            StorageOp::SetAcceptedRound(bal) => batch.put(ACC, bincode::serialize(&bal)?),
+            StorageOp::SetCompactedIdx(idx) => batch.put(TRIM, usize::as_bytes(&idx)),
+            StorageOp::Trim(idx) => {
+                let from_key = 0_usize.to_be_bytes();
+                let to_key = idx.to_be_bytes();
+                batch.delete_range_cf(self.get_log_handle(), from_key, to_key);
+            }
+            StorageOp::SetStopsign(ss) => batch.put(STOPSIGN, bincode::serialize(&ss)?),
+            StorageOp::SetSnapshot(snap) => batch.put(SNAPSHOT, bincode::serialize(&snap)?),
+        }
         Ok(())
     }
 
-    fn batch_append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
+    fn batch_append_entries(
+        &mut self,
+        batch: &mut WriteBatch,
+        entries: Vec<T>,
+    ) -> StorageResult<()> {
         for entry in entries {
-            self.write_batch.put_cf(
-                self.db.cf_handle(LOG).unwrap(),
+            batch.put_cf(
+                self.get_log_handle(),
                 self.next_log_key.to_be_bytes(),
                 bincode::serialize(&entry)?,
             );
@@ -202,61 +248,23 @@ where
         Ok(())
     }
 
-    fn batch_append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        // Don't need to delete entries that will be overwritten.
-        let delete_idx = from_idx + entries.len();
-        if delete_idx < self.next_log_key {
-            let from_key = delete_idx.to_be_bytes();
-            let to_key = self.next_log_key.to_be_bytes();
-            let log = self.db.cf_handle(LOG).unwrap();
-            self.write_batch.delete_range_cf(log, from_key, to_key);
+    /// Writes all `ops` in a single batch. If any op fails to serialize or the write fails, nothing
+    /// is written and `next_log_key` is restored.
+    fn write_batch(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()> {
+        let prev_next_log_key = self.next_log_key;
+        let mut batch = WriteBatch::default();
+        let res = ops
+            .into_iter()
+            .try_for_each(|op| self.add_to_batch(&mut batch, op))
+            .and_then(|()| Ok(self.db.write_opt(batch, &self.write_opts)?));
+        if res.is_err() {
+            self.next_log_key = prev_next_log_key;
         }
-        self.next_log_key = from_idx;
-        self.batch_append_entries(entries)
+        res
     }
 
-    fn batch_set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
-        let prom_bytes = bincode::serialize(&n_prom)?;
-        self.write_batch.put(NPROM, prom_bytes);
-        Ok(())
-    }
-
-    fn batch_set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
-        let ld_bytes = usize::as_bytes(&ld);
-        self.write_batch.put(DECIDE, ld_bytes);
-        Ok(())
-    }
-
-    fn batch_set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        let acc_bytes = bincode::serialize(&na)?;
-        self.write_batch.put(ACC, acc_bytes);
-        Ok(())
-    }
-
-    fn batch_set_compacted_idx(&mut self, trimmed_idx: usize) -> StorageResult<()> {
-        let trim_bytes = usize::as_bytes(&trimmed_idx);
-        self.write_batch.put(TRIM, trim_bytes);
-        Ok(())
-    }
-
-    fn batch_trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
-        let from_key = 0_usize.to_be_bytes();
-        let to_key = trimmed_idx.to_be_bytes();
-        let log = self.db.cf_handle(LOG).unwrap();
-        self.write_batch.delete_range_cf(log, from_key, to_key);
-        Ok(())
-    }
-
-    fn batch_set_stopsign(&mut self, ss: Option<StopSign>) -> StorageResult<()> {
-        let stopsign = bincode::serialize(&ss)?;
-        self.write_batch.put(STOPSIGN, stopsign);
-        Ok(())
-    }
-
-    fn batch_set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
-        let s = bincode::serialize(&snapshot)?;
-        self.write_batch.put(SNAPSHOT, s);
-        Ok(())
+    fn put(&self, key: &[u8], value: impl AsRef<[u8]>) -> StorageResult<()> {
+        Ok(self.db.put_opt(key, value, &self.write_opts)?)
     }
 }
 
@@ -276,61 +284,19 @@ where
     T::Snapshot: Serialize + for<'a> Deserialize<'a>,
 {
     fn write_atomically(&mut self, ops: Vec<StorageOp<T>>) -> StorageResult<()> {
-        for op in ops {
-            match op {
-                StorageOp::AppendEntry(entry) => self.batch_append_entry(entry)?,
-                StorageOp::AppendEntries(entries) => self.batch_append_entries(entries)?,
-                StorageOp::AppendOnPrefix(from_idx, entries) => {
-                    self.batch_append_on_prefix(from_idx, entries)?
-                }
-                StorageOp::SetPromise(bal) => self.batch_set_promise(bal)?,
-                StorageOp::SetDecidedIndex(idx) => self.batch_set_decided_idx(idx)?,
-                StorageOp::SetAcceptedRound(bal) => self.batch_set_accepted_round(bal)?,
-                StorageOp::SetCompactedIdx(idx) => self.batch_set_compacted_idx(idx)?,
-                StorageOp::Trim(idx) => self.batch_trim(idx)?,
-                StorageOp::SetStopsign(ss) => self.batch_set_stopsign(ss)?,
-                StorageOp::SetSnapshot(snap) => self.batch_set_snapshot(snap)?,
-            }
-        }
-        Ok(self.db.write(std::mem::take(&mut self.write_batch))?)
+        self.write_batch(ops)
     }
 
     fn append_entry(&mut self, entry: T) -> StorageResult<()> {
-        let entry_bytes = bincode::serialize(&entry)?;
-        self.db.put_cf(
-            self.get_log_handle(),
-            self.next_log_key.to_be_bytes(),
-            entry_bytes,
-        )?;
-        self.next_log_key += 1;
-        Ok(())
+        self.write_batch(vec![StorageOp::AppendEntry(entry)])
     }
 
     fn append_entries(&mut self, entries: Vec<T>) -> StorageResult<()> {
-        let mut batch = WriteBatchWithTransaction::<false>::default();
-        for entry in entries {
-            batch.put_cf(
-                self.get_log_handle(),
-                self.next_log_key.to_be_bytes(),
-                bincode::serialize(&entry)?,
-            );
-            self.next_log_key += 1;
-        }
-        self.db.write(batch)?;
-        Ok(())
+        self.write_batch(vec![StorageOp::AppendEntries(entries)])
     }
 
     fn append_on_prefix(&mut self, from_idx: usize, entries: Vec<T>) -> StorageResult<()> {
-        // Don't need to delete entries that will be overwritten.
-        let delete_idx = from_idx + entries.len();
-        if delete_idx < self.next_log_key {
-            let from_key = delete_idx.to_be_bytes();
-            let to_key = self.next_log_key.to_be_bytes();
-            self.db
-                .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
-        }
-        self.next_log_key = from_idx;
-        self.append_entries(entries)
+        self.write_batch(vec![StorageOp::AppendOnPrefix(from_idx, entries)])
     }
 
     fn get_entries(&self, from: usize, to: usize) -> StorageResult<Vec<T>> {
@@ -367,9 +333,7 @@ where
     }
 
     fn set_promise(&mut self, n_prom: Ballot) -> StorageResult<()> {
-        let prom_bytes = bincode::serialize(&n_prom)?;
-        self.db.put(NPROM, prom_bytes)?;
-        Ok(())
+        self.put(NPROM, bincode::serialize(&n_prom)?)
     }
 
     fn get_decided_idx(&self) -> StorageResult<usize> {
@@ -381,9 +345,7 @@ where
     }
 
     fn set_decided_idx(&mut self, ld: usize) -> StorageResult<()> {
-        let ld_bytes = usize::as_bytes(&ld);
-        self.db.put(DECIDE, ld_bytes)?;
-        Ok(())
+        self.put(DECIDE, usize::as_bytes(&ld))
     }
 
     fn get_accepted_round(&self) -> StorageResult<Option<Ballot>> {
@@ -398,9 +360,7 @@ where
     }
 
     fn set_accepted_round(&mut self, na: Ballot) -> StorageResult<()> {
-        let acc_bytes = bincode::serialize(&na)?;
-        self.db.put(ACC, acc_bytes)?;
-        Ok(())
+        self.put(ACC, bincode::serialize(&na)?)
     }
 
     fn get_compacted_idx(&self) -> StorageResult<usize> {
@@ -412,9 +372,7 @@ where
     }
 
     fn set_compacted_idx(&mut self, trimmed_idx: usize) -> StorageResult<()> {
-        let trim_bytes = usize::as_bytes(&trimmed_idx);
-        self.db.put(TRIM, trim_bytes)?;
-        Ok(())
+        self.put(TRIM, usize::as_bytes(&trimmed_idx))
     }
 
     fn get_stopsign(&self) -> StorageResult<Option<StopSign>> {
@@ -426,9 +384,7 @@ where
     }
 
     fn set_stopsign(&mut self, s: Option<StopSign>) -> StorageResult<()> {
-        let stopsign = bincode::serialize(&s)?;
-        self.db.put(STOPSIGN, stopsign)?;
-        Ok(())
+        self.put(STOPSIGN, bincode::serialize(&s)?)
     }
 
     fn get_snapshot(&self) -> StorageResult<Option<T::Snapshot>> {
@@ -441,16 +397,100 @@ where
     }
 
     fn set_snapshot(&mut self, snapshot: Option<T::Snapshot>) -> StorageResult<()> {
-        let s = bincode::serialize(&snapshot)?;
-        self.db.put(SNAPSHOT, s)?;
-        Ok(())
+        self.put(SNAPSHOT, bincode::serialize(&snapshot)?)
     }
 
     fn trim(&mut self, trimmed_idx: usize) -> StorageResult<()> {
-        let from_key = 0_usize.to_be_bytes();
-        let to_key = trimmed_idx.to_be_bytes();
-        self.db
-            .delete_range_cf(self.get_log_handle(), from_key, to_key)?;
-        Ok(())
+        self.write_batch(vec![StorageOp::Trim(trimmed_idx)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omnipaxos::macros::Entry;
+    use serde::{Deserializer, Serializer};
+    use tempfile::TempDir;
+
+    const UNSERIALIZABLE: u64 = u64::MAX;
+
+    /// Fails to serialize when it holds `UNSERIALIZABLE`.
+    #[derive(Clone, Debug, PartialEq, Entry)]
+    struct TestEntry(u64);
+
+    impl Serialize for TestEntry {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            if self.0 == UNSERIALIZABLE {
+                return Err(serde::ser::Error::custom("unserializable entry"));
+            }
+            s.serialize_u64(self.0)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TestEntry {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            u64::deserialize(d).map(TestEntry)
+        }
+    }
+
+    fn open_storage(dir: &TempDir) -> PersistentStorage<TestEntry> {
+        let path = dir.path().join("db").to_str().unwrap().to_string();
+        PersistentStorage::open(PersistentStorageConfig::with_path(path))
+    }
+
+    fn entries(vals: &[u64]) -> Vec<TestEntry> {
+        vals.iter().map(|v| TestEntry(*v)).collect()
+    }
+
+    #[test]
+    fn sync_writes_enabled_by_default() {
+        assert!(PersistentStorageConfig::default().get_sync_writes());
+        assert!(PersistentStorageConfig::with_path("p".to_string()).get_sync_writes());
+        assert!(PersistentStorageConfig::with(
+            "p".to_string(),
+            Options::default(),
+            Options::default()
+        )
+        .get_sync_writes());
+    }
+
+    #[test]
+    fn failed_write_atomically_leaves_no_partial_state() {
+        let dir = TempDir::new().unwrap();
+        let mut storage = open_storage(&dir);
+        storage.append_entries(entries(&[1, 2])).unwrap();
+
+        let failed = storage.write_atomically(vec![
+            StorageOp::SetDecidedIndex(1),
+            StorageOp::AppendEntries(entries(&[3, UNSERIALIZABLE])),
+        ]);
+        assert!(failed.is_err());
+        assert_eq!(storage.get_decided_idx().unwrap(), 0);
+        assert_eq!(storage.get_log_len().unwrap(), 2);
+
+        // A later write must not commit anything left over from the failed one.
+        storage
+            .write_atomically(vec![StorageOp::AppendEntry(TestEntry(4))])
+            .unwrap();
+        assert_eq!(storage.get_decided_idx().unwrap(), 0);
+        assert_eq!(storage.get_suffix(0).unwrap(), entries(&[1, 2, 4]));
+
+        drop(storage);
+        let reopened = open_storage(&dir);
+        assert_eq!(reopened.get_decided_idx().unwrap(), 0);
+        assert_eq!(reopened.get_suffix(0).unwrap(), entries(&[1, 2, 4]));
+    }
+
+    #[test]
+    fn failed_append_entries_does_not_advance_log() {
+        let dir = TempDir::new().unwrap();
+        let mut storage = open_storage(&dir);
+        storage.append_entries(entries(&[1])).unwrap();
+
+        assert!(storage
+            .append_entries(entries(&[2, UNSERIALIZABLE]))
+            .is_err());
+        storage.append_entry(TestEntry(3)).unwrap();
+        assert_eq!(storage.get_suffix(0).unwrap(), entries(&[1, 3]));
     }
 }
