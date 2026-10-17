@@ -33,7 +33,8 @@ pub struct RuntimeConfig {
     /// Bounded capacity for the incoming message channel.
     pub incoming_capacity: usize,
     /// Bounded capacity for the event channel. When it is full, the oldest
-    /// event is dropped to make room for the newest.
+    /// event is dropped to make room for the newest; see
+    /// [`OmniPaxosHandle::subscribe_events`] for what a lagging consumer can miss.
     pub event_capacity: usize,
     /// How long an `append_notify` call waits for its entry to be decided before
     /// resolving with [`AppendError::Timeout`](super::AppendError::Timeout).
@@ -258,9 +259,14 @@ where
     /// For fan-out to multiple independent subscribers, wrap in a broadcasting task.
     ///
     /// The stream is lossy: if events are not drained fast enough to stay within
-    /// [`RuntimeConfig::event_capacity`], the oldest are dropped. Each event carries
-    /// absolute state (e.g. the current decided index), so a consumer that lags
-    /// still converges on the latest state.
+    /// [`RuntimeConfig::event_capacity`], the oldest are dropped. Only
+    /// [`OmniPaxosEvent::Decided`] is self-correcting, since each one carries the
+    /// current decided index. [`OmniPaxosEvent::LeaderElected`] and
+    /// [`OmniPaxosEvent::Reconfigured`] are emitted once per transition, so a lagging
+    /// consumer can miss them for good; use [`Self::current_leader`] for the current
+    /// leader, and the decided log ([`Self::subscribe_decided`] or
+    /// [`Self::read_decided_suffix`]), which ends in a decided [`LogEntry::StopSign`]
+    /// after a reconfiguration.
     pub fn subscribe_events(&self) -> async_channel::Receiver<OmniPaxosEvent> {
         self.events_rx.clone()
     }

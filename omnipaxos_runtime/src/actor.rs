@@ -170,8 +170,8 @@ where
 
     /// Never blocks: the handle keeps the event receiver alive even if nobody
     /// reads it, so awaiting room would stall the actor loop forever. When the
-    /// channel is full the oldest event is dropped; every event carries absolute
-    /// state, so the newest ones are what a lagging consumer needs.
+    /// channel is full the oldest event is dropped (see
+    /// `OmniPaxosHandle::subscribe_events` for what a lagging consumer can miss).
     fn emit_event(&self, event: OmniPaxosEvent) {
         let _ = self.event_tx.force_send(event);
     }
@@ -439,16 +439,16 @@ where
     }
 
     /// Attempt to dispatch every pending entry that hasn't yet been sent or
-    /// accepted locally. Called from `Command::AppendNotify` and on each tick,
-    /// which lets a call issued *before* an election eventually succeed once a
-    /// leader is known.
+    /// accepted locally. Called from `Command::AppendNotify` and from every
+    /// `react`, which lets a call issued *before* an election eventually succeed
+    /// once a leader is known.
     fn try_dispatch_undispatched(&mut self) {
         let Some((leader, accepted)) = self.op.get_current_leader() else {
             return;
         };
         if leader == self.pid && !accepted {
             // We're leader but not yet in Accept phase — leave entries undispatched
-            // and wait for the next tick.
+            // and retry on the next `react`.
             return;
         }
         let entries = self.pending.take_undispatched();
@@ -531,9 +531,7 @@ where
         }
     }
 
-    /// Delivers an incoming `SequencePaxos`/BLE message to the core, tracking
-    /// any entries it silently adds to the shared batch buffer -- see
-    /// `track_batch_growth`.
+    /// Routes an incoming message to the runtime or to the core.
     fn handle_incoming(&mut self, m: Message<T>) {
         match m {
             Message::AsyncRuntime(arm) => self.handle_runtime_msg(arm),
@@ -541,6 +539,9 @@ where
         }
     }
 
+    /// Delivers an incoming `SequencePaxos`/BLE message to the core, tracking
+    /// any entries it silently adds to the shared batch buffer -- see
+    /// `track_batch_growth`.
     fn handle_incoming_tracked(&mut self, m: Message<T>) {
         let batched_before = self.op.get_batched_len();
         let accepted_before = self.op.get_accepted_idx();

@@ -20,9 +20,9 @@ where
 {
     id: EntryId,
     /// The entry, retained until dispatched (accepted locally or sent as a
-    /// `TaggedProposal`). While `Some`, the actor retries dispatching it each
-    /// tick -- this is what lets `append_notify` be called before a leader is
-    /// known.
+    /// `TaggedProposal`). While `Some`, the actor retries dispatching it every
+    /// time it reacts to a tick, message, or command -- this is what lets
+    /// `append_notify` be called before a leader is known.
     entry: Option<T>,
     /// `(assigned_idx, ballot_at_assignment)`. `None` until either:
     ///   (a) we accepted the entry ourselves as leader, or

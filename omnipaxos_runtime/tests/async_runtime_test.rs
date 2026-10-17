@@ -363,11 +363,10 @@ async fn append_notify_index_correct_when_batched_with_forwarded_proposal() {
     let h_plain = handles.get(&f1).unwrap().clone();
 
     // Real sleeps, not `yield_now`: each node is its own actor task, scheduled
-    // independently, so only waiting well past a tick (tick_period=2ms here)
-    // is enough to be confident a given
-    // entry has actually left its origin node and been processed by the
-    // leader before the next one is submitted -- submission order alone
-    // doesn't imply leader-arrival order.
+    // independently, so only waiting well past a tick (tick_period=2ms here) is
+    // enough to be confident a given entry has actually left its origin node and
+    // been processed by the leader before the next one is submitted --
+    // submission order alone doesn't imply leader-arrival order.
     h_plain
         .append(TestEntry(101))
         .await
