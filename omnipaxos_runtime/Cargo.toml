@@ -1,6 +1,6 @@
 [package]
 name = "omnipaxos_runtime"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Harald Ng <hng@kth.se>"]
 edition = "2021"
 description = "Async runtime actor layer for OmniPaxos."
@@ -24,7 +24,7 @@ uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", optional = true, features = ["rt", "time", "sync", "macros"] }
 
 [dev-dependencies]
-omnipaxos_storage = { version = "0.2.3", path = "../omnipaxos_storage" }
+omnipaxos_storage = { version = "0.2.4", path = "../omnipaxos_storage" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 

@@ -12,6 +12,6 @@ The runtime is generic over the async executor via the `AsyncRuntime` trait; a r
 
 ```toml
 [dependencies]
-omnipaxos = { version = "0.2.3", features = ["async_runtime"] }
-omnipaxos_runtime = { version = "0.1.0", features = ["tokio_runtime"] }
+omnipaxos = { version = "0.2.4", features = ["async_runtime"] }
+omnipaxos_runtime = { version = "0.1.1", features = ["tokio_runtime"] }
 ```
