@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use futures::{select_biased, FutureExt, StreamExt};
+use futures::{select_biased, FutureExt};
 
 use omnipaxos::{
     ballot_leader_election::Ballot,
@@ -628,12 +628,8 @@ where
     let mut tick_fut = Box::pin(R::sleep(state.config.tick_period)).fuse();
     let mut egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
 
-    // async_channel::Receiver is !Unpin; keep it in a Pin<Box<...>> so the Stream
-    // impl works under select_biased!.
     let cmd_rx = std::mem::replace(&mut state.cmd_rx, async_channel::bounded(1).1);
     let incoming_rx = std::mem::replace(&mut state.incoming_rx, async_channel::bounded(1).1);
-    let mut cmd_rx = Box::pin(cmd_rx);
-    let mut incoming_rx = Box::pin(incoming_rx);
 
     // After a message or command wakes the actor, everything else already queued
     // is handled before reacting, so a burst gets one round of resolution and one
@@ -652,8 +648,11 @@ where
                 state.flush_outgoing();
                 egress_fut = Box::pin(R::sleep(state.config.egress_period)).fuse();
             }
-            in_msg = incoming_rx.next() => {
-                let Some(m) = in_msg else { break };
+            // `recv()`, not `next()`: a closed, empty Receiver reports itself as a
+            // terminated FusedStream, and select_biased! skips terminated branches,
+            // so `next()` would never yield the `None` that ends the loop.
+            in_msg = incoming_rx.recv().fuse() => {
+                let Ok(m) = in_msg else { break };
                 state.handle_incoming(m);
                 for _ in 1..MAX_BURST {
                     let Ok(m) = incoming_rx.try_recv() else { break };
@@ -661,8 +660,8 @@ where
                 }
                 state.react();
             }
-            cmd = cmd_rx.next() => {
-                let Some(c) = cmd else { break };
+            cmd = cmd_rx.recv().fuse() => {
+                let Ok(c) = cmd else { break };
                 state.handle_command(c);
                 for _ in 1..MAX_BURST {
                     let Ok(c) = cmd_rx.try_recv() else { break };

@@ -876,31 +876,28 @@ async fn undrained_event_channel_does_not_stall_actor_loop() {
     assert_eq!(latest_decided, leader_h.decided_idx().await);
 }
 
+/// Regression test: the actor loop used `Receiver::next()` under `select_biased!`.
+/// A closed, empty `async_channel::Receiver` reports itself as a terminated
+/// `FusedStream`, so the branch was skipped and the loop never exited, keeping
+/// the storage (e.g. a RocksDB lock) alive forever. The actor owns `outgoing_tx`,
+/// so `outgoing_rx` closing is the observable sign that it has exited.
 #[tokio::test]
-async fn dropping_all_handles_shuts_actor_down() {
-    let handles = spawn_cluster(3).await;
-    let _leader = wait_for_leader(&handles).await;
+async fn actor_exits_when_all_handles_dropped() {
+    let cfg = RuntimeConfig {
+        tick_period: Duration::from_millis(2),
+        egress_period: Duration::from_millis(1),
+        ..Default::default()
+    };
+    let op = build_op(1, vec![1, 2, 3]);
+    let h = spawn_actor::<TestEntry, MemoryStorage<TestEntry>, TokioRuntime>(op, cfg);
+    let out = h.outgoing_messages();
+    drop(h);
 
-    // Grab the outgoing receiver on one node so we can observe it close.
-    let victim_pid: NodeId = 1;
-    let out = handles.get(&victim_pid).unwrap().outgoing_messages();
-
-    // Drop every clone of node 1's handle.
-    // First remove from the map to drop the map's owned copy.
-    let mut handles = handles;
-    handles.remove(&victim_pid);
-
-    // The transport-forwarding task still holds a clone (through Arc<HashMap>), so the
-    // outgoing_rx stays open — this test asserts the *observable* behavior when there are
-    // no user-side owners left. Trigger it by dropping the forwarding task's copy too:
-    drop(out); // release our observer
-
-    // Give the actor time to notice and shut down.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Sanity: remaining handles still function.
-    let survivor = handles.values().next().unwrap();
-    let _ = survivor.decided_idx().await;
+    timeout(Duration::from_secs(2), async {
+        while out.recv().await.is_ok() {}
+    })
+    .await
+    .expect("actor should exit once every handle is dropped");
 }
 
 /// Regression test: `accept_as_leader` used to silently swallow a `ProposeErr`
